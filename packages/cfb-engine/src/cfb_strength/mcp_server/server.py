@@ -40,7 +40,7 @@ from mcp.server.mcpserver import MCPServer
 mcp: MCPServer = MCPServer(
     "cfb-strength",
     instructions=(
-        "Recursive strength-of-schedule college football rankings (2000-2023). "
+        "Recursive strength-of-schedule college football rankings (1998-2025). "
         "Read resource://cfb-strength/seasons and resource://cfb-strength/teams "
         "for the season/team catalog instead of guessing valid inputs, and "
         "resource://cfb-strength/credits for the methodology citation and data "

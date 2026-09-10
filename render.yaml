@@ -7,11 +7,11 @@
 # speculatively ahead of the code that needs it.
 #
 # Build command note (docs/ARCHITECTURE.md §3.1): the engine's ingest range
-# is currently hardcoded to 2000-2023 (`cfb_strength.ingest.ingest_season`'s
-# MIN_YEAR/MAX_YEAR) -- NOT yet 1998-2025 as the eventual product target.
-# Update this build command's --years range at the same time that gap is
-# closed; shipping --years 1998-2025 here today would silently no-op on the
-# out-of-range years.
+# now matches the product's 1998-2025 target (issue #9) --
+# `cfb_strength.ingest.ingest_season`'s MIN_YEAR/MAX_YEAR were extended and
+# 1998/1999/2024/2025 were live-fetched from CFBD and committed to
+# `packages/cfb-engine/data/raw/` alongside that change, so this build
+# command's `--years 1998-2025` is a 100% cache hit, not a live API call.
 services:
   - type: web
     name: my-team-is-better-api
@@ -21,8 +21,8 @@ services:
     rootDir: apps/api
     buildCommand: >-
       uv sync --frozen --no-dev &&
-      uv run cfb ingest --years 2000-2023 &&
-      uv run cfb rate --years 2000-2023
+      uv run cfb ingest --years 1998-2025 &&
+      uv run cfb rate --years 1998-2025
     startCommand: uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
