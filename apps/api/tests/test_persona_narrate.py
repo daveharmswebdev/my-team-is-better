@@ -1,0 +1,137 @@
+"""Failing-first tests for `api.persona.narrate` (issue #4's grounding
+retry-then-fallback orchestration, Architecture Brief §4.3). Uses a fake
+`Narrator` (never the real `anthropic` SDK) so this file needs neither
+`ANTHROPIC_API_KEY` nor network access.
+"""
+
+from __future__ import annotations
+
+import anthropic
+import httpx2
+
+from api.persona.narrate import narrate
+
+FACT_BLOCK = (
+    '{"team_name": "Texas", "year": 2005, "wins": 13, "losses": 0, "rank": 1, '
+    '"quality_wins": [{"opponent_name": "USC", "team_score": 41, "opponent_score": 38}]}'
+)
+KNOWN_TEAMS = ["Texas", "USC", "Alabama"]
+FALLBACK_TEXT = "Texas finished 13-0 in 2005, ranked #1 -- the numbers speak for themselves."
+
+
+class _ScriptedNarrator:
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = list(responses)
+        self.calls: list[list[dict[str, str]]] = []
+
+    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        return self.responses.pop(0)
+
+
+class _RaisingNarrator:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+        self.calls: list[list[dict[str, str]]] = []
+
+    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        raise self.error
+
+
+def test_grounded_first_response_is_returned_with_a_single_call() -> None:
+    narrator = _ScriptedNarrator(["Texas ran the table at 13-0 in 2005, beating USC 41-38."])
+
+    text = narrate(
+        fact_block_json=FACT_BLOCK,
+        user_team=None,
+        contested=False,
+        known_team_names=KNOWN_TEAMS,
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert text == "Texas ran the table at 13-0 in 2005, beating USC 41-38."
+    assert len(narrator.calls) == 1
+
+
+def test_ungrounded_first_response_retries_once_with_feedback_then_succeeds() -> None:
+    narrator = _ScriptedNarrator(
+        [
+            "Texas would have smoked Alabama too, probably.",  # ungrounded mention
+            "Texas ran the table at 13-0 in 2005, beating USC 41-38.",
+        ]
+    )
+
+    text = narrate(
+        fact_block_json=FACT_BLOCK,
+        user_team=None,
+        contested=False,
+        known_team_names=KNOWN_TEAMS,
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert text == "Texas ran the table at 13-0 in 2005, beating USC 41-38."
+    assert len(narrator.calls) == 2
+    # The retry's follow-up message must quote the offending token.
+    retry_messages = narrator.calls[1]
+    feedback = retry_messages[-1]["content"]
+    assert "Alabama" in feedback
+
+
+def test_two_ungrounded_responses_serve_the_fallback_and_never_make_a_third_call() -> None:
+    narrator = _ScriptedNarrator(
+        [
+            "Texas would have smoked Alabama too, probably.",
+            "Honestly Alabama would have had a case too, who knows.",
+        ]
+    )
+
+    text = narrate(
+        fact_block_json=FACT_BLOCK,
+        user_team=None,
+        contested=False,
+        known_team_names=KNOWN_TEAMS,
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert text == FALLBACK_TEXT
+    assert len(narrator.calls) == 2
+
+
+def test_claude_api_connection_error_falls_back_without_crashing() -> None:
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    narrator = _RaisingNarrator(anthropic.APIConnectionError(request=request))
+
+    text = narrate(
+        fact_block_json=FACT_BLOCK,
+        user_team=None,
+        contested=False,
+        known_team_names=KNOWN_TEAMS,
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert text == FALLBACK_TEXT
+    assert len(narrator.calls) == 1
+
+
+def test_claude_api_status_error_falls_back_without_crashing() -> None:
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx2.Response(status_code=529, request=request)
+    error = anthropic.APIStatusError("overloaded", response=response, body=None)
+    narrator = _RaisingNarrator(error)
+
+    text = narrate(
+        fact_block_json=FACT_BLOCK,
+        user_team=None,
+        contested=False,
+        known_team_names=KNOWN_TEAMS,
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert text == FALLBACK_TEXT
+    assert len(narrator.calls) == 1

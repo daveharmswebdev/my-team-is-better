@@ -1,0 +1,66 @@
+"""Failing-first tests for `api.persona.prompt` (issue #4).
+
+The persona system prompt text is coordinator-authored and verbatim per
+this project's CLAUDE.md routing rules on persona voice/tone -- these tests
+pin the load-bearing rules/phrases (grounding rules 1-4, the PG-13
+constraint, the worked examples) rather than diffing the whole string, so a
+future accidental rewrite of the *voice* fails loudly without this test
+suite being brittle to incidental whitespace changes.
+"""
+
+from __future__ import annotations
+
+from api.persona.prompt import build_system_prompt, build_user_message
+
+
+def test_prompt_with_user_team_names_them_as_the_persona_s_team() -> None:
+    prompt = build_system_prompt("Texas")
+
+    assert "Texas" in prompt
+    assert "rooting hard" in prompt
+
+
+def test_prompt_without_user_team_has_no_placeholder_left_unfilled() -> None:
+    prompt = build_system_prompt(None)
+
+    assert "{user_team}" not in prompt
+    assert "loud hype man for whoever" in prompt
+
+
+def test_prompt_carries_the_non_negotiable_grounding_rules_verbatim() -> None:
+    prompt = build_system_prompt("Texas")
+
+    assert "MUST appear in the" in prompt
+    assert "FACT BLOCK" in prompt
+    assert "Never contradict or hedge on who the FACT BLOCK says is ranked #1" in prompt
+    assert "PG-13 rivalry trash talk" in prompt
+    assert "No slurs, no profanity" in prompt
+    assert "Two or three sentences" in prompt
+
+
+def test_prompt_includes_the_worked_examples() -> None:
+    prompt = build_system_prompt("Texas")
+
+    assert "13-0 and had the guts to go through USC" in prompt
+    assert "invents a loss that never happened" in prompt
+
+
+def test_user_message_embeds_fact_block_json_verbatim() -> None:
+    fact_block_json = '{"team_name": "Texas", "year": 2005}'
+
+    message = build_user_message(fact_block_json, contested=False)
+
+    assert fact_block_json in message
+
+
+def test_user_message_discloses_contested_true() -> None:
+    message = build_user_message("{}", contested=True)
+
+    assert "contested" in message.lower()
+    assert "true" in message.lower()
+
+
+def test_user_message_discloses_contested_false() -> None:
+    message = build_user_message("{}", contested=False)
+
+    assert "false" in message.lower()
