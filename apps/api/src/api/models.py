@@ -151,6 +151,29 @@ class ComparisonResultOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# persona narration envelope (issue #4) -- wraps issue #3's evidence rather
+# than replacing it, so issue #6 (the web UI) can render `narration.text`
+# next to the evidence "receipts" from the same response.
+# ---------------------------------------------------------------------------
+
+
+class NarrationOut(BaseModel):
+    text: str
+    contested: bool
+    cached: bool
+
+
+class TeamCaseEnvelope(BaseModel):
+    evidence: TeamCaseOut
+    narration: NarrationOut
+
+
+class ComparisonEnvelope(BaseModel):
+    evidence: ComparisonResultOut
+    narration: NarrationOut
+
+
+# ---------------------------------------------------------------------------
 # error bodies (Architecture Brief §4.4 -- HTTP-response half only, no
 # persona copy here, that's issue #4's job)
 # ---------------------------------------------------------------------------

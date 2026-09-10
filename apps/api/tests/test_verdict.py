@@ -7,6 +7,14 @@ is also this issue's required real-engine integration test: it goes through
 the actual HTTP endpoint (TestClient), against the committed, real-engine
 -computed fixture db (tests/fixtures/cfb_verdict_fixture.sqlite3) -- not a
 mocked/handwritten evidence dataclass.
+
+Issue #4 wrapped these routes' response in a `{"evidence": ..., "narration":
+...}` envelope -- the assertions below read `body["evidence"][...]` rather
+than `body[...]` to match (an expected, in-scope update to this file, since
+issue #4's brief is the one that changed the response shape; error-path
+tests are untouched, since typed-exception responses were never wrapped).
+The `client` fixture (see conftest.py) wires a stub persona narrator + an
+in-memory cache by default, so these tests never call the real Claude API.
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ def test_champion_endpoint_returns_2005_texas_full_case(client: TestClient) -> N
     response = client.post("/api/verdict/champion", json={"year": 2005})
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["evidence"]
     assert body["year"] == 2005
     assert body["method"] == "keener"
     assert body["team_name"] == "Texas"
@@ -36,7 +44,7 @@ def test_team_case_endpoint_returns_named_team_case(client: TestClient) -> None:
     response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["evidence"]
     assert body["team_name"] == "USC"
     assert body["year"] == 2005
     assert body["wins"] == 12
@@ -53,7 +61,7 @@ def test_compare_endpoint_returns_comparison_of_two_named_teams(
     )
 
     assert response.status_code == 200
-    body = response.json()
+    body = response.json()["evidence"]
     assert body["year"] == 2005
     assert body["team_a"]["team_name"] == "Texas"
     assert body["team_b"]["team_name"] == "USC"
