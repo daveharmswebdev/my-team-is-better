@@ -85,8 +85,8 @@ def narrate_comparison(
     narrator: Narrator,
 ) -> NarrationOut:
     contested = is_contested(comparison.year)
-    team_a_name = str(comparison.team_a["team_name"])
-    team_b_name = str(comparison.team_b["team_name"])
+    team_a_name = comparison.team_a.team_name
+    team_b_name = comparison.team_b.team_name
     key = cache_key(
         question_type="compare",
         year=comparison.year,

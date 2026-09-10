@@ -7,7 +7,7 @@ instances, not hand-typed strings.
 
 from __future__ import annotations
 
-from api.models import ComparisonResultOut, TeamCaseOut
+from api.models import ComparisonResultOut, ComparisonTeamSummaryOut, HeadToHeadOut, TeamCaseOut
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 
 
@@ -44,9 +44,27 @@ def test_team_case_fallback_uses_only_evidence_fields() -> None:
 def test_comparison_fallback_uses_only_evidence_fields() -> None:
     comparison = ComparisonResultOut(
         year=2005,
-        team_a={"team_name": "Texas", "wins": 13, "losses": 0, "rank": 1, "rating": 0.95},
-        team_b={"team_name": "USC", "wins": 12, "losses": 1, "rank": 2, "rating": 0.9},
-        head_to_head={"played": True, "meetings": []},
+        team_a=ComparisonTeamSummaryOut(
+            team_id=1,
+            team_name="Texas",
+            rank=1,
+            rating=0.95,
+            wins=13,
+            losses=0,
+            quality_wins=[],
+            worst_loss=None,
+        ),
+        team_b=ComparisonTeamSummaryOut(
+            team_id=2,
+            team_name="USC",
+            rank=2,
+            rating=0.9,
+            wins=12,
+            losses=1,
+            quality_wins=[],
+            worst_loss=None,
+        ),
+        head_to_head=HeadToHeadOut(played=True, meetings=[]),
         common_opponents=[],
         rating_diff=0.05,
         verdict="Texas rates higher.",

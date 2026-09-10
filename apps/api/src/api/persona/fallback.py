@@ -25,8 +25,8 @@ def comparison_fallback_text(comparison: ComparisonResultOut) -> str:
     team_a = comparison.team_a
     team_b = comparison.team_b
     return (
-        f"{team_a['team_name']} went {team_a['wins']}-{team_a['losses']} and "
-        f"{team_b['team_name']} went {team_b['wins']}-{team_b['losses']} in "
+        f"{team_a.team_name} went {team_a.wins}-{team_a.losses} and "
+        f"{team_b.team_name} went {team_b.wins}-{team_b.losses} in "
         f"{comparison.year} -- you can see the full breakdown below. My "
         "mouth's a little tied up right now, but the numbers speak for "
         "themselves."

@@ -20,7 +20,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-from cfb_strength.contracts import ComparisonResult, OpponentResult, TeamCase
+from cfb_strength.contracts import (
+    CommonOpponent,
+    ComparisonResult,
+    ComparisonTeamSummary,
+    HeadToHead,
+    HeadToHeadMeeting,
+    OpponentResult,
+    TeamCase,
+)
 from pydantic import BaseModel, ConfigDict
 
 # ---------------------------------------------------------------------------
@@ -128,12 +136,102 @@ class TeamCaseOut(BaseModel):
         )
 
 
+class ComparisonTeamSummaryOut(BaseModel):
+    team_id: int
+    team_name: str
+    rank: int
+    rating: float
+    wins: int
+    losses: int
+    quality_wins: list[OpponentResultOut]
+    worst_loss: OpponentResultOut | None
+
+    @classmethod
+    def from_dataclass(cls, summary: ComparisonTeamSummary) -> ComparisonTeamSummaryOut:
+        return cls(
+            team_id=summary.team_id,
+            team_name=summary.team_name,
+            rank=summary.rank,
+            rating=summary.rating,
+            wins=summary.wins,
+            losses=summary.losses,
+            quality_wins=[OpponentResultOut.from_dataclass(g) for g in summary.quality_wins],
+            worst_loss=(
+                OpponentResultOut.from_dataclass(summary.worst_loss)
+                if summary.worst_loss is not None
+                else None
+            ),
+        )
+
+
+class HeadToHeadMeetingOut(BaseModel):
+    week: int | None
+    season_type: str
+    neutral_site: bool
+    home_team: str
+    away_team: str
+    home_points: int
+    away_points: int
+    winner: str | None
+
+    @classmethod
+    def from_dataclass(cls, meeting: HeadToHeadMeeting) -> HeadToHeadMeetingOut:
+        return cls(
+            week=meeting.week,
+            season_type=meeting.season_type,
+            neutral_site=meeting.neutral_site,
+            home_team=meeting.home_team,
+            away_team=meeting.away_team,
+            home_points=meeting.home_points,
+            away_points=meeting.away_points,
+            winner=meeting.winner,
+        )
+
+
+class HeadToHeadOut(BaseModel):
+    played: bool
+    meetings: list[HeadToHeadMeetingOut]
+
+    @classmethod
+    def from_dataclass(cls, head_to_head: HeadToHead) -> HeadToHeadOut:
+        return cls(
+            played=head_to_head.played,
+            meetings=[HeadToHeadMeetingOut.from_dataclass(m) for m in head_to_head.meetings],
+        )
+
+
+class CommonOpponentOut(BaseModel):
+    opponent_team_id: int
+    opponent_name: str
+    opponent_rank: int | None
+    team_a_result: Literal["W", "L"]
+    team_a_score: int
+    team_a_opponent_score: int
+    team_b_result: Literal["W", "L"]
+    team_b_score: int
+    team_b_opponent_score: int
+
+    @classmethod
+    def from_dataclass(cls, common_opponent: CommonOpponent) -> CommonOpponentOut:
+        return cls(
+            opponent_team_id=common_opponent.opponent_team_id,
+            opponent_name=common_opponent.opponent_name,
+            opponent_rank=common_opponent.opponent_rank,
+            team_a_result=common_opponent.team_a_result,
+            team_a_score=common_opponent.team_a_score,
+            team_a_opponent_score=common_opponent.team_a_opponent_score,
+            team_b_result=common_opponent.team_b_result,
+            team_b_score=common_opponent.team_b_score,
+            team_b_opponent_score=common_opponent.team_b_opponent_score,
+        )
+
+
 class ComparisonResultOut(BaseModel):
     year: int
-    team_a: dict[str, object]
-    team_b: dict[str, object]
-    head_to_head: dict[str, object]
-    common_opponents: list[dict[str, object]]
+    team_a: ComparisonTeamSummaryOut
+    team_b: ComparisonTeamSummaryOut
+    head_to_head: HeadToHeadOut
+    common_opponents: list[CommonOpponentOut]
     rating_diff: float
     verdict: str
 
@@ -141,10 +239,12 @@ class ComparisonResultOut(BaseModel):
     def from_dataclass(cls, comparison: ComparisonResult) -> ComparisonResultOut:
         return cls(
             year=comparison.year,
-            team_a=comparison.team_a,
-            team_b=comparison.team_b,
-            head_to_head=comparison.head_to_head,
-            common_opponents=comparison.common_opponents,
+            team_a=ComparisonTeamSummaryOut.from_dataclass(comparison.team_a),
+            team_b=ComparisonTeamSummaryOut.from_dataclass(comparison.team_b),
+            head_to_head=HeadToHeadOut.from_dataclass(comparison.head_to_head),
+            common_opponents=[
+                CommonOpponentOut.from_dataclass(c) for c in comparison.common_opponents
+            ],
             rating_diff=comparison.rating_diff,
             verdict=comparison.verdict,
         )
