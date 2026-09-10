@@ -30,6 +30,8 @@ services:
         sync: false
       - key: CFBD_API_KEY
         sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
     # DATABASE_URL (Postgres) and the auth provider secret are added here
     # once the Postgres instance and accounts work land -- out of scope for
     # this issue (see docs/ARCHITECTURE.md §7, §5).
