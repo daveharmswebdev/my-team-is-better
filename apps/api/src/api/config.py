@@ -15,6 +15,13 @@ Architecture Brief layering rule). This module loads `apps/api/.env` (via
 - `CONTESTED_YEARS`: the first place this constant is defined anywhere in
   the project (checked -- no equivalent exists in `packages/cfb-engine`);
   scoped to `apps/api` only, per issue #4's brief.
+- `CORS_ALLOWED_ORIGINS`: comma-separated allowlist of browser origins
+  permitted to call this API (issue #13). Defaults to
+  `["http://localhost:5173"]` (the Vite dev server's default port) when
+  unset, so local dev works out of the box with no `.env` change required --
+  unlike `DATABASE_URL`/`ANTHROPIC_API_KEY`, this one intentionally never
+  falls back to `None`, since an empty allowlist would make `apps/web` fail
+  silently at the browser rather than at startup.
 """
 
 from __future__ import annotations
@@ -34,6 +41,13 @@ load_dotenv(_ENV_FILE, override=False)
 
 DATABASE_URL: str | None = os.environ.get("DATABASE_URL")
 ANTHROPIC_API_KEY: str | None = os.environ.get("ANTHROPIC_API_KEY")
+
+_CORS_ALLOWED_ORIGINS_RAW: str | None = os.environ.get("CORS_ALLOWED_ORIGINS")
+CORS_ALLOWED_ORIGINS: list[str] = (
+    [origin.strip() for origin in _CORS_ALLOWED_ORIGINS_RAW.split(",") if origin.strip()]
+    if _CORS_ALLOWED_ORIGINS_RAW
+    else ["http://localhost:5173"]
+)
 
 PROMPT_VERSION = "persona-v1"
 
