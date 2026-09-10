@@ -1,0 +1,30 @@
+[project]
+name = "cfb-strength-orchestrated"
+version = "0.1.0"
+description = "Recursive strength-of-schedule college football rankings, exposed via MCP (coordinator/subagent rebuild)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=2.2.0",
+    "numpy>=2.5.3",
+    "requests>=2.34.2",
+]
+
+[project.scripts]
+cfb = "cfb_strength.cli:main"
+cfb-mcp-server = "cfb_strength.mcp_server.server:main"
+
+[build-system]
+requires = ["uv_build>=0.12.11,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "cfb_strength"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "mypy>=1.14.0",
+    "import-linter>=2.1",
+    "pre-commit>=4.6.2",
+]

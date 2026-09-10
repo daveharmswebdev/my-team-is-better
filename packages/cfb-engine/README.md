@@ -1,0 +1,52 @@
+# cfb-strength-orchestrated
+
+Recursive strength-of-schedule college football rankings, computed deterministically
+and exposed to an LLM via an MCP server. This is a rebuild of
+[`cfb-strength`](../cfb-strength) under a hub-and-spoke coordinator/subagent
+architecture — see `CLAUDE.md` for the process this codebase was built under, and
+`docs/comparison.md` for how that process compared to the original solo build.
+
+The idea: a team's rating should depend on the strength of the teams it beat, whose
+strength depends on the strength of *their* opponents, recursively. This is
+[Keener's eigenvector method](https://dl.acm.org/doi/10.1137/1035004) (Perron-Frobenius
+theorem applied to a win-graph) — the same mathematical idea behind PageRank.
+
+## Setup
+
+```bash
+uv sync
+```
+
+Sign up for a free API key at [collegefootballdata.com](https://collegefootballdata.com)
+(1,000 calls/month free tier), then:
+
+```bash
+cp .env.example .env
+# edit .env, set CFBD_API_KEY=...
+```
+
+## Usage
+
+```bash
+uv run cfb ingest --years 2005     # ingest game data (cached raw JSON in data/raw/)
+uv run cfb rate --years 2005       # compute ratings from ingested games
+uv run cfb serve                   # run the MCP server (stdio)
+```
+
+## Tools exposed
+
+- `list_seasons()` — years with computed ratings
+- `get_rankings(year, top_n=25, method="keener")` — ranked list for a season
+- `get_team_season(year, team, method="keener")` — a team's rank, rating, full schedule
+  with opponent context, quality wins, worst loss
+- `compare_teams(year, team_a, team_b, method="keener")` — head-to-head, common
+  opponents, rating comparison
+- `get_champion(year, method="keener")` — the #1 team with full evidence
+
+## Development
+
+```bash
+uv run pytest
+uv run mypy --strict src/cfb_strength/contracts.py
+uv run lint-imports
+```

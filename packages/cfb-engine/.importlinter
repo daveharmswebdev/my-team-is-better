@@ -1,0 +1,20 @@
+[importlinter]
+root_package = cfb_strength
+
+[importlinter:contract:layers]
+name = Layered architecture: spokes depend on the contract, never on each other
+type = layers
+layers =
+    cfb_strength.cli
+    cfb_strength.mcp_server
+    cfb_strength.evidence | cfb_strength.ratings | cfb_strength.ingest
+    cfb_strength.db
+    cfb_strength.contracts | cfb_strength.config
+
+[importlinter:contract:no-sibling-imports]
+name = ingest, ratings, and evidence must not import each other
+type = independence
+modules =
+    cfb_strength.ingest
+    cfb_strength.ratings
+    cfb_strength.evidence

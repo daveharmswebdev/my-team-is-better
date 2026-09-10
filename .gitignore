@@ -1,0 +1,28 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.import_linter_cache/
+*.egg-info/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Reference data (rebuilt via `uv run cfb ingest` / `uv run cfb rate`)
+packages/cfb-engine/data/
+
+# Node / frontend (apps/web, once scaffolded)
+node_modules/
+dist/
+build/
+storybook-static/
+.vite/
+
+# Editors / OS
+.DS_Store
+.vscode/
+.idea/

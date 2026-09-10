@@ -1,0 +1,230 @@
+"""MCP server exposing recursive-SOS ranking data and evidence as tools.
+
+This module composes two things read-only:
+  - `cfb_strength.db.connection.get_conn` (shared infra) for simple listing
+    queries (`list_seasons`, `get_rankings`) that don't need the evidence
+    layer's per-team reasoning.
+  - `cfb_strength.evidence.proof` (evidence-agent's module) for anything that
+    needs a team's full case or a two-team comparison.
+
+Every tool opens its own connection with `mode=ro` and closes it before
+returning -- this server never writes to the database under any
+circumstance. Every tool catches its own exceptions and returns a
+JSON-serializable `{"error": ...}` dict rather than raising across the MCP
+boundary, so a malformed request (bad year, ambiguous team name) surfaces as
+data the calling LLM can read and react to, not a protocol-level failure.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import sqlite3
+from typing import Any
+
+from cfb_strength.config import DB_PATH
+from cfb_strength.contracts import AmbiguousTeamError, SameTeamComparisonError, UnknownYearError
+from cfb_strength.db.connection import get_conn
+from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
+
+from mcp.server.mcpserver import MCPServer
+
+mcp: MCPServer = MCPServer(
+    "cfb-strength",
+    instructions=(
+        "Recursive strength-of-schedule college football rankings (2000-2023). "
+        "Use list_seasons to discover what's loaded, get_rankings for a top-N "
+        "leaderboard, get_team_season for one team's full resume, compare_teams "
+        "for head-to-head evidence between two named teams, and get_champion as "
+        "a shortcut for 'who was #1' with the same evidence shape as "
+        "get_team_season."
+    ),
+)
+
+
+def _get_conn() -> sqlite3.Connection:
+    """Open a read-only connection to the project sqlite db. Never writes."""
+    return get_conn(DB_PATH, read_only=True)
+
+
+@mcp.tool()
+def list_seasons() -> dict[str, Any]:
+    """List every (year, method) combination that has computed ratings in the
+    database. Call this FIRST when you're unsure which seasons/methods are
+    actually loaded -- it tells you what valid inputs to get_rankings,
+    get_team_season, compare_teams, and get_champion look like. It returns no
+    team-level data itself.
+    """
+    try:
+        conn = _get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT year, method FROM ratings ORDER BY year, method"
+            ).fetchall()
+        finally:
+            conn.close()
+
+        seasons: dict[int, list[str]] = {}
+        for row in rows:
+            seasons.setdefault(int(row["year"]), []).append(str(row["method"]))
+
+        return {
+            "seasons": [
+                {"year": year, "methods": methods} for year, methods in sorted(seasons.items())
+            ]
+        }
+    except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_rankings(year: int, top_n: int = 25, method: str = "keener") -> dict[str, Any]:
+    """Return the top-N ranked teams for a season, ordered by rank ascending.
+    Use this for leaderboard-style requests spanning MANY teams ("show me the
+    top 10 of 2005", "who's ranked around #15"). For deep evidence on a
+    SINGLE named team's full resume (schedule, quality wins, worst loss) use
+    get_team_season instead -- this tool returns only rank/rating/record, no
+    game-by-game detail. For the #1 team specifically with full evidence, use
+    get_champion.
+    """
+    try:
+        conn = _get_conn()
+        try:
+            exists = conn.execute(
+                "SELECT 1 FROM ratings WHERE year = ? AND method = ? LIMIT 1",
+                (year, method),
+            ).fetchone()
+            if exists is None:
+                raise UnknownYearError(year, list_available_years(conn, method))
+
+            rows = conn.execute(
+                """
+                SELECT r.rank AS rank, r.rating AS rating, r.wins AS wins,
+                       r.losses AS losses, r.team_id AS team_id, t.school AS school
+                FROM ratings r
+                JOIN teams t ON t.id = r.team_id
+                WHERE r.year = ? AND r.method = ?
+                ORDER BY r.rank ASC
+                LIMIT ?
+                """,
+                (year, method, top_n),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        return {
+            "year": year,
+            "method": method,
+            "count": len(rows),
+            "rankings": [
+                {
+                    "rank": int(row["rank"]),
+                    "team_id": int(row["team_id"]),
+                    "team_name": row["school"],
+                    "rating": float(row["rating"]),
+                    "wins": int(row["wins"]),
+                    "losses": int(row["losses"]),
+                }
+                for row in rows
+            ],
+        }
+    except UnknownYearError as e:
+        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_team_season(year: int, team: str, method: str = "keener") -> dict[str, Any]:
+    """Return ONE team's full evidentiary case for a season: its rank,
+    rating, win-loss record, every completed game (with the opponent's rank
+    at that snapshot), its quality wins (vs top-25 opponents), and its worst
+    loss. Use this when the request names a SINGLE team ("how good was Texas
+    in 2005?", "what's Ohio State's resume?"). If the request instead
+    compares TWO named teams head-to-head, use compare_teams. If the request
+    is "who is #1" rather than a named team, use get_champion.
+    """
+    try:
+        conn = _get_conn()
+        try:
+            case = build_team_case(conn, year, team, method=method)
+        finally:
+            conn.close()
+        return dataclasses.asdict(case)
+    except AmbiguousTeamError as e:
+        return {"error": "ambiguous_team", "query": e.query, "candidates": e.candidates}
+    except UnknownYearError as e:
+        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def compare_teams(year: int, team_a: str, team_b: str, method: str = "keener") -> dict[str, Any]:
+    """Compare exactly TWO named teams for a season: whether they played
+    head-to-head (and who won), every opponent they both played (common
+    opponents) with each side's result, the rating gap between them, and a
+    plain-language verdict citing that evidence. Use this for "who's better,
+    X or Y?" or "did X deserve to be ranked above Y?" questions naming two
+    teams. For a single team's own resume (no comparison), use
+    get_team_season instead.
+    """
+    try:
+        conn = _get_conn()
+        try:
+            comparison = build_comparison(conn, year, team_a, team_b, method=method)
+        finally:
+            conn.close()
+        return dataclasses.asdict(comparison)
+    except SameTeamComparisonError as e:
+        return {"error": "same_team_comparison", "team": e.team_name}
+    except AmbiguousTeamError as e:
+        return {"error": "ambiguous_team", "query": e.query, "candidates": e.candidates}
+    except UnknownYearError as e:
+        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@mcp.tool()
+def get_champion(year: int, method: str = "keener") -> dict[str, Any]:
+    """Convenience lookup for "who was the best/greatest team in <year>?":
+    resolves the #1-ranked team for the season and returns its FULL
+    evidentiary case (same shape as get_team_season -- schedule, quality
+    wins, worst loss) in one call, instead of requiring get_rankings followed
+    by a separate get_team_season lookup. If you already know which team you
+    care about, use get_team_season directly; for a two-team question use
+    compare_teams.
+    """
+    try:
+        conn = _get_conn()
+        try:
+            row = conn.execute(
+                """
+                SELECT t.school AS school
+                FROM ratings r
+                JOIN teams t ON t.id = r.team_id
+                WHERE r.year = ? AND r.method = ? AND r.rank = 1
+                """,
+                (year, method),
+            ).fetchone()
+            if row is None:
+                raise UnknownYearError(year, list_available_years(conn, method))
+            case = build_team_case(conn, year, str(row["school"]), method=method)
+        finally:
+            conn.close()
+        return dataclasses.asdict(case)
+    except AmbiguousTeamError as e:
+        return {"error": "ambiguous_team", "query": e.query, "candidates": e.candidates}
+    except UnknownYearError as e:
+        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+def main() -> None:
+    """Start the MCP server on the stdio transport."""
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

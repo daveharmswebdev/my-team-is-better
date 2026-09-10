@@ -1,0 +1,196 @@
+"""Every dataclass/Protocol that crosses a module boundary in this project.
+
+Coordinator-owned. No spoke may edit this file. If a spoke's task needs a field
+or shape that isn't here, that is a contract-insufficient finding it returns to
+the coordinator -- it does not invent a parallel shape or import around this.
+
+Layer map (enforced by .importlinter):
+    cli / mcp_server
+        -> evidence | ratings | ingest
+            -> contracts | config | db
+
+`ingest`, `ratings`, and `evidence` never import each other. The database
+(schema.sql) is the integration boundary between them -- e.g. `evidence` reads
+the `ratings` table via SQL rather than importing `cfb_strength.ratings`.
+"""
+
+from dataclasses import dataclass, field
+from typing import Literal, Protocol
+
+
+# ---------------------------------------------------------------------------
+# ingest -> db normalization output (ingest-agent produces these, writes them
+# to the `games`, `teams`, `team_season` tables per schema.sql)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GameRow:
+    id: int
+    season: int
+    week: int | None
+    season_type: str
+    start_date: str | None
+    neutral_site: bool
+    completed: bool
+    home_team_id: int
+    away_team_id: int
+    home_team: str
+    away_team: str
+    home_points: int | None
+    away_points: int | None
+    home_conference: str | None
+    away_conference: str | None
+    home_classification: str | None
+    away_classification: str | None
+    venue: str | None
+    raw_json: str
+
+
+@dataclass(frozen=True)
+class TeamRow:
+    id: int
+    school: str
+    classification: str | None
+    conference: str | None
+
+
+# ---------------------------------------------------------------------------
+# ratings input/output (ratings-agent implements RatingMethod; the CLI reads
+# `games` from the db, the compute-and-store step writes to `ratings`)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Game:
+    home_team_id: int
+    away_team_id: int
+    home_points: int
+    away_points: int
+    neutral_site: bool = False
+
+
+@dataclass(frozen=True)
+class TeamRating:
+    team_id: int
+    rating: float
+    rank: int
+    wins: int
+    losses: int
+
+
+class RatingMethod(Protocol):
+    def rate(self, games: list[Game]) -> dict[int, TeamRating]: ...
+
+
+# ---------------------------------------------------------------------------
+# evidence output (evidence-agent implements the functions below against
+# these shapes; mcp-agent imports and calls those functions -- see the
+# "evidence public API" note at the bottom of this file for the exact
+# function signatures the coordinator has assigned across that seam)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OpponentResult:
+    opponent_team_id: int
+    opponent_name: str
+    opponent_rank: int | None
+    opponent_rating: float | None
+    result: Literal["W", "L"]
+    team_score: int
+    opponent_score: int
+    week: int | None
+    season_type: str
+    neutral_site: bool
+
+
+@dataclass(frozen=True)
+class TeamCase:
+    year: int
+    method: str
+    team_id: int
+    team_name: str
+    rank: int
+    rating: float
+    wins: int
+    losses: int
+    games: list[OpponentResult] = field(default_factory=list)
+    quality_wins: list[OpponentResult] = field(default_factory=list)
+    worst_loss: OpponentResult | None = None
+
+
+@dataclass(frozen=True)
+class ComparisonResult:
+    year: int
+    team_a: dict[str, object]
+    team_b: dict[str, object]
+    head_to_head: dict[str, object]
+    common_opponents: list[dict[str, object]]
+    rating_diff: float
+    verdict: str
+
+
+class AmbiguousTeamError(ValueError):
+    """Raised by evidence.resolve_team when a query matches >1 team ambiguously."""
+
+    def __init__(self, query: str, candidates: list[str]):
+        super().__init__(f"could not uniquely resolve {query!r}: candidates={candidates}")
+        self.query = query
+        self.candidates = candidates
+
+
+class UnknownYearError(ValueError):
+    """Raised by evidence functions when no ratings exist for the requested year."""
+
+    def __init__(self, year: int, available_years: list[int]):
+        super().__init__(f"no ratings computed for {year}")
+        self.year = year
+        self.available_years = available_years
+
+
+class SameTeamComparisonError(ValueError):
+    """Raised by build_comparison when team_a and team_b resolve to the same team."""
+
+    def __init__(self, team_name: str):
+        super().__init__(f"cannot compare {team_name!r} to itself")
+        self.team_name = team_name
+
+
+# ---------------------------------------------------------------------------
+# Evidence public API (coordinator-assigned function signatures)
+#
+# These functions are NOT implemented in this file -- they live in
+# src/cfb_strength/evidence/proof.py, owned by evidence-agent. They are
+# declared here as the seam's interface so evidence-agent and mcp-agent can
+# be briefed and built in parallel without either one guessing the other's
+# shape:
+#
+#   def resolve_team(conn: sqlite3.Connection, year: int, query: str,
+#                     method: str = "keener") -> int: ...
+#       Exact match first, then fuzzy match. Raises AmbiguousTeamError with
+#       candidates on ambiguity, UnknownYearError if no ratings exist for
+#       that year/method.
+#
+#   def build_team_case(conn: sqlite3.Connection, year: int, team: str,
+#                        method: str = "keener") -> TeamCase: ...
+#       `team` is resolved via resolve_team. Raises the same two errors.
+#
+#   def build_comparison(conn: sqlite3.Connection, year: int, team_a: str,
+#                         team_b: str, method: str = "keener") -> ComparisonResult: ...
+#       Raises SameTeamComparisonError if team_a and team_b resolve to the same
+#       team_id (added in the Round 4 amendment below).
+#
+#   def list_available_years(conn: sqlite3.Connection, method: str = "keener") -> list[int]: ...
+#       `SELECT DISTINCT year FROM ratings WHERE method = ? ORDER BY year`. Added
+#       in the Round 4 amendment below: mcp-agent and evidence-agent had each
+#       independently implemented an identical private copy of this query
+#       (`_available_years`) because it wasn't originally part of the public API —
+#       `reviewer` flagged the duplication as an uncovered seam. Promoted here so
+#       there is exactly one implementation (evidence-agent's), which mcp-agent
+#       imports instead of reimplementing.
+#
+# mcp-agent imports these four names (plus AmbiguousTeamError/UnknownYearError/
+# SameTeamComparisonError from this file) from cfb_strength.evidence.proof and
+# must not reimplement their logic in mcp_server/.
+# ---------------------------------------------------------------------------
