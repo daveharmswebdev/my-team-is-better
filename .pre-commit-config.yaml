@@ -1,0 +1,24 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cfb-engine-pytest
+        name: cfb-engine — pytest
+        entry: bash -c 'cd packages/cfb-engine && uv run pytest'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: cfb-engine-mypy-strict-contracts
+        name: cfb-engine — mypy --strict (contracts.py, the interface contract)
+        entry: bash -c 'cd packages/cfb-engine && uv run mypy --strict src/cfb_strength/contracts.py'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: cfb-engine-lint-imports
+        name: cfb-engine — import-linter (layered architecture + sibling independence)
+        entry: bash -c 'cd packages/cfb-engine && uv run lint-imports'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+# apps/api and apps/web get their own hooks (ruff/mypy, eslint/tsc/dependency-cruiser)
+# added here when those apps are scaffolded — see CLAUDE.md "Engineering standards".
