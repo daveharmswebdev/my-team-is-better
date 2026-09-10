@@ -20,11 +20,14 @@ of these is mis-scoped — fix the brief, don't ship the violation.
   `main`. Nothing merges with a red check. Add a job to that workflow the moment a new
   app (`apps/api`, `apps/web`) gets its first line of code — don't let untested code
   accumulate ahead of its own CI job.
-- **`main` is protected.** No direct pushes, from anyone, including the coordinator.
-  Every change — including this one — goes through a feature branch, a PR, and a
-  green CI run before merging. (Solo project: 0 required approving reviews, but PR +
-  passing checks are both required; branch protection enforces this against admins
-  too, not just external contributors.)
+- **`main` is protected — process, not (yet) a GitHub-enforced gate.** GitHub blocks
+  branch protection (both the classic API and the newer Rulesets API — checked
+  directly, not assumed) on a private repo without GitHub Pro. Founder chose to stay
+  private and skip the paid plan for now, so this is enforced by discipline: every
+  change — including this one — goes through a feature branch, a PR, and a green CI
+  run before merging, with no direct `git push` to `main`. If the repo goes public or
+  moves to GitHub Pro later, flip on classic branch protection / a ruleset requiring
+  the CI job(s) below — the workflow doesn't change, only the enforcement mechanism.
 - **Python side**: `uv` for dependencies/workspace, `mypy --strict` on anything that
   crosses a module boundary (already true for `contracts.py`; extend to `apps/api`'s
   request/response models), `import-linter` for enforced (not just documented) module
