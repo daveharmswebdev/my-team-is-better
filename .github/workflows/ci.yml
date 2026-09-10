@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  cfb-engine:
+    name: cfb-engine (pytest, mypy --strict, import-linter)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cfb-engine
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.12.11"
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev
+
+      - name: pytest
+        run: uv run pytest -q
+
+      - name: mypy --strict (contracts.py)
+        run: uv run mypy --strict src/cfb_strength/contracts.py
+
+      - name: import-linter
+        run: uv run lint-imports
+
+  # apps/api (pytest, mypy, ruff) and apps/web (eslint, tsc, vitest,
+  # dependency-cruiser, storybook build) get their own jobs here when those
+  # apps are scaffolded -- see CLAUDE.md "Engineering standards". Branch
+  # protection on main should list every job below as a required check.

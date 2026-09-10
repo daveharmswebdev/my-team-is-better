@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://my-team-is-better.lol/schemas/return.schema.json",
+  "title": "Spoke return (spoke -> coordinator)",
+  "description": "Every spoke's final message must be exactly one fenced ```json code block conforming to this schema, and nothing else outside the fence. The coordinator validates every return against this schema (via the jsonschema package, already a project dependency) before acting on it -- a return that fails validation is itself a failure (failure_type: malformed-return), not something to interpret charitably.",
+  "type": "object",
+  "required": ["status"],
+  "oneOf": [
+    {
+      "properties": { "status": { "const": "success" } },
+      "required": ["status", "summary", "files_changed", "tests_run", "contract_gaps"]
+    },
+    {
+      "properties": { "status": { "const": "failure" } },
+      "required": ["status", "failure_type", "attempted", "partial_results", "alternatives"]
+    }
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success", "failure"]
+    },
+    "summary": {
+      "type": "string",
+      "description": "One paragraph: what was actually produced. Never claim success with an empty or stubbed deliverable."
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "change_type"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "change_type": { "type": "string", "enum": ["created", "modified", "deleted"] }
+        }
+      }
+    },
+    "tests_run": {
+      "type": "array",
+      "description": "Every test command actually executed, with its real result. Empty array means no tests were run -- that is itself meaningful and should be rare for a TDD task.",
+      "items": {
+        "type": "object",
+        "required": ["command", "result"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string" },
+          "result": { "type": "string", "enum": ["pass", "fail"] }
+        }
+      }
+    },
+    "contract_gaps": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Places the brief's contract was insufficient for what was actually needed. Empty array (not omitted) if none -- distinguish 'checked, no gaps' from not having checked."
+    },
+    "failure_type": {
+      "type": "string",
+      "enum": [
+        "contract-insufficient",
+        "rubric-failed",
+        "blocked-by-missing-input",
+        "tool-or-environment-failure",
+        "scope-collision",
+        "malformed-return"
+      ]
+    },
+    "attempted": {
+      "type": "string",
+      "description": "Concretely what was tried, including exact commands run."
+    },
+    "partial_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "usable"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string" },
+          "usable": { "type": "boolean" }
+        }
+      }
+    },
+    "alternatives": {
+      "type": "string",
+      "description": "What to try next, or what the coordinator should change about the brief."
+    }
+  }
+}

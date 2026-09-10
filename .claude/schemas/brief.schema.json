@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://my-team-is-better.lol/schemas/brief.schema.json",
+  "title": "Delegation brief (coordinator -> spoke)",
+  "description": "Every delegation from the coordinator to a spoke agent is constructed against this shape before the Agent call is made. It is not sent to the spoke as literal JSON in the prompt -- it's the coordinator's own checklist for writing a self-contained brief, and the fields map 1:1 onto the corresponding prose sections of the brief text.",
+  "type": "object",
+  "required": ["objective", "contract", "scope", "negative", "rubric"],
+  "additionalProperties": false,
+  "properties": {
+    "objective": {
+      "type": "string",
+      "description": "What to produce, concretely. Not a vague goal -- a description specific enough that success/failure is unambiguous."
+    },
+    "contract": {
+      "type": ["string", "null"],
+      "description": "The relevant slice of a shared interface (contracts.py, an API schema, a component prop type) pasted verbatim, or null if this task needs none. The spoke cannot see anything the brief doesn't contain."
+    },
+    "scope": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "File paths/globs this agent owns for this task. Must match (or be a subset of) the owning agent's ownership map entry in CLAUDE.md."
+    },
+    "negative": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Explicitly out of scope: another agent's territory, forbidden actions (e.g. 'do not run git commands', 'do not edit main branch protection'), or things that look tempting but aren't this task's job."
+    },
+    "rubric": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "How this will be judged: named tests that must pass, lint/type/modularity checks that must be clean, specific behaviors to verify. TDD tasks: the rubric names the test(s) written first."
+    }
+  }
+}
