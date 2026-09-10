@@ -118,6 +118,45 @@ def test_claude_api_connection_error_falls_back_without_crashing() -> None:
     assert len(narrator.calls) == 1
 
 
+def test_relational_score_order_mismatch_retries_then_succeeds() -> None:
+    # issue #26 regression: `narrate()` doesn't reimplement grounding logic,
+    # it just calls `find_ungrounded_tokens` and checks for a non-empty
+    # list -- confirm that wiring actually catches a relational (order
+    # swapped) mismatch, not just plain token-membership ones.
+    swapped_fact_block = (
+        '{"team_name": "Vanderbilt", "year": 2025, "wins": 10, "losses": 3, '
+        '"rank": 21, "games": [], "quality_wins": ['
+        '{"opponent_name": "Texas", "team_score": 31, "opponent_score": 34, '
+        '"result": "L"}], "worst_loss": null}'
+    )
+    narrator = _ScriptedNarrator(
+        [
+            "Vanderbilt had a great year, beating Texas (34-31) along the way.",
+            "Vanderbilt had a great year, falling to Texas (31-34) along the way.",
+        ]
+    )
+
+    text = narrate(
+        fact_block_json=swapped_fact_block,
+        user_team=None,
+        contested=False,
+        known_team_names=["Vanderbilt", "Texas"],
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert text == "Vanderbilt had a great year, falling to Texas (31-34) along the way."
+    assert len(narrator.calls) == 2
+    retry_messages = narrator.calls[1]
+    feedback = retry_messages[-1]["content"]
+    # Finding 3: the feedback must name the correct order explicitly (not
+    # just repeat the wrong one), since "34" and "31" are each individually
+    # present in the FACT BLOCK -- the old "which don't appear there"
+    # wording was literally false and gave the retry nothing concrete to
+    # self-correct from.
+    assert "should be stated 31-34, not 34-31" in feedback
+
+
 def test_claude_api_status_error_falls_back_without_crashing() -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     response = httpx2.Response(status_code=529, request=request)

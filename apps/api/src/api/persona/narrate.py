@@ -30,11 +30,20 @@ _TRANSPORT_ERRORS = (anthropic.APIStatusError, anthropic.APIConnectionError)
 
 
 def _grounding_feedback(mismatches: list[str]) -> str:
-    quoted = ", ".join(f'"{token}"' for token in mismatches)
+    # `mismatches` mixes two shapes (see `api.persona.grounding`): plain
+    # ungrounded tokens like "14" or "Alabama" that genuinely don't appear
+    # in the FACT BLOCK at all, and relational messages like "Texas's score
+    # should be stated 31-34, not 34-31" for names/numbers that *do*
+    # individually appear but not in that pairing/order. The old wrapper
+    # ("you said X, which don't appear there") was literally false for the
+    # second shape -- the digits are right there, just mispaired -- so the
+    # wording here is generic enough to wrap either shape honestly instead
+    # of asserting non-appearance.
+    joined = "; ".join(mismatches)
     return (
-        f"That wasn't fully grounded in the FACT BLOCK -- you said {quoted}, "
-        "which don't appear there. Rewrite your answer using only names, "
-        "numbers, and records that appear in the FACT BLOCK above."
+        f"That wasn't fully grounded in the FACT BLOCK -- specifically: {joined}. "
+        "Rewrite your answer using only names, numbers, and score pairings that "
+        "appear in the FACT BLOCK above, in the order shown there."
     )
 
 

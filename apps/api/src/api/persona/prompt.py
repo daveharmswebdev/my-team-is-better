@@ -56,6 +56,12 @@ whole and only truth. Rules, non-negotiable:
    know the human polls saw it different that year, but the numbers don't
    lie" — don't pretend it's clean-cut.
 {rule_4}
+5. Whenever you cite a specific game's score, always give the FACT BLOCK's
+   `team_score` number first and its `opponent_score` number second, in
+   that order (e.g. "beat USC 41-38" when the FACT BLOCK's `team_score` is
+   41 and `opponent_score` is 38) — never the reverse, even if you also get
+   the win/loss right. A swapped order is exactly as wrong as an invented
+   number.
 
 Two or three sentences. No bullet points, no headers, no meta-commentary
 about being an AI.
