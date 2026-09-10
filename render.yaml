@@ -1,11 +1,10 @@
 # Render Blueprint -- see docs/ARCHITECTURE.md §7 for the full deployment
 # design (static site + web service + Postgres).
 #
-# This file currently declares the apps/api web service only (this repo's
-# issue #2 scope). The `apps/web` static site and the Postgres instance are
-# added here once those pieces land (apps/web scaffolding and the
-# accounts/history/persona-cache work, respectively) -- don't add them
-# speculatively ahead of the code they'd serve.
+# This file declares apps/api's web service (issue #2) and apps/web's
+# static site (issue #5). The Postgres instance is added here once the
+# accounts/persona-cache work lands (issue #4 and beyond) -- don't add it
+# speculatively ahead of the code that needs it.
 #
 # Build command note (docs/ARCHITECTURE.md §3.1): the engine's ingest range
 # is currently hardcoded to 2000-2023 (`cfb_strength.ingest.ingest_season`'s
@@ -34,3 +33,20 @@ services:
     # DATABASE_URL (Postgres) and the auth provider secret are added here
     # once the Postgres instance and accounts work land -- out of scope for
     # this issue (see docs/ARCHITECTURE.md §7, §5).
+
+  - type: web
+    name: my-team-is-better-web
+    runtime: static
+    rootDir: apps/web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: false
+    routes:
+      # SPA fallback: client-side routing owns everything under /.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY

@@ -68,7 +68,43 @@ jobs:
       - name: ruff format --check
         run: uv run ruff format --check .
 
-  # apps/web (eslint, tsc, vitest, dependency-cruiser, storybook build) gets
-  # its own job here when it is scaffolded -- see CLAUDE.md "Engineering
-  # standards". Branch protection on main should list every job above as a
-  # required check.
+  apps-web:
+    name: apps-web (eslint, tsc, vitest, dependency-cruiser, storybook build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Type-check
+        run: npx tsc -b
+
+      - name: dependency-cruiser
+        run: npm run dep-cruise
+
+      - name: Vitest
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Build Storybook
+        run: npm run build-storybook
+
+  # Every job above should be listed as a required check if/when branch
+  # protection on main becomes GitHub-enforced rather than process-only
+  # (see CLAUDE.md "main is protected").
