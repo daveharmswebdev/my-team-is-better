@@ -351,25 +351,27 @@ Single `render.yaml` blueprint:
   `uv run cfb ingest --years 1998-2025 && uv run cfb rate --years 1998-2025`
   against the committed `data/raw/` cache (§3.1) so the SQLite reference
   data is baked into every deploy with zero live CFBD calls.
-- **Postgres** — Render managed instance for accounts/history/persona
-  cache — needed only if/when accounts (PRD §5.3) actually ship.
+- **Postgres** — Render managed instance, **entry-level paid plan
+  (Basic-256mb, ~$6–7/mo) from day one**, for accounts/history/persona
+  cache. Founder has confirmed willingness to spend at the entry level
+  specifically to keep account data actually persistent (PRD §5.3) —
+  resolved, not deferred.
 
-**Two real costs, both verified against current Render pricing/policy —
-resolving what was previously an open question:**
+**Two real Render cost/behavior facts, verified against current pricing and
+policy:**
 
-| Render free tier reality | Impact here | Recommendation |
+| Render tier fact | Impact here | Resolution |
 |---|---|---|
-| Free Postgres **expires 30 days after creation** (14-day grace period, then deleted; no backups; [Render changelog](https://render.com/changelog/free-postgresql-instances-now-expire-after-30-days-previously-90)) | Unacceptable for durable account/history data — a free Postgres would silently wipe user accounts every ~44 days | Since accounts are explicitly optional and guest mode is the first-class MVP path (PRD §5.3), **ship MVP with no Postgres at all** — guest-only, zero database cost. Add Postgres (cheapest paid tier, ~$6–7/mo — [pricing](https://render.com/docs/free)) only when the founder decides accounts are worth turning on. |
-| Free web services **spin down after 15 min idle**, ~30–60s cold start on the next request ([Render docs](https://render.com/docs/free)) | A demo link sent to a technical interviewer could hang for a minute on first click — a bad first impression for a portfolio piece (PRD §6) | Worth the ~$7/mo Starter instance to keep it always warm, given "demoable" is an explicit non-functional requirement — this is the one place "hobby budget" and "must demo well" are in tension, so it's the founder's call, not an architecture default. |
+| Free Postgres **expires 30 days after creation** (14-day grace period, then deleted; no backups; [Render changelog](https://render.com/changelog/free-postgresql-instances-now-expire-after-30-days-previously-90)) | Unacceptable for durable account/history data — a free Postgres would silently wipe user accounts every ~44 days | **Resolved**: entry-level paid Postgres from day one (~$6–7/mo, [pricing](https://render.com/docs/free)). Guest mode still doesn't need it at all — the cost only buys durability for the optional account layer. |
+| Free web services **spin down after 15 min idle**, ~30–60s cold start on the next request ([Render docs](https://render.com/docs/free)) | A demo link sent to a technical interviewer could hang for a minute on first click — a bad first impression for a portfolio piece (PRD §6) | **Still open** — not yet addressed by the founder's spend decision above (that was specifically about data persistence, not compute uptime). Entry-level Starter web service (~$7/mo) removes it; free web service keeps the cold start. Flagging separately rather than bundling it into the Postgres answer. |
 
-Net: **MVP can genuinely run on Render's free tier at $0/month** if cold
-starts are acceptable and accounts stay guest-only; the moment either
-"always warm for demos" or "real accounts" is wanted, that's ~$7/mo each,
-independently addable.
+Running total if both entry-level paid tiers are used: **~$13–14/month**
+(Postgres + web service), independent of Claude API usage (PRD §6's
+cache/model-choice cost controls still apply on top of this).
 
 Environment variables: `ANTHROPIC_API_KEY`, `CFBD_API_KEY` (build-time
-ingest only, not needed at runtime), `DATABASE_URL` and an auth provider
-secret (only once Postgres/accounts are actually turned on).
+ingest only, not needed at runtime), `DATABASE_URL` (Postgres), auth
+provider secret.
 
 ## 8. CI (`.github/workflows/ci.yml`)
 

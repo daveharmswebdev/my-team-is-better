@@ -155,16 +155,14 @@ mode is the default, first-class experience, not a degraded fallback:
   experience. Adds: favorite team synced across devices, history of past
   questions/answers tied to the account.
 
-**Open decision, revisit before build**: this was originally scoped as
-"accounts from day one." Architecture Brief §7 found that Render's free
-Postgres expires 30 days after creation (deleted after a 14-day grace
-period) — durable accounts therefore cost real money (~$6–7/mo) from the
-day they're turned on, there's no free way to have them. Since guest mode
-now covers the full core experience on its own, the recommendation is to
-launch guest-only at $0/month and add paid Postgres + accounts once that
-spend is worth it to the founder — but that's a real scope change from the
-original "day one" answer, not something to assume silently. Confirm before
-`apps/api` gets built.
+**Resolved**: Render's free Postgres expires 30 days after creation
+(deleted after a 14-day grace period, Architecture Brief §7) — durable
+accounts cost real money (~$6–7/mo, entry-level paid instance) from the day
+they're turned on, there's no free way to have them. Founder is willing to
+spend at the entry level to keep account data actually persistent, so
+accounts ship **from day one, on paid Postgres**, as originally scoped —
+guest mode stays the default first-class path, but there's no $0/month
+period where accounts silently don't work.
 
 No further profile/social features (no following other users, no public
 leaderboards, no comments) for MVP.
@@ -257,6 +255,11 @@ prominently is a founder value, not a legal-minimum afterthought:
   be budgeted deliberately, not automated on a tight loop.
 - ~~Render Postgres free-tier terms~~ — **resolved**: free Postgres expires
   30 days after creation and gets deleted, unacceptable for account data.
-  MVP ships guest-only with no Postgres at all ($0/month); a paid instance
-  (~$6–7/mo) gets added only when accounts are actually turned on. See
-  Architecture Brief §7.
+  Founder is willing to pay the entry-level tier (~$6–7/mo) from day one to
+  keep account data actually persistent — accounts ship on paid Postgres
+  from the start, not deferred. See Architecture Brief §7.
+- **Render web service cold starts** — separate from the Postgres decision
+  above: a free web service spins down after 15 min idle (~30–60s cold
+  start on wake), which could hurt a demo-to-an-interviewer moment (§6).
+  Not yet decided whether that's worth the additional ~$7/mo Starter
+  instance — a founder call to make before launch, not before this brief.
