@@ -129,8 +129,9 @@ several times a day (or Render building independently per scaled instance)
 could burn through CFBD's 1,000-calls/month free tier fast. `ingest`
 already fetches cache-first from `data/raw/*.json`
 (`cfb_strength.ingest.client.get_games`) — so the fix is simply to **commit
-`data/raw/` to the repo** (done: ~30MB of cached CFBD JSON for 2000–2023 is
-now tracked, `.gitignore` only excludes the derived `cfb.sqlite3` binary).
+`data/raw/` to the repo** (done: cached CFBD JSON for the full 1998–2025
+product range is now tracked, `.gitignore` only excludes the derived
+`cfb.sqlite3` binary).
 Every build's ingest step is then a 100% cache hit — zero live API calls per
 deploy, regardless of deploy frequency or instance count. A human only
 touches the live API deliberately, with `--force`, to add a new season or
@@ -144,12 +145,11 @@ change — e.g. when the "levers" feature ships. Committing the JSON and
 rebuilding the db deterministically at build time keeps the diffable
 artifact in git and the derived one out of it.)
 
-**Known gap to close before this actually works for the full PRD scope**:
-`ingest_season.py` currently hardcodes `MIN_YEAR = 2000` / `MAX_YEAR = 2023`
-— 1998–1999 and 2024–2025 need that range extended (and freshly ingested)
-before the `--years 1998-2025` build command above is accurate. Not a
-blocker for this brief, just don't copy that command verbatim into
-`render.yaml` without doing it first.
+**Gap closed (issue #9)**: `ingest_season.py` used to hardcode
+`MIN_YEAR = 2000` / `MAX_YEAR = 2023`. It now spans `1998-2025`, with
+1998/1999/2024/2025 live-fetched from CFBD, spot-checked against the
+existing completeness floors, and committed to `data/raw/` — so
+`render.yaml`'s `--years 1998-2025` build command above is accurate.
 
 ## 4. Backend: FastAPI (`apps/api`)
 

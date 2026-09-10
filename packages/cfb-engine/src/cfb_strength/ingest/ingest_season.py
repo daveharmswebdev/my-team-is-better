@@ -7,12 +7,12 @@ CLI-callable entry point for the coordinator's umbrella CLI:
 
 Flags:
     --years YEARS       Required. Accepts a single year ("2005"), a range
-                         ("2000-2023", inclusive both ends), a comma-separated
+                         ("1998-2025", inclusive both ends), a comma-separated
                          list ("2000,2005,2010"), or any comma-separated mix of
                          those ("2000-2005,2010,2015-2020"). Years outside
-                         2000-2023 are skipped with a warning (not fetched --
-                         that's the full range this project's cache/golden
-                         dataset covers).
+                         1998-2025 are skipped with a warning (not fetched --
+                         that's the full range this project's cache covers,
+                         per PRD §5.2's modern/BCS-CFP-era data scope).
     --force             Optional. Bypass the on-disk cache in data/raw/ and
                          re-fetch live from the CFBD API for every requested
                          year/season-type, overwriting the cache file.
@@ -45,17 +45,19 @@ from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest.client import CFBDClientError, get_games
 from cfb_strength.ingest.normalize import normalize_game, team_rows_from_game
 
-MIN_YEAR = 2000
-MAX_YEAR = 2023
+MIN_YEAR = 1998
+MAX_YEAR = 2025
 
 # Completeness heuristic: count games where at least one side is FBS
 # ("fbs_game_count" below), rather than the raw total games in the response.
 # CFBD's /games coverage of FCS/II/III-vs-itself games is inconsistent across
 # years (near-zero before ~2019, large majority of the payload by 2022-2023),
 # so the raw total is not a stable completeness signal across the full
-# 2000-2023 range. The FBS-involving subset is stable year over year (roughly
-# 540-870 for regular season, 25-42 for postseason across the cached files),
-# so it's what these floors are calibrated against.
+# 1998-2025 range. The FBS-involving subset is stable year over year (roughly
+# 540-890 for regular season, 25-46 for postseason across the cached files --
+# confirmed against the full 1998-2025 cache while closing issue #9, not just
+# the original 2000-2023 subset), so it's what these floors are calibrated
+# against.
 REGULAR_FBS_GAME_FLOOR = 500
 POSTSEASON_FBS_GAME_FLOOR = 20
 
@@ -71,7 +73,7 @@ class IngestResult:
 
 
 def parse_years(spec: str) -> list[int]:
-    """Parse "2005", "2000-2023", "2000,2005,2010", or a comma-separated mix."""
+    """Parse "2005", "1998-2025", "2000,2005,2010", or a comma-separated mix."""
     years: set[int] = set()
     for token in spec.split(","):
         token = token.strip()
@@ -243,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--years",
         required=True,
-        help='Years to ingest: "2005", "2000-2023", "2000,2005,2010", or a mix.',
+        help='Years to ingest: "2005", "1998-2025", "2000,2005,2010", or a mix.',
     )
     parser.add_argument(
         "--force",
@@ -276,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     if not years:
-        print("error: no valid years to ingest after filtering to 2000-2023", file=sys.stderr)
+        print("error: no valid years to ingest after filtering to 1998-2025", file=sys.stderr)
         return 1
 
     season_types = [s.strip() for s in args.season_types.split(",") if s.strip()]
