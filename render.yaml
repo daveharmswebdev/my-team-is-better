@@ -1,0 +1,36 @@
+# Render Blueprint -- see docs/ARCHITECTURE.md §7 for the full deployment
+# design (static site + web service + Postgres).
+#
+# This file currently declares the apps/api web service only (this repo's
+# issue #2 scope). The `apps/web` static site and the Postgres instance are
+# added here once those pieces land (apps/web scaffolding and the
+# accounts/history/persona-cache work, respectively) -- don't add them
+# speculatively ahead of the code they'd serve.
+#
+# Build command note (docs/ARCHITECTURE.md §3.1): the engine's ingest range
+# is currently hardcoded to 2000-2023 (`cfb_strength.ingest.ingest_season`'s
+# MIN_YEAR/MAX_YEAR) -- NOT yet 1998-2025 as the eventual product target.
+# Update this build command's --years range at the same time that gap is
+# closed; shipping --years 1998-2025 here today would silently no-op on the
+# out-of-range years.
+services:
+  - type: web
+    name: my-team-is-better-api
+    runtime: python
+    plan: starter
+    region: oregon
+    rootDir: apps/api
+    buildCommand: >-
+      uv sync --frozen --no-dev &&
+      uv run cfb ingest --years 2000-2023 &&
+      uv run cfb rate --years 2000-2023
+    startCommand: uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: CFBD_API_KEY
+        sync: false
+    # DATABASE_URL (Postgres) and the auth provider secret are added here
+    # once the Postgres instance and accounts work land -- out of scope for
+    # this issue (see docs/ARCHITECTURE.md §7, §5).
