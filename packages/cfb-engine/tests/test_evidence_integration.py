@@ -17,6 +17,7 @@ import pytest
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     ComparisonResult,
+    ComparisonTeamSummary,
     SameTeamComparisonError,
     TeamCase,
     UnknownYearError,
@@ -109,17 +110,41 @@ def test_build_comparison_texas_vs_usc_cites_head_to_head_rose_bowl(
     comparison = build_comparison(rated_conn, 2005, "Texas", "USC", method="keener")
     assert isinstance(comparison, ComparisonResult)
 
-    assert comparison.head_to_head["played"] is True
-    meetings = comparison.head_to_head["meetings"]
+    assert comparison.head_to_head.played is True
+    meetings = comparison.head_to_head.meetings
     assert len(meetings) == 1
     meeting = meetings[0]
-    assert meeting["home_team"] == "Texas"
-    assert meeting["away_team"] == "USC"
-    assert meeting["home_points"] == 41
-    assert meeting["away_points"] == 38
-    assert meeting["winner"] == "Texas"
-    assert meeting["neutral_site"] is True
+    assert meeting.home_team == "Texas"
+    assert meeting.away_team == "USC"
+    assert meeting.home_points == 41
+    assert meeting.away_points == 38
+    assert meeting.winner == "Texas"
+    assert meeting.neutral_site is True
 
     assert "Texas" in comparison.verdict
     assert "USC" in comparison.verdict
     assert comparison.rating_diff > 0  # Texas rates strictly higher than USC
+
+
+def test_build_comparison_team_summaries_and_common_opponents_are_typed(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Issue #21: `team_a`/`team_b`/`common_opponents` used to be untyped
+    `dict[str, object]`, forcing `apps/web` to render a raw generic dump
+    instead of a curated summary. This locks in that they are now real
+    dataclasses with attribute access, not dicts."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "USC", method="keener")
+
+    assert isinstance(comparison.team_a, ComparisonTeamSummary)
+    assert isinstance(comparison.team_b, ComparisonTeamSummary)
+    assert comparison.team_a.team_name == "Texas"
+    assert comparison.team_a.rank >= 1
+    assert isinstance(comparison.team_a.rating, float)
+    assert comparison.team_a.wins >= 0
+
+    # Texas and USC both played common opponents in the 2005 season
+    # (e.g. conference/OOC overlap) -- assert the shape, not specific teams.
+    for opponent in comparison.common_opponents:
+        assert opponent.team_a_result in ("W", "L")
+        assert opponent.team_b_result in ("W", "L")
+        assert isinstance(opponent.opponent_name, str)
