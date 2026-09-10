@@ -118,13 +118,20 @@ Modern/BCS-CFP era: **1998–present**. Matches the era people actually argue
 about, keeps the one-time ingestion job (and CFBD free-tier call budget)
 small. Historical pre-1998 seasons are a plausible v2, not a launch blocker.
 
-### 5.3 Accounts
+### 5.3 Accounts — guest-first, never a wall
 
-Lightweight accounts from day one:
+Nobody is forced to sign in or hand over credentials to ask a question. Guest
+mode is the default, first-class experience, not a degraded fallback:
 
-- Sign in (social/email — implementation detail, see Architecture Brief §5)
-- Saved favorite team (so it doesn't have to be re-picked every visit)
-- History of past questions/answers tied to the account
+- **Guest**: pick a team, ask questions, get answers — no sign-in prompt
+  anywhere in that path. "Your team" persists locally (e.g. `localStorage`)
+  so a guest doesn't have to re-pick it every visit, it just doesn't follow
+  them to another device.
+- **Optional account** (social/email — implementation detail, see
+  Architecture Brief §5): offered as an upgrade ("sign in to save your team
+  and history across devices"), never a gate in front of the core
+  experience. Adds: favorite team synced across devices, history of past
+  questions/answers tied to the account.
 
 No further profile/social features (no following other users, no public
 leaderboards, no comments) for MVP.
@@ -148,6 +155,23 @@ chatty back-and-forth persona would otherwise require.
 - Mobile app (responsive web only)
 - Monetization (ads, subscriptions) — hobby budget, cost-controlled infra
   instead (see Architecture Brief)
+
+### 5.6 Attribution — a product requirement, not a footnote
+
+This project stands entirely on two things it didn't invent: **Keener's
+method** (J.P. Keener, *The Perron-Frobenius Theorem and the Ranking of
+Football Teams*, SIAM Review 35(1), 1993) and **game data from
+[CollegeFootballData.com](https://collegefootballdata.com)**. Crediting both
+prominently is a founder value, not a legal-minimum afterthought:
+
+- A visible "How this works / Credits" surface in the web app citing both,
+  in plain language a non-technical visitor would actually read.
+- The same attribution is baked into the engine's MCP server as a resource
+  (`resource://cfb-strength/credits` — see Architecture Brief §4.5) so any
+  agent that connects to it — not just this web app — sees the citation as
+  part of the data, not just marketing copy on a page nobody visits.
+- The persona itself can nod to "the math" being real, but the formal
+  citation lives in the UI/resource, not buried only in in-character banter.
 
 ## 6. Non-functional requirements
 

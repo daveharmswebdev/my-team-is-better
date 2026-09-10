@@ -28,11 +28,12 @@ Two separate consumers of the same engine, on purpose:
 - **The web app** already knows exactly which deterministic query it needs
   (the UI picked the question type) — it calls `cfb_strength.evidence`
   functions **directly as a Python import**, no tool-calling round trip.
-- **The existing MCP server** (unchanged, still stdio) stays available for
-  agentic consumers that genuinely need to *choose* which tool to call —
-  Claude Desktop, other agents. Don't collapse these into one path just
-  because they wrap the same engine (Domain 2.3: an agent's tool surface
-  should match what that agent actually needs to decide, not be maximized).
+- **The existing MCP server** (still stdio, one addition — see §4.5) stays
+  available for agentic consumers that genuinely need to *choose* which tool
+  to call — Claude Desktop, other agents. Don't collapse these into one path
+  just because they wrap the same engine (Domain 2.3: an agent's tool
+  surface should match what that agent actually needs to decide, not be
+  maximized).
 
 ## 2. Monorepo layout
 
@@ -174,15 +175,51 @@ None of these should ever reach Claude — they're resolved before the persona
 call happens, since they're about invalid *input*, not about the persona's
 job.
 
-## 5. Accounts
+### 4.5 Static catalog data as MCP resources, not tools (Domain 2.4)
 
-Use a managed auth provider (e.g. Clerk) rather than building auth — the PRD
-calls for "lightweight accounts from day one" on a days-not-weeks timeline,
-and rolling custom auth is the highest-risk way to spend that time. FastAPI
-verifies the provider's JWT on protected routes; Postgres stores only
-`(provider_user_id, favorite_team, created_at)` plus a `question_history`
-table keyed on that id. No password handling, no session infrastructure to
-build.
+`packages/cfb-engine`'s MCP server (`mcp_server/server.py`) now exposes three
+**resources** alongside its existing tools — implemented, not just planned:
+
+| Resource | Content | Why a resource, not a tool |
+|---|---|---|
+| `resource://cfb-strength/seasons` | Every `(year, method)` with computed ratings | Parameter-free catalog data that never changes per-request — a client reads it once instead of spending a tool call on "discovery" every time. Shares its query with the existing `list_seasons` tool (`_season_catalog()`) so there's one source of truth, not two drifting copies. |
+| `resource://cfb-strength/teams` | Full team catalog (id, school, classification) | Same reasoning — lets a client resolve/spell-check a team name from static context instead of guessing or round-tripping. |
+| `resource://cfb-strength/credits` | Methodology citation (Keener 1993) + data source (CollegeFootballData.com) | Static by nature, and putting it on the resource surface means **any** MCP client that connects — not just this product's own backend — sees the attribution as part of the data contract, not as page copy it can ignore. See PRD §5.6. |
+
+The four existing computed-query tools (`get_rankings`, `get_team_season`,
+`compare_teams`, `get_champion`) are unchanged — they take parameters and do
+real computation per call, which is exactly what stays a tool rather than a
+resource. `list_seasons` also stays as a tool for clients that only support
+tool calls; it now just delegates to the same helper the resource uses.
+
+The web app's own hot path (§4.1) still fetches facts via direct Python
+import, not a live MCP connection — that decision doesn't change. But its
+"How this works / Credits" page (PRD §5.6) and any static team-name/season
+data the frontend needs should source from these same `cfb_strength`-level
+functions (imported directly, same as the evidence calls) rather than
+re-hardcoding a second copy of the team list or the citation text anywhere
+in `apps/api` or `apps/web`.
+
+## 5. Accounts — guest-first, optional upgrade
+
+No credential is ever required to ask a question (PRD §5.3). This shapes the
+backend and data model:
+
+- **`POST /api/ask`-equivalent endpoints are public**, unauthenticated. A
+  guest's "my team" selection travels with the request from client-side
+  storage (`localStorage`); the backend never requires an identity to answer.
+  The persona cache key (§4.1) was already user-id-free — guest mode doesn't
+  change it at all.
+- **Sign-in is additive**, not a gate: offered as "save your team and history
+  across devices." When present, use a managed auth provider (e.g. Clerk)
+  rather than building auth — the PRD's days-not-weeks timeline makes custom
+  auth the highest-risk way to spend that time. FastAPI verifies the
+  provider's JWT only on the routes that need an identity (saving/reading
+  history); every other route works with no token at all.
+- Postgres stores only `(provider_user_id, favorite_team, created_at)` plus a
+  `question_history` table keyed on that id — rows that simply don't exist
+  for guests. No password handling, no session infrastructure to build, and
+  no feature is unreachable without an account.
 
 ## 6. The engine: no changes needed for MVP, one seam to protect for v2
 

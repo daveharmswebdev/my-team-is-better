@@ -13,6 +13,15 @@ circumstance. Every tool catches its own exceptions and returns a
 JSON-serializable `{"error": ...}` dict rather than raising across the MCP
 boundary, so a malformed request (bad year, ambiguous team name) surfaces as
 data the calling LLM can read and react to, not a protocol-level failure.
+
+Static, parameter-free catalog data (which seasons/methods exist, the full
+team list, methodology/data-source attribution) is exposed as MCP
+**resources**, not tools -- a client can read these once and hold them as
+context instead of the model spending a tool call to "discover" data that
+never changes per-request. `list_seasons`/`get_rankings` stay as tools too
+(unchanged, for backward compatibility with existing callers); the
+`seasons` resource shares the exact same query helper so there is one
+source of truth, not two.
 """
 
 from __future__ import annotations
@@ -32,11 +41,14 @@ mcp: MCPServer = MCPServer(
     "cfb-strength",
     instructions=(
         "Recursive strength-of-schedule college football rankings (2000-2023). "
-        "Use list_seasons to discover what's loaded, get_rankings for a top-N "
-        "leaderboard, get_team_season for one team's full resume, compare_teams "
-        "for head-to-head evidence between two named teams, and get_champion as "
-        "a shortcut for 'who was #1' with the same evidence shape as "
-        "get_team_season."
+        "Read resource://cfb-strength/seasons and resource://cfb-strength/teams "
+        "for the season/team catalog instead of guessing valid inputs, and "
+        "resource://cfb-strength/credits for the methodology citation and data "
+        "source -- cite both whenever you present a ranking as fact. Use "
+        "get_rankings for a top-N leaderboard, get_team_season for one team's "
+        "full resume, compare_teams for head-to-head evidence between two "
+        "named teams, and get_champion as a shortcut for 'who was #1' with "
+        "the same evidence shape as get_team_season."
     ),
 )
 
@@ -46,34 +58,134 @@ def _get_conn() -> sqlite3.Connection:
     return get_conn(DB_PATH, read_only=True)
 
 
+def _season_catalog(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Every (year, method) combination that has computed ratings. Shared by
+    the `list_seasons` tool and the `seasons` resource so there's exactly one
+    query for this, not two drifting copies.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT year, method FROM ratings ORDER BY year, method"
+    ).fetchall()
+
+    seasons: dict[int, list[str]] = {}
+    for row in rows:
+        seasons.setdefault(int(row["year"]), []).append(str(row["method"]))
+
+    return {
+        "seasons": [
+            {"year": year, "methods": methods} for year, methods in sorted(seasons.items())
+        ]
+    }
+
+
 @mcp.tool()
 def list_seasons() -> dict[str, Any]:
     """List every (year, method) combination that has computed ratings in the
     database. Call this FIRST when you're unsure which seasons/methods are
     actually loaded -- it tells you what valid inputs to get_rankings,
     get_team_season, compare_teams, and get_champion look like. It returns no
-    team-level data itself.
+    team-level data itself. Prefer reading resource://cfb-strength/seasons
+    directly if your client supports resources; this tool exists for clients
+    that only support tool calls.
     """
     try:
         conn = _get_conn()
         try:
-            rows = conn.execute(
-                "SELECT DISTINCT year, method FROM ratings ORDER BY year, method"
-            ).fetchall()
+            return _season_catalog(conn)
         finally:
             conn.close()
-
-        seasons: dict[int, list[str]] = {}
-        for row in rows:
-            seasons.setdefault(int(row["year"]), []).append(str(row["method"]))
-
-        return {
-            "seasons": [
-                {"year": year, "methods": methods} for year, methods in sorted(seasons.items())
-            ]
-        }
     except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
         return {"error": str(e)}
+
+
+@mcp.resource(
+    "resource://cfb-strength/seasons",
+    name="seasons",
+    description=(
+        "Catalog of every (year, method) combination with computed ratings -- "
+        "read this once to know what years/methods are valid elsewhere, "
+        "instead of spending a tool call to discover it."
+    ),
+    mime_type="application/json",
+)
+def seasons_resource() -> dict[str, Any]:
+    conn = _get_conn()
+    try:
+        return _season_catalog(conn)
+    finally:
+        conn.close()
+
+
+@mcp.resource(
+    "resource://cfb-strength/teams",
+    name="teams",
+    description=(
+        "Full catalog of every team in the database (id, school name, "
+        "classification). Static reference data -- read this to resolve or "
+        "spell-check a team name before calling a tool, instead of guessing."
+    ),
+    mime_type="application/json",
+)
+def teams_resource() -> dict[str, Any]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, school, classification FROM teams ORDER BY school"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "count": len(rows),
+        "teams": [
+            {
+                "team_id": int(row["id"]),
+                "school": row["school"],
+                "classification": row["classification"],
+            }
+            for row in rows
+        ],
+    }
+
+
+@mcp.resource(
+    "resource://cfb-strength/credits",
+    name="credits",
+    description=(
+        "Attribution for the ranking methodology and the underlying game "
+        "data. Read this before presenting a ranking as fact -- cite Keener's "
+        "method and CollegeFootballData.com as the data source rather than "
+        "presenting either as this server's own analysis or data collection."
+    ),
+    mime_type="application/json",
+)
+def credits_resource() -> dict[str, Any]:
+    return {
+        "methodology": {
+            "name": "Keener's method",
+            "citation": (
+                'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking of '
+                'Football Teams," SIAM Review, 35(1), 1993.'
+            ),
+            "url": "https://dl.acm.org/doi/10.1137/1035004",
+            "summary": (
+                "A team's rating depends recursively on the strength of the teams "
+                "it beat, whose strength depends on the strength of their "
+                "opponents -- the same Perron-Frobenius eigenvector idea behind "
+                "PageRank, applied to a win graph. This server computes stock "
+                "Keener with win/loss as the dominant signal; margin of victory "
+                "is not weighted."
+            ),
+        },
+        "data_source": {
+            "name": "CollegeFootballData.com (CFBD)",
+            "url": "https://collegefootballdata.com",
+            "note": (
+                "All game results are ingested from the CFBD API. This project "
+                "performs no independent data collection and claims no "
+                "ownership of the underlying game data."
+            ),
+        },
+    }
 
 
 @mcp.tool()
