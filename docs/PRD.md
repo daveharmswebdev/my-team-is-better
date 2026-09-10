@@ -258,8 +258,8 @@ prominently is a founder value, not a legal-minimum afterthought:
   Founder is willing to pay the entry-level tier (~$6–7/mo) from day one to
   keep account data actually persistent — accounts ship on paid Postgres
   from the start, not deferred. See Architecture Brief §7.
-- **Render web service cold starts** — separate from the Postgres decision
-  above: a free web service spins down after 15 min idle (~30–60s cold
-  start on wake), which could hurt a demo-to-an-interviewer moment (§6).
-  Not yet decided whether that's worth the additional ~$7/mo Starter
-  instance — a founder call to make before launch, not before this brief.
+- ~~Render web service cold starts~~ — **resolved**: founder confirmed the
+  additional ~$7/mo Starter instance is worth it to avoid the 30–60s cold
+  start a free instance would show a demo visitor. Confirmed hosting
+  budget: **~$13–14/month** (Postgres + web service), on top of the domain
+  and Claude API usage. See Architecture Brief §7.

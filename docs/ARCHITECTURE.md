@@ -347,27 +347,27 @@ until the founder decides to spend the time on it.
 Single `render.yaml` blueprint:
 
 - **Static site** — `apps/web` build output.
-- **Web service** — `apps/api` (FastAPI via uvicorn), build step runs
+- **Web service** — `apps/api` (FastAPI via uvicorn), **entry-level Starter
+  plan (~$7/mo)**, not free — build step runs
   `uv run cfb ingest --years 1998-2025 && uv run cfb rate --years 1998-2025`
   against the committed `data/raw/` cache (§3.1) so the SQLite reference
   data is baked into every deploy with zero live CFBD calls.
 - **Postgres** — Render managed instance, **entry-level paid plan
   (Basic-256mb, ~$6–7/mo) from day one**, for accounts/history/persona
-  cache. Founder has confirmed willingness to spend at the entry level
-  specifically to keep account data actually persistent (PRD §5.3) —
-  resolved, not deferred.
+  cache.
 
-**Two real Render cost/behavior facts, verified against current pricing and
-policy:**
+**Two Render tier facts that drove both paid-plan decisions, verified
+against current pricing and policy:**
 
 | Render tier fact | Impact here | Resolution |
 |---|---|---|
 | Free Postgres **expires 30 days after creation** (14-day grace period, then deleted; no backups; [Render changelog](https://render.com/changelog/free-postgresql-instances-now-expire-after-30-days-previously-90)) | Unacceptable for durable account/history data — a free Postgres would silently wipe user accounts every ~44 days | **Resolved**: entry-level paid Postgres from day one (~$6–7/mo, [pricing](https://render.com/docs/free)). Guest mode still doesn't need it at all — the cost only buys durability for the optional account layer. |
-| Free web services **spin down after 15 min idle**, ~30–60s cold start on the next request ([Render docs](https://render.com/docs/free)) | A demo link sent to a technical interviewer could hang for a minute on first click — a bad first impression for a portfolio piece (PRD §6) | **Still open** — not yet addressed by the founder's spend decision above (that was specifically about data persistence, not compute uptime). Entry-level Starter web service (~$7/mo) removes it; free web service keeps the cold start. Flagging separately rather than bundling it into the Postgres answer. |
+| Free web services **spin down after 15 min idle**, ~30–60s cold start on the next request ([Render docs](https://render.com/docs/free)) | A demo link sent to a technical interviewer could hang for a minute on first click — a bad first impression for a portfolio piece (PRD §6) | **Resolved**: entry-level Starter instance (~$7/mo) keeps it always warm — worth it given "demoable" is an explicit non-functional requirement (PRD §6). |
 
-Running total if both entry-level paid tiers are used: **~$13–14/month**
-(Postgres + web service), independent of Claude API usage (PRD §6's
-cache/model-choice cost controls still apply on top of this).
+**Confirmed running cost: ~$13–14/month** (Postgres + web service, both
+entry-level paid tiers), independent of Claude API usage (PRD §6's
+cache/model-choice cost controls still apply on top of this) and independent
+of the domain (`my-team-is-better.lol`, already purchased separately).
 
 Environment variables: `ANTHROPIC_API_KEY`, `CFBD_API_KEY` (build-time
 ingest only, not needed at runtime), `DATABASE_URL` (Postgres), auth
