@@ -19,6 +19,24 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: apps-api-pytest
+        name: apps/api — pytest
+        entry: bash -c 'cd apps/api && uv run pytest'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: apps-api-mypy-strict
+        name: apps/api — mypy --strict
+        entry: bash -c 'cd apps/api && uv run mypy --strict src/api tests'
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: apps-api-ruff
+        name: apps/api — ruff check + format --check
+        entry: bash -c 'cd apps/api && uv run ruff check . && uv run ruff format --check .'
+        language: system
+        pass_filenames: false
+        always_run: true
 
-# apps/api and apps/web get their own hooks (ruff/mypy, eslint/tsc/dependency-cruiser)
-# added here when those apps are scaffolded — see CLAUDE.md "Engineering standards".
+# apps/web gets its own hooks (eslint/tsc/dependency-cruiser) added here when
+# it is scaffolded — see CLAUDE.md "Engineering standards".

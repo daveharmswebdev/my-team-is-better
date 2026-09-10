@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["packages/cfb-engine"]
+members = ["packages/cfb-engine", "apps/api"]
