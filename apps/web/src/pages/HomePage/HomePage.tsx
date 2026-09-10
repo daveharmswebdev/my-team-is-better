@@ -10,6 +10,7 @@ import {
   fetchTeamCase,
 } from '../../lib/api/client'
 import type { VerdictCardState, VerdictErrorState } from '../../lib/api/types'
+import styles from './HomePage.module.css'
 
 /**
  * Pages own composition/data-fetching; components do not import from pages
@@ -75,8 +76,8 @@ export function HomePage() {
   }
 
   return (
-    <main>
-      <h1>My Team Is Better</h1>
+    <main className={styles.wrap}>
+      <h1 className={styles.title}>My Team Is Better</h1>
       <QuestionForm
         onSubmit={(next) => void runSubmission(next)}
         isSubmitting={state?.status === 'loading'}

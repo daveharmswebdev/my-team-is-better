@@ -1,0 +1,80 @@
+.vcard {
+  position: relative;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  border: 1px solid var(--rule);
+  padding: var(--sp-6) var(--sp-4) var(--sp-4);
+}
+
+.stamp {
+  position: absolute;
+  top: -16px;
+  right: 18px;
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  background: var(--leather);
+  color: var(--on-leather);
+  border: 3px solid var(--gold-bright);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(-9deg);
+  box-shadow: var(--shadow);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.25;
+}
+
+.tear {
+  border-top: 3px dashed var(--rule-strong);
+  margin: 0 calc(-1 * var(--sp-4)) var(--sp-4);
+}
+
+.narration {
+  font-family: var(--font-display);
+  font-weight: 400;
+  margin: 0;
+  font-size: clamp(1.5rem, 6vw, 1.9rem);
+  line-height: 1.05;
+  color: var(--ink);
+  padding-right: 3.5rem;
+}
+
+.contested {
+  margin-top: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.tagContested {
+  background: var(--gold-bright);
+  color: var(--leather-strong);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.25rem 0.6rem 0.25rem 0.55rem;
+  clip-path: polygon(0 0, 100% 0, 88% 50%, 100% 100%, 0 100%);
+}
+
+.loading {
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--leather);
+  text-align: center;
+  padding-block: var(--sp-6);
+  font-size: 1rem;
+}

@@ -1,0 +1,15 @@
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-block: var(--sp-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-8);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.8rem, 6vw, 2.6rem);
+  color: var(--leather-strong);
+}

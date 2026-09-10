@@ -1,4 +1,5 @@
 import type { VerdictErrorState } from '../../lib/api/types'
+import styles from './VerdictError.module.css'
 
 export interface VerdictErrorProps {
   state: VerdictErrorState
@@ -21,15 +22,19 @@ export function VerdictError({
   switch (state.kind) {
     case 'unknown_year':
       return (
-        <div role="alert">
-          <p>
+        <div role="alert" className={styles.pick}>
+          <p className={styles.msg}>
             No ratings are available for {state.body.year}. Try one of the years
             that do have data:
           </p>
-          <ul>
+          <ul className={styles.chipList}>
             {state.body.available_years.map((year) => (
               <li key={year}>
-                <button type="button" onClick={() => onSelectYear?.(year)}>
+                <button
+                  type="button"
+                  className={`${styles.chip} ${styles.chipYear}`}
+                  onClick={() => onSelectYear?.(year)}
+                >
                   {year}
                 </button>
               </li>
@@ -39,16 +44,17 @@ export function VerdictError({
       )
     case 'ambiguous_team':
       return (
-        <div role="alert">
-          <p>
+        <div role="alert" className={styles.pick}>
+          <p className={styles.msg}>
             &ldquo;{state.body.query}&rdquo; could mean more than one team. Did
             you mean:
           </p>
-          <ul>
+          <ul className={styles.chipList}>
             {state.body.candidates.map((candidate) => (
               <li key={candidate}>
                 <button
                   type="button"
+                  className={`${styles.chip} ${styles.chipTeam}`}
                   onClick={() => onSelectCandidate?.(candidate)}
                 >
                   {candidate}
@@ -60,7 +66,7 @@ export function VerdictError({
       )
     case 'same_team_comparison':
       return (
-        <div role="alert">
+        <div role="alert" className={`${styles.plain} ${styles.user}`}>
           <p>
             {state.body.team_name} can&apos;t be compared to itself. Pick two
             different teams.
@@ -69,7 +75,7 @@ export function VerdictError({
       )
     case 'network_error':
       return (
-        <div role="alert">
+        <div role="alert" className={`${styles.plain} ${styles.system}`}>
           <p>{state.message}</p>
         </div>
       )

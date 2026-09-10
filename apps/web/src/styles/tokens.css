@@ -1,0 +1,88 @@
+/**
+ * Design tokens for "The Bar-Stool Standard" (docs/design-system.html) --
+ * copied directly from that file's `:root` / dark-media / `[data-theme]`
+ * blocks (lines ~5-73). This is the source-of-truth spec; do not edit
+ * docs/design-system.html itself, edit here and keep them in sync.
+ */
+:root {
+  --bg: #f3ecdd;
+  --surface: #fbf8f1;
+  --surface-alt: #eae0c9;
+  --ink: #1c1a17;
+  --ink-muted: #5b564c;
+  --leather: #6b3423;
+  --leather-strong: #4a2318;
+  --on-leather: #fbf8f1;
+  --gold: #a9781f;
+  --gold-bright: #c89b3c;
+  --navy: #1f2d50;
+  --hunter: #2a5c3f;
+  --brick: #8c2f2f;
+  --slate: #6b665c;
+  --rule: rgba(28, 26, 23, 0.18);
+  --rule-strong: rgba(28, 26, 23, 0.32);
+  --shadow: 0 10px 24px -12px rgba(28, 20, 12, 0.35);
+
+  --font-display: 'Anton', 'Arial Narrow Bold', sans-serif;
+  --font-label: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-12: 3rem;
+  --sp-16: 4rem;
+
+  --radius: 3px;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #15120e;
+    --surface: #1e1913;
+    --surface-alt: #29221a;
+    --ink: #f3ecdd;
+    --ink-muted: #c7bead;
+    --leather: #b5673f;
+    --leather-strong: #8c4a2a;
+    --on-leather: #1b120a;
+    --gold: #d9ae5c;
+    --gold-bright: #e4be7a;
+    --navy: #7086be;
+    --hunter: #5c9174;
+    --brick: #d9705e;
+    --slate: #a39c8c;
+    --rule: rgba(243, 236, 221, 0.18);
+    --rule-strong: rgba(243, 236, 221, 0.32);
+    --shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/*
+ * Explicit override (a future theme toggle would set data-theme) -- same
+ * dark values as the media-query block above, so an explicit choice wins
+ * both directions regardless of the OS-level preference.
+ */
+:root[data-theme='dark'] {
+  --bg: #15120e;
+  --surface: #1e1913;
+  --surface-alt: #29221a;
+  --ink: #f3ecdd;
+  --ink-muted: #c7bead;
+  --leather: #b5673f;
+  --leather-strong: #8c4a2a;
+  --on-leather: #1b120a;
+  --gold: #d9ae5c;
+  --gold-bright: #e4be7a;
+  --navy: #7086be;
+  --hunter: #5c9174;
+  --brick: #d9705e;
+  --slate: #a39c8c;
+  --rule: rgba(243, 236, 221, 0.18);
+  --rule-strong: rgba(243, 236, 221, 0.32);
+  --shadow: 0 10px 28px -12px rgba(0, 0, 0, 0.6);
+}
