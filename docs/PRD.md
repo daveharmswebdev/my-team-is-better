@@ -155,6 +155,17 @@ mode is the default, first-class experience, not a degraded fallback:
   experience. Adds: favorite team synced across devices, history of past
   questions/answers tied to the account.
 
+**Open decision, revisit before build**: this was originally scoped as
+"accounts from day one." Architecture Brief §7 found that Render's free
+Postgres expires 30 days after creation (deleted after a 14-day grace
+period) — durable accounts therefore cost real money (~$6–7/mo) from the
+day they're turned on, there's no free way to have them. Since guest mode
+now covers the full core experience on its own, the recommendation is to
+launch guest-only at $0/month and add paid Postgres + accounts once that
+spend is worth it to the founder — but that's a real scope change from the
+original "day one" answer, not something to assume silently. Confirm before
+`apps/api` gets built.
+
 No further profile/social features (no following other users, no public
 leaderboards, no comments) for MVP.
 
@@ -244,6 +255,8 @@ prominently is a founder value, not a legal-minimum afterthought:
   1998–present should fit easily since games are fetched per-season and
   cached to `data/raw/`, but re-ingesting for corrections/new seasons should
   be budgeted deliberately, not automated on a tight loop.
-- **Render Postgres free-tier terms** — verify current expiry/limits before
-  committing account data to it; this affects whether accounts genuinely stay
-  "hobby budget" (see Architecture Brief §7).
+- ~~Render Postgres free-tier terms~~ — **resolved**: free Postgres expires
+  30 days after creation and gets deleted, unacceptable for account data.
+  MVP ships guest-only with no Postgres at all ($0/month); a paid instance
+  (~$6–7/mo) gets added only when accounts are actually turned on. See
+  Architecture Brief §7.

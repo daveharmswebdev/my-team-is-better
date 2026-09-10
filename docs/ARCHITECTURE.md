@@ -89,12 +89,67 @@ package boundaries as configured today.
 
 | Store | Contents | Lifecycle | Why |
 |---|---|---|---|
-| **SQLite** (`cfb-engine`'s existing schema, unchanged) | `teams`, `team_season`, `games`, `ratings`, `ingestion_log` | Built at deploy/ingest time (`uv run cfb ingest --years 1998-2025 && uv run cfb rate`), shipped as a read-only artifact inside the API service | This is reference data — it doesn't change per-request, doesn't need a network round trip, and paying for a managed Postgres instance just to serve read-mostly rankings would be waste for a hobby-budget app. |
+| **SQLite** (`cfb-engine`'s existing schema, unchanged) | `teams`, `team_season`, `games`, `ratings`, `ingestion_log` | Rebuilt fresh by the Render **build command** on every deploy | This is reference data — it doesn't change per-request, doesn't need a network round trip, and paying for a managed Postgres instance just to serve read-mostly rankings would be waste for a hobby-budget app. |
 | **Postgres** (Render managed) | accounts (via auth provider's user id), favorite team, question history, **persona response cache** | Runtime, mutable, grows with usage | This is genuinely dynamic app state — the one thing that has to be a real database. |
 
-Re-ingestion (new season each year, or a data correction) is a manual/cron
-Render job, not something triggered by user traffic — keeps CFBD's 1,000
-calls/month free tier comfortably out of the hot path (PRD §8).
+### 3.1 Where the SQLite file actually lives (verified against Render's docs)
+
+Render web services have an **ephemeral filesystem** by default — anything a
+running instance writes to disk is gone on the next deploy, restart, or scale
+event. [Persistent Disks](https://render.com/docs/disks) exist to survive
+that, but they're paid-plan-only (free web services can't attach one at
+all) and — critically — **the build command can't see a persistent disk in
+the first place**: build and pre-deploy commands run on separate compute
+from the running instance ([Render docs](https://render.com/docs/deploys)).
+
+None of that matters here, because we don't need the db to survive anything
+— we need it to be *correct*, and it's 100% reproducible from committed
+source data. So the plan is:
+
+1. The Render **build command** runs `uv run cfb ingest --years 1998-2025 &&
+   uv run cfb rate --years 1998-2025`, which writes `cfb.sqlite3` to
+   `packages/cfb-engine/data/` — the same path `config.py`'s `DB_PATH`
+   already resolves to locally.
+2. That file becomes part of the instance's filesystem for the running
+   deploy — build output *is* present when the start command runs, for the
+   lifetime of that instance (confirmed: build output is baked into what
+   each deployed/scaled instance runs from).
+3. A redeploy, restart, or scale-out regenerates it from scratch via the
+   same build command. This is a feature, not a gap: every instance is
+   guaranteed to be running the exact same reference data with zero drift,
+   and the whole reason a persistent disk would even be a candidate here
+   (surviving restarts) is moot when regeneration is free and deterministic.
+4. **No persistent disk, no Postgres for this data.** The engine already
+   opens every connection to it `mode=ro` (`mcp_server/server.py`) — it was
+   never going to be written to at runtime anyway.
+
+**The one real cost risk this surfaces**: if the build's ingest step ever
+hits the *live* CFBD API instead of the on-disk cache, a hobby dev deploying
+several times a day (or Render building independently per scaled instance)
+could burn through CFBD's 1,000-calls/month free tier fast. `ingest`
+already fetches cache-first from `data/raw/*.json`
+(`cfb_strength.ingest.client.get_games`) — so the fix is simply to **commit
+`data/raw/` to the repo** (done: ~30MB of cached CFBD JSON for 2000–2023 is
+now tracked, `.gitignore` only excludes the derived `cfb.sqlite3` binary).
+Every build's ingest step is then a 100% cache hit — zero live API calls per
+deploy, regardless of deploy frequency or instance count. A human only
+touches the live API deliberately, with `--force`, to add a new season or
+fix bad data — then commits the refreshed JSON like any other source change.
+
+(Considered and rejected: committing the built `cfb.sqlite3` binary itself
+and skipping ingest at build time entirely. Simpler build step, but couples
+"source of truth" to an opaque 44MB blob that's hard to review in a PR and
+has to be manually regenerated and recommitted after any ratings-algorithm
+change — e.g. when the "levers" feature ships. Committing the JSON and
+rebuilding the db deterministically at build time keeps the diffable
+artifact in git and the derived one out of it.)
+
+**Known gap to close before this actually works for the full PRD scope**:
+`ingest_season.py` currently hardcodes `MIN_YEAR = 2000` / `MAX_YEAR = 2023`
+— 1998–1999 and 2024–2025 need that range extended (and freshly ingested)
+before the `--years 1998-2025` build command above is accurate. Not a
+blocker for this brief, just don't copy that command verbatim into
+`render.yaml` without doing it first.
 
 ## 4. Backend: FastAPI (`apps/api`)
 
@@ -292,21 +347,29 @@ until the founder decides to spend the time on it.
 Single `render.yaml` blueprint:
 
 - **Static site** — `apps/web` build output.
-- **Web service** — `apps/api` (FastAPI via uvicorn), build step runs the
-  `uv run cfb ingest && uv run cfb rate` pipeline (or ships a pre-built
-  SQLite file as a build artifact — decide based on how long ingestion
-  actually takes in practice) so the SQLite reference data is baked into
-  the deploy.
-- **Postgres** — Render managed instance for accounts/history/persona cache.
-  **Verify current Render free-tier Postgres terms before committing** —
-  historically Render's free Postgres instances have had time-limited
-  retention, which would be a real problem for durable account data on a
-  hobby budget; if that's still true, budget for the cheapest paid tier
-  rather than discover it mid-project.
+- **Web service** — `apps/api` (FastAPI via uvicorn), build step runs
+  `uv run cfb ingest --years 1998-2025 && uv run cfb rate --years 1998-2025`
+  against the committed `data/raw/` cache (§3.1) so the SQLite reference
+  data is baked into every deploy with zero live CFBD calls.
+- **Postgres** — Render managed instance for accounts/history/persona
+  cache — needed only if/when accounts (PRD §5.3) actually ship.
 
-Environment variables: `ANTHROPIC_API_KEY`, `DATABASE_URL` (Postgres),
-`CFBD_API_KEY` (build-time ingest only, not needed at runtime), auth
-provider secret.
+**Two real costs, both verified against current Render pricing/policy —
+resolving what was previously an open question:**
+
+| Render free tier reality | Impact here | Recommendation |
+|---|---|---|
+| Free Postgres **expires 30 days after creation** (14-day grace period, then deleted; no backups; [Render changelog](https://render.com/changelog/free-postgresql-instances-now-expire-after-30-days-previously-90)) | Unacceptable for durable account/history data — a free Postgres would silently wipe user accounts every ~44 days | Since accounts are explicitly optional and guest mode is the first-class MVP path (PRD §5.3), **ship MVP with no Postgres at all** — guest-only, zero database cost. Add Postgres (cheapest paid tier, ~$6–7/mo — [pricing](https://render.com/docs/free)) only when the founder decides accounts are worth turning on. |
+| Free web services **spin down after 15 min idle**, ~30–60s cold start on the next request ([Render docs](https://render.com/docs/free)) | A demo link sent to a technical interviewer could hang for a minute on first click — a bad first impression for a portfolio piece (PRD §6) | Worth the ~$7/mo Starter instance to keep it always warm, given "demoable" is an explicit non-functional requirement — this is the one place "hobby budget" and "must demo well" are in tension, so it's the founder's call, not an architecture default. |
+
+Net: **MVP can genuinely run on Render's free tier at $0/month** if cold
+starts are acceptable and accounts stay guest-only; the moment either
+"always warm for demos" or "real accounts" is wanted, that's ~$7/mo each,
+independently addable.
+
+Environment variables: `ANTHROPIC_API_KEY`, `CFBD_API_KEY` (build-time
+ingest only, not needed at runtime), `DATABASE_URL` and an auth provider
+secret (only once Postgres/accounts are actually turned on).
 
 ## 8. CI (`.github/workflows/ci.yml`)
 

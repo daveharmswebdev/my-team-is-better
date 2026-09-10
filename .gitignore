@@ -12,8 +12,11 @@ __pycache__/
 .env.*
 !.env.example
 
-# Reference data (rebuilt via `uv run cfb ingest` / `uv run cfb rate`)
-packages/cfb-engine/data/
+# Reference data: the sqlite db is a build artifact, regenerated on every
+# deploy from the committed data/raw/ JSON cache (see docs/ARCHITECTURE.md §3)
+# -- never commit the derived db, but data/raw/ itself IS tracked.
+packages/cfb-engine/data/*.sqlite3
+packages/cfb-engine/data/*.sqlite3-*
 
 # Node / frontend (apps/web, once scaffolded)
 node_modules/
