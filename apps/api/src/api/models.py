@@ -151,6 +151,21 @@ class ComparisonResultOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# catalog responses (issue #13) -- plain evidence-catalog reads for the
+# `apps/web` year/team picker fields. No persona/narration envelope: these
+# aren't verdicts, just the universe of valid inputs.
+# ---------------------------------------------------------------------------
+
+
+class YearsOut(BaseModel):
+    years: list[int]
+
+
+class TeamsOut(BaseModel):
+    teams: list[str]
+
+
+# ---------------------------------------------------------------------------
 # persona narration envelope (issue #4) -- wraps issue #3's evidence rather
 # than replacing it, so issue #6 (the web UI) can render `narration.text`
 # next to the evidence "receipts" from the same response.
