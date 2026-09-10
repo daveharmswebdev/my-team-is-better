@@ -21,8 +21,10 @@ issue #3's brief, `_resolve_champion_name` below replicates that same
 7-line rank=1 SQL query directly against the connection this app already
 holds, then hands the resolved name to `build_team_case` -- the only
 non-evidence-layer SQL in this app, by design (issue #4 adds one more:
-`api.persona.service._all_team_names`, the grounding check's "known team
-names" universe, same justification).
+`api.deps.list_all_team_names`, the grounding check's "known team names"
+universe, same justification -- promoted from a private
+`api.persona.service._all_team_names` helper by issue #13 so `api.catalog`'s
+`/api/teams` route can share it).
 """
 
 from __future__ import annotations

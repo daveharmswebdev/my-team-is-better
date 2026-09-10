@@ -6,6 +6,15 @@ grounding check, and writing the result back to the cache.
 `api.verdict`'s routes call `narrate_team_case`/`narrate_comparison` after
 building the same `TeamCaseOut`/`ComparisonResultOut` issue #3 already
 returns -- this module never recomputes evidence itself.
+
+The grounding check's "known team names" universe (every team in the db, not
+just the ones in this particular fact block, so a mention of a real-but-
+wrong team, e.g. "Alabama" in a USC case, is recognized as a team-name
+mention and checked against the fact block rather than silently ignored as
+an arbitrary capitalized word) used to live here as a private
+`_all_team_names` helper; issue #13 promoted it to `api.deps.
+list_all_team_names` so `api.catalog`'s `/api/teams` route can share the
+same query instead of forking it.
 """
 
 from __future__ import annotations
@@ -13,6 +22,7 @@ from __future__ import annotations
 import sqlite3
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
+from api.deps import list_all_team_names
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claude_client import Narrator
@@ -25,17 +35,6 @@ def is_contested(year: int) -> bool:
     the computed ratings disagreed (`api.config.CONTESTED_YEARS`).
     """
     return year in CONTESTED_YEARS
-
-
-def _all_team_names(conn: sqlite3.Connection) -> list[str]:
-    """The grounding check's "known team names" universe -- every team in
-    the db, not just the ones in this particular fact block, so a mention
-    of a real-but-wrong team (e.g. "Alabama" in a USC case) is recognized
-    as a team-name mention and checked against the fact block, rather than
-    silently ignored as an arbitrary capitalized word.
-    """
-    rows = conn.execute("SELECT DISTINCT school FROM teams").fetchall()
-    return [str(row["school"]) for row in rows]
 
 
 def narrate_team_case(
@@ -67,7 +66,7 @@ def narrate_team_case(
         fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
-        known_team_names=_all_team_names(conn),
+        known_team_names=list_all_team_names(conn),
         narrator=narrator,
         fallback_text=team_case_fallback_text(case),
     )
@@ -106,7 +105,7 @@ def narrate_comparison(
         fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
-        known_team_names=_all_team_names(conn),
+        known_team_names=list_all_team_names(conn),
         narrator=narrator,
         fallback_text=comparison_fallback_text(comparison),
     )
