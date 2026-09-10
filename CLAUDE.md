@@ -8,6 +8,37 @@ engineering standards for both the Python and React sides.
 
 ---
 
+## Starting a session (do this before anything else)
+
+This project's memory is externalized on purpose — GitHub Issues/Milestones/PRs and
+`git log`, not conversation history. A fresh or just-cleared session is expected to
+reconstruct state from these, not ask the user to re-explain it:
+
+1. `gh issue list --state open` — what's left, and read the open Sprint milestone
+   (`gh api repos/:owner/:repo/milestones`) for the current sprint's framing.
+2. `git log --oneline -15` — what actually landed on `main` recently.
+3. `gh pr list --state merged --limit 5` and skim each merged PR's description (not
+   just its title) — verification notes and any `contract_gaps` a spoke flagged live
+   there, not in a separate log.
+4. Check for open items with no issue yet: grep recent PR descriptions and
+   `docs/ARCHITECTURE.md` for phrases like "not yet extended," "known gap," "TODO" —
+   if something real surfaces with no tracking issue, **file one** before starting
+   unrelated work, so it doesn't get rediscovered from scratch a third time. (This
+   project already hit exactly this once: `packages/cfb-engine`'s `ingest_season.py`
+   hardcoding `MIN_YEAR = 2000` / `MAX_YEAR = 2023` was mentioned in three separate
+   places — `docs/ARCHITECTURE.md` §3.1, `render.yaml`'s build-command comment, and a
+   PR description — before anyone filed it as a real issue. It's tracked as #9 now;
+   check its current status there instead of re-deriving the gap from scratch again.)
+
+There is no separate `docs/delegation-log.md` in this project (unlike
+`../cfb-strength-orchestrated`, which used one) — merged PR descriptions serve that
+role instead, since they're linked to the actual diff and checked by CI, which a
+prose log entry isn't. Don't create a parallel log that duplicates what a PR
+description already says; do create a GitHub issue for anything real that has no
+tracking anywhere yet.
+
+---
+
 ## Engineering standards (apply to every change, not just new code)
 
 These are standing rules, not a one-time setup task. Any brief that would violate one
