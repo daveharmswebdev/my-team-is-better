@@ -121,12 +121,57 @@ class TeamCase:
 
 
 @dataclass(frozen=True)
+class ComparisonTeamSummary:
+    """`_case_summary`'s shape, typed -- a `TeamCase` minus `year`/`method`/`games`."""
+
+    team_id: int
+    team_name: str
+    rank: int
+    rating: float
+    wins: int
+    losses: int
+    quality_wins: list[OpponentResult] = field(default_factory=list)
+    worst_loss: OpponentResult | None = None
+
+
+@dataclass(frozen=True)
+class HeadToHeadMeeting:
+    week: int | None
+    season_type: str
+    neutral_site: bool
+    home_team: str
+    away_team: str
+    home_points: int
+    away_points: int
+    winner: str | None
+
+
+@dataclass(frozen=True)
+class HeadToHead:
+    played: bool
+    meetings: list[HeadToHeadMeeting] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class CommonOpponent:
+    opponent_team_id: int
+    opponent_name: str
+    opponent_rank: int | None
+    team_a_result: Literal["W", "L"]
+    team_a_score: int
+    team_a_opponent_score: int
+    team_b_result: Literal["W", "L"]
+    team_b_score: int
+    team_b_opponent_score: int
+
+
+@dataclass(frozen=True)
 class ComparisonResult:
     year: int
-    team_a: dict[str, object]
-    team_b: dict[str, object]
-    head_to_head: dict[str, object]
-    common_opponents: list[dict[str, object]]
+    team_a: ComparisonTeamSummary
+    team_b: ComparisonTeamSummary
+    head_to_head: HeadToHead
+    common_opponents: list[CommonOpponent]
     rating_diff: float
     verdict: str
 

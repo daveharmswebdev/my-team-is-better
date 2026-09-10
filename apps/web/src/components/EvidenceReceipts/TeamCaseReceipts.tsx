@@ -1,3 +1,4 @@
+import { formatRating } from '../../lib/formatRating'
 import type { OpponentResultOut, TeamCaseOut } from '../../lib/api/types'
 import styles from './TeamCaseReceipts.module.css'
 
@@ -34,7 +35,7 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
     >
       <p className={styles.stats}>
         Record: {evidence.wins}-{evidence.losses} &middot; Rank #{evidence.rank}{' '}
-        &middot; Rating {evidence.rating.toFixed(2)}
+        &middot; Rating {formatRating(evidence.rating)}
       </p>
 
       <h4 className={styles.label}>Quality wins</h4>

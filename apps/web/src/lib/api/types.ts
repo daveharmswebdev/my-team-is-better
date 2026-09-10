@@ -32,18 +32,51 @@ export interface TeamCaseOut {
   worst_loss: OpponentResultOut | null
 }
 
-/**
- * `team_a`/`team_b`/`head_to_head`/`common_opponents` are loosely-typed
- * dicts on the Python side too (`dict[str, object]`) -- there is no tighter
- * contract to type against, so this mirrors that looseness rather than
- * inventing structure the backend doesn't guarantee.
- */
+export interface ComparisonTeamSummaryOut {
+  team_id: number
+  team_name: string
+  rank: number
+  rating: number
+  wins: number
+  losses: number
+  quality_wins: OpponentResultOut[]
+  worst_loss: OpponentResultOut | null
+}
+
+export interface HeadToHeadMeetingOut {
+  week: number | null
+  season_type: string
+  neutral_site: boolean
+  home_team: string
+  away_team: string
+  home_points: number
+  away_points: number
+  winner: string | null
+}
+
+export interface HeadToHeadOut {
+  played: boolean
+  meetings: HeadToHeadMeetingOut[]
+}
+
+export interface CommonOpponentOut {
+  opponent_team_id: number
+  opponent_name: string
+  opponent_rank: number | null
+  team_a_result: 'W' | 'L'
+  team_a_score: number
+  team_a_opponent_score: number
+  team_b_result: 'W' | 'L'
+  team_b_score: number
+  team_b_opponent_score: number
+}
+
 export interface ComparisonResultOut {
   year: number
-  team_a: Record<string, unknown>
-  team_b: Record<string, unknown>
-  head_to_head: Record<string, unknown>
-  common_opponents: Record<string, unknown>[]
+  team_a: ComparisonTeamSummaryOut
+  team_b: ComparisonTeamSummaryOut
+  head_to_head: HeadToHeadOut
+  common_opponents: CommonOpponentOut[]
   rating_diff: number
   verdict: string
 }

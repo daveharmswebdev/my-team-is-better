@@ -10,7 +10,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
     team_id: 1,
     team_name: 'Texas',
     rank: 1,
-    rating: 12.3,
+    rating: 0.01234,
     wins: 13,
     losses: 0,
     games: [],
@@ -27,11 +27,29 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
 const comparisonEnvelope: ComparisonEnvelope = {
   evidence: {
     year: 2005,
-    team_a: { team_name: 'Texas' },
-    team_b: { team_name: 'USC' },
-    head_to_head: {},
+    team_a: {
+      team_id: 1,
+      team_name: 'Texas',
+      rank: 1,
+      rating: 0.01234,
+      wins: 13,
+      losses: 0,
+      quality_wins: [],
+      worst_loss: null,
+    },
+    team_b: {
+      team_id: 2,
+      team_name: 'USC',
+      rank: 2,
+      rating: 0.01147,
+      wins: 12,
+      losses: 1,
+      quality_wins: [],
+      worst_loss: null,
+    },
+    head_to_head: { played: false, meetings: [] },
     common_opponents: [],
-    rating_diff: 0.4,
+    rating_diff: 0.00087,
     verdict: 'Texas was better.',
   },
   narration: { text: 'Texas edges USC.', contested: true, cached: true },
@@ -63,7 +81,7 @@ describe('VerdictCard', () => {
     )
 
     expect(screen.getByText('Texas edges USC.')).toBeInTheDocument()
-    expect(screen.getByText('Texas was better.')).toBeInTheDocument()
+    expect(screen.getByText(/Texas was better\./)).toBeInTheDocument()
   })
 
   it('renders the unknown_year error state', () => {

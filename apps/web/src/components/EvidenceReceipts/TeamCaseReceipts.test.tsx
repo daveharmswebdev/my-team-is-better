@@ -22,7 +22,7 @@ const evidence: TeamCaseOut = {
   team_id: 1,
   team_name: 'Texas',
   rank: 1,
-  rating: 12.3,
+  rating: 0.01234,
   wins: 13,
   losses: 0,
   games: [baseOpponent],
@@ -35,6 +35,12 @@ describe('TeamCaseReceipts', () => {
     render(<TeamCaseReceipts evidence={evidence} />)
 
     expect(screen.getByText(/13-0/)).toBeInTheDocument()
+  })
+
+  it('renders the rating scaled by 1000 via formatRating, not the raw eigenvector value', () => {
+    render(<TeamCaseReceipts evidence={evidence} />)
+
+    expect(screen.getByText(/12\.34/)).toBeInTheDocument()
   })
 
   it('renders quality wins', () => {

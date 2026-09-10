@@ -16,6 +16,10 @@ from typing import Literal
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     ComparisonResult,
+    ComparisonTeamSummary,
+    CommonOpponent,
+    HeadToHead,
+    HeadToHeadMeeting,
     OpponentResult,
     SameTeamComparisonError,
     TeamCase,
@@ -233,32 +237,17 @@ def build_team_case(
     )
 
 
-def _opponent_result_dict(o: OpponentResult) -> dict[str, object]:
-    return {
-        "opponent_team_id": o.opponent_team_id,
-        "opponent_name": o.opponent_name,
-        "opponent_rank": o.opponent_rank,
-        "opponent_rating": o.opponent_rating,
-        "result": o.result,
-        "team_score": o.team_score,
-        "opponent_score": o.opponent_score,
-        "week": o.week,
-        "season_type": o.season_type,
-        "neutral_site": o.neutral_site,
-    }
-
-
-def _case_summary(case: TeamCase) -> dict[str, object]:
-    return {
-        "team_id": case.team_id,
-        "team_name": case.team_name,
-        "rank": case.rank,
-        "rating": case.rating,
-        "wins": case.wins,
-        "losses": case.losses,
-        "quality_wins": [_opponent_result_dict(o) for o in case.quality_wins],
-        "worst_loss": _opponent_result_dict(case.worst_loss) if case.worst_loss else None,
-    }
+def _case_summary(case: TeamCase) -> ComparisonTeamSummary:
+    return ComparisonTeamSummary(
+        team_id=case.team_id,
+        team_name=case.team_name,
+        rank=case.rank,
+        rating=case.rating,
+        wins=case.wins,
+        losses=case.losses,
+        quality_wins=case.quality_wins,
+        worst_loss=case.worst_loss,
+    )
 
 
 def build_comparison(
@@ -290,7 +279,7 @@ def build_comparison(
         (year, case_a.team_id, case_b.team_id, case_b.team_id, case_a.team_id),
     ).fetchall()
 
-    meetings: list[dict[str, object]] = []
+    meetings: list[HeadToHeadMeeting] = []
     if h2h_games:
         for g in h2h_games:
             if g["home_points"] is None or g["away_points"] is None:
@@ -306,18 +295,18 @@ def build_comparison(
                 else None
             )
             meetings.append(
-                {
-                    "week": g["week"],
-                    "season_type": g["season_type"],
-                    "neutral_site": bool(g["neutral_site"]),
-                    "home_team": g["home_team"],
-                    "away_team": g["away_team"],
-                    "home_points": g["home_points"],
-                    "away_points": g["away_points"],
-                    "winner": winner,
-                }
+                HeadToHeadMeeting(
+                    week=g["week"],
+                    season_type=g["season_type"],
+                    neutral_site=bool(g["neutral_site"]),
+                    home_team=g["home_team"],
+                    away_team=g["away_team"],
+                    home_points=g["home_points"],
+                    away_points=g["away_points"],
+                    winner=winner,
+                )
             )
-    head_to_head: dict[str, object] = {"played": bool(meetings), "meetings": meetings}
+    head_to_head = HeadToHead(played=bool(meetings), meetings=meetings)
 
     # Common opponents: any team both A and B played this season (excluding
     # each other), with each side's result against that opponent.
@@ -325,24 +314,24 @@ def build_comparison(
     b_by_opp = {o.opponent_team_id: o for o in case_b.games}
     common_ids = (set(a_by_opp) & set(b_by_opp)) - {case_a.team_id, case_b.team_id}
 
-    common_opponents: list[dict[str, object]] = []
+    common_opponents: list[CommonOpponent] = []
     for opp_id in common_ids:
         oa = a_by_opp[opp_id]
         ob = b_by_opp[opp_id]
         common_opponents.append(
-            {
-                "opponent_team_id": opp_id,
-                "opponent_name": oa.opponent_name,
-                "opponent_rank": oa.opponent_rank,
-                "team_a_result": oa.result,
-                "team_a_score": oa.team_score,
-                "team_a_opponent_score": oa.opponent_score,
-                "team_b_result": ob.result,
-                "team_b_score": ob.team_score,
-                "team_b_opponent_score": ob.opponent_score,
-            }
+            CommonOpponent(
+                opponent_team_id=opp_id,
+                opponent_name=oa.opponent_name,
+                opponent_rank=oa.opponent_rank,
+                team_a_result=oa.result,
+                team_a_score=oa.team_score,
+                team_a_opponent_score=oa.opponent_score,
+                team_b_result=ob.result,
+                team_b_score=ob.team_score,
+                team_b_opponent_score=ob.opponent_score,
+            )
         )
-    common_opponents.sort(key=lambda c: (c["opponent_rank"] is None, c["opponent_rank"] or 0))
+    common_opponents.sort(key=lambda c: (c.opponent_rank is None, c.opponent_rank or 0))
 
     rating_diff = case_a.rating - case_b.rating
 
@@ -362,25 +351,25 @@ def build_comparison(
 def _build_verdict(
     case_a: TeamCase,
     case_b: TeamCase,
-    meetings: list[dict[str, object]],
-    common_opponents: list[dict[str, object]],
+    meetings: list[HeadToHeadMeeting],
+    common_opponents: list[CommonOpponent],
     rating_diff: float,
 ) -> str:
     parts: list[str] = []
 
     if meetings:
         for m in meetings:
-            if m["winner"] == case_a.team_name:
+            if m.winner == case_a.team_name:
                 parts.append(
                     f"{case_a.team_name} beat {case_b.team_name} head-to-head "
-                    f"{m['home_points']}-{m['away_points']} "
-                    f"({m['home_team']} vs {m['away_team']}, week {m['week']})."
+                    f"{m.home_points}-{m.away_points} "
+                    f"({m.home_team} vs {m.away_team}, week {m.week})."
                 )
-            elif m["winner"] == case_b.team_name:
+            elif m.winner == case_b.team_name:
                 parts.append(
                     f"{case_b.team_name} beat {case_a.team_name} head-to-head "
-                    f"{m['home_points']}-{m['away_points']} "
-                    f"({m['home_team']} vs {m['away_team']}, week {m['week']})."
+                    f"{m.home_points}-{m.away_points} "
+                    f"({m.home_team} vs {m.away_team}, week {m.week})."
                 )
     else:
         parts.append(f"{case_a.team_name} and {case_b.team_name} did not play each other.")
@@ -388,9 +377,9 @@ def _build_verdict(
     if common_opponents:
         for c in common_opponents[:3]:
             parts.append(
-                f"vs common opponent {c['opponent_name']} "
-                f"(rank {c['opponent_rank']}): {case_a.team_name} went {c['team_a_result']}, "
-                f"{case_b.team_name} went {c['team_b_result']}."
+                f"vs common opponent {c.opponent_name} "
+                f"(rank {c.opponent_rank}): {case_a.team_name} went {c.team_a_result}, "
+                f"{case_b.team_name} went {c.team_b_result}."
             )
 
     leader = case_a.team_name if rating_diff > 0 else case_b.team_name if rating_diff < 0 else None

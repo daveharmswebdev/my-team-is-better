@@ -21,7 +21,7 @@ const undefeated: TeamCaseOut = {
   team_id: 1,
   team_name: 'Texas',
   rank: 1,
-  rating: 12.3,
+  rating: 0.01234,
   wins: 13,
   losses: 0,
   games: [qualityWin],
