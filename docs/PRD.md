@@ -112,6 +112,28 @@ named), it roots for the user's team's *conference* or era loosely, or simply
 stays a loud neutral-ish hype man for the actual #1 — exact behavior is a
 prompt-design detail, not a product blocker.
 
+### 5.1a Push back on the take (bounded debate follow-up)
+
+A real bar-stool argument doesn't stop at the first answer — "no way, what
+was Ohio State's actual record in 2007? who'd they even play?" is exactly
+the reaction this app should invite, not dodge. So every verdict card gets a
+**"push back on this"** free-text box. This is deliberately *not* the same
+thing as the open-ended chat ruled out in §5.5 — it's a bounded follow-up
+exchange anchored to the verdict already on screen (same year, same team(s)),
+not a general CFB chatbot:
+
+- The persona answers using real data fetched live for that specific
+  pushback (full game-by-game schedule, a specific opponent's score, etc.) —
+  it isn't limited to only the facts shown in the original verdict, because
+  the whole point is a user can drill into anything the engine actually
+  knows. See Architecture Brief §4.6 for how tool-calling makes this
+  possible without turning the whole app into an open-ended agent.
+- Capped at a small number of follow-up turns per verdict (exact number is
+  an implementation/cost-tuning detail, not a product requirement) — this
+  is a bar-stool argument, not an unbounded chat session.
+- No account required — guest or signed-in, pushback works the same way
+  (PRD §5.3).
+
 ### 5.2 Data scope
 
 Modern/BCS-CFP era: **1998–present**. Matches the era people actually argue
@@ -138,19 +160,27 @@ leaderboards, no comments) for MVP.
 
 ### 5.4 Interaction model
 
-Single-shot, stateless Q&A — one question in, one answer out. No server-side
-conversation memory. The client may keep local UI history so a session still
-*feels* continuous, but the backend never needs multi-turn context. This is a
-deliberate scope cut, not a limitation to work around later — it removes an
-entire category of context-management complexity (Domain 5 concerns) that a
-chatty back-and-forth persona would otherwise require.
+The **initial verdict** is single-shot and stateless — one structured
+question in, one cached answer out, no server-side memory (§5.1). The
+**pushback follow-up** (§5.1a) is the one place this app has real
+conversation: the backend still doesn't need a database session for it,
+though — the client resends the verdict's fact block plus the running
+follow-up exchange with each pushback, so the server stays logically
+stateless per request even though the *conversation* has turns (the "case
+facts block resent each turn" pattern, not server-side session state). A
+guest never loses this mid-argument just because they didn't sign in.
 
 ### 5.5 Explicitly out of scope for MVP
 
-- Free-text/open-ended CFB chat not backed by the ranking engine
+- Open-ended CFB chat unanchored to a specific verdict (no "just chat with
+  the bot about football" entry point — every conversation starts from a
+  structured question; §5.1a's pushback is a bounded exception, not a
+  general chat surface)
 - Current/live season data, scores, recruiting, betting lines
 - The "levers"/weighting feature (see §4 future state)
-- Multi-turn conversational memory
+- Server-persisted, unbounded multi-turn memory — the pushback exchange
+  (§5.1a) is scoped and client-carried, not a general session the backend
+  remembers indefinitely
 - Public sharing/social features, comments, leaderboards
 - Mobile app (responsive web only)
 - Monetization (ads, subscriptions) — hobby budget, cost-controlled infra
@@ -179,7 +209,10 @@ prominently is a founder value, not a legal-minimum afterthought:
   the same Claude generation twice (identical question + team + method should
   be cache-served) and should default to the cheapest Claude model that can
   hold the persona voice, since the hard reasoning is already done
-  deterministically before Claude is ever called.
+  deterministically before Claude is ever called. Pushback follow-ups
+  (§5.1a) are the deliberate exception — they're not cacheable the same way
+  since they're free-text — so the turn cap and tool-call cap in
+  Architecture Brief §4.6 are the cost guardrail there instead of caching.
 - **Portfolio-grade frontend**: React + Storybook is a stated goal in its own
   right (skill-building for the author's day job), not just a means to an
   end — component quality and Storybook coverage matter as much as feature

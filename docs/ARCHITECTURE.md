@@ -1,7 +1,7 @@
 # Architecture Brief — My Team Is Better
 
 Companion to `docs/PRD.md`. Assumes that PRD's scope decisions (structured
-questions only, single-shot stateless Q&A, 1998–present, Keener-only for MVP).
+questions with a bounded pushback follow-up, 1998–present, Keener-only for MVP).
 
 Where a decision is explicitly borrowed from `claude-architect/docs/exam-guide.md`,
 it's cited inline as `(Domain N.M)` — not because the exam matters here, but
@@ -14,12 +14,15 @@ deterministic-core/AI-layer boundary this product depends on.
 
 ```mermaid
 flowchart LR
-    U[Browser<br/>React + Storybook components] -->|question + user_team| API[FastAPI<br/>apps/api]
-    API -->|1. direct Python call, read-only| ENGINE[cfb_strength.evidence<br/>packages/cfb-engine]
+    U[Browser<br/>React + Storybook components] -->|1. verdict question + user_team| API[FastAPI<br/>apps/api]
+    API -->|direct Python call, read-only| ENGINE[cfb_strength.evidence<br/>packages/cfb-engine]
     ENGINE --> DB[(SQLite<br/>games/ratings/teams<br/>build-time artifact)]
-    API -->|2. facts + persona prompt| CLAUDE[Claude API<br/>Haiku-class model]
+    API -->|facts + persona prompt, no tools| CLAUDE[Claude API]
+    U -->|2. pushback + resent thread context| API
+    API -->|tool_choice: auto, capped loop| CLAUDE2[Claude API<br/>same model, tools attached]
+    CLAUDE2 -.->|tool_use: get_team_season etc.| ENGINE
     API <-->|accounts, history, response cache| PG[(Postgres<br/>Render managed)]
-    AGENT[External agents<br/>Claude Desktop, etc.] -.->|tool calls, unchanged| MCP[cfb-strength MCP server<br/>packages/cfb-engine]
+    AGENT[External agents<br/>Claude Desktop, etc.] -.->|tool + resource calls, unchanged| MCP[cfb-strength MCP server<br/>packages/cfb-engine]
     MCP --> DB
 ```
 
@@ -95,7 +98,10 @@ calls/month free tier comfortably out of the hot path (PRD §8).
 
 ## 4. Backend: FastAPI (`apps/api`)
 
-### 4.1 Request flow for a question
+### 4.1 Request flow for the initial verdict
+
+This is the structured-question path only (PRD §5.1). The follow-up pushback
+path (PRD §5.1a) is a deliberately different flow — see §4.6.
 
 1. Client sends `{question_type, year, team | team_a/team_b, user_team}`.
 2. API calls the matching `cfb_strength.evidence.proof` function **directly**
@@ -200,6 +206,53 @@ functions (imported directly, same as the evidence calls) rather than
 re-hardcoding a second copy of the team list or the citation text anywhere
 in `apps/api` or `apps/web`.
 
+### 4.6 Debate mode: bounded tool-calling for pushback follow-ups (Domain 1.1, 2.3, 5.1)
+
+The verdict flow (§4.1) deliberately gives Claude no tools, because the
+backend already knows exactly which fact block it needs. A pushback
+follow-up ("what was Ohio State's record in 2007? who'd they play?") is the
+opposite case: the question is genuinely open-ended text, so the backend
+*can't* know in advance which evidence call answers it. This is exactly the
+situation real tool-calling exists for (Domain 2.3), and it's a different
+code path from the verdict flow, not a modification of it.
+
+**This is Anthropic tool-use, not MCP.** `apps/api` defines tool schemas
+that wrap the same `cfb_strength.evidence.proof` functions the verdict flow
+already imports directly (`build_team_case`, `build_comparison`,
+`list_available_years`, plus a season-leaderboard lookup) and executes them
+itself when Claude returns a `tool_use` block. The MCP server (§4.5) is a
+separate, unchanged transport for external agents — this is the product's
+own backend handing Claude functions to call, which happens to be the same
+underlying Python functions the MCP server also wraps. Don't stand up an
+internal MCP client to talk to the internal MCP server; that would be a
+network/process hop to reach code already sitting in the same import graph.
+
+**Request shape:** `{original_verdict_context, follow_up_history, new_pushback}`.
+The client resends the verdict's fact block and every prior pushback Q&A
+pair in the thread (the "case facts block, resent each turn" pattern —
+Domain 5.1) — the server still opens and closes a connection per call and
+holds no session state for a guest.
+
+**Agentic loop, capped (Domain 1.1):** `tool_choice: "auto"`, and the
+backend runs the standard tool-use loop — Claude may call a tool, get the
+result appended to context, and decide whether it needs another — but capped
+at a small fixed number of tool calls per pushback (e.g. 2–3) before the
+backend forces a final answer with whatever it has. An uncapped loop here is
+the one place this architecture could genuinely run away on cost; the cap is
+the guardrail, not the cache (which doesn't apply well to free text anyway —
+PRD §6).
+
+**Honesty check still applies:** the same post-generation grounding check
+from §4.3 runs here too, except the allowed fact set is now the original
+verdict's fact block *plus* whatever this turn's tool calls actually
+returned — still nothing invented, just a larger, dynamically-assembled set
+of "things Claude is allowed to have said."
+
+**Not built for MVP unless the founder wants it there day one**: the turn
+cap, tool-call cap, and exact tool schema names are implementation details
+to settle when this gets built, not open architecture questions — the
+pattern above is the answer regardless of when it's scheduled.
+
 ## 5. Accounts — guest-first, optional upgrade
 
 No credential is ever required to ask a question (PRD §5.3). This shapes the
@@ -277,8 +330,13 @@ Extends the engine's existing checks rather than replacing them:
 
 ## 9. Explicit non-goals for this brief
 
-- No conversational memory / session state (PRD §5.4 — stateless by design).
-- No agent-choosing-tools path for the web app's hot request path (§4.1).
+- No server-side session state, for either flow — the verdict path is
+  stateless by design (§4.1), and the pushback path stays stateless-per-
+  request by having the client resend thread context rather than the
+  backend holding a session (§4.6, PRD §5.4).
+- No agent-choosing-tools path for the **verdict** flow specifically (§4.1)
+  — that's still a hard rule. The pushback flow (§4.6) is the one
+  intentional exception, and it's capped, not open-ended.
 - No new database engine or ORM decision beyond "Postgres for mutable app
   state, SQLite for the deterministic reference dataset" — don't add Redis,
   a queue, or a vector store; nothing here needs them yet.
