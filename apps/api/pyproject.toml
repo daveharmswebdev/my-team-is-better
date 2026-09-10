@@ -31,6 +31,18 @@ dev = [
 [tool.mypy]
 strict = true
 
+# packages/cfb-engine ships no py.typed marker (coordinator-owned, apps/api
+# may not edit it -- see CLAUDE.md's layering rule). Without this override,
+# every static `from cfb_strength... import ...` in this app trips
+# mypy's [import-untyped] under --strict. The functions/dataclasses this app
+# actually imports (cfb_strength.contracts, .config, .db.connection,
+# .evidence.proof) are read-only, signature-stable per the Architecture
+# Brief's contract -- this override widens their imported types to `Any`,
+# it does not relax --strict for any of this app's own code.
+[[tool.mypy.overrides]]
+module = "cfb_strength.*"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
