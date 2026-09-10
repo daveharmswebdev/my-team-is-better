@@ -1,15 +1,56 @@
-:root {
-  color-scheme: light dark;
-  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+/**
+ * Global reset-ish rules -- ported from docs/design-system.html's
+ * "RESET-ISH" block (lines ~75-96). Token values live in ./styles/tokens.css,
+ * imported before this file in main.tsx (and in .storybook/preview.tsx).
+ */
+* {
+  box-sizing: border-box;
 }
 
 body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 0;
+  padding-inline: max(16px, env(safe-area-inset-left));
+}
+
+h1,
+h2,
+h3,
+h4 {
+  text-wrap: balance;
   margin: 0;
 }
 
-#root {
-  max-width: 640px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+p {
+  margin: 0;
+}
+
+ul,
+dl {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+button {
+  font: inherit;
+}
+
+a {
+  color: var(--navy);
+}
+
+:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
+  border-radius: 1px;
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--on-leather);
 }

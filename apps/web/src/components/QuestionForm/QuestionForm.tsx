@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import type { FormEvent } from 'react'
 import { getStoredUserTeam, setStoredUserTeam } from '../../lib/userTeam'
+import styles from './QuestionForm.module.css'
 
 export type QuestionType = 'champion' | 'team_case' | 'compare'
 
@@ -103,8 +104,8 @@ export function QuestionForm({
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <div>
+    <form className={styles.qform} onSubmit={handleSubmit}>
+      <div className={styles.qfield}>
         <label htmlFor={questionTypeId}>What do you want to know?</label>
         <select
           id={questionTypeId}
@@ -119,7 +120,7 @@ export function QuestionForm({
         </select>
       </div>
 
-      <div>
+      <div className={styles.qfield}>
         <label htmlFor={yearId}>Year</label>
         <input
           id={yearId}
@@ -131,7 +132,7 @@ export function QuestionForm({
       </div>
 
       {questionType === 'team_case' && (
-        <div>
+        <div className={styles.qfield}>
           <label htmlFor={teamId}>Team</label>
           <input
             id={teamId}
@@ -144,8 +145,8 @@ export function QuestionForm({
       )}
 
       {questionType === 'compare' && (
-        <>
-          <div>
+        <div className={styles.qfieldPair}>
+          <div className={styles.qfield}>
             <label htmlFor={teamAId}>Team A</label>
             <input
               id={teamAId}
@@ -155,7 +156,7 @@ export function QuestionForm({
               required
             />
           </div>
-          <div>
+          <div className={styles.qfield}>
             <label htmlFor={teamBId}>Team B</label>
             <input
               id={teamBId}
@@ -165,10 +166,10 @@ export function QuestionForm({
               required
             />
           </div>
-        </>
+        </div>
       )}
 
-      <div>
+      <div className={`${styles.qfield} ${styles.casual}`}>
         <label htmlFor={userTeamId}>Your team (optional)</label>
         <input
           id={userTeamId}
@@ -179,7 +180,11 @@ export function QuestionForm({
         />
       </div>
 
-      <button type="submit" disabled={isSubmitting}>
+      <button
+        className={`${styles.btn} ${styles.btnPrimary}`}
+        type="submit"
+        disabled={isSubmitting}
+      >
         {isSubmitting ? 'Getting the verdict…' : 'Get the verdict'}
       </button>
     </form>

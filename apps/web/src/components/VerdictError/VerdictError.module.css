@@ -1,0 +1,69 @@
+.pick {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+}
+
+.msg {
+  margin-bottom: var(--sp-3);
+}
+
+.chipList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.chip {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+}
+
+.chipYear {
+  border: 1.5px solid var(--leather);
+  color: var(--leather-strong);
+}
+
+.chipYear:hover {
+  background: var(--leather);
+  color: var(--on-leather);
+}
+
+.chipTeam {
+  border: 1.5px solid var(--navy);
+  color: var(--navy);
+}
+
+.chipTeam:hover {
+  background: var(--navy);
+  color: var(--on-leather);
+}
+
+.plain {
+  border-radius: var(--radius);
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 4px solid var(--slate);
+  background: var(--surface);
+}
+
+.plain p {
+  font-size: 0.95rem;
+}
+
+/* User-fault error (e.g. same-team comparison) -- brick, distinct from a system hiccup. */
+.user {
+  border-left-color: var(--brick);
+}
+
+/* System-fault error (e.g. unreachable API) -- slate, distinct from a user mistake. */
+.system {
+  border-left-color: var(--slate);
+}
