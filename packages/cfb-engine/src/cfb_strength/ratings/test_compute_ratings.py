@@ -160,6 +160,52 @@ def test_delete_then_insert_replaces_prior_rows(tmp_path: Path) -> None:
     conn.close()
 
 
+def test_compute_and_store_writes_rating_breakdowns(tmp_path: Path) -> None:
+    """Issue #31: one rating_breakdowns row per opponent actually played,
+    plus one opponent_team_id=NULL residual row, per displayed FBS team."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    for tid in (1, 2, 3):
+        _insert_team(conn, tid, f"Team {tid}")
+        _insert_team_season(conn, tid, year, "fbs")
+
+    _insert_game(conn, 1, year, 1, 2, 30, 10)
+    _insert_game(conn, 2, year, 2, 3, 20, 17)
+    _insert_game(conn, 3, year, 3, 1, 3, 40)
+    conn.commit()
+
+    compute_and_store(conn, year, "keener")
+
+    residual_rows = conn.execute(
+        "SELECT team_id, contribution FROM rating_breakdowns "
+        "WHERE year = ? AND method = ? AND opponent_team_id IS NULL",
+        (year, "keener"),
+    ).fetchall()
+    assert {r["team_id"] for r in residual_rows} == {1, 2, 3}
+
+    entry_rows = conn.execute(
+        "SELECT team_id, opponent_team_id, games_played, wins, losses, credit, contribution "
+        "FROM rating_breakdowns WHERE year = ? AND method = ? AND opponent_team_id IS NOT NULL",
+        (year, "keener"),
+    ).fetchall()
+    # 3-team cycle: each team played 2 distinct opponents -> 2 entry rows each.
+    assert len(entry_rows) == 6
+    for row in entry_rows:
+        assert row["games_played"] == 1
+        assert row["credit"] is not None
+
+    # delete-then-insert: recomputing must not duplicate rows.
+    compute_and_store(conn, year, "keener")
+    total_after = conn.execute(
+        "SELECT COUNT(*) AS c FROM rating_breakdowns WHERE year = ? AND method = ?",
+        (year, "keener"),
+    ).fetchone()["c"]
+    assert total_after == len(entry_rows) + len(residual_rows)
+    conn.close()
+
+
 def test_unknown_method_raises(tmp_path: Path) -> None:
     db_path = _make_db(tmp_path)
     conn = get_conn(db_path)

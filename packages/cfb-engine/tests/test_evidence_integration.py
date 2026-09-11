@@ -148,3 +148,58 @@ def test_build_comparison_team_summaries_and_common_opponents_are_typed(
         assert opponent.team_a_result in ("W", "L")
         assert opponent.team_b_result in ("W", "L")
         assert isinstance(opponent.opponent_name, str)
+
+
+def test_build_team_case_rating_breakdown_has_entries_for_real_opponents(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Issue #31: TeamCase.rating_breakdown surfaces the per-opponent credit
+    decomposition computed and persisted by compute_and_store."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+
+    assert case.rating_breakdown.entries, "Texas played games in 2005; expected breakdown entries"
+
+    schedule_opponent_ids = {o.opponent_team_id for o in case.games}
+    for entry in case.rating_breakdown.entries:
+        assert entry.opponent_team_id in schedule_opponent_ids
+
+
+def test_build_team_case_rating_breakdown_reconstructs_rating(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """The decomposition is exact by construction upstream: entries'
+    contributions plus the residual must sum back to the team's rating."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+
+    total = sum(e.contribution for e in case.rating_breakdown.entries)
+    total += case.rating_breakdown.residual_contribution
+
+    assert total == pytest.approx(case.rating, abs=1e-6)
+
+
+def test_build_comparison_team_summaries_have_rating_breakdowns(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """build_comparison's ComparisonTeamSummary (via _case_summary) must
+    carry the same rating_breakdown as build_team_case, not just
+    build_team_case's own return value."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "USC", method="keener")
+
+    for summary in (comparison.team_a, comparison.team_b):
+        assert summary.rating_breakdown.entries
+        total = sum(e.contribution for e in summary.rating_breakdown.entries)
+        total += summary.rating_breakdown.residual_contribution
+        assert total == pytest.approx(summary.rating, abs=1e-6)
+
+
+def test_rating_breakdown_degrades_gracefully_with_no_rows(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """A team rated but with no rating_breakdowns rows (e.g. a fixture db
+    predating this table, or an id with no persisted breakdown) should
+    produce an empty RatingBreakdown rather than raising."""
+    from cfb_strength.evidence.proof import _rating_breakdown
+
+    breakdown = _rating_breakdown(rated_conn, 2005, "keener", team_id=-1)
+    assert breakdown.entries == []
+    assert breakdown.residual_contribution == 0.0

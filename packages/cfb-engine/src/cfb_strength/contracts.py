@@ -71,12 +71,57 @@ class Game:
 
 
 @dataclass(frozen=True)
+class OpponentCredit:
+    """One opponent's exact contribution to a team's Keener rating.
+
+    `credit` is the row-normalized (pre-epsilon) matrix value for this
+    opponent -- purely game-based, straight from `_single_game_credit`,
+    aggregated across every game the two teams played that season. `credit *
+    opponent_rating == contribution`.
+    """
+
+    opponent_team_id: int
+    games_played: int
+    wins: int
+    losses: int
+    credit: float
+    contribution: float
+
+
+@dataclass(frozen=True)
+class RatingBreakdown:
+    """The exact per-opponent decomposition of a Keener rating: `rating ==
+    sum(e.contribution for e in entries) + residual_contribution`, always,
+    by construction (residual_contribution is defined as whatever's left
+    over).
+
+    `residual_contribution` is real math, not a rounding artifact, and it is
+    NOT small: for a real FBS season (~120+ teams) it typically accounts for
+    roughly half of a team's rating. Two things drive it, both inherent to
+    the existing (already-validated, unmodified-by-this-feature) Keener
+    implementation, not this decomposition: (1) `epsilon = 1/(2n)` is a
+    fixed fraction (1/2) of the "equal share" baseline `1/n` for any n, by
+    construction; (2) the credit matrix's dominant eigenvalue is meaningfully
+    below 1 (keener.py's own docstring explains why: it deliberately avoids
+    full row-stochastic normalization, which would erase real per-game
+    credit information). Present this to users as a named, understood
+    component of the rating system itself (e.g. "rating-system baseline /
+    connectivity regularizer") -- never imply it's negligible or a rounding
+    residue.
+    """
+
+    entries: list[OpponentCredit] = field(default_factory=list)
+    residual_contribution: float = 0.0
+
+
+@dataclass(frozen=True)
 class TeamRating:
     team_id: int
     rating: float
     rank: int
     wins: int
     losses: int
+    rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
 
 
 class RatingMethod(Protocol):
@@ -115,6 +160,7 @@ class TeamCase:
     rating: float
     wins: int
     losses: int
+    rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
     games: list[OpponentResult] = field(default_factory=list)
     quality_wins: list[OpponentResult] = field(default_factory=list)
     worst_loss: OpponentResult | None = None
@@ -130,6 +176,7 @@ class ComparisonTeamSummary:
     rating: float
     wins: int
     losses: int
+    rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
     quality_wins: list[OpponentResult] = field(default_factory=list)
     worst_loss: OpponentResult | None = None
 

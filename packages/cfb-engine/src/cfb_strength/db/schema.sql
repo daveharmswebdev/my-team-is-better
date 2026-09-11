@@ -49,6 +49,24 @@ CREATE TABLE IF NOT EXISTS ratings (
 );
 CREATE INDEX IF NOT EXISTS idx_ratings_year_method ON ratings(year, method);
 
+-- opponent_team_id NULL marks the "background" row: the epsilon-regularizer
+-- residual folded into one line rather than one row per unplayed team.
+CREATE TABLE IF NOT EXISTS rating_breakdowns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year INTEGER NOT NULL,
+    method TEXT NOT NULL DEFAULT 'keener',
+    team_id INTEGER NOT NULL REFERENCES teams(id),
+    opponent_team_id INTEGER REFERENCES teams(id),
+    games_played INTEGER,
+    wins INTEGER,
+    losses INTEGER,
+    credit REAL,
+    contribution REAL NOT NULL,
+    computed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rating_breakdowns_year_method_team
+    ON rating_breakdowns(year, method, team_id);
+
 CREATE TABLE IF NOT EXISTS ingestion_log (
     year INTEGER NOT NULL,
     season_type TEXT NOT NULL,

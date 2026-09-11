@@ -20,7 +20,9 @@ from cfb_strength.contracts import (
     CommonOpponent,
     HeadToHead,
     HeadToHeadMeeting,
+    OpponentCredit,
     OpponentResult,
+    RatingBreakdown,
     SameTeamComparisonError,
     TeamCase,
     UnknownYearError,
@@ -56,6 +58,52 @@ def _ratings_map(conn: sqlite3.Connection, year: int, method: str) -> dict[int, 
         (year, method),
     ).fetchall()
     return {int(r["team_id"]): r for r in rows}
+
+
+def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id: int) -> RatingBreakdown:
+    """Reconstruct a team's `RatingBreakdown` from `rating_breakdowns` rows.
+
+    `OpponentCredit`/`RatingBreakdown` (contracts.py) only carry
+    `opponent_team_id`, not opponent name/rating, so no join against
+    `teams`/`ratings` is needed for construction -- entries are ordered by
+    `contribution` descending (largest driver of the rating first), which
+    matches the descending-by-significance convention `quality_wins` and
+    `common_opponents` already use elsewhere in this module.
+
+    A rated team always has breakdown rows too (`compute_and_store` writes
+    both tables together in the same pass -- see compute_ratings.py's
+    `_store`/`_store_breakdowns`), but this degrades gracefully (empty
+    entries, zero residual) rather than raising if rows are ever missing,
+    e.g. a fixture db computed before this table existed.
+    """
+    rows = conn.execute(
+        """
+        SELECT opponent_team_id, games_played, wins, losses, credit, contribution
+        FROM rating_breakdowns
+        WHERE year = ? AND method = ? AND team_id = ?
+        """,
+        (year, method, team_id),
+    ).fetchall()
+
+    entries: list[OpponentCredit] = []
+    residual_contribution = 0.0
+    for row in rows:
+        if row["opponent_team_id"] is None:
+            residual_contribution = float(row["contribution"])
+            continue
+        entries.append(
+            OpponentCredit(
+                opponent_team_id=int(row["opponent_team_id"]),
+                games_played=int(row["games_played"]),
+                wins=int(row["wins"]),
+                losses=int(row["losses"]),
+                credit=float(row["credit"]),
+                contribution=float(row["contribution"]),
+            )
+        )
+
+    entries.sort(key=lambda e: e.contribution, reverse=True)
+    return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
 def _require_year(conn: sqlite3.Connection, year: int, method: str) -> None:
@@ -196,6 +244,7 @@ def build_team_case(
 
     ratings = _ratings_map(conn, year, method)
     games = _team_games(conn, year, team_id)
+    rating_breakdown = _rating_breakdown(conn, year, method, team_id)
 
     opponent_results: list[OpponentResult] = []
     for game in games:
@@ -231,6 +280,7 @@ def build_team_case(
         rating=float(rating_row["rating"]),
         wins=int(rating_row["wins"]),
         losses=int(rating_row["losses"]),
+        rating_breakdown=rating_breakdown,
         games=opponent_results,
         quality_wins=quality_wins,
         worst_loss=worst_loss,
@@ -245,6 +295,7 @@ def _case_summary(case: TeamCase) -> ComparisonTeamSummary:
         rating=case.rating,
         wins=case.wins,
         losses=case.losses,
+        rating_breakdown=case.rating_breakdown,
         quality_wins=case.quality_wins,
         worst_loss=case.worst_loss,
     )
