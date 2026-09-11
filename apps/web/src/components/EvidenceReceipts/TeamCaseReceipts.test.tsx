@@ -79,6 +79,8 @@ const evidence: TeamCaseOut = {
         losses: 0,
         credit: 0.03,
         contribution: 0.005,
+        explanation:
+          "Ran them off the field, 45-3 — 94% of the points, capped at 85% so blowouts don't count extra past that. That earns the flat 0.60 every win banks, plus a 0.10 margin bonus for the lopsided score.",
       },
     ],
     residual_contribution: 0.00734,

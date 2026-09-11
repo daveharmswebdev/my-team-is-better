@@ -23,6 +23,8 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
           losses: 0,
           credit: 0.02,
           contribution: 0.006,
+          explanation:
+            "Ran them off the field, 45-3 — 94% of the points, capped at 85% so blowouts don't count extra past that. That earns the flat 0.60 every win banks, plus a 0.10 margin bonus for the lopsided score.",
         },
       ],
       residual_contribution: 0.00634,
@@ -71,6 +73,8 @@ const comparisonEnvelope: ComparisonEnvelope = {
             losses: 0,
             credit: 0.019,
             contribution: 0.0057,
+            explanation:
+              "Snuck out a 24-21 win — 53% of the points, barely above even. That's the flat 0.60 every win banks, plus just a 0.01 margin bonus.",
           },
         ],
         residual_contribution: 0.00664,
@@ -95,6 +99,8 @@ const comparisonEnvelope: ComparisonEnvelope = {
             losses: 1,
             credit: 0.015,
             contribution: 0.0045,
+            explanation:
+              'Got run over, 3-52 — 5% of the points, clamped at the 15% floor. Still banks the flat 0.05 every loss keeps, nobody walks away with zero, but no margin bonus at that end of the scale.',
           },
         ],
         residual_contribution: 0.00697,
