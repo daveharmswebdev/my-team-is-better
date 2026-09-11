@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { TeamCaseOut } from '../../lib/api/types'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
@@ -16,6 +16,45 @@ const baseOpponent = {
   neutral_site: false,
 }
 
+const lsuGame = {
+  ...baseOpponent,
+  opponent_team_id: 3,
+  opponent_name: 'LSU',
+  opponent_rank: null,
+  result: 'W' as const,
+  team_score: 24,
+  opponent_score: 17,
+  week: 1,
+  season_type: 'regular',
+}
+
+const tennesseeGame = {
+  ...baseOpponent,
+  opponent_team_id: 4,
+  opponent_name: 'Tennessee',
+  opponent_rank: null,
+  result: 'W' as const,
+  team_score: 31,
+  opponent_score: 10,
+  week: 10,
+  season_type: 'regular',
+}
+
+const bowlGame = {
+  ...baseOpponent,
+  opponent_team_id: 5,
+  opponent_name: 'USC',
+  opponent_rank: 2,
+  result: 'W' as const,
+  team_score: 41,
+  opponent_score: 38,
+  // Postseason weeks are numbered independently of the regular season by
+  // the upstream data (a bowl game can carry week: 1), so sorting on raw
+  // week number alone would interleave it into the regular season.
+  week: 1,
+  season_type: 'postseason',
+}
+
 const evidence: TeamCaseOut = {
   year: 2005,
   method: 'keener',
@@ -25,7 +64,11 @@ const evidence: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
-  games: [baseOpponent],
+  // `baseOpponent` (Michigan) is included in both `games` and
+  // `quality_wins` here on purpose -- a real API response includes every
+  // quality win (and the worst loss, if any) in the full game list too, so
+  // the fixture should exercise that overlap rather than avoid it.
+  games: [bowlGame, tennesseeGame, lsuGame, baseOpponent],
   quality_wins: [baseOpponent],
   worst_loss: null,
 }
@@ -46,7 +89,29 @@ describe('TeamCaseReceipts', () => {
   it('renders quality wins', () => {
     render(<TeamCaseReceipts evidence={evidence} />)
 
-    expect(screen.getByText(/Michigan/)).toBeInTheDocument()
+    // Michigan is a quality win that also appears in the full schedule (the
+    // realistic API shape), so it legitimately renders twice.
+    expect(screen.getAllByText(/Michigan/)).toHaveLength(2)
+  })
+
+  it('stars the full-schedule row for a game that is also a quality win, instead of an unexplained duplicate', () => {
+    render(<TeamCaseReceipts evidence={evidence} />)
+
+    const schedule = screen.getByRole('list', { name: /full schedule/i })
+    const michiganRow = within(schedule)
+      .getByText(/Michigan/)
+      .closest('li')
+
+    expect(michiganRow).not.toBeNull()
+    expect(
+      within(michiganRow as HTMLElement).getByText(/quality win/i),
+    ).toBeInTheDocument()
+
+    // The Quality Wins section itself has no redundant badge on its own row.
+    const qualityWins = screen.getByRole('list', { name: /quality wins/i })
+    expect(
+      within(qualityWins).queryByText(/quality win/i),
+    ).not.toBeInTheDocument()
   })
 
   it('renders "no losses" when there is no worst loss', () => {
@@ -67,5 +132,35 @@ describe('TeamCaseReceipts', () => {
     )
 
     expect(screen.getByText(/Baylor/)).toBeInTheDocument()
+  })
+
+  it('renders every game in the full schedule, not just quality wins and worst loss', () => {
+    render(<TeamCaseReceipts evidence={evidence} />)
+
+    // LSU and Tennessee appear only in `games`, not in `quality_wins` or
+    // `worst_loss` -- a fan should still be able to see them.
+    expect(screen.getByText(/LSU/)).toBeInTheDocument()
+    expect(screen.getByText(/Tennessee/)).toBeInTheDocument()
+  })
+
+  it('orders the full schedule chronologically by regular-season week, with postseason games after the regular season regardless of raw week number', () => {
+    render(<TeamCaseReceipts evidence={evidence} />)
+
+    const schedule = screen.getByRole('list', { name: /full schedule/i })
+    const opponents = within(schedule)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent)
+
+    const lsuIndex = opponents.findIndex((text) => text?.includes('LSU'))
+    const tennesseeIndex = opponents.findIndex((text) =>
+      text?.includes('Tennessee'),
+    )
+    const bowlIndex = opponents.findIndex((text) => text?.includes('USC'))
+
+    // Regular season in week order (LSU: week 1, Tennessee: week 10)...
+    expect(lsuIndex).toBeLessThan(tennesseeIndex)
+    // ...then the postseason, even though the bowl game's raw `week` (1) is
+    // lower than Tennessee's.
+    expect(tennesseeIndex).toBeLessThan(bowlIndex)
   })
 })

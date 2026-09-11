@@ -45,6 +45,16 @@ def test_prompt_includes_the_worked_examples() -> None:
     assert "invents a loss that never happened" in prompt
 
 
+def test_prompt_pins_the_score_order_convention() -> None:
+    # issue #26: the relational grounding check can only verify score order
+    # if the persona is instructed to always state `team_score` before
+    # `opponent_score` -- this rule is what makes that checkable.
+    prompt = build_system_prompt("Texas")
+
+    assert "`team_score` number first" in prompt
+    assert "A swapped order is exactly as wrong as an invented" in prompt
+
+
 def test_user_message_embeds_fact_block_json_verbatim() -> None:
     fact_block_json = '{"team_name": "Texas", "year": 2005}'
 
