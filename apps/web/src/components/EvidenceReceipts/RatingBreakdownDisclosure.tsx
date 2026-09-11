@@ -176,6 +176,7 @@ export function RatingBreakdownDisclosure({
               <span className={styles.rowNum}>
                 {formatRating(entry.contribution)}
               </span>
+              <span className={styles.rowExplanation}>{entry.explanation}</span>
             </li>
           ))}
         </ul>

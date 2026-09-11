@@ -19,7 +19,9 @@
   border-bottom-color: var(--navy);
 }
 
-/* Desktop hover popover, anchored just below/right of the trigger. */
+/* Desktop hover popover, anchored just below/right of the trigger. Scrolls
+   instead of overflowing the viewport once entries (each now with its own
+   explanation line) push it taller than the window, same as `.modal` below. */
 .popover {
   position: absolute;
   z-index: 20;
@@ -27,6 +29,8 @@
   right: 0;
   margin-top: var(--sp-2);
   width: 280px;
+  max-height: 80vh;
+  overflow-y: auto;
 }
 
 /* Mobile tap modal: full-viewport backdrop, centered panel. */
@@ -124,6 +128,13 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
   min-width: 3ch;
+}
+
+.rowExplanation {
+  grid-column: 1 / -1;
+  font-size: 0.76rem;
+  font-style: italic;
+  color: var(--ink-muted);
 }
 
 .empty {

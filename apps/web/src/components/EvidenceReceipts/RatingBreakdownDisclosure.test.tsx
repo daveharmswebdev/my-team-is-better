@@ -34,6 +34,8 @@ const breakdown: RatingBreakdownOut = {
       losses: 0,
       credit: 0.018,
       contribution: 0.002,
+      explanation:
+        "Snuck out a 24-21 win — 53% of the points, barely above even. That's the flat 0.60 every win banks, plus just a 0.01 margin bonus.",
     },
     {
       opponent_team_id: 999,
@@ -43,6 +45,8 @@ const breakdown: RatingBreakdownOut = {
       losses: 0,
       credit: 0.009,
       contribution: 0.001,
+      explanation:
+        "Ran them off the field, 45-3 — 94% of the points, capped at 85% so blowouts don't count extra past that. That earns the flat 0.60 every win banks, plus a 0.10 margin bonus for the lopsided score.",
     },
   ],
   residual_contribution: 0.00427,
@@ -190,5 +194,27 @@ describe('RatingBreakdownDisclosure', () => {
     // entries' contributions (0.002 + 0.001) + residual (0.00427) = 0.00877,
     // i.e. the same value `formatRating` renders on the trigger (8.77).
     expect(within(dialog).getByText(/8\.77/)).toBeInTheDocument()
+  })
+
+  it('renders each entry’s own deterministic explanation line', async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    render(
+      <RatingBreakdownDisclosure
+        teamName="Ohio State"
+        rating={0.00877}
+        breakdown={breakdown}
+      />,
+    )
+
+    await user.hover(screen.getByRole('button', { name: /8\.77/ }))
+    const dialog = screen.getByRole('dialog')
+
+    expect(
+      within(dialog).getByText(/snuck out a 24-21 win/i),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/ran them off the field, 45-3/i),
+    ).toBeInTheDocument()
   })
 })

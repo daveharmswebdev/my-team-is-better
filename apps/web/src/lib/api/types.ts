@@ -26,6 +26,7 @@ export interface OpponentCreditOut {
   losses: number
   credit: number
   contribution: number
+  explanation: string
 }
 
 export interface RatingBreakdownOut {

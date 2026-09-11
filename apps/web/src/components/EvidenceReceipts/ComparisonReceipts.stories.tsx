@@ -21,6 +21,8 @@ const evidence: ComparisonResultOut = {
           losses: 0,
           credit: 0.018,
           contribution: 0.002,
+          explanation:
+            "Snuck out a 24-21 win — 53% of the points, barely above even. That's the flat 0.60 every win banks, plus just a 0.01 margin bonus.",
         },
         {
           opponent_team_id: 127,
@@ -30,6 +32,8 @@ const evidence: ComparisonResultOut = {
           losses: 0,
           credit: 0.021,
           contribution: 0.00227,
+          explanation:
+            "Ran them off the field, 45-3 — 94% of the points, capped at 85% so blowouts don't count extra past that. That earns the flat 0.60 every win banks, plus a 0.10 margin bonus for the lopsided score.",
         },
       ],
       // Real, not negligible -- the Keener regularizer/eigenvalue baseline
@@ -57,6 +61,8 @@ const evidence: ComparisonResultOut = {
           losses: 1,
           credit: 0.01,
           contribution: 0.00102,
+          explanation:
+            'Got run over, 3-52 — 5% of the points, clamped at the 15% floor. Still banks the flat 0.05 every loss keeps, nobody walks away with zero, but no margin bonus at that end of the scale.',
         },
       ],
       residual_contribution: 0.005,
