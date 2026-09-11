@@ -1,10 +1,20 @@
 """Umbrella CLI for cfb-strength: `cfb ingest`, `cfb rate`, `cfb serve`.
 
 This module only dispatches to entry points owned by other modules
-(`ingest.ingest_season.main`, `ratings.compute_ratings.main`,
-`mcp_server.server.main`) -- it contains no ingestion, rating, or evidence
-logic of its own. Imports are deferred into each branch so that, e.g.,
-`cfb ingest --years 2005` doesn't pay the cost of importing the MCP SDK.
+(`ingest.ingest_season.main`, `ingest.nflverse.ingest_season.main`,
+`ratings.compute_ratings.main`, `mcp_server.server.main`) -- it contains no
+ingestion, rating, or evidence logic of its own. Imports are deferred into
+each branch so that, e.g., `cfb ingest --years 2005` doesn't pay the cost of
+importing the MCP SDK.
+
+`ingest --sport {cfb,nfl}` (added for issue #51) dispatches to one of two
+independent orchestration modules -- see `.importlinter`'s
+`no-nflverse-import-of-cfbd / no-cfbd-import-of-nflverse` contract, which forbids those two modules
+importing each other. `--sport` is stripped out of `rest` here (both target
+mains have their own, unrelated argparse parsers and know nothing about
+`--sport`) before the remaining args are passed through unchanged, so
+`cfb ingest --years 2005` (no `--sport`) behaves identically to before this
+change.
 """
 
 from __future__ import annotations
@@ -15,8 +25,9 @@ USAGE = """\
 usage: cfb <command> [args]
 
 commands:
-  ingest --years YEARS [--force] [--season-types TYPES] [--db-path PATH]
-      Fetch and store CFBD game/team data for one or more seasons.
+  ingest --years YEARS [--sport {cfb,nfl}] [--force] [--season-types TYPES] [--db-path PATH]
+      Fetch and store game/team data for one or more seasons. --sport
+      defaults to "cfb" (CFBD); "nfl" ingests nflverse data instead.
 
   rate --years YEARS [--method METHOD]
       Compute and store team ratings for one or more seasons (default method: keener).
@@ -26,6 +37,33 @@ commands:
 
 Run 'cfb <command> --help' for command-specific options.
 """
+
+
+def _split_out_sport_flag(rest: list[str]) -> tuple[str, list[str]]:
+    """Pull `--sport VALUE` / `--sport=VALUE` out of `ingest`'s args.
+
+    Returns `(sport, remaining_args)`. Defaults to "cfb" when absent, since
+    neither target orchestration module's own argparse parser knows about
+    `--sport` -- it's a dispatch-only concern of this CLI layer.
+    """
+    sport = "cfb"
+    remaining: list[str] = []
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg == "--sport":
+            if i + 1 >= len(rest):
+                raise ValueError("--sport requires a value")
+            sport = rest[i + 1]
+            i += 2
+            continue
+        if arg.startswith("--sport="):
+            sport = arg.split("=", 1)[1]
+            i += 1
+            continue
+        remaining.append(arg)
+        i += 1
+    return sport, remaining
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -42,9 +80,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if command == "ingest":
-        from cfb_strength.ingest.ingest_season import main as ingest_main
+        try:
+            sport, ingest_args = _split_out_sport_flag(rest)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
 
-        return ingest_main(rest)
+        if sport == "cfb":
+            from cfb_strength.ingest.ingest_season import main as ingest_main
+
+            return ingest_main(ingest_args)
+
+        if sport == "nfl":
+            from cfb_strength.ingest.nflverse.ingest_season import main as nfl_ingest_main
+
+            return nfl_ingest_main(ingest_args)
+
+        print(f"error: unknown --sport {sport!r}, expected 'cfb' or 'nfl'\n", file=sys.stderr)
+        return 2
 
     if command == "rate":
         from cfb_strength.ratings.compute_ratings import main as rate_main

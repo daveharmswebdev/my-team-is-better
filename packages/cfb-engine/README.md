@@ -28,10 +28,22 @@ cp .env.example .env
 ## Usage
 
 ```bash
-uv run cfb ingest --years 2005     # ingest game data (cached raw JSON in data/raw/)
-uv run cfb rate --years 2005       # compute ratings from ingested games
-uv run cfb serve                   # run the MCP server (stdio)
+uv run cfb ingest --years 2005              # ingest CFB game data (cached raw JSON in data/raw/)
+uv run cfb ingest --sport nfl --years 2023-2025   # ingest NFL game data (cached raw CSV in data/raw/nfl/)
+uv run cfb rate --years 2005                # compute ratings from ingested games
+uv run cfb serve                            # run the MCP server (stdio)
 ```
+
+## Data sources
+
+- College football: [collegefootballdata.com](https://collegefootballdata.com) (CFBD).
+- NFL (added for issue #51): [nflverse](https://github.com/nflverse/nflverse-data)'s
+  `games.csv` (schedules release) and `teams_colors_logos.csv` (teams release). The
+  NFL schedule data in `games.csv` was originally compiled and maintained by
+  **Lee Sharpe**, whose work nflverse now publishes and maintains — see
+  [nflverse-data](https://github.com/nflverse/nflverse-data) and
+  [nflreadr's data dictionary](https://nflreadr.nflverse.com/articles/dictionary_schedules.html)
+  for the full history and citation.
 
 ## Tools exposed
 

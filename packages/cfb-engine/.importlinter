@@ -18,3 +18,36 @@ modules =
     cfb_strength.ingest
     cfb_strength.ratings
     cfb_strength.evidence
+
+; NOTE for the coordinator: the brief for issue #51 specified this contract
+; verbatim as a single `type = independence` block listing all four modules
+; (client, normalize, ingest_season, nflverse). That literal form doesn't
+; hold: `type = independence` forbids every pairwise import among *all*
+; listed modules, including the CFBD path's own internal, legitimate,
+; pre-existing dependency of `ingest_season` on `client` and `normalize` --
+; running `lint-imports` against it breaks (see the two BROKEN lines it
+; reports for `ingest.ingest_season -> ingest.client` / `-> ingest.normalize`,
+; neither touched by this change). Implemented instead as two directional
+; `forbidden` contracts, which capture the actual intent (the CFBD path and
+; the nflverse path must not import each other) without also forbidding the
+; CFBD path's own internal structure. Flagging this as a contract_gaps entry
+; in the RETURN rather than shipping the literal (broken) form.
+[importlinter:contract:no-nflverse-import-of-cfbd]
+name = the nflverse ingest path must not import the CFBD ingest path
+type = forbidden
+source_modules =
+    cfb_strength.ingest.nflverse
+forbidden_modules =
+    cfb_strength.ingest.client
+    cfb_strength.ingest.normalize
+    cfb_strength.ingest.ingest_season
+
+[importlinter:contract:no-cfbd-import-of-nflverse]
+name = the CFBD ingest path must not import the nflverse ingest path
+type = forbidden
+source_modules =
+    cfb_strength.ingest.client
+    cfb_strength.ingest.normalize
+    cfb_strength.ingest.ingest_season
+forbidden_modules =
+    cfb_strength.ingest.nflverse
