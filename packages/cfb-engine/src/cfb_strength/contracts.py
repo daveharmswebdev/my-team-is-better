@@ -45,6 +45,14 @@ class GameRow:
     away_classification: str | None
     venue: str | None
     raw_json: str
+    # sport/source_id added for #51 (NFL support, sprint 2). `sport` defaults to
+    # "cfb" so the existing CFBD ingest path (ingest/normalize.py) needs no
+    # change. `source_id` carries nflverse's native string id (team abbreviation
+    # for teams, e.g. "KC"; composite game id, e.g. "2023_01_KC_DET", for games)
+    # for traceability and idempotent re-ingest -- always None for CFB rows,
+    # since CFBD ids are already the row's real integer primary key.
+    sport: Literal["cfb", "nfl"] = "cfb"
+    source_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,6 +61,9 @@ class TeamRow:
     school: str
     classification: str | None
     conference: str | None
+    # See GameRow's sport/source_id note above -- same reasoning applies here.
+    sport: Literal["cfb", "nfl"] = "cfb"
+    source_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

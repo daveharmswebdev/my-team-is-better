@@ -1,7 +1,26 @@
+-- `sport` (added #51, sprint 2: NFL support) distinguishes rows sharing this
+-- one sqlite db rather than splitting into a new datastore. `source_id`
+-- (teams/games only) carries nflverse's native string id (team abbreviation /
+-- composite game id) for traceability and idempotent re-ingest -- CFB rows
+-- leave it NULL (sqlite UNIQUE treats multiple NULLs as distinct, so this
+-- coexists with the CFBD-native integer `id` PK). See ingest/nflverse/ for
+-- the surrogate-id minting that keeps NFL's string-keyed natural ids from
+-- colliding with CFBD's native integer ids on these same PK columns.
+--
+-- NOTE: the unique indexes on teams.source_id / games.source_id are NOT
+-- declared here. This script runs unconditionally against a possibly
+-- pre-existing (pre-#51) db via CREATE TABLE IF NOT EXISTS, which is a no-op
+-- on an already-existing table -- so a fresh-db-only index here would raise
+-- "no such column: source_id" against a real pre-existing db, before
+-- connection.py's migration below has had a chance to add the column. See
+-- `_migrate_sport_columns` in connection.py, which creates both indexes
+-- itself once it has guaranteed the column exists either way.
 CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY,
     school TEXT NOT NULL,
-    classification TEXT
+    classification TEXT,
+    sport TEXT NOT NULL DEFAULT 'cfb',
+    source_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS team_season (
@@ -9,6 +28,7 @@ CREATE TABLE IF NOT EXISTS team_season (
     year INTEGER NOT NULL,
     conference TEXT,
     classification TEXT,
+    sport TEXT NOT NULL DEFAULT 'cfb',
     PRIMARY KEY (team_id, year)
 );
 
@@ -29,11 +49,15 @@ CREATE TABLE IF NOT EXISTS games (
     home_conference TEXT,
     away_conference TEXT,
     venue TEXT,
-    raw_json TEXT NOT NULL
+    raw_json TEXT NOT NULL,
+    sport TEXT NOT NULL DEFAULT 'cfb',
+    source_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_games_season ON games(season);
 CREATE INDEX IF NOT EXISTS idx_games_home ON games(home_team_id);
 CREATE INDEX IF NOT EXISTS idx_games_away ON games(away_team_id);
+-- idx_games_source_id: see the teams.source_id note above -- created in
+-- connection.py's migration, not here, for the same reason.
 
 CREATE TABLE IF NOT EXISTS ratings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +69,7 @@ CREATE TABLE IF NOT EXISTS ratings (
     wins INTEGER NOT NULL,
     losses INTEGER NOT NULL,
     computed_at TEXT NOT NULL,
+    sport TEXT NOT NULL DEFAULT 'cfb',
     UNIQUE(year, method, team_id)
 );
 CREATE INDEX IF NOT EXISTS idx_ratings_year_method ON ratings(year, method);
@@ -62,16 +87,22 @@ CREATE TABLE IF NOT EXISTS rating_breakdowns (
     losses INTEGER,
     credit REAL,
     contribution REAL NOT NULL,
-    computed_at TEXT NOT NULL
+    computed_at TEXT NOT NULL,
+    sport TEXT NOT NULL DEFAULT 'cfb'
 );
 CREATE INDEX IF NOT EXISTS idx_rating_breakdowns_year_method_team
     ON rating_breakdowns(year, method, team_id);
 
+-- sport is part of the PK here (unlike the tables above): year/season_type
+-- alone would collide between a CFB and an NFL ingest run of the same
+-- year/season_type, and team_id-based disambiguation (which is what lets the
+-- other tables skip this) doesn't apply to this table -- it has no team_id.
 CREATE TABLE IF NOT EXISTS ingestion_log (
     year INTEGER NOT NULL,
     season_type TEXT NOT NULL,
     fetched_at TEXT NOT NULL,
     game_count INTEGER NOT NULL,
     status TEXT NOT NULL,
-    PRIMARY KEY (year, season_type)
+    sport TEXT NOT NULL DEFAULT 'cfb',
+    PRIMARY KEY (year, season_type, sport)
 );
