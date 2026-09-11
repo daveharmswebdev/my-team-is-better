@@ -187,9 +187,9 @@ def _write_ingestion_log(
 ) -> None:
     conn.execute(
         """
-        INSERT INTO ingestion_log (year, season_type, fetched_at, game_count, status)
-        VALUES (:year, :season_type, :fetched_at, :game_count, :status)
-        ON CONFLICT(year, season_type) DO UPDATE SET
+        INSERT INTO ingestion_log (year, season_type, fetched_at, game_count, status, sport)
+        VALUES (:year, :season_type, :fetched_at, :game_count, :status, 'cfb')
+        ON CONFLICT(year, season_type, sport) DO UPDATE SET
             fetched_at = excluded.fetched_at,
             game_count = excluded.game_count,
             status = excluded.status
