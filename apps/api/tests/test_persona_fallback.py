@@ -7,7 +7,13 @@ instances, not hand-typed strings.
 
 from __future__ import annotations
 
-from api.models import ComparisonResultOut, ComparisonTeamSummaryOut, HeadToHeadOut, TeamCaseOut
+from api.models import (
+    ComparisonResultOut,
+    ComparisonTeamSummaryOut,
+    HeadToHeadOut,
+    RatingBreakdownOut,
+    TeamCaseOut,
+)
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 
 
@@ -21,6 +27,7 @@ def _team_case(**overrides: object) -> TeamCaseOut:
         "rating": 0.95,
         "wins": 13,
         "losses": 0,
+        "rating_breakdown": RatingBreakdownOut(entries=[], residual_contribution=0.0),
         "games": [],
         "quality_wins": [],
         "worst_loss": None,
@@ -51,6 +58,7 @@ def test_comparison_fallback_uses_only_evidence_fields() -> None:
             rating=0.95,
             wins=13,
             losses=0,
+            rating_breakdown=RatingBreakdownOut(entries=[], residual_contribution=0.0),
             quality_wins=[],
             worst_loss=None,
         ),
@@ -61,6 +69,7 @@ def test_comparison_fallback_uses_only_evidence_fields() -> None:
             rating=0.9,
             wins=12,
             losses=1,
+            rating_breakdown=RatingBreakdownOut(entries=[], residual_contribution=0.0),
             quality_wins=[],
             worst_loss=None,
         ),
