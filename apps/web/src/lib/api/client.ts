@@ -6,6 +6,7 @@
 
 import type {
   ComparisonEnvelope,
+  CreditsOut,
   TeamCaseEnvelope,
   VerdictErrorBody,
 } from './types'
@@ -107,4 +108,30 @@ export function fetchCompare(
   payload: ComparePayload,
 ): Promise<ComparisonEnvelope> {
   return postVerdict<ComparisonEnvelope>('/api/verdict/compare', payload)
+}
+
+/**
+ * `GET /api/credits` for the About page -- mirrors `postVerdict`'s
+ * error-handling shape (network failure and non-2xx both collapse to a
+ * `VerdictNetworkError`; there's no mapped 4xx contract for this endpoint
+ * the way there is for `/api/verdict/*`, so `VerdictApiError` doesn't apply
+ * here).
+ */
+export async function fetchCredits(): Promise<CreditsOut> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}/api/credits`)
+  } catch {
+    throw new VerdictNetworkError(
+      'Could not reach the API. Check your connection and try again.',
+    )
+  }
+
+  if (!response.ok) {
+    throw new VerdictNetworkError(
+      `Unexpected API error (status ${response.status}).`,
+    )
+  }
+
+  return (await response.json()) as CreditsOut
 }

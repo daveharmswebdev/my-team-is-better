@@ -116,6 +116,28 @@ export interface ComparisonEnvelope {
 
 export type VerdictEnvelope = TeamCaseEnvelope | ComparisonEnvelope
 
+// ---------------------------------------------------------------------------
+// credits -- mirrors apps/api/src/api/models.py's `CreditsOut` (About page).
+// ---------------------------------------------------------------------------
+
+export interface CreditsMethodologyOut {
+  name: string
+  citation: string
+  url: string
+  summary: string
+}
+
+export interface CreditsDataSourceOut {
+  name: string
+  url: string
+  note: string
+}
+
+export interface CreditsOut {
+  methodology: CreditsMethodologyOut
+  data_source: CreditsDataSourceOut
+}
+
 /** True when `evidence` is a `TeamCaseOut` (champion/team-case routes) rather than a `ComparisonResultOut` (compare route). */
 export function isTeamCaseEnvelope(
   envelope: VerdictEnvelope,

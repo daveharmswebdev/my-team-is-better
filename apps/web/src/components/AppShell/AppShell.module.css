@@ -1,0 +1,69 @@
+/*
+ * Ported from docs/design-system.html's `.topbar` / `.foot` spec
+ * (lines ~100-129, ~380) -- see AppShell.tsx for why this exists.
+ */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--sp-3) var(--sp-4);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--rule);
+}
+
+.name {
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.nav {
+  display: flex;
+  gap: var(--sp-4);
+}
+
+.navLink {
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink-muted);
+}
+
+.navLink:hover {
+  color: var(--leather);
+}
+
+.foot {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-4) var(--sp-16);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2) var(--sp-6);
+  color: var(--slate);
+  font-size: 0.82rem;
+}
+
+.footLink {
+  color: var(--slate);
+  text-decoration: underline;
+}
+
+.footLink:hover {
+  color: var(--leather);
+}

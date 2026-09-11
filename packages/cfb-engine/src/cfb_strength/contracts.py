@@ -258,6 +258,35 @@ class SameTeamComparisonError(ValueError):
 
 
 # ---------------------------------------------------------------------------
+# Attribution (static; no db access). Mirrors the shape mcp_server's
+# credits_resource() already returns -- see get_credits() in
+# evidence/credits.py, the single source of truth both mcp_server and
+# apps/api import from (PRD §5.6 / ARCHITECTURE §4.5).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MethodologyCredit:
+    name: str
+    citation: str
+    url: str
+    summary: str
+
+
+@dataclass(frozen=True)
+class DataSourceCredit:
+    name: str
+    url: str
+    note: str
+
+
+@dataclass(frozen=True)
+class Credits:
+    methodology: MethodologyCredit
+    data_source: DataSourceCredit
+
+
+# ---------------------------------------------------------------------------
 # Evidence public API (coordinator-assigned function signatures)
 #
 # These functions are NOT implemented in this file -- they live in
@@ -290,7 +319,16 @@ class SameTeamComparisonError(ValueError):
 #       there is exactly one implementation (evidence-agent's), which mcp-agent
 #       imports instead of reimplementing.
 #
-# mcp-agent imports these four names (plus AmbiguousTeamError/UnknownYearError/
-# SameTeamComparisonError from this file) from cfb_strength.evidence.proof and
-# must not reimplement their logic in mcp_server/.
+#   def get_credits() -> Credits: ...
+#       Lives in evidence/credits.py, not proof.py (no db access, unlike the
+#       four functions above). Added for #29/#30: relocates the dict literal
+#       that used to live inline in mcp_server/server.py's credits_resource()
+#       so apps/api can import the same source of truth instead of
+#       hardcoding a second copy (ARCHITECTURE §4.5). Content must match the
+#       pre-existing inline dict verbatim -- this is a relocation, not new
+#       copy.
+#
+# mcp-agent imports these five names (plus AmbiguousTeamError/UnknownYearError/
+# SameTeamComparisonError from this file) from cfb_strength.evidence and must
+# not reimplement their logic in mcp_server/.
 # ---------------------------------------------------------------------------
