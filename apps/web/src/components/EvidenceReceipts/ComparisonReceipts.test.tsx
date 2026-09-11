@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { ComparisonResultOut } from '../../lib/api/types'
 import { ComparisonReceipts } from './ComparisonReceipts'
@@ -12,7 +13,56 @@ const evidence: ComparisonResultOut = {
     rating: 0.00877,
     wins: 7,
     losses: 1,
-    quality_wins: [],
+    // Each entry carries its own `opponent_name` straight from the API now
+    // (issue #31 follow-up) -- no more resolving names from elsewhere in the
+    // evidence. Contributions + residual sum exactly to `rating` (0.002 +
+    // 0.0015 + 0.001 + 0.00427 = 0.00877).
+    rating_breakdown: {
+      entries: [
+        {
+          opponent_team_id: 84,
+          opponent_name: 'Indiana',
+          games_played: 1,
+          wins: 1,
+          losses: 0,
+          credit: 0.018,
+          contribution: 0.002,
+        },
+        {
+          opponent_team_id: 555,
+          opponent_name: 'Northwestern',
+          games_played: 1,
+          wins: 1,
+          losses: 0,
+          credit: 0.015,
+          contribution: 0.0015,
+        },
+        {
+          opponent_team_id: 999,
+          opponent_name: 'Rutgers',
+          games_played: 1,
+          wins: 1,
+          losses: 0,
+          credit: 0.009,
+          contribution: 0.001,
+        },
+      ],
+      residual_contribution: 0.00427,
+    },
+    quality_wins: [
+      {
+        opponent_team_id: 555,
+        opponent_name: 'Northwestern',
+        opponent_rank: 45,
+        opponent_rating: 0.003,
+        result: 'W',
+        team_score: 38,
+        opponent_score: 21,
+        week: 6,
+        season_type: 'regular',
+        neutral_site: false,
+      },
+    ],
     worst_loss: null,
   },
   team_b: {
@@ -22,6 +72,22 @@ const evidence: ComparisonResultOut = {
     rating: 0.00602,
     wins: 2,
     losses: 4,
+    // Contribution + residual sum exactly to `rating` (0.00102 + 0.005 =
+    // 0.00602).
+    rating_breakdown: {
+      entries: [
+        {
+          opponent_team_id: 84,
+          opponent_name: 'Indiana',
+          games_played: 1,
+          wins: 0,
+          losses: 1,
+          credit: 0.01,
+          contribution: 0.00102,
+        },
+      ],
+      residual_contribution: 0.005,
+    },
     quality_wins: [],
     worst_loss: null,
   },
@@ -122,5 +188,25 @@ describe('ComparisonReceipts', () => {
 
     expect(container.textContent).not.toContain('{')
     expect(container.textContent).not.toContain('[object')
+  })
+
+  it('wires each team’s rating value up to its own rating breakdown disclosure, rendering each entry’s own opponent_name', async () => {
+    const user = userEvent.setup()
+    render(<ComparisonReceipts evidence={evidence} />)
+
+    const ratingTrigger = screen.getByRole('button', { name: /8\.77/ })
+    await user.hover(ratingTrigger)
+
+    const dialog = screen.getByRole('dialog')
+    // Every row's name comes straight from its entry's own opponent_name.
+    expect(within(dialog).getByText('Indiana')).toBeInTheDocument()
+    expect(within(dialog).getByText('Northwestern')).toBeInTheDocument()
+    expect(within(dialog).getByText('Rutgers')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/rating-system baseline/i),
+    ).toBeInTheDocument()
+
+    await user.unhover(ratingTrigger)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

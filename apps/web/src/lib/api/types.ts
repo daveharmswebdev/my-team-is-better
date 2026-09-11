@@ -18,6 +18,21 @@ export interface OpponentResultOut {
   neutral_site: boolean
 }
 
+export interface OpponentCreditOut {
+  opponent_team_id: number
+  opponent_name: string
+  games_played: number
+  wins: number
+  losses: number
+  credit: number
+  contribution: number
+}
+
+export interface RatingBreakdownOut {
+  entries: OpponentCreditOut[]
+  residual_contribution: number
+}
+
 export interface TeamCaseOut {
   year: number
   method: string
@@ -27,6 +42,7 @@ export interface TeamCaseOut {
   rating: number
   wins: number
   losses: number
+  rating_breakdown: RatingBreakdownOut
   games: OpponentResultOut[]
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
@@ -39,6 +55,7 @@ export interface ComparisonTeamSummaryOut {
   rating: number
   wins: number
   losses: number
+  rating_breakdown: RatingBreakdownOut
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
 }

@@ -5,6 +5,7 @@ import type {
   CommonOpponentOut,
   HeadToHeadMeetingOut,
 } from '../../lib/api/types'
+import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
 import styles from './ComparisonReceipts.module.css'
 
 export interface ComparisonReceiptsProps {
@@ -25,7 +26,13 @@ function TeamSummary({ team }: { team: ComparisonTeamSummaryOut }) {
         </div>
         <div>
           <dt>Rating</dt>
-          <dd>{formatRating(team.rating)}</dd>
+          <dd>
+            <RatingBreakdownDisclosure
+              teamName={team.team_name}
+              rating={team.rating}
+              breakdown={team.rating_breakdown}
+            />
+          </dd>
         </div>
       </dl>
     </>

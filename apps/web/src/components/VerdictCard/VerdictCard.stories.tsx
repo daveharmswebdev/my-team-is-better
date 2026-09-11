@@ -13,6 +13,20 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
     rating: 0.01234,
     wins: 13,
     losses: 0,
+    rating_breakdown: {
+      entries: [
+        {
+          opponent_team_id: 2,
+          opponent_name: 'Michigan',
+          games_played: 1,
+          wins: 1,
+          losses: 0,
+          credit: 0.02,
+          contribution: 0.006,
+        },
+      ],
+      residual_contribution: 0.00634,
+    },
     games: [],
     quality_wins: [
       {
@@ -47,6 +61,20 @@ const comparisonEnvelope: ComparisonEnvelope = {
       rating: 0.01234,
       wins: 13,
       losses: 0,
+      rating_breakdown: {
+        entries: [
+          {
+            opponent_team_id: 3,
+            opponent_name: 'Ohio State',
+            games_played: 1,
+            wins: 1,
+            losses: 0,
+            credit: 0.019,
+            contribution: 0.0057,
+          },
+        ],
+        residual_contribution: 0.00664,
+      },
       quality_wins: [],
       worst_loss: null,
     },
@@ -57,6 +85,20 @@ const comparisonEnvelope: ComparisonEnvelope = {
       rating: 0.01147,
       wins: 12,
       losses: 1,
+      rating_breakdown: {
+        entries: [
+          {
+            opponent_team_id: 3,
+            opponent_name: 'Ohio State',
+            games_played: 1,
+            wins: 0,
+            losses: 1,
+            credit: 0.015,
+            contribution: 0.0045,
+          },
+        ],
+        residual_contribution: 0.00697,
+      },
       quality_wins: [],
       worst_loss: null,
     },
