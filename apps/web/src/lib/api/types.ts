@@ -20,6 +20,7 @@ export interface OpponentResultOut {
 
 export interface OpponentCreditOut {
   opponent_team_id: number
+  opponent_name: string
   games_played: number
   wins: number
   losses: number

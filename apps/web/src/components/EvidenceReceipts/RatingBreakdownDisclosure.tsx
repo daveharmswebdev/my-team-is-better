@@ -10,15 +10,6 @@ export interface RatingBreakdownDisclosureProps {
   /** The same rating value `ComparisonReceipts` already displays -- shown again in the footer total so a fan can see it's consistent with the entries + residual below it. */
   rating: number
   breakdown: RatingBreakdownOut
-  /**
-   * `opponent_team_id` -> display name. `OpponentCreditOut` (issue #31's API
-   * contract) carries only the numeric id, not a name -- callers resolve
-   * whatever names they can from elsewhere in the same evidence response
-   * (see `ComparisonReceipts`'s `buildOpponentNameMap`) and pass the result
-   * here. An id with no entry renders as a visible numeric fallback rather
-   * than a guessed or hardcoded name.
-   */
-  opponentNames?: Record<number, string>
 }
 
 /**
@@ -64,7 +55,6 @@ export function RatingBreakdownDisclosure({
   teamName,
   rating,
   breakdown,
-  opponentNames = {},
 }: RatingBreakdownDisclosureProps) {
   const isTouch = useIsTouchInteraction()
   const [open, setOpen] = useState(false)
@@ -176,10 +166,7 @@ export function RatingBreakdownDisclosure({
         <ul className={styles.rows}>
           {breakdown.entries.map((entry) => (
             <li key={entry.opponent_team_id} className={styles.row}>
-              <span className={styles.rowOpponent}>
-                {opponentNames[entry.opponent_team_id] ??
-                  `Team #${entry.opponent_team_id}`}
-              </span>
+              <span className={styles.rowOpponent}>{entry.opponent_name}</span>
               <span className={styles.rowRecord}>
                 {entry.wins}-{entry.losses}
               </span>

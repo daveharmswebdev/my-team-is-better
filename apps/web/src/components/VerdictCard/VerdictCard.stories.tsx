@@ -17,6 +17,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
       entries: [
         {
           opponent_team_id: 2,
+          opponent_name: 'Michigan',
           games_played: 1,
           wins: 1,
           losses: 0,
@@ -64,6 +65,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
         entries: [
           {
             opponent_team_id: 3,
+            opponent_name: 'Ohio State',
             games_played: 1,
             wins: 1,
             losses: 0,
@@ -87,6 +89,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
         entries: [
           {
             opponent_team_id: 3,
+            opponent_name: 'Ohio State',
             games_played: 1,
             wins: 0,
             losses: 1,

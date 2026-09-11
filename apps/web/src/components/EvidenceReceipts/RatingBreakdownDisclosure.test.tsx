@@ -28,6 +28,7 @@ const breakdown: RatingBreakdownOut = {
   entries: [
     {
       opponent_team_id: 84,
+      opponent_name: 'Indiana',
       games_played: 1,
       wins: 1,
       losses: 0,
@@ -36,6 +37,7 @@ const breakdown: RatingBreakdownOut = {
     },
     {
       opponent_team_id: 999,
+      opponent_name: 'Rutgers',
       games_played: 1,
       wins: 1,
       losses: 0,
@@ -45,8 +47,6 @@ const breakdown: RatingBreakdownOut = {
   ],
   residual_contribution: 0.00427,
 }
-
-const opponentNames = { 84: 'Indiana' }
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -61,7 +61,6 @@ describe('RatingBreakdownDisclosure', () => {
         teamName="Ohio State"
         rating={0.00877}
         breakdown={breakdown}
-        opponentNames={opponentNames}
       />,
     )
 
@@ -83,7 +82,6 @@ describe('RatingBreakdownDisclosure', () => {
         teamName="Ohio State"
         rating={0.00877}
         breakdown={breakdown}
-        opponentNames={opponentNames}
       />,
     )
 
@@ -105,7 +103,6 @@ describe('RatingBreakdownDisclosure', () => {
         teamName="Ohio State"
         rating={0.00877}
         breakdown={breakdown}
-        opponentNames={opponentNames}
       />,
     )
 
@@ -126,7 +123,6 @@ describe('RatingBreakdownDisclosure', () => {
         teamName="Ohio State"
         rating={0.00877}
         breakdown={breakdown}
-        opponentNames={opponentNames}
       />,
     )
 
@@ -148,7 +144,6 @@ describe('RatingBreakdownDisclosure', () => {
         teamName="Ohio State"
         rating={0.00877}
         breakdown={breakdown}
-        opponentNames={opponentNames}
       />,
     )
 
@@ -164,7 +159,7 @@ describe('RatingBreakdownDisclosure', () => {
     expect(trigger).toHaveFocus()
   })
 
-  it('renders per-opponent rows with resolved names, a fallback for unresolved ids, the labeled residual line, and a total consistent with the displayed rating', async () => {
+  it('renders per-opponent rows with each entry’s own opponent_name, the labeled residual line, and a total consistent with the displayed rating', async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     render(
@@ -172,18 +167,15 @@ describe('RatingBreakdownDisclosure', () => {
         teamName="Ohio State"
         rating={0.00877}
         breakdown={breakdown}
-        opponentNames={opponentNames}
       />,
     )
 
     await user.hover(screen.getByRole('button', { name: /8\.77/ }))
     const dialog = screen.getByRole('dialog')
 
-    // Resolved opponent name (from the caller-supplied lookup).
-    expect(within(dialog).getByText(/Indiana/)).toBeInTheDocument()
-    // Unresolved opponent id falls back to a visible numeric id, not a
-    // guessed/hardcoded name.
-    expect(within(dialog).getByText(/999/)).toBeInTheDocument()
+    // Each row reads its opponent name straight off its own entry.
+    expect(within(dialog).getByText('Indiana')).toBeInTheDocument()
+    expect(within(dialog).getByText('Rutgers')).toBeInTheDocument()
 
     // Residual line is labeled as its own named thing -- never bare
     // "Other"/"Misc" (an explanatory note elsewhere may legitimately use the

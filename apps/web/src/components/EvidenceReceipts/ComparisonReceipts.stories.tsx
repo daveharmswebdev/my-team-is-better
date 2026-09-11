@@ -15,6 +15,7 @@ const evidence: ComparisonResultOut = {
       entries: [
         {
           opponent_team_id: 84,
+          opponent_name: 'Indiana',
           games_played: 1,
           wins: 1,
           losses: 0,
@@ -23,6 +24,7 @@ const evidence: ComparisonResultOut = {
         },
         {
           opponent_team_id: 127,
+          opponent_name: 'Michigan State',
           games_played: 1,
           wins: 1,
           losses: 0,
@@ -49,6 +51,7 @@ const evidence: ComparisonResultOut = {
       entries: [
         {
           opponent_team_id: 84,
+          opponent_name: 'Indiana',
           games_played: 1,
           wins: 0,
           losses: 1,

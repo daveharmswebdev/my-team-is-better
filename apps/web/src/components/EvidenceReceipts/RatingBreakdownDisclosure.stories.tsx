@@ -19,6 +19,7 @@ const breakdown: RatingBreakdownOut = {
   entries: [
     {
       opponent_team_id: 84,
+      opponent_name: 'Indiana',
       games_played: 1,
       wins: 1,
       losses: 0,
@@ -27,6 +28,7 @@ const breakdown: RatingBreakdownOut = {
     },
     {
       opponent_team_id: 127,
+      opponent_name: 'Michigan State',
       games_played: 1,
       wins: 1,
       losses: 0,
@@ -35,6 +37,7 @@ const breakdown: RatingBreakdownOut = {
     },
     {
       opponent_team_id: 999,
+      opponent_name: 'Rutgers',
       games_played: 1,
       wins: 0,
       losses: 1,
@@ -59,7 +62,6 @@ const meta = {
     teamName: 'Ohio State',
     rating: 0.00877,
     breakdown,
-    opponentNames: { 84: 'Indiana', 127: 'Michigan State' },
   },
   parameters: {
     // The trigger renders inline; give it some breathing room so the
@@ -77,13 +79,6 @@ type Story = StoryObj<typeof meta>
  * open the popover; move the pointer away (or Tab off) to close it.
  */
 export const Default: Story = {}
-
-/** Same data with no `opponentNames` supplied -- every row falls back to the visible numeric id. */
-export const NoOpponentNamesResolved: Story = {
-  args: {
-    opponentNames: {},
-  },
-}
 
 /**
  * Forces touch/coarse-pointer mode (no real touch device needed) -- click

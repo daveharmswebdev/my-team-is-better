@@ -13,16 +13,15 @@ const evidence: ComparisonResultOut = {
     rating: 0.00877,
     wins: 7,
     losses: 1,
-    // Deliberately mixes: an opponent resolvable via `common_opponents`
-    // (Indiana, id 84), one resolvable via this team's own `quality_wins`
-    // (Northwestern, id 555), and one with no name anywhere in the evidence
-    // (id 999) so the breakdown's opponent-name fallback is exercised too.
-    // Contributions + residual sum exactly to `rating` (0.002 + 0.0015 +
-    // 0.001 + 0.00427 = 0.00877).
+    // Each entry carries its own `opponent_name` straight from the API now
+    // (issue #31 follow-up) -- no more resolving names from elsewhere in the
+    // evidence. Contributions + residual sum exactly to `rating` (0.002 +
+    // 0.0015 + 0.001 + 0.00427 = 0.00877).
     rating_breakdown: {
       entries: [
         {
           opponent_team_id: 84,
+          opponent_name: 'Indiana',
           games_played: 1,
           wins: 1,
           losses: 0,
@@ -31,6 +30,7 @@ const evidence: ComparisonResultOut = {
         },
         {
           opponent_team_id: 555,
+          opponent_name: 'Northwestern',
           games_played: 1,
           wins: 1,
           losses: 0,
@@ -39,6 +39,7 @@ const evidence: ComparisonResultOut = {
         },
         {
           opponent_team_id: 999,
+          opponent_name: 'Rutgers',
           games_played: 1,
           wins: 1,
           losses: 0,
@@ -77,6 +78,7 @@ const evidence: ComparisonResultOut = {
       entries: [
         {
           opponent_team_id: 84,
+          opponent_name: 'Indiana',
           games_played: 1,
           wins: 0,
           losses: 1,
@@ -188,7 +190,7 @@ describe('ComparisonReceipts', () => {
     expect(container.textContent).not.toContain('[object')
   })
 
-  it('wires each team’s rating value up to its own rating breakdown disclosure, resolving opponent names from quality_wins/common_opponents where available', async () => {
+  it('wires each team’s rating value up to its own rating breakdown disclosure, rendering each entry’s own opponent_name', async () => {
     const user = userEvent.setup()
     render(<ComparisonReceipts evidence={evidence} />)
 
@@ -196,13 +198,10 @@ describe('ComparisonReceipts', () => {
     await user.hover(ratingTrigger)
 
     const dialog = screen.getByRole('dialog')
-    // Resolved via `common_opponents` (Indiana, shared by both teams).
-    expect(within(dialog).getByText(/Indiana/)).toBeInTheDocument()
-    // Resolved via team_a's own `quality_wins` (Northwestern).
-    expect(within(dialog).getByText(/Northwestern/)).toBeInTheDocument()
-    // Not resolvable anywhere in the evidence -- numeric fallback, not a
-    // guessed name.
-    expect(within(dialog).getByText(/999/)).toBeInTheDocument()
+    // Every row's name comes straight from its entry's own opponent_name.
+    expect(within(dialog).getByText('Indiana')).toBeInTheDocument()
+    expect(within(dialog).getByText('Northwestern')).toBeInTheDocument()
+    expect(within(dialog).getByText('Rutgers')).toBeInTheDocument()
     expect(
       within(dialog).getByText(/rating-system baseline/i),
     ).toBeInTheDocument()
