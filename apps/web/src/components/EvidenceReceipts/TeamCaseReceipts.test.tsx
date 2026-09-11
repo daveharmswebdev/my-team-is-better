@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { TeamCaseOut } from '../../lib/api/types'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
@@ -64,10 +65,24 @@ const evidence: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
-  // Not exercised by this component's tests (issue #31 only wires the
-  // hover/tap disclosure into ComparisonReceipts) -- residual-only keeps the
-  // fixture's entries + residual sum trivially equal to `rating`.
-  rating_breakdown: { entries: [], residual_contribution: 0.01234 },
+  // Real entries (not just a residual-only placeholder) so this component's
+  // tests can exercise the same rating breakdown disclosure ComparisonReceipts
+  // already tests -- contribution + residual sum exactly to `rating`
+  // (0.005 + 0.00734 = 0.01234).
+  rating_breakdown: {
+    entries: [
+      {
+        opponent_team_id: 2,
+        opponent_name: 'Michigan',
+        games_played: 1,
+        wins: 1,
+        losses: 0,
+        credit: 0.03,
+        contribution: 0.005,
+      },
+    ],
+    residual_contribution: 0.00734,
+  },
   // `baseOpponent` (Michigan) is included in both `games` and
   // `quality_wins` here on purpose -- a real API response includes every
   // quality win (and the worst loss, if any) in the full game list too, so
@@ -166,5 +181,22 @@ describe('TeamCaseReceipts', () => {
     // ...then the postseason, even though the bowl game's raw `week` (1) is
     // lower than Tennessee's.
     expect(tennesseeIndex).toBeLessThan(bowlIndex)
+  })
+
+  it('wires the rating value up to its rating breakdown disclosure, rendering real entries', async () => {
+    const user = userEvent.setup()
+    render(<TeamCaseReceipts evidence={evidence} />)
+
+    const ratingTrigger = screen.getByRole('button', { name: /12\.34/ })
+    await user.hover(ratingTrigger)
+
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('Michigan')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/rating-system baseline/i),
+    ).toBeInTheDocument()
+
+    await user.unhover(ratingTrigger)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

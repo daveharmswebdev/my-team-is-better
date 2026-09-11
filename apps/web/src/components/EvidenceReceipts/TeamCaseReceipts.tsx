@@ -1,6 +1,6 @@
 import { useId } from 'react'
-import { formatRating } from '../../lib/formatRating'
 import type { OpponentResultOut, TeamCaseOut } from '../../lib/api/types'
+import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
 import styles from './TeamCaseReceipts.module.css'
 
 export interface TeamCaseReceiptsProps {
@@ -101,7 +101,12 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
     >
       <p className={styles.stats}>
         Record: {evidence.wins}-{evidence.losses} &middot; Rank #{evidence.rank}{' '}
-        &middot; Rating {formatRating(evidence.rating)}
+        &middot; Rating{' '}
+        <RatingBreakdownDisclosure
+          teamName={evidence.team_name}
+          rating={evidence.rating}
+          breakdown={evidence.rating_breakdown}
+        />
       </p>
 
       <h4 id={qualityWinsHeadingId} className={styles.label}>

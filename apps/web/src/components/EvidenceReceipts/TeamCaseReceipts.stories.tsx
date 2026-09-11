@@ -78,10 +78,24 @@ const undefeated: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
-  // Not exercised by this component (issue #31 only wires the hover/tap
-  // disclosure into ComparisonReceipts) -- residual-only keeps entries +
-  // residual trivially equal to `rating`.
-  rating_breakdown: { entries: [], residual_contribution: 0.01234 },
+  // Real entries, not just a residual-only placeholder -- lets the rating
+  // breakdown disclosure (hover/tap the rating value) show real per-opponent
+  // credit. Contribution + residual sum exactly to `rating`
+  // (0.005 + 0.00734 = 0.01234).
+  rating_breakdown: {
+    entries: [
+      {
+        opponent_team_id: 2,
+        opponent_name: 'Michigan',
+        games_played: 1,
+        wins: 1,
+        losses: 0,
+        credit: 0.03,
+        contribution: 0.005,
+      },
+    ],
+    residual_contribution: 0.00734,
+  },
   games: [openerWin, qualityWin, midseasonWin, lateSeasonWin, bowlWin],
   quality_wins: [qualityWin],
   worst_loss: null,
@@ -128,5 +142,17 @@ export const WithALoss: Story = {
       games: [...undefeated.games, worstLoss],
       worst_loss: worstLoss,
     },
+  },
+}
+
+/**
+ * Demonstrates the rating breakdown disclosure wired into the champion/
+ * team-case flows -- hover (or Tab to focus, then press Enter) the rating
+ * value to see the per-opponent credit that adds up to it, same disclosure
+ * `ComparisonReceipts` already uses for the compare flow.
+ */
+export const RatingBreakdown: Story = {
+  args: {
+    evidence: undefeated,
   },
 }
