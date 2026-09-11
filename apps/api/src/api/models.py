@@ -26,7 +26,9 @@ from cfb_strength.contracts import (
     ComparisonTeamSummary,
     HeadToHead,
     HeadToHeadMeeting,
+    OpponentCredit,
     OpponentResult,
+    RatingBreakdown,
     TeamCase,
 )
 from pydantic import BaseModel, ConfigDict
@@ -102,6 +104,38 @@ class OpponentResultOut(BaseModel):
         )
 
 
+class OpponentCreditOut(BaseModel):
+    opponent_team_id: int
+    games_played: int
+    wins: int
+    losses: int
+    credit: float
+    contribution: float
+
+    @classmethod
+    def from_dataclass(cls, credit: OpponentCredit) -> OpponentCreditOut:
+        return cls(
+            opponent_team_id=credit.opponent_team_id,
+            games_played=credit.games_played,
+            wins=credit.wins,
+            losses=credit.losses,
+            credit=credit.credit,
+            contribution=credit.contribution,
+        )
+
+
+class RatingBreakdownOut(BaseModel):
+    entries: list[OpponentCreditOut]
+    residual_contribution: float
+
+    @classmethod
+    def from_dataclass(cls, breakdown: RatingBreakdown) -> RatingBreakdownOut:
+        return cls(
+            entries=[OpponentCreditOut.from_dataclass(e) for e in breakdown.entries],
+            residual_contribution=breakdown.residual_contribution,
+        )
+
+
 class TeamCaseOut(BaseModel):
     year: int
     method: str
@@ -111,6 +145,7 @@ class TeamCaseOut(BaseModel):
     rating: float
     wins: int
     losses: int
+    rating_breakdown: RatingBreakdownOut
     games: list[OpponentResultOut]
     quality_wins: list[OpponentResultOut]
     worst_loss: OpponentResultOut | None
@@ -126,6 +161,7 @@ class TeamCaseOut(BaseModel):
             rating=case.rating,
             wins=case.wins,
             losses=case.losses,
+            rating_breakdown=RatingBreakdownOut.from_dataclass(case.rating_breakdown),
             games=[OpponentResultOut.from_dataclass(g) for g in case.games],
             quality_wins=[OpponentResultOut.from_dataclass(g) for g in case.quality_wins],
             worst_loss=(
@@ -143,6 +179,7 @@ class ComparisonTeamSummaryOut(BaseModel):
     rating: float
     wins: int
     losses: int
+    rating_breakdown: RatingBreakdownOut
     quality_wins: list[OpponentResultOut]
     worst_loss: OpponentResultOut | None
 
@@ -155,6 +192,7 @@ class ComparisonTeamSummaryOut(BaseModel):
             rating=summary.rating,
             wins=summary.wins,
             losses=summary.losses,
+            rating_breakdown=RatingBreakdownOut.from_dataclass(summary.rating_breakdown),
             quality_wins=[OpponentResultOut.from_dataclass(g) for g in summary.quality_wins],
             worst_loss=(
                 OpponentResultOut.from_dataclass(summary.worst_loss)

@@ -19,6 +19,7 @@ in-memory cache by default, so these tests never call the real Claude API.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -52,6 +53,32 @@ def test_team_case_endpoint_returns_named_team_case(client: TestClient) -> None:
     assert body["worst_loss"] is not None
 
 
+def test_team_case_endpoint_includes_rating_breakdown(client: TestClient) -> None:
+    """Issue #31: the per-opponent rating decomposition rides along on
+    /api/verdict/team-case, reconstructing to the team's `rating` field."""
+    response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
+
+    assert response.status_code == 200
+    body = response.json()["evidence"]
+    breakdown = body["rating_breakdown"]
+    entries = breakdown["entries"]
+    assert isinstance(entries, list) and len(entries) > 0
+    assert isinstance(breakdown["residual_contribution"], float)
+
+    for entry in entries:
+        assert set(entry.keys()) == {
+            "opponent_team_id",
+            "games_played",
+            "wins",
+            "losses",
+            "credit",
+            "contribution",
+        }
+
+    total = sum(e["contribution"] for e in entries) + breakdown["residual_contribution"]
+    assert total == pytest.approx(body["rating"], abs=1e-6)
+
+
 def test_compare_endpoint_returns_comparison_of_two_named_teams(
     client: TestClient,
 ) -> None:
@@ -68,6 +95,40 @@ def test_compare_endpoint_returns_comparison_of_two_named_teams(
     assert body["head_to_head"]["played"] is True
     assert isinstance(body["common_opponents"], list)
     assert isinstance(body["verdict"], str) and body["verdict"]
+
+
+def test_compare_endpoint_includes_rating_breakdown_for_both_teams(
+    client: TestClient,
+) -> None:
+    """Issue #31: both sides of a comparison carry their own rating breakdown,
+    each reconstructing to that team's own `rating` field."""
+    response = client.post(
+        "/api/verdict/compare",
+        json={"year": 2005, "team_a": "Texas", "team_b": "USC"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()["evidence"]
+
+    for team_key in ("team_a", "team_b"):
+        team = body[team_key]
+        breakdown = team["rating_breakdown"]
+        entries = breakdown["entries"]
+        assert isinstance(entries, list) and len(entries) > 0
+        assert isinstance(breakdown["residual_contribution"], float)
+
+        for entry in entries:
+            assert set(entry.keys()) == {
+                "opponent_team_id",
+                "games_played",
+                "wins",
+                "losses",
+                "credit",
+                "contribution",
+            }
+
+        total = sum(e["contribution"] for e in entries) + breakdown["residual_contribution"]
+        assert total == pytest.approx(team["rating"], abs=1e-6)
 
 
 def test_unknown_year_returns_404_with_available_years(client: TestClient) -> None:
