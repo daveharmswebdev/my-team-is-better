@@ -11,6 +11,30 @@ const evidence: ComparisonResultOut = {
     rating: 0.00877,
     wins: 7,
     losses: 1,
+    rating_breakdown: {
+      entries: [
+        {
+          opponent_team_id: 84,
+          games_played: 1,
+          wins: 1,
+          losses: 0,
+          credit: 0.018,
+          contribution: 0.002,
+        },
+        {
+          opponent_team_id: 127,
+          games_played: 1,
+          wins: 1,
+          losses: 0,
+          credit: 0.021,
+          contribution: 0.00227,
+        },
+      ],
+      // Real, not negligible -- the Keener regularizer/eigenvalue baseline
+      // (see RatingBreakdownDisclosure) typically accounts for ~47-53% of a
+      // team's rating.
+      residual_contribution: 0.0045,
+    },
     quality_wins: [],
     worst_loss: null,
   },
@@ -21,6 +45,19 @@ const evidence: ComparisonResultOut = {
     rating: 0.00602,
     wins: 2,
     losses: 4,
+    rating_breakdown: {
+      entries: [
+        {
+          opponent_team_id: 84,
+          games_played: 1,
+          wins: 0,
+          losses: 1,
+          credit: 0.01,
+          contribution: 0.00102,
+        },
+      ],
+      residual_contribution: 0.005,
+    },
     quality_wins: [],
     worst_loss: null,
   },
@@ -99,5 +136,17 @@ export const NoCommonOpponents: Story = {
       ...evidence,
       common_opponents: [],
     },
+  },
+}
+
+/**
+ * Demonstrates issue #31's hover-triggered rating breakdown -- hover (or Tab
+ * to focus, then press Enter) either team's rating value to see the
+ * per-opponent credit that adds up to it, including the honestly-labeled
+ * "Rating-system baseline" residual (see `RatingBreakdownDisclosure`).
+ */
+export const RatingBreakdown: Story = {
+  args: {
+    evidence,
   },
 }

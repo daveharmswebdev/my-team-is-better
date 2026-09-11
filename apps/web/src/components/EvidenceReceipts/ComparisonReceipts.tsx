@@ -5,14 +5,49 @@ import type {
   CommonOpponentOut,
   HeadToHeadMeetingOut,
 } from '../../lib/api/types'
+import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
 import styles from './ComparisonReceipts.module.css'
 
 export interface ComparisonReceiptsProps {
   evidence: ComparisonResultOut
 }
 
+/**
+ * `OpponentCreditOut` (each `rating_breakdown` entry) only carries a numeric
+ * `opponent_team_id`, not a name -- there is no full-schedule field on this
+ * response to resolve every id from. This resolves whatever names *are*
+ * available elsewhere in the same evidence (both teams' `quality_wins`/
+ * `worst_loss`, plus `common_opponents`) as a best effort; an id not covered
+ * by any of those falls back to a visible numeric id in
+ * `RatingBreakdownDisclosure` rather than a guess. See this issue's
+ * `contract_gaps` for the underlying gap.
+ */
+function buildOpponentNameMap(
+  evidence: ComparisonResultOut,
+): Record<number, string> {
+  const names: Record<number, string> = {}
+  for (const team of [evidence.team_a, evidence.team_b]) {
+    for (const game of team.quality_wins) {
+      names[game.opponent_team_id] = game.opponent_name
+    }
+    if (team.worst_loss) {
+      names[team.worst_loss.opponent_team_id] = team.worst_loss.opponent_name
+    }
+  }
+  for (const opponent of evidence.common_opponents) {
+    names[opponent.opponent_team_id] = opponent.opponent_name
+  }
+  return names
+}
+
 /** Per-team Record/Rating summary (design-system.html's "Comparison" mockup's `kv-grid`). */
-function TeamSummary({ team }: { team: ComparisonTeamSummaryOut }) {
+function TeamSummary({
+  team,
+  opponentNames,
+}: {
+  team: ComparisonTeamSummaryOut
+  opponentNames: Record<number, string>
+}) {
   return (
     <>
       <h4 className={styles.label}>{team.team_name}</h4>
@@ -25,7 +60,14 @@ function TeamSummary({ team }: { team: ComparisonTeamSummaryOut }) {
         </div>
         <div>
           <dt>Rating</dt>
-          <dd>{formatRating(team.rating)}</dd>
+          <dd>
+            <RatingBreakdownDisclosure
+              teamName={team.team_name}
+              rating={team.rating}
+              breakdown={team.rating_breakdown}
+              opponentNames={opponentNames}
+            />
+          </dd>
         </div>
       </dl>
     </>
@@ -76,11 +118,12 @@ function CommonOpponentLine({ opponent }: { opponent: CommonOpponentOut }) {
 /** The "receipts" for a compare verdict (PRD §3 / Architecture Brief §4.3's "show your work"). */
 export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
   const { team_a, team_b, head_to_head, common_opponents } = evidence
+  const opponentNames = buildOpponentNameMap(evidence)
 
   return (
     <section aria-label="comparison evidence" className={styles.receipts}>
-      <TeamSummary team={team_a} />
-      <TeamSummary team={team_b} />
+      <TeamSummary team={team_a} opponentNames={opponentNames} />
+      <TeamSummary team={team_b} opponentNames={opponentNames} />
 
       <h4 className={styles.label}>Head to head</h4>
       {head_to_head.played ? (

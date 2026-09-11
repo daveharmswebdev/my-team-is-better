@@ -64,6 +64,10 @@ const evidence: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
+  // Not exercised by this component's tests (issue #31 only wires the
+  // hover/tap disclosure into ComparisonReceipts) -- residual-only keeps the
+  // fixture's entries + residual sum trivially equal to `rating`.
+  rating_breakdown: { entries: [], residual_contribution: 0.01234 },
   // `baseOpponent` (Michigan) is included in both `games` and
   // `quality_wins` here on purpose -- a real API response includes every
   // quality win (and the worst loss, if any) in the full game list too, so

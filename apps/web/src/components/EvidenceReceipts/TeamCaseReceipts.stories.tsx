@@ -78,6 +78,10 @@ const undefeated: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
+  // Not exercised by this component (issue #31 only wires the hover/tap
+  // disclosure into ComparisonReceipts) -- residual-only keeps entries +
+  // residual trivially equal to `rating`.
+  rating_breakdown: { entries: [], residual_contribution: 0.01234 },
   games: [openerWin, qualityWin, midseasonWin, lateSeasonWin, bowlWin],
   quality_wins: [qualityWin],
   worst_loss: null,
