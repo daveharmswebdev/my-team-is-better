@@ -5,6 +5,15 @@ persona narration call.
 implementing this `Protocol` instead of `ClaudeNarrator`, so the test suite
 never hits the real Anthropic API. `ClaudeNarrator` is the real
 implementation, used in production and in the one gated integration test.
+
+`StubNarrator` (issue #39's groundwork) is a production-code counterpart to
+the private `_StubNarrator` test double in `apps/api/tests/conftest.py`: a
+real booted `uvicorn` process (not pytest) needs to construct a `Narrator`
+too, when `APP_TEST_MODE=1` (see `api.deps.get_narrator`), so this can't
+live test-only. It always returns a fixed string with no numbers and no
+proper-noun team names, so it always passes the grounding check in
+`api.persona.grounding` regardless of the fact block, and never needs a
+retry.
 """
 
 from __future__ import annotations
@@ -51,3 +60,12 @@ class ClaudeNarrator:
         )
         text_parts = [block.text for block in response.content if block.type == "text"]
         return "".join(text_parts).strip()
+
+
+class StubNarrator:
+    """`APP_TEST_MODE=1` production stand-in for `ClaudeNarrator` -- never
+    calls the real Anthropic API, never needs `ANTHROPIC_API_KEY`.
+    """
+
+    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+        return "Solid case, no notes."

@@ -12,6 +12,17 @@ pattern: every persona test replaces both with an `InMemoryNarrationCache`
 and a fake `Narrator` via `app.dependency_overrides`, so the CI-safe test
 suite never opens a real Postgres connection or calls the real Claude API.
 
+Both also have a second, independent test-mode seam (issue #39's
+groundwork): when `APP_TEST_MODE=1` (see `api.config`), `get_narration_cache`
+returns an `InMemoryNarrationCache` instead of requiring `DATABASE_URL`/
+building a `PostgresNarrationCache`, and `get_narrator` returns a
+`StubNarrator` instead of a `ClaudeNarrator`. This is for a real *booted*
+`uvicorn` process (e.g. the Playwright e2e job), which has no
+`app.dependency_overrides` to lean on -- pytest's `TestClient`-based
+overrides in `tests/conftest.py` are unaffected and unchanged by this flag.
+When `APP_TEST_MODE` is false/unset, both functions behave exactly as
+before.
+
 `list_all_team_names` (issue #13) is the shared "known team names" universe
 -- originally a private helper on `api.persona.service` (issue #4's
 grounding-check input), promoted here so `api.catalog`'s `/api/teams` route
@@ -27,9 +38,9 @@ from collections.abc import Iterator
 from cfb_strength.config import DB_PATH
 from cfb_strength.db.connection import get_conn
 
-from api.config import DATABASE_URL, PROMPT_VERSION
-from api.persona.cache import NarrationCacheStore, PostgresNarrationCache
-from api.persona.claude_client import ClaudeNarrator, Narrator
+from api.config import APP_TEST_MODE, DATABASE_URL, PROMPT_VERSION
+from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore, PostgresNarrationCache
+from api.persona.claude_client import ClaudeNarrator, Narrator, StubNarrator
 
 
 def get_db_conn() -> Iterator[sqlite3.Connection]:
@@ -41,6 +52,8 @@ def get_db_conn() -> Iterator[sqlite3.Connection]:
 
 
 def get_narration_cache() -> NarrationCacheStore:
+    if APP_TEST_MODE:
+        return InMemoryNarrationCache()
     if not DATABASE_URL:
         raise RuntimeError(
             "DATABASE_URL is not configured -- the persona response cache requires it"
@@ -49,6 +62,8 @@ def get_narration_cache() -> NarrationCacheStore:
 
 
 def get_narrator() -> Narrator:
+    if APP_TEST_MODE:
+        return StubNarrator()
     return ClaudeNarrator()
 
 

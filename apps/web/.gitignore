@@ -25,3 +25,9 @@ dist-ssr
 
 *storybook.log
 storybook-static
+
+# Playwright (issue #39)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
