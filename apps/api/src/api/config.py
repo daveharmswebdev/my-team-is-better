@@ -22,6 +22,14 @@ Architecture Brief layering rule). This module loads `apps/api/.env` (via
   unlike `DATABASE_URL`/`ANTHROPIC_API_KEY`, this one intentionally never
   falls back to `None`, since an empty allowlist would make `apps/web` fail
   silently at the browser rather than at startup.
+- `APP_TEST_MODE`: `True` only when the env var is set to the exact string
+  `"1"` (issue #39's groundwork). Lets a real `uvicorn` process boot with no
+  live Postgres instance and no real `ANTHROPIC_API_KEY` -- e.g. for the
+  Playwright e2e job, which runs this API over real HTTP rather than
+  FastAPI's in-process `TestClient` (see `api.deps`'s `get_narration_cache`/
+  `get_narrator`, which branch on this flag). Distinct from `DATABASE_URL`
+  being merely unset: this is an explicit "run in test mode" signal, not an
+  absence of config.
 """
 
 from __future__ import annotations
@@ -52,3 +60,5 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 PROMPT_VERSION = "persona-v1"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
+
+APP_TEST_MODE: bool = os.environ.get("APP_TEST_MODE") == "1"

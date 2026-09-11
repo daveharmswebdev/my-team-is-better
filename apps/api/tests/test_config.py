@@ -58,3 +58,33 @@ def test_config_exposes_contested_years() -> None:
     config = _reimport_config()
 
     assert config.CONTESTED_YEARS == {2003, 2017}  # type: ignore[attr-defined]
+
+
+def test_config_app_test_mode_true_only_for_exact_string_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_TEST_MODE", "1")
+
+    config = _reimport_config()
+
+    assert config.APP_TEST_MODE is True  # type: ignore[attr-defined]
+
+
+def test_config_app_test_mode_defaults_to_false_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APP_TEST_MODE", raising=False)
+
+    config = _reimport_config()
+
+    assert config.APP_TEST_MODE is False  # type: ignore[attr-defined]
+
+
+def test_config_app_test_mode_false_for_non_one_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("APP_TEST_MODE", "true")
+
+    config = _reimport_config()
+
+    assert config.APP_TEST_MODE is False  # type: ignore[attr-defined]
