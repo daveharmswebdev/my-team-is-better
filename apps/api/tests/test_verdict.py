@@ -76,9 +76,11 @@ def test_team_case_endpoint_includes_rating_breakdown(client: TestClient) -> Non
             "losses",
             "credit",
             "contribution",
+            "explanation",
         }
         assert isinstance(entry["opponent_name"], str) and entry["opponent_name"]
         assert entry["opponent_name"] in known_teams
+        assert isinstance(entry["explanation"], str) and entry["explanation"]
 
     total = sum(e["contribution"] for e in entries) + breakdown["residual_contribution"]
     assert total == pytest.approx(body["rating"], abs=1e-6)
@@ -133,9 +135,11 @@ def test_compare_endpoint_includes_rating_breakdown_for_both_teams(
                 "losses",
                 "credit",
                 "contribution",
+                "explanation",
             }
             assert isinstance(entry["opponent_name"], str) and entry["opponent_name"]
             assert entry["opponent_name"] in known_teams
+            assert isinstance(entry["explanation"], str) and entry["explanation"]
 
         total = sum(e["contribution"] for e in entries) + breakdown["residual_contribution"]
         assert total == pytest.approx(team["rating"], abs=1e-6)
