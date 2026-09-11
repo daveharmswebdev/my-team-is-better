@@ -4,6 +4,7 @@ import {
   VerdictNetworkError,
   fetchChampion,
   fetchCompare,
+  fetchCredits,
 } from './client'
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -101,5 +102,55 @@ describe('api client', () => {
     await expect(
       fetchChampion({ year: 2005, user_team: null }),
     ).rejects.toBeInstanceOf(VerdictNetworkError)
+  })
+})
+
+describe('fetchCredits', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('resolves with the parsed credits payload on a 200 response', async () => {
+    const credits = {
+      methodology: {
+        name: 'Keener',
+        citation:
+          'Keener, J. P. (1993). The Perron-Frobenius theorem and the ranking of football teams.',
+        url: 'https://example.com/keener',
+        summary: 'Eigenvector-based strength-of-schedule ranking.',
+      },
+      data_source: {
+        name: 'CollegeFootballData.com',
+        url: 'https://collegefootballdata.com',
+        note: 'Game results and team data.',
+      },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, credits))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchCredits()
+
+    expect(result).toEqual(credits)
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/credits'),
+    )
+  })
+
+  it('throws a VerdictNetworkError when fetch itself rejects', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+    )
+
+    await expect(fetchCredits()).rejects.toBeInstanceOf(VerdictNetworkError)
+  })
+
+  it('throws a VerdictNetworkError on a non-2xx response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+    )
+
+    await expect(fetchCredits()).rejects.toBeInstanceOf(VerdictNetworkError)
   })
 })

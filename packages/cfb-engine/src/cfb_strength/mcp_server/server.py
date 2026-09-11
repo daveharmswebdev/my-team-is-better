@@ -33,6 +33,7 @@ from typing import Any
 from cfb_strength.config import DB_PATH
 from cfb_strength.contracts import AmbiguousTeamError, SameTeamComparisonError, UnknownYearError
 from cfb_strength.db.connection import get_conn
+from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
 
 from mcp.server.mcpserver import MCPServer
@@ -159,33 +160,7 @@ def teams_resource() -> dict[str, Any]:
     mime_type="application/json",
 )
 def credits_resource() -> dict[str, Any]:
-    return {
-        "methodology": {
-            "name": "Keener's method",
-            "citation": (
-                'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking of '
-                'Football Teams," SIAM Review, 35(1), 1993.'
-            ),
-            "url": "https://dl.acm.org/doi/10.1137/1035004",
-            "summary": (
-                "A team's rating depends recursively on the strength of the teams "
-                "it beat, whose strength depends on the strength of their "
-                "opponents -- the same Perron-Frobenius eigenvector idea behind "
-                "PageRank, applied to a win graph. This server computes stock "
-                "Keener with win/loss as the dominant signal; margin of victory "
-                "is not weighted."
-            ),
-        },
-        "data_source": {
-            "name": "CollegeFootballData.com (CFBD)",
-            "url": "https://collegefootballdata.com",
-            "note": (
-                "All game results are ingested from the CFBD API. This project "
-                "performs no independent data collection and claims no "
-                "ownership of the underlying game data."
-            ),
-        },
-    }
+    return dataclasses.asdict(get_credits())
 
 
 @mcp.tool()

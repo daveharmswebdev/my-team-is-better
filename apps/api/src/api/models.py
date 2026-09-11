@@ -24,8 +24,11 @@ from cfb_strength.contracts import (
     CommonOpponent,
     ComparisonResult,
     ComparisonTeamSummary,
+    Credits,
+    DataSourceCredit,
     HeadToHead,
     HeadToHeadMeeting,
+    MethodologyCredit,
     OpponentCredit,
     OpponentResult,
     RatingBreakdown,
@@ -303,6 +306,48 @@ class YearsOut(BaseModel):
 
 class TeamsOut(BaseModel):
     teams: list[str]
+
+
+class MethodologyCreditOut(BaseModel):
+    name: str
+    citation: str
+    url: str
+    summary: str
+
+    @classmethod
+    def from_dataclass(cls, methodology: MethodologyCredit) -> MethodologyCreditOut:
+        return cls(
+            name=methodology.name,
+            citation=methodology.citation,
+            url=methodology.url,
+            summary=methodology.summary,
+        )
+
+
+class DataSourceCreditOut(BaseModel):
+    name: str
+    url: str
+    note: str
+
+    @classmethod
+    def from_dataclass(cls, data_source: DataSourceCredit) -> DataSourceCreditOut:
+        return cls(
+            name=data_source.name,
+            url=data_source.url,
+            note=data_source.note,
+        )
+
+
+class CreditsOut(BaseModel):
+    methodology: MethodologyCreditOut
+    data_source: DataSourceCreditOut
+
+    @classmethod
+    def from_dataclass(cls, credits: Credits) -> CreditsOut:
+        return cls(
+            methodology=MethodologyCreditOut.from_dataclass(credits.methodology),
+            data_source=DataSourceCreditOut.from_dataclass(credits.data_source),
+        )
 
 
 # ---------------------------------------------------------------------------
