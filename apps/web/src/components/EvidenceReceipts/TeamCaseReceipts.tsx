@@ -99,7 +99,7 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
       aria-label={`${evidence.team_name} evidence`}
       className={styles.receipts}
     >
-      <p className={styles.stats}>
+      <div className={styles.stats}>
         Record: {evidence.wins}-{evidence.losses} &middot; Rank #{evidence.rank}{' '}
         &middot; Rating{' '}
         <RatingBreakdownDisclosure
@@ -107,7 +107,7 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
           rating={evidence.rating}
           breakdown={evidence.rating_breakdown}
         />
-      </p>
+      </div>
 
       <h4 id={qualityWinsHeadingId} className={styles.label}>
         Quality wins
