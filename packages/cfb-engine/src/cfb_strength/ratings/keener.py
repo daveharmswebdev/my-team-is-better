@@ -147,7 +147,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from cfb_strength.contracts import Game, TeamRating
+from cfb_strength.contracts import (
+    Game,
+    OpponentCredit,
+    RatingBreakdown,
+    TeamRating,
+)
 
 MAX_SKEW = 0.35
 """Cap, in either direction from 0.5, on how far a game's raw points-share
@@ -238,6 +243,14 @@ class KeenerRating:
         losses = {team_id: 0 for team_id in team_ids}
         games_played = {team_id: 0 for team_id in team_ids}
 
+        # Per-opponent-pair bookkeeping for the rating breakdown (issue #31).
+        # Keyed by (team_id, opponent_team_id); distinct from the per-team
+        # totals above -- two teams that meet twice in a season accumulate
+        # into the same pair entry rather than producing two.
+        pair_games_played: dict[tuple[int, int], int] = {}
+        pair_wins: dict[tuple[int, int], int] = {}
+        pair_losses: dict[tuple[int, int], int] = {}
+
         for g in games:
             hi, ai = index[g.home_team_id], index[g.away_team_id]
             home_credit, away_credit = _single_game_credit(g.home_points, g.away_points)
@@ -247,12 +260,25 @@ class KeenerRating:
             games_played[g.home_team_id] += 1
             games_played[g.away_team_id] += 1
 
+            home_pair = (g.home_team_id, g.away_team_id)
+            away_pair = (g.away_team_id, g.home_team_id)
+            pair_games_played[home_pair] = pair_games_played.get(home_pair, 0) + 1
+            pair_games_played[away_pair] = pair_games_played.get(away_pair, 0) + 1
+            pair_wins.setdefault(home_pair, 0)
+            pair_losses.setdefault(home_pair, 0)
+            pair_wins.setdefault(away_pair, 0)
+            pair_losses.setdefault(away_pair, 0)
+
             if g.home_points > g.away_points:
                 wins[g.home_team_id] += 1
                 losses[g.away_team_id] += 1
+                pair_wins[home_pair] += 1
+                pair_losses[away_pair] += 1
             elif g.away_points > g.home_points:
                 wins[g.away_team_id] += 1
                 losses[g.home_team_id] += 1
+                pair_wins[away_pair] += 1
+                pair_losses[home_pair] += 1
             # a tie increments neither; not possible under current NCAA rules
 
         if n == 1:
@@ -276,6 +302,13 @@ class KeenerRating:
             if games_played[team_id] > 0:
                 raw[ti, :] /= games_played[team_id]
 
+        # Keep the row-normalized, pre-epsilon matrix around: this is the
+        # "credit" value the rating breakdown reports for each opponent
+        # (see OpponentCredit's docstring in contracts.py). `raw` below is
+        # reused for the epsilon-regularized matrix `a`, so it must be
+        # copied before that happens.
+        raw_normalized = raw.copy()
+
         epsilon = 1.0 / (EPSILON_DENOMINATOR * n)
         # EPSILON is added to every entry, including the diagonal: see the
         # module docstring for why a strictly positive diagonal is required
@@ -294,6 +327,31 @@ class KeenerRating:
         order = sorted(range(n), key=lambda i: (-r[i], team_ids[i]))
         rank_of = {i: rank + 1 for rank, i in enumerate(order)}
 
+        def _breakdown_for(i: int) -> RatingBreakdown:
+            team_id = team_ids[i]
+            entries = []
+            entries_contribution = 0.0
+            for j in range(n):
+                credit = float(raw_normalized[i, j])
+                if credit == 0.0:
+                    continue
+                opponent_id = team_ids[j]
+                pair = (team_id, opponent_id)
+                contribution = credit * float(r[j])
+                entries_contribution += contribution
+                entries.append(
+                    OpponentCredit(
+                        opponent_team_id=opponent_id,
+                        games_played=pair_games_played.get(pair, 0),
+                        wins=pair_wins.get(pair, 0),
+                        losses=pair_losses.get(pair, 0),
+                        credit=credit,
+                        contribution=contribution,
+                    )
+                )
+            residual_contribution = float(r[i]) - entries_contribution
+            return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
+
         return {
             team_ids[i]: TeamRating(
                 team_id=team_ids[i],
@@ -301,6 +359,7 @@ class KeenerRating:
                 rank=rank_of[i],
                 wins=wins[team_ids[i]],
                 losses=losses[team_ids[i]],
+                rating_breakdown=_breakdown_for(i),
             )
             for i in range(n)
         }

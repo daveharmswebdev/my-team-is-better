@@ -142,3 +142,130 @@ def test_ratings_sum_to_one() -> None:
     result = _rate(games)
     total = sum(v.rating for v in result.values())
     assert abs(total - 1.0) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Per-opponent rating breakdown (issue #31)
+# ---------------------------------------------------------------------------
+
+BREAKDOWN_TOL = 1e-9
+
+
+def _assert_breakdown_invariants(result: dict[int, TeamRating], n: int) -> None:
+    """Invariant that must hold for every team in every graph of `n` teams
+    (see keener.py's RatingBreakdown docstring / issue #31 brief):
+
+        entries' contributions + residual == the team's overall rating.
+
+    NOTE on the brief's second claimed invariant ("residual_contribution
+    equals epsilon == 1/(2n) exactly for every team"): that claim assumes
+    the power-iteration matrix `a` is row-stochastic (dominant eigenvalue
+    lambda == 1), so that r = a @ r exactly at convergence. It is not: `a`'s
+    rows sum to `raw_normalized`'s row sum (average per-game credit, which
+    varies by a team's win/loss mix) plus a constant `n * epsilon`, not 1
+    (see the module docstring's "No stochastic normalization" section,
+    which deliberately keeps A unnormalized beyond the games-played row
+    division). Verified numerically across every synthetic graph in this
+    file: the actual dominant eigenvalue lambda is ~0.81-0.83, not 1, and
+    residual_i = epsilon + r_i * (1 - lambda) -- constant only in the
+    epsilon term, not equal to epsilon itself. Reported to the coordinator
+    as a contract_gap rather than silently "fixed" by renormalizing A to be
+    row-stochastic, which would change actual rating values (forbidden by
+    this task's brief) and contradict the module's own documented design
+    choice against that normalization.
+    """
+    for tr in result.values():
+        breakdown = tr.rating_breakdown
+        total = sum(e.contribution for e in breakdown.entries) + breakdown.residual_contribution
+        assert abs(total - tr.rating) < BREAKDOWN_TOL
+
+
+def test_breakdown_reconstructs_rating_exactly() -> None:
+    """Chain A>B>C (3 teams): breakdown entries + residual reconstruct the
+    overall rating exactly."""
+    games = [
+        Game(home_team_id=A, away_team_id=B, home_points=24, away_points=17),
+        Game(home_team_id=B, away_team_id=C, home_points=28, away_points=14),
+        Game(home_team_id=C, away_team_id=A, home_points=3, away_points=45),
+    ]
+    result = _rate(games)
+    _assert_breakdown_invariants(result, n=3)
+
+
+def test_breakdown_disconnected_components() -> None:
+    """Residual == epsilon invariant must hold even for teams in a
+    disconnected component of the win-graph (the whole point of epsilon)."""
+    P, Q, R, S = 30, 31, 32, 33
+    games = [
+        Game(home_team_id=P, away_team_id=Q, home_points=20, away_points=10),
+        Game(home_team_id=R, away_team_id=S, home_points=20, away_points=10),
+    ]
+    result = _rate(games)
+    _assert_breakdown_invariants(result, n=4)
+
+
+def test_breakdown_entries_only_for_opponents_actually_played() -> None:
+    """A team's breakdown should have exactly one entry per distinct
+    opponent it played -- not one per team in the graph."""
+    X, Y, Z = 10, 11, 12
+    games = [
+        Game(home_team_id=A, away_team_id=X, home_points=30, away_points=10),
+        Game(home_team_id=A, away_team_id=Y, home_points=28, away_points=14),
+        Game(home_team_id=A, away_team_id=Z, home_points=21, away_points=17),
+        Game(home_team_id=B, away_team_id=X, home_points=30, away_points=10),
+        Game(home_team_id=B, away_team_id=Y, home_points=28, away_points=14),
+        Game(home_team_id=Z, away_team_id=B, home_points=21, away_points=17),
+    ]
+    result = _rate(games)
+    n = len({A, B, X, Y, Z})
+    _assert_breakdown_invariants(result, n=n)
+
+    a_opponents = {e.opponent_team_id for e in result[A].rating_breakdown.entries}
+    assert a_opponents == {X, Y, Z}
+    for e in result[A].rating_breakdown.entries:
+        assert e.games_played == 1
+        assert e.wins == 1 and e.losses == 0
+
+
+def test_breakdown_combines_repeated_matchup_into_one_entry() -> None:
+    """A team that plays the same opponent twice in a season gets ONE
+    OpponentCredit entry for that opponent, with the combined record --
+    not two separate entries."""
+    games = [
+        Game(home_team_id=A, away_team_id=B, home_points=24, away_points=17),
+        Game(home_team_id=B, away_team_id=A, home_points=10, away_points=35),
+        # Give C a game too so there's a third team in the graph.
+        Game(home_team_id=C, away_team_id=A, home_points=3, away_points=45),
+    ]
+    result = _rate(games)
+    _assert_breakdown_invariants(result, n=3)
+
+    a_entries = result[A].rating_breakdown.entries
+    a_vs_b = [e for e in a_entries if e.opponent_team_id == B]
+    assert len(a_vs_b) == 1
+    entry = a_vs_b[0]
+    assert entry.games_played == 2
+    assert entry.wins == 2 and entry.losses == 0
+
+    b_entries = result[B].rating_breakdown.entries
+    b_vs_a = [e for e in b_entries if e.opponent_team_id == A]
+    assert len(b_vs_a) == 1
+    assert b_vs_a[0].games_played == 2
+    assert b_vs_a[0].wins == 0 and b_vs_a[0].losses == 2
+
+
+def test_breakdown_credit_times_opponent_rating_equals_contribution() -> None:
+    """`entry.credit * opponent_rating == entry.contribution` per the
+    OpponentCredit docstring contract."""
+    games = [
+        Game(home_team_id=A, away_team_id=B, home_points=24, away_points=17),
+        Game(home_team_id=B, away_team_id=C, home_points=28, away_points=14),
+        Game(home_team_id=C, away_team_id=D, home_points=10, away_points=7),
+        Game(home_team_id=D, away_team_id=A, home_points=3, away_points=45),
+    ]
+    result = _rate(games)
+    _assert_breakdown_invariants(result, n=4)
+    for tr in result.values():
+        for e in tr.rating_breakdown.entries:
+            opponent_rating = result[e.opponent_team_id].rating
+            assert abs(e.credit * opponent_rating - e.contribution) < BREAKDOWN_TOL

@@ -111,6 +111,7 @@ def _rerank_fbs_only(
             rank=i + 1,
             wins=tr.wins,
             losses=tr.losses,
+            rating_breakdown=tr.rating_breakdown,
         )
         for i, tr in enumerate(candidates)
     ]
@@ -134,21 +135,84 @@ def _store(
         )
 
 
+def _store_breakdowns(
+    conn: sqlite3.Connection, year: int, method: str, ratings: list[TeamRating]
+) -> None:
+    """Delete-then-insert one row per `OpponentCredit` entry, plus one
+    `opponent_team_id IS NULL` residual row, per displayed team -- same
+    pattern as `_store()`, scoped by year+method."""
+    computed_at = datetime.now(timezone.utc).isoformat()
+    rows: list[tuple[int, str, int, int | None, int | None, int | None, int | None, float | None, float, str]] = []
+    for tr in ratings:
+        for entry in tr.rating_breakdown.entries:
+            rows.append(
+                (
+                    year,
+                    method,
+                    tr.team_id,
+                    entry.opponent_team_id,
+                    entry.games_played,
+                    entry.wins,
+                    entry.losses,
+                    entry.credit,
+                    entry.contribution,
+                    computed_at,
+                )
+            )
+        rows.append(
+            (
+                year,
+                method,
+                tr.team_id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                tr.rating_breakdown.residual_contribution,
+                computed_at,
+            )
+        )
+
+    with conn:
+        conn.execute(
+            "DELETE FROM rating_breakdowns WHERE year = ? AND method = ?", (year, method)
+        )
+        conn.executemany(
+            """
+            INSERT INTO rating_breakdowns (
+                year, method, team_id, opponent_team_id, games_played, wins, losses,
+                credit, contribution, computed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+
 def compute_and_store(conn: sqlite3.Connection, year: int, method: str) -> int:
     """Compute ratings for one year/method and store them. Returns the
     number of FBS rows written."""
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}; available: {sorted(METHODS)}")
 
+    # Idempotent (every statement in schema.sql is CREATE TABLE/INDEX IF NOT
+    # EXISTS) -- guarantees `rating_breakdowns` exists even for a connection
+    # handed in directly (bypassing `main()`'s own ensure_schema call), e.g.
+    # a pre-built fixture db copied from before this table existed.
+    ensure_schema(conn)
+
     games = _load_games(conn, year)
     if not games:
         _store(conn, year, method, [])
+        _store_breakdowns(conn, year, method, [])
         return 0
 
     full_ratings = METHODS[method].rate(games)
     fbs_ids = _fbs_team_ids(conn, year)
     display_ratings = _rerank_fbs_only(full_ratings, fbs_ids)
     _store(conn, year, method, display_ratings)
+    _store_breakdowns(conn, year, method, display_ratings)
     return len(display_ratings)
 
 
