@@ -199,6 +199,33 @@ def test_build_comparison_team_summaries_have_rating_breakdowns(
         assert total == pytest.approx(summary.rating, abs=1e-6)
 
 
+def test_build_team_case_rating_breakdown_entries_have_explanations(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Issue #37: OpponentCredit.explanation is populated from the real
+    per-game scores, not left at contracts.py's default of ''."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+
+    assert case.rating_breakdown.entries, "Texas played games in 2005; expected breakdown entries"
+    for entry in case.rating_breakdown.entries:
+        assert entry.explanation, (
+            f"expected a non-empty explanation for opponent {entry.opponent_name!r}"
+        )
+
+    # Pick one opponent Texas actually played once, and check the
+    # explanation cites that game's real score as a substring -- without
+    # hardcoding the exact sentence, since this delegation doesn't control
+    # the golden-fixture wording, only the template.
+    single_game_opponent = next(
+        e for e in case.rating_breakdown.entries if e.games_played == 1
+    )
+    matching_game = next(
+        g for g in case.games if g.opponent_team_id == single_game_opponent.opponent_team_id
+    )
+    expected_score = f"{matching_game.team_score}-{matching_game.opponent_score}"
+    assert expected_score in single_game_opponent.explanation
+
+
 def test_rating_breakdown_degrades_gracefully_with_no_rows(
     rated_conn: sqlite3.Connection,
 ) -> None:
@@ -207,6 +234,6 @@ def test_rating_breakdown_degrades_gracefully_with_no_rows(
     produce an empty RatingBreakdown rather than raising."""
     from cfb_strength.evidence.proof import _rating_breakdown
 
-    breakdown = _rating_breakdown(rated_conn, 2005, "keener", team_id=-1)
+    breakdown = _rating_breakdown(rated_conn, 2005, "keener", team_id=-1, games=[])
     assert breakdown.entries == []
     assert breakdown.residual_contribution == 0.0

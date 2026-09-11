@@ -85,6 +85,17 @@ class OpponentCredit:
     populates this field for real when it reconstructs `OpponentCredit` from
     the `rating_breakdowns` table. Never non-empty when it reaches apps/api
     or apps/web.
+
+    `explanation` follows the same populated-by-evidence-not-ratings pattern,
+    for the same reason: it is a plain-English-plus-numbers line (issue #37)
+    describing *this opponent's* game(s) -- score, points-share, the flat
+    win/loss base rate, and the resulting margin bonus, computed via
+    `cfb_strength.credit_math.single_game_credit` against the raw score(s)
+    `evidence/` already has loaded (from the same `games` table query behind
+    `OpponentResult`). `keener.py` never sees a score-to-explanation mapping,
+    only ids and points, so it cannot populate this field. Never empty when
+    it reaches apps/api or apps/web (unlike `opponent_name`, there's no
+    "resolution can fail" case here -- every entry has at least one game).
     """
 
     opponent_team_id: int
@@ -94,6 +105,7 @@ class OpponentCredit:
     credit: float
     contribution: float
     opponent_name: str = ""
+    explanation: str = ""
 
 
 @dataclass(frozen=True)

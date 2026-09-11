@@ -141,6 +141,14 @@ normalization of its magnitude. r solves A r = lambda r for the dominant
 eigenvalue lambda, computed by power iteration with a per-iteration
 renormalization that is purely a numerical-stability device (preventing
 under/overflow across iterations), not a modeling choice.
+
+Note: the single-game credit constants (``MAX_SKEW``, ``BASE_WIN``,
+``BASE_LOSS``, ``MARGIN_NUDGE``) and the clamped-share/single-game-credit
+functions referenced throughout this docstring now live in
+``cfb_strength.credit_math`` (shared with the ``evidence`` layer's
+per-opponent "why this credit" explanation, issue #37), not in this module.
+This module imports them rather than defining its own copies, so the
+displayed explanation and the actual computed credit can never drift apart.
 """
 
 from __future__ import annotations
@@ -153,33 +161,7 @@ from cfb_strength.contracts import (
     RatingBreakdown,
     TeamRating,
 )
-
-MAX_SKEW = 0.35
-"""Cap, in either direction from 0.5, on how far a game's raw points-share
-can move a team's credit. Bounds the clamped share to
-[0.5 - MAX_SKEW, 0.5 + MAX_SKEW] = [0.15, 0.85], so an extreme blowout score
-(e.g. 70-0) is treated the same as any other sufficiently lopsided score."""
-
-BASE_WIN = 0.6
-"""Fixed credit floor for a win, before the margin nudge. A win's credit is
-always in [BASE_WIN, BASE_WIN + MARGIN_NUDGE * MAX_SKEW]."""
-
-BASE_LOSS = 0.05
-"""Fixed credit floor for a loss, before the margin nudge. A loss's credit
-is always in [BASE_LOSS, BASE_LOSS + MARGIN_NUDGE * MAX_SKEW]. BASE_WIN
-must always exceed this range's maximum (BASE_LOSS + MARGIN_NUDGE *
-MAX_SKEW) so that win/loss remains the dominant signal regardless of
-margin -- see test_win_always_beats_loss_regardless_of_margin."""
-
-MARGIN_NUDGE = 0.3
-"""How much of the clamped points-share nudges credit within a team's own
-win or loss band. Combined with MAX_SKEW, bounds the nudge's total swing to
-MARGIN_NUDGE * MAX_SKEW = 0.105 in either direction."""
-
-assert BASE_WIN > BASE_LOSS + MARGIN_NUDGE * MAX_SKEW, (
-    "win/loss dominance invariant violated: a win must always out-credit "
-    "any loss regardless of margin"
-)
+from cfb_strength.credit_math import single_game_credit
 
 EPSILON_DENOMINATOR = 2.0
 """EPSILON = 1 / (EPSILON_DENOMINATOR * N) for N teams -- small enough that
@@ -192,38 +174,19 @@ MAX_ITERATIONS = 10_000
 CONVERGENCE_TOL = 1e-12
 
 
-def _clamped_share(points_i: int, points_j: int) -> float:
-    """Team i's share of total points scored in the game, clamped to
-    [0.5 - MAX_SKEW, 0.5 + MAX_SKEW]. Symmetric: clamped_share(i, j) and
-    clamped_share(j, i) always sum to 1."""
-    total = points_i + points_j
-    if total == 0:
-        return 0.5
-    share = points_i / total
-    return min(max(share, 0.5 - MAX_SKEW), 0.5 + MAX_SKEW)
-
-
 def _single_game_credit(home_points: int, away_points: int) -> tuple[float, float]:
     """Return (home_credit, away_credit), each a fixed win/loss base rate
     nudged by a clamped share of points scored.
 
     See module docstring: win/loss is the dominant signal (BASE_WIN always
     exceeds the maximum possible loss credit); margin only nudges within
-    the winner's or loser's own band, via a clamped points share.
+    the winner's or loser's own band, via a clamped points share. Delegates
+    to `cfb_strength.credit_math.single_game_credit`, which is the shared
+    source of truth for this per-game formula (see module docstring's note).
     """
-    home_share = _clamped_share(home_points, away_points)
-    away_share = 1.0 - home_share  # _clamped_share is symmetric around 0.5
-
-    def credit(points_i: int, points_j: int, share_i: float) -> float:
-        if points_i > points_j:
-            return BASE_WIN + MARGIN_NUDGE * (share_i - 0.5)
-        if points_j > points_i:
-            return BASE_LOSS + MARGIN_NUDGE * (share_i - (0.5 - MAX_SKEW))
-        return 0.5  # tie, not possible under current NCAA rules but handled
-
     return (
-        credit(home_points, away_points, home_share),
-        credit(away_points, home_points, away_share),
+        single_game_credit(home_points, away_points).total,
+        single_game_credit(away_points, home_points).total,
     )
 
 

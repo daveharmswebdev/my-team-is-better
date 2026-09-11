@@ -27,6 +27,7 @@ from cfb_strength.contracts import (
     TeamCase,
     UnknownYearError,
 )
+from cfb_strength.evidence.credit_explain import explain_credit
 
 # Wins against an opponent ranked this or better count as "quality wins".
 # Take 1 used a top-25 threshold; we keep that convention here.
@@ -60,7 +61,38 @@ def _ratings_map(conn: sqlite3.Connection, year: int, method: str) -> dict[int, 
     return {int(r["team_id"]): r for r in rows}
 
 
-def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id: int) -> RatingBreakdown:
+def _scores_vs_opponent(
+    games: list[sqlite3.Row], team_id: int, opponent_team_id: int
+) -> list[tuple[int, int]]:
+    """(team_score, opponent_score) tuples, in `games`' existing chronological
+    order, for every completed game in `games` (already scoped to `team_id`
+    by `_team_games`) played against `opponent_team_id` specifically.
+
+    Mirrors `_opponent_result`'s is_home resolution and tie/data-artifact
+    skip exactly, so the games fed to `explain_credit` are the same games
+    (by score) `OpponentResult` itself would report for this matchup.
+    """
+    pairs: list[tuple[int, int]] = []
+    for game in games:
+        is_home = game["home_team_id"] == team_id
+        opponent_id = game["away_team_id"] if is_home else game["home_team_id"]
+        if opponent_id != opponent_team_id:
+            continue
+        team_score = game["home_points"] if is_home else game["away_points"]
+        opp_score = game["away_points"] if is_home else game["home_points"]
+        if team_score is None or opp_score is None or team_score == opp_score:
+            continue
+        pairs.append((int(team_score), int(opp_score)))
+    return pairs
+
+
+def _rating_breakdown(
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    team_id: int,
+    games: list[sqlite3.Row],
+) -> RatingBreakdown:
     """Reconstruct a team's `RatingBreakdown` from `rating_breakdowns` rows.
 
     `OpponentCredit` (contracts.py) only carries `opponent_team_id` from the
@@ -71,6 +103,12 @@ def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id:
     descending (largest driver of the rating first), which matches the
     descending-by-significance convention `quality_wins` and
     `common_opponents` already use elsewhere in this module.
+
+    `games` is the same raw per-game score rows `build_team_case` already
+    fetches via `_team_games` for `OpponentResult` construction -- reused
+    here (issue #37) so `OpponentCredit.explanation` is derived from the
+    exact same scores, via the exact same `single_game_credit` call, that
+    the persisted `credit`/`contribution` columns were computed from.
 
     A rated team always has breakdown rows too (`compute_and_store` writes
     both tables together in the same pass -- see compute_ratings.py's
@@ -98,6 +136,12 @@ def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id:
             "SELECT school FROM teams WHERE id = ?", (opponent_team_id,)
         ).fetchone()
         opponent_name = opponent_name_row["school"] if opponent_name_row is not None else ""
+        # Defensive: the rating_breakdowns row and the games query are two
+        # different sources (persisted vs. re-queried), so in principle they
+        # could disagree on which games were played. If filtering yields no
+        # valid scores for this pair, leave explanation="" rather than
+        # crashing or guessing -- see this delegation's contract_gaps note.
+        scores = _scores_vs_opponent(games, team_id, opponent_team_id)
         entries.append(
             OpponentCredit(
                 opponent_team_id=opponent_team_id,
@@ -107,6 +151,7 @@ def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id:
                 credit=float(row["credit"]),
                 contribution=float(row["contribution"]),
                 opponent_name=opponent_name,
+                explanation=explain_credit(scores),
             )
         )
 
@@ -252,7 +297,7 @@ def build_team_case(
 
     ratings = _ratings_map(conn, year, method)
     games = _team_games(conn, year, team_id)
-    rating_breakdown = _rating_breakdown(conn, year, method, team_id)
+    rating_breakdown = _rating_breakdown(conn, year, method, team_id, games)
 
     opponent_results: list[OpponentResult] = []
     for game in games:
