@@ -115,6 +115,7 @@ class OpponentCreditOut(BaseModel):
     losses: int
     credit: float
     contribution: float
+    explanation: str
 
     @classmethod
     def from_dataclass(cls, credit: OpponentCredit) -> OpponentCreditOut:
@@ -126,6 +127,7 @@ class OpponentCreditOut(BaseModel):
             losses=credit.losses,
             credit=credit.credit,
             contribution=credit.contribution,
+            explanation=credit.explanation,
         )
 
 
