@@ -106,6 +106,7 @@ class OpponentResultOut(BaseModel):
 
 class OpponentCreditOut(BaseModel):
     opponent_team_id: int
+    opponent_name: str
     games_played: int
     wins: int
     losses: int
@@ -116,6 +117,7 @@ class OpponentCreditOut(BaseModel):
     def from_dataclass(cls, credit: OpponentCredit) -> OpponentCreditOut:
         return cls(
             opponent_team_id=credit.opponent_team_id,
+            opponent_name=credit.opponent_name,
             games_played=credit.games_played,
             wins=credit.wins,
             losses=credit.losses,

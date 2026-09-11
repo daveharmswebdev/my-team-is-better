@@ -63,11 +63,13 @@ def _ratings_map(conn: sqlite3.Connection, year: int, method: str) -> dict[int, 
 def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id: int) -> RatingBreakdown:
     """Reconstruct a team's `RatingBreakdown` from `rating_breakdowns` rows.
 
-    `OpponentCredit`/`RatingBreakdown` (contracts.py) only carry
-    `opponent_team_id`, not opponent name/rating, so no join against
-    `teams`/`ratings` is needed for construction -- entries are ordered by
-    `contribution` descending (largest driver of the rating first), which
-    matches the descending-by-significance convention `quality_wins` and
+    `OpponentCredit` (contracts.py) only carries `opponent_team_id` from the
+    ratings layer (`keener.py` never sees names, only ids) -- this join
+    against `teams` (same pattern as `_opponent_result`'s resolution for
+    `OpponentResult.opponent_name`) is what populates the real
+    `opponent_name` for each entry. Entries are ordered by `contribution`
+    descending (largest driver of the rating first), which matches the
+    descending-by-significance convention `quality_wins` and
     `common_opponents` already use elsewhere in this module.
 
     A rated team always has breakdown rows too (`compute_and_store` writes
@@ -91,14 +93,20 @@ def _rating_breakdown(conn: sqlite3.Connection, year: int, method: str, team_id:
         if row["opponent_team_id"] is None:
             residual_contribution = float(row["contribution"])
             continue
+        opponent_team_id = int(row["opponent_team_id"])
+        opponent_name_row = conn.execute(
+            "SELECT school FROM teams WHERE id = ?", (opponent_team_id,)
+        ).fetchone()
+        opponent_name = opponent_name_row["school"] if opponent_name_row is not None else ""
         entries.append(
             OpponentCredit(
-                opponent_team_id=int(row["opponent_team_id"]),
+                opponent_team_id=opponent_team_id,
                 games_played=int(row["games_played"]),
                 wins=int(row["wins"]),
                 losses=int(row["losses"]),
                 credit=float(row["credit"]),
                 contribution=float(row["contribution"]),
+                opponent_name=opponent_name,
             )
         )
 

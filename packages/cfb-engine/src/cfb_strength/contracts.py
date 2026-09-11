@@ -78,6 +78,13 @@ class OpponentCredit:
     opponent -- purely game-based, straight from `_single_game_credit`,
     aggregated across every game the two teams played that season. `credit *
     opponent_rating == contribution`.
+
+    `opponent_name` defaults to `""` because the ratings layer (`keener.py`)
+    only ever sees team ids, never names -- it's the evidence layer, which
+    already resolves names via the `teams` table for `OpponentResult`, that
+    populates this field for real when it reconstructs `OpponentCredit` from
+    the `rating_breakdowns` table. Never non-empty when it reaches apps/api
+    or apps/web.
     """
 
     opponent_team_id: int
@@ -86,6 +93,7 @@ class OpponentCredit:
     losses: int
     credit: float
     contribution: float
+    opponent_name: str = ""
 
 
 @dataclass(frozen=True)

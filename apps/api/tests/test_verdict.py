@@ -56,6 +56,8 @@ def test_team_case_endpoint_returns_named_team_case(client: TestClient) -> None:
 def test_team_case_endpoint_includes_rating_breakdown(client: TestClient) -> None:
     """Issue #31: the per-opponent rating decomposition rides along on
     /api/verdict/team-case, reconstructing to the team's `rating` field."""
+    known_teams = set(client.get("/api/teams").json()["teams"])
+
     response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
 
     assert response.status_code == 200
@@ -68,12 +70,15 @@ def test_team_case_endpoint_includes_rating_breakdown(client: TestClient) -> Non
     for entry in entries:
         assert set(entry.keys()) == {
             "opponent_team_id",
+            "opponent_name",
             "games_played",
             "wins",
             "losses",
             "credit",
             "contribution",
         }
+        assert isinstance(entry["opponent_name"], str) and entry["opponent_name"]
+        assert entry["opponent_name"] in known_teams
 
     total = sum(e["contribution"] for e in entries) + breakdown["residual_contribution"]
     assert total == pytest.approx(body["rating"], abs=1e-6)
@@ -102,6 +107,8 @@ def test_compare_endpoint_includes_rating_breakdown_for_both_teams(
 ) -> None:
     """Issue #31: both sides of a comparison carry their own rating breakdown,
     each reconstructing to that team's own `rating` field."""
+    known_teams = set(client.get("/api/teams").json()["teams"])
+
     response = client.post(
         "/api/verdict/compare",
         json={"year": 2005, "team_a": "Texas", "team_b": "USC"},
@@ -120,12 +127,15 @@ def test_compare_endpoint_includes_rating_breakdown_for_both_teams(
         for entry in entries:
             assert set(entry.keys()) == {
                 "opponent_team_id",
+                "opponent_name",
                 "games_played",
                 "wins",
                 "losses",
                 "credit",
                 "contribution",
             }
+            assert isinstance(entry["opponent_name"], str) and entry["opponent_name"]
+            assert entry["opponent_name"] in known_teams
 
         total = sum(e["contribution"] for e in entries) + breakdown["residual_contribution"]
         assert total == pytest.approx(team["rating"], abs=1e-6)

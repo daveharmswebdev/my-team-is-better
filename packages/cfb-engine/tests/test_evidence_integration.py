@@ -160,8 +160,15 @@ def test_build_team_case_rating_breakdown_has_entries_for_real_opponents(
     assert case.rating_breakdown.entries, "Texas played games in 2005; expected breakdown entries"
 
     schedule_opponent_ids = {o.opponent_team_id for o in case.games}
+    schedule_names_by_id = {o.opponent_team_id: o.opponent_name for o in case.games}
     for entry in case.rating_breakdown.entries:
         assert entry.opponent_team_id in schedule_opponent_ids
+        # Issue #31 follow-up: OpponentCredit.opponent_name must be resolved
+        # to the opponent's real school name (same teams-table join
+        # _opponent_result already does for OpponentResult), not left at its
+        # contracts.py default of "".
+        assert entry.opponent_name
+        assert entry.opponent_name == schedule_names_by_id[entry.opponent_team_id]
 
 
 def test_build_team_case_rating_breakdown_reconstructs_rating(
