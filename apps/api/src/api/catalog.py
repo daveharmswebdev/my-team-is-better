@@ -7,8 +7,8 @@ users can only select years that are actually ingested"). `/api/credits`
 backs issue #29's "How this works / Credits" page. Unlike `api.verdict`'s
 routes, all three return plain evidence-catalog data -- no persona
 narration envelope, no MCP -- so each route is a thin call straight into
-`cfb_strength.evidence.proof` (years), the shared `api.deps.list_all_team_names`
-helper (teams), or `cfb_strength.evidence.credits` (credits), with no
+`cfb_strength.evidence.proof` (years), `api.deps.list_team_records`
+(teams), or `cfb_strength.evidence.credits` (credits), with no
 business logic of its own. `/api/credits` needs no db connection at all
 (unlike the other two): `get_credits()` takes no arguments and touches no
 database, so this route has no `Depends(get_db_conn)`.
@@ -22,8 +22,8 @@ from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import list_available_years
 from fastapi import APIRouter, Depends
 
-from api.deps import get_db_conn, list_all_team_names
-from api.models import CreditsOut, TeamsOut, YearsOut
+from api.deps import get_db_conn, list_team_records
+from api.models import CreditsOut, TeamDetailOut, TeamsOut, YearsOut
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
@@ -44,13 +44,44 @@ def years(
 @router.get("/teams", response_model=TeamsOut)
 def teams(
     sport: str = "cfb",
+    year: int | None = None,
+    method: str = "keener",
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> TeamsOut:
-    """Every team name in the db for `sport` -- the team picker's valid-
-    selection universe, the same query the persona grounding check already
-    uses. `sport` defaults to "cfb" (issue #59), matching today's behavior
-    for a client that never sends it."""
-    return TeamsOut(teams=list_all_team_names(conn, sport))
+    """The team picker's valid-selection universe for `sport`, optionally
+    narrowed to one season.
+
+    With `year` (issue #78), only teams that actually have a
+    `year`/`sport`/`method` rating are offered -- without it, an NFL picker
+    offers both halves of every relocation ("Las Vegas Raiders" for a 2010
+    question, "San Diego Chargers" for a 2024 one, neither of which has
+    data for that year) and a CFB picker offers the entire ~788-name
+    FBS/FCS/D2/D3 opponent universe the games ingest has ever seen. An
+    un-ingested year is an empty list with HTTP 200, not an error: this
+    route populates a picker, it doesn't resolve a verdict.
+
+    `sport` defaults to "cfb" (issue #59) and `method` to "keener"
+    (matching `/api/years` above); omitting `year` returns exactly the
+    pre-#78 full per-sport list, so a client that never sends it sees no
+    change.
+
+    `team_details` is additive metadata for the same teams in the same
+    order -- see `api.models.TeamsOut`. Both arrays come from the one
+    `list_team_records` call below, never two queries, so they cannot drift
+    apart.
+
+    Note this is `list_team_records`, not the grounding check's
+    `list_all_team_names`: the persona layer's known-team-name universe
+    must stay unscoped (see `api.deps`).
+    """
+    records = list_team_records(conn, sport=sport, year=year, method=method)
+    return TeamsOut(
+        teams=[record.name for record in records],
+        team_details=[
+            TeamDetailOut(name=record.name, mascot=record.mascot, aliases=list(record.aliases))
+            for record in records
+        ],
+    )
 
 
 @router.get("/credits", response_model=CreditsOut)

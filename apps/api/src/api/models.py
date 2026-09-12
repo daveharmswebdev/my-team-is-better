@@ -34,7 +34,7 @@ from cfb_strength.contracts import (
     RatingBreakdown,
     TeamCase,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # requests
@@ -312,8 +312,41 @@ class YearsOut(BaseModel):
     years: list[int]
 
 
+class TeamDetailOut(BaseModel):
+    """One selectable team's display/search metadata (issue #78, epic #76),
+    faithful to `api.deps.TeamRecord`.
+
+    `name` is `teams.school` verbatim and is the value a client submits
+    back -- the verdict lookup, the persona grounding check, the golden
+    dataset, and every cached narration key are all keyed on that exact
+    string, so it must never be display-joined with the mascot. `mascot` is
+    null for every NFL row (whose `school` already carries city *and*
+    nickname) and for any CFB team CFBD has no mascot for; `aliases` is the
+    decoded `teams.alternate_names` array, `[]` when there are none.
+    """
+
+    name: str
+    mascot: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+
+
 class TeamsOut(BaseModel):
+    """`teams` is the canonical submitted-value list; `team_details` is a
+    parallel array carrying the same names in the same order plus issue
+    #78's display metadata.
+
+    The parallel-array shape is deliberate rather than changing `teams`'
+    element type to an object: `apps/web`'s consumer lands in a separate PR
+    and a separate production deploy, and its `TeamsOut` type declares
+    `teams: string[]` and renders `value={name}` straight from it -- so
+    changing the element type would render `[object Object]` in the live
+    team picker for the whole window between the two merges. Both arrays
+    come from one query (`api.deps.list_team_records`), so a consumer may
+    zip them by index.
+    """
+
     teams: list[str]
+    team_details: list[TeamDetailOut] = Field(default_factory=list)
 
 
 class MethodologyCreditOut(BaseModel):
