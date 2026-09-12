@@ -329,18 +329,51 @@ backend and data model:
   for guests. No password handling, no session infrastructure to build, and
   no feature is unreachable without an account.
 
-## 6. The engine: no changes needed for MVP, one seam to protect for v2
+## 6. The engine: the second method seam, now used
 
-`RatingMethod` (in `contracts.py`) is already a `Protocol` — `keener.py` is
-one implementation behind it. This is exactly the seam the "levers" feature
-(PRD §4 future state) will use: a future `TunableKeener` (or similarly named)
-implementation taking a weights config, registered as a second `method`
-value alongside `"keener"` in the `ratings` table (the schema's
-`UNIQUE(year, method, team_id)` and `method TEXT` column already anticipate
-more than one method existing side by side — no schema change required to
-add one). For MVP: **do not build this.** Ship stock Keener only, keep the
-seam in mind, don't speculatively build the weighting UI or backend plumbing
-until the founder decides to spend the time on it.
+**Status: the seam described below was used. Keener is no longer the only
+method.** This section previously said "for MVP: do not build this, ship
+stock Keener only" — that instruction was correct at the time and has been
+carried out and superseded, not ignored. Updated here rather than left
+contradicting `main`, because CLAUDE.md's session-start protocol treats this
+file as a state-reconstruction source, and a stale "do not build this" is
+exactly the rediscovery cost the `MIN_YEAR` story warns about.
+
+`RatingMethod` (in `contracts.py`) is a `Protocol`, and the `ratings`
+table's `method TEXT` column plus `UNIQUE(year, method, team_id)` already
+allowed several methods side by side, so adding one needed **no schema
+change** — the seam worked as designed.
+
+Three methods are registered today, in `ratings/compute_ratings.py`'s
+`METHODS`:
+
+| method | shape | notes |
+|---|---|---|
+| `keener` | `RatingMethod` | Eigenvector strength-of-schedule. The default, and the **only** method gated by the golden dataset. Margin of victory deliberately unweighted. |
+| `elo` | `RatingMethod` | Sequential, each season rated in isolation. Margin of victory **is** weighted. |
+| `elo_career` | `CareerRatingMethod` | As `elo`, but ratings carry across seasons with offseason mean reversion. |
+
+Two things the second engine changed that a future third one inherits:
+
+- **`METHODS` holds factories, not instances** — `(conn, sport) -> impl`.
+  Elo needs per-sport tuning (`ELO_CONFIGS`) and `elo_career` needs the NFL
+  franchise-lineage map resolved from `teams`, and a fresh instance per call
+  keeps a stateful method from leaking ratings between years.
+- **A second protocol, `CareerRatingMethod`.** `RatingMethod.rate()` is
+  strictly per-season and cannot express carryover. `compute_and_store`
+  dispatches on `isinstance`, loading `season <= target` for a career
+  method. A new method implements exactly one of the two.
+
+The "levers" feature (PRD §4 future state) — a `TunableKeener` taking a
+weights config — is still unbuilt and still uses this same seam. The
+`EloConfig` frozen dataclass is the pattern to copy: calibration as data,
+never a subclass.
+
+**Not yet done, and tracked:** no `QuestionForm` engine toggle exists, and
+one cannot ship until #82 — `apps/web`'s `formatRating` multiplies every
+rating by 1000 for Keener's sum-to-1 scale, which would render an Elo rating
+of ~1500 as `1,500,000`. CFB's Elo constants are an uncalibrated first pass
+(#87). The MCP surface still has no `sport` parameter at all (#86).
 
 ## 7. Deployment (Render)
 

@@ -1,6 +1,14 @@
 [importlinter]
 root_package = cfb_strength
 
+; NOTE: the middle tier (evidence | ratings | ingest) sits ABOVE `db`, so
+; every module in it may import `db` -- and `ingest` and `evidence` both do,
+; legitimately and constantly (`get_conn` / `ensure_schema`). That is
+; correct and deliberate. Do NOT demote the tier to "fix" it; you would
+; break the ingest path immediately. The narrower rule -- that the pure
+; *computation* modules stay db-free -- cannot be expressed as a layer and
+; is enforced separately by `rating-algorithms-are-db-free` at the bottom of
+; this file.
 [importlinter:contract:layers]
 name = Layered architecture: spokes depend on the contract, never on each other
 type = layers
@@ -51,3 +59,34 @@ source_modules =
     cfb_strength.ingest.ingest_season
 forbidden_modules =
     cfb_strength.ingest.nflverse
+
+; The rating algorithms themselves must stay pure functions of their inputs
+; -- floats, `Game`s and a config in, `TeamRating`s out -- with no database
+; access. `compute_ratings` is the one module in this layer that may touch
+; `db`: it loads games, resolves the franchise-lineage map out of `teams`,
+; and hands both to the algorithm.
+;
+; This needs its own `forbidden` contract because the `layers` contract
+; above does NOT cover it: `ratings` sits above `db` there, so ANY ratings
+; module importing `db` is explicitly allowed, which is exactly how
+; `compute_ratings` does it with all contracts kept. Without the block
+; below, adding `from cfb_strength.db.connection import get_conn` to
+; `elo.py` tomorrow would pass `lint-imports` silently.
+;
+; The tier permitting `db` is deliberate, not an oversight -- see the NOTE on
+; the layers contract above before changing either one.
+;
+; Added because two comments in the Elo PR claimed this was "enforced by
+; .importlinter" when it was not. A boundary stated in prose and never
+; checked is the failure mode CLAUDE.md's modularity rule exists to prevent,
+; so the claim was made true rather than deleted.
+[importlinter:contract:rating-algorithms-are-db-free]
+name = rating algorithms must not touch the database (only compute_ratings may)
+type = forbidden
+source_modules =
+    cfb_strength.ratings.elo
+    cfb_strength.ratings.keener
+    cfb_strength.ratings.franchise_lineage
+    cfb_strength.credit_math
+forbidden_modules =
+    cfb_strength.db

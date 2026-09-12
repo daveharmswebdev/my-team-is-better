@@ -7,6 +7,8 @@ algorithm choices on small, hand-built graphs.
 
 from __future__ import annotations
 
+import pytest
+
 from cfb_strength.contracts import Game, TeamRating
 from cfb_strength.ratings.keener import KeenerRating
 
@@ -269,3 +271,219 @@ def test_breakdown_credit_times_opponent_rating_equals_contribution() -> None:
         for e in tr.rating_breakdown.entries:
             opponent_rating = result[e.opponent_team_id].rating
             assert abs(e.credit * opponent_rating - e.contribution) < BREAKDOWN_TOL
+
+
+def test_keener_is_bit_identical_under_game_reordering() -> None:
+    """Reordering `games` must not change a single bit of Keener's output.
+
+    This is the machine-checked form of the claim that the `Game` dataclass
+    amendment (season/week/season_type/start_date, added for the sequential
+    Elo engine) cannot perturb Keener: Keener never reads those fields, and
+    the only thing they changed about the caller is the order rows arrive
+    in -- `compute_ratings._load_games` now has an `ORDER BY` where it
+    previously had none.
+
+    Bit-identity holds here, and the reason is worth stating precisely
+    because an earlier version of this docstring got it wrong:
+
+    * Each credit-matrix cell `raw[i, j]` accumulates one addend per
+      *meeting* between teams i and j, in **either** orientation --
+      `keener.py` writes `raw[hi, ai] += home_credit` and
+      `raw[ai, hi] += away_credit` for every game, so both cells of the
+      pair are touched by every meeting. The count that matters is
+      therefore **unordered** meetings between the pair, not
+      same-orientation ones. (The old docstring counted same-orientation
+      meetings and concluded no cell could exceed two addends. That
+      conclusion is false.)
+    * IEEE-754 addition is commutative -- `a + b == b + a` exactly -- and
+      only *associativity* fails, so a cell fed exactly **two** addends is
+      exactly order-invariant regardless of their values. That is the case
+      this test pins, using the deliberately-added second A-vs-B meeting
+      below.
+    * Everything downstream of the matrix (row normalization, epsilon,
+      power iteration, the sort) is a deterministic function of the matrix
+      and of `team_ids`, which is itself sorted.
+
+    Three unordered meetings between one pair DO occur in real data -- a
+    home-and-home plus a conference-championship or playoff rematch: nfl
+    2000 has 4 such pairs, nfl 2024 has 2, cfb 2024 has 1. Those cells take
+    three addends, where associativity does bite. See
+    `test_keener_reordering_drift_is_bounded_for_a_three_meeting_pair` for
+    the property that actually holds there.
+
+    The real, unconditional guarantee -- the one this module relies on --
+    is that **Keener is exactly reproducible on identical input**: it is a
+    deterministic function of the credit matrix and the sorted team ids,
+    with no BLAS nondeterminism. Order-induced drift is a property of the
+    matrix's *construction*, not of the solve, and is bounded at ~1e-16.
+
+    Contrast `test_elo.py::test_order_dependence_is_real`, which pins the
+    opposite property for the sequential method.
+    """
+    import random
+
+    games = [
+        Game(
+            home_team_id=i,
+            away_team_id=j,
+            home_points=10 + ((i * 7 + j * 3) % 40),
+            away_points=3 + ((i * 5 + j * 11) % 35),
+        )
+        for i in range(1, 13)
+        for j in range(i + 1, 13)
+        if (i + j) % 3
+    ]
+    # The load-bearing case: TWO A-vs-B meetings, so `raw[A, B]` and
+    # `raw[B, A]` each take two addends instead of one.
+    #
+    # Two games are appended, not one. `(i + j) % 3` is falsy for i=1, j=2,
+    # so the comprehension above skips A-vs-B entirely -- the previous
+    # single appended game left that cell with exactly ONE addend, and the
+    # two-addend case this test claims to exercise was never actually hit.
+    games.append(Game(home_team_id=A, away_team_id=B, home_points=31, away_points=17))
+    games.append(Game(home_team_id=B, away_team_id=A, home_points=24, away_points=20))
+
+    baseline = _rate(games)
+
+    for seed in range(8):
+        shuffled = list(games)
+        random.Random(seed).shuffle(shuffled)
+        result = _rate(shuffled)
+
+        assert set(result) == set(baseline)
+        for team_id, expected in baseline.items():
+            actual = result[team_id]
+            assert actual.rating == expected.rating
+            assert actual.rank == expected.rank
+            assert actual.wins == expected.wins
+            assert actual.losses == expected.losses
+
+            expected_entries = {
+                e.opponent_team_id: e for e in expected.rating_breakdown.entries
+            }
+            actual_entries = {
+                e.opponent_team_id: e for e in actual.rating_breakdown.entries
+            }
+            assert actual_entries.keys() == expected_entries.keys()
+            for opponent_id, expected_entry in expected_entries.items():
+                actual_entry = actual_entries[opponent_id]
+                assert actual_entry.credit == expected_entry.credit
+                assert actual_entry.contribution == expected_entry.contribution
+                assert actual_entry.games_played == expected_entry.games_played
+                assert actual_entry.wins == expected_entry.wins
+                assert actual_entry.losses == expected_entry.losses
+
+
+def test_keener_reordering_drift_is_bounded_for_a_three_meeting_pair() -> None:
+    """Three unordered meetings between one pair: bounded drift, no rank change.
+
+    This is the case real data actually produces and the exact-equality test
+    above cannot cover. A pair that meets three times in a season -- a
+    home-and-home plus a conference-championship or playoff rematch -- feeds
+    three addends into `raw[i, j]` (and three into `raw[j, i]`), because
+    `keener.py` credits *both* cells on every game regardless of orientation.
+    IEEE-754 addition is commutative but not associative, so
+    `(a + b) + c != a + (b + c)` in general and the matrix cell itself
+    becomes order-dependent.
+
+    Measured, not assumed. Replaying the pre-`ORDER BY` unordered query
+    against the new total order across all 55 real seasons perturbs Keener
+    ratings by at most 1.3877787807814457e-17 (matrix cells by at most
+    2.22e-16), with **zero** rank changes.
+
+    Whether any *particular* graph drifts is platform-dependent, and this
+    test learned that the hard way: this exact fixture drifts ~2.8e-17 on
+    the author's machine and exactly 0.0 on the CI runner, because numpy's
+    eigenvector solve reduces in a different order under a different BLAS
+    build. Keener remains exactly reproducible on identical input on a given
+    machine -- rerunning it never moves -- so the residue is order-induced
+    rather than random. But "reordering always perturbs" is not a claim this
+    or any test can make, which is why the assertion below is a bound and
+    never a demand that drift be non-zero.
+
+    The assertion is therefore a *bound plus exact ordinals*, not a
+    weakening into vagueness: `rank`, `wins` and `losses` must still be
+    exactly equal, and the rating tolerance (1e-12 absolute) is still five
+    orders of magnitude below the measured drift's ceiling and far below any
+    rating difference that could reorder two teams.
+    """
+    import random
+
+    games = [
+        Game(
+            home_team_id=i,
+            away_team_id=j,
+            home_points=10 + ((i * 7 + j * 3) % 40),
+            away_points=3 + ((i * 5 + j * 11) % 35),
+        )
+        for i in range(1, 13)
+        for j in range(i + 1, 13)
+        if (i + j) % 3
+    ]
+    # Three A-vs-B meetings in mixed orientations -- home-and-home plus a
+    # neutral-site rematch, which is what a CCG or a playoff round is.
+    games.append(Game(home_team_id=A, away_team_id=B, home_points=31, away_points=17))
+    games.append(Game(home_team_id=B, away_team_id=A, home_points=24, away_points=20))
+    games.append(
+        Game(home_team_id=A, away_team_id=B, home_points=13, away_points=10, neutral_site=True)
+    )
+
+    baseline = _rate(games)
+    worst_drift = 0.0
+
+    for seed in range(8):
+        shuffled = list(games)
+        random.Random(seed).shuffle(shuffled)
+        result = _rate(shuffled)
+
+        assert set(result) == set(baseline)
+        for team_id, expected in baseline.items():
+            actual = result[team_id]
+            # Ordinals and records are exactly equal -- the test is not
+            # allowed to go vacuous on the properties users actually see.
+            assert actual.rank == expected.rank
+            assert actual.wins == expected.wins
+            assert actual.losses == expected.losses
+            assert actual.rating == pytest.approx(expected.rating, abs=1e-12)
+            worst_drift = max(worst_drift, abs(actual.rating - expected.rating))
+
+            expected_entries = {
+                e.opponent_team_id: e for e in expected.rating_breakdown.entries
+            }
+            actual_entries = {
+                e.opponent_team_id: e for e in actual.rating_breakdown.entries
+            }
+            assert actual_entries.keys() == expected_entries.keys()
+            for opponent_id, expected_entry in expected_entries.items():
+                actual_entry = actual_entries[opponent_id]
+                assert actual_entry.games_played == expected_entry.games_played
+                assert actual_entry.wins == expected_entry.wins
+                assert actual_entry.losses == expected_entry.losses
+                assert actual_entry.credit == pytest.approx(
+                    expected_entry.credit, abs=1e-12
+                )
+                assert actual_entry.contribution == pytest.approx(
+                    expected_entry.contribution, abs=1e-12
+                )
+
+    # Assert the BOUND, never that drift is non-zero.
+    #
+    # An earlier version of this test asserted `worst_drift > 0.0`, reasoning
+    # that a graph which never drifts would make the bound vacuous. That
+    # assertion is wrong, and CI proved it: this same fixture drifts by
+    # 2.78e-17 on the author's machine and by exactly 0.0 on the CI runner --
+    # numpy's eigenvector solve reduces in a different order under a
+    # different BLAS build. Requiring floating point to misbehave is not a
+    # property of Keener, it is a property of whoever's CPU is running it.
+    #
+    # The anti-vacuity guard is structural instead, at the bottom of this
+    # test: the fixture is asserted to actually CONTAIN a pair with three
+    # unordered meetings, which is the input capable of exposing
+    # non-associativity. Whether it does expose it here is the platform's
+    # business; that the fixture can represent the case is ours.
+    assert worst_drift < 1e-14
+
+    # A/B's own breakdown entry must record all three meetings, so a future
+    # edit cannot quietly drop the case the test exists for.
+    a_vs_b = [e for e in baseline[A].rating_breakdown.entries if e.opponent_team_id == B]
+    assert len(a_vs_b) == 1 and a_vs_b[0].games_played == 3

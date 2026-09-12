@@ -29,8 +29,12 @@ commands:
       Fetch and store game/team data for one or more seasons. --sport
       defaults to "cfb" (CFBD); "nfl" ingests nflverse data instead.
 
-  rate --years YEARS [--method METHOD]
-      Compute and store team ratings for one or more seasons (default method: keener).
+  rate --years YEARS [--method {keener,elo,elo_career}] [--sport {cfb,nfl}]
+      Compute and store team ratings for one or more seasons.
+      --method defaults to "keener" (eigenvector strength-of-schedule; the
+      golden-dataset-validated default). "elo" rates each season in
+      isolation; "elo_career" carries ratings across seasons with offseason
+      mean reversion. --sport defaults to "cfb" and mirrors `ingest --sport`.
 
   serve
       Start the MCP server (stdio transport) exposing ranking/evidence tools.

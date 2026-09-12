@@ -15,7 +15,7 @@ the `ratings` table via SQL rather than importing `cfb_strength.ratings`.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
@@ -97,11 +97,54 @@ class TeamRow:
 
 @dataclass(frozen=True)
 class Game:
+    """One completed game, as handed to a `RatingMethod`.
+
+    The four ordering fields below were added for the Elo engine. Only
+    `season` is read by any current rating method (`EloCareerRating`, for
+    its offseason boundaries); `week`, `season_type` and `start_date` are
+    carried so a `Game` is self-describing when a failing test prints it,
+    and so a future in-memory reorder needs no second contract change. The
+    chronological ordering itself is imposed in SQL by
+    `ratings/compute_ratings.py::_load_games`, not in Python.
+
+    Every field is additive with a default, so no existing `Game(...)`
+    construction changes and Keener -- which is order-invariant by
+    construction, accumulating a credit matrix and then solving for its
+    dominant eigenvector -- is unaffected in substance.
+
+    Precisely how unaffected, because the honest bound matters more than a
+    round claim: Keener is *exactly* reproducible on identical input, and
+    reordering real games perturbs its ratings by at most ~1e-16 (measured
+    at 1.39e-17 across all 55 ingested seasons, with **zero** rank
+    changes). It is not bit-identical under reordering in general. A credit
+    matrix cell accumulates one addend per meeting in *either* orientation,
+    and unordered meetings do reach three in real data -- an NFL
+    home-and-home plus a playoff rematch, or a CFB regular-season game plus
+    a conference-championship rematch -- at which point float addition's
+    non-associativity is reachable. See
+    `ratings/test_keener.py`, where the two halves need different fixtures
+    and different assertion strengths, so they are two tests:
+    `test_keener_is_bit_identical_under_game_reordering` pins the exact
+    two-meeting case, and `test_keener_reordering_drift_is_bounded_for_a_
+    three_meeting_pair` pins the bound for the three-meeting case real data
+    actually produces. The two golden-dataset regression suites remain the
+    real guard.
+
+    `season` is `None`-able rather than required because Keener genuinely
+    does not need it and the synthetic `Game`s in the test suites do not
+    populate it. `CareerRatingMethod` implementations DO need it and may
+    treat a `None` season as a programming error.
+    """
+
     home_team_id: int
     away_team_id: int
     home_points: int
     away_points: int
     neutral_site: bool = False
+    season: int | None = None
+    week: int | None = None
+    season_type: str = "regular"
+    start_date: str | None = None
 
 
 @dataclass(frozen=True)
@@ -179,7 +222,58 @@ class TeamRating:
 
 
 class RatingMethod(Protocol):
+    """A rating algorithm that computes one season in isolation.
+
+    Ordering guarantee (added with `Game`'s ordering fields, for Elo):
+    `games` is delivered in chronological order -- by season, then regular
+    season before postseason, then week, then start date, then game id (see
+    `ratings/compute_ratings.py::_load_games`). The final id tiebreak makes
+    that a *total* order, so a sequential method's output is reproducible
+    even where `week`/`start_date` are null and the true chronology is
+    unknown.
+
+    Order-invariant methods (Keener) may ignore this and are unaffected by
+    it. It is stated here because it is a promise the caller now keeps, and
+    silently dropping it would break sequential methods in a way no
+    Keener test would catch.
+    """
+
     def rate(self, games: list[Game]) -> dict[int, TeamRating]: ...
+
+
+@runtime_checkable
+class CareerRatingMethod(Protocol):
+    """A rating algorithm whose output for a season depends on prior seasons.
+
+    `RatingMethod.rate()` is strictly per-year and cannot express carryover:
+    it never sees a game outside the season being rated. This protocol is the
+    seam for methods that can (e.g. Elo with cross-season rating carryover
+    and offseason mean reversion).
+
+    Semantics, which an implementation must honor exactly:
+
+    - `games` spans every season up to *and including* `target_season`, in
+      the chronological total order described on `RatingMethod`. Their
+      `season` fields are populated.
+    - The returned dict contains **only teams that played in
+      `target_season`**. A team that appeared in an earlier season but not
+      this one is carried through the replay (its rating still influences
+      opponents) but is absent from the result.
+    - Each `TeamRating.wins`/`losses` counts **only `target_season` games**.
+      The rating carries across seasons; the win-loss record does not.
+
+    `@runtime_checkable` is load-bearing, not decoration:
+    `compute_ratings.compute_and_store` dispatches on
+    `isinstance(impl, CareerRatingMethod)` to decide whether to load one
+    season or the full history. An `isinstance` check against a method-only
+    protocol tests for the presence of the method *name*, so a
+    `RatingMethod`-only implementation (which has `rate` but no
+    `rate_through`) correctly fails it.
+    """
+
+    def rate_through(
+        self, games: list[Game], target_season: int
+    ) -> dict[int, TeamRating]: ...
 
 
 # ---------------------------------------------------------------------------

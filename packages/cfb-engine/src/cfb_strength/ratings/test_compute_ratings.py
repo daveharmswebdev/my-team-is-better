@@ -13,7 +13,17 @@ import pytest
 
 from cfb_strength.contracts import Game
 from cfb_strength.db.connection import ensure_schema, get_conn
-from cfb_strength.ratings.compute_ratings import compute_and_store, main
+from cfb_strength.ratings.compute_ratings import (
+    _franchise_successors,
+    _load_games,
+    compute_and_store,
+    main,
+)
+from cfb_strength.ratings.elo import (
+    ELO_CONFIGS,
+    rating_shift,
+    revert_between_seasons,
+)
 from cfb_strength.ratings.keener import KeenerRating
 
 
@@ -488,4 +498,542 @@ def test_main_sport_flag_scopes_to_nfl(tmp_path: Path, monkeypatch: pytest.Monke
     ).fetchall()
     assert len(rows) == 2
     assert all(r["sport"] == "nfl" for r in rows)
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Elo (issue #86): a second and third registered method, one of which is
+# stateful across seasons. The 14 tests above are unchanged and are the
+# primary regression signal that adding them perturbed nothing.
+# ---------------------------------------------------------------------------
+
+
+def _insert_game_full(
+    conn: sqlite3.Connection,
+    game_id: int,
+    year: int,
+    home_id: int,
+    away_id: int,
+    home_points: int,
+    away_points: int,
+    week: int | None = 1,
+    season_type: str = "regular",
+    start_date: str | None = None,
+    sport: str = "cfb",
+) -> None:
+    """Like `_insert_game`, but with the ordering columns exposed."""
+    conn.execute(
+        """
+        INSERT INTO games (
+            id, season, week, season_type, start_date, neutral_site, completed,
+            home_team_id, away_team_id, home_team, away_team,
+            home_points, away_points, home_conference, away_conference, venue, raw_json, sport
+        ) VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '{}', ?)
+        """,
+        (
+            game_id,
+            year,
+            week,
+            season_type,
+            start_date,
+            home_id,
+            away_id,
+            f"team-{home_id}",
+            f"team-{away_id}",
+            home_points,
+            away_points,
+            sport,
+        ),
+    )
+
+
+def test_elo_method_is_registered_and_writes_ratings(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    for tid in (1, 2, 3):
+        _insert_team(conn, tid, f"Team {tid}")
+        _insert_team_season(conn, tid, year, "fbs")
+    _insert_game(conn, 1, year, 1, 2, 30, 10)
+    _insert_game(conn, 2, year, 2, 3, 20, 17)
+    _insert_game(conn, 3, year, 3, 1, 3, 40)
+    conn.commit()
+
+    count = compute_and_store(conn, year, "elo")
+    assert count == 3
+
+    rows = conn.execute(
+        "SELECT team_id, rating, rank FROM ratings WHERE year = ? AND method = ? ORDER BY rank",
+        (year, "elo"),
+    ).fetchall()
+    assert [r["rank"] for r in rows] == [1, 2, 3]
+    assert rows[0]["rating"] > rows[1]["rating"] > rows[2]["rating"]
+    # Elo lives on the ~1500 scale, not Keener's eigenvector scale.
+    assert all(1000.0 < r["rating"] < 2000.0 for r in rows)
+    conn.close()
+
+
+def test_elo_writes_no_rating_breakdown_rows(tmp_path: Path) -> None:
+    """Elo has no per-opponent decomposition, so it returns the default
+    `RatingBreakdown()`. Writing a NULL-opponent residual row for it would
+    assert a decomposition that does not exist."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    for tid in (1, 2):
+        _insert_team(conn, tid, f"Team {tid}")
+        _insert_team_season(conn, tid, year, "fbs")
+    _insert_game(conn, 1, year, 1, 2, 30, 10)
+    conn.commit()
+
+    compute_and_store(conn, year, "elo")
+    count = conn.execute(
+        "SELECT COUNT(*) AS c FROM rating_breakdowns WHERE method = 'elo'"
+    ).fetchone()["c"]
+    assert count == 0
+    conn.close()
+
+
+def test_single_team_wingraph_writes_no_breakdown_rows(tmp_path: Path) -> None:
+    """Pins the deliberate change to `_store_breakdowns`: the residual row
+    is emitted only when the breakdown is not default-constructed.
+
+    Keener's `n == 1` early-return path (reachable only via a degenerate
+    self-game) returns `rating=1.0` with an empty breakdown, so the row it
+    used to write asserted `1.0 == 0.0 + 0.0` -- a violation of
+    `RatingBreakdown`'s documented invariant. Dropping it is a fix, and it
+    is unobservable through the only reader (`evidence/proof.py` defaults
+    `residual_contribution` to 0.0 when no NULL-opponent row exists)."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    _insert_team(conn, 1, "Lonely")
+    _insert_team_season(conn, 1, year, "fbs")
+    _insert_game(conn, 1, year, 1, 1, 21, 14)
+    conn.commit()
+
+    count = compute_and_store(conn, year, "keener")
+    assert count == 1
+    breakdown_rows = conn.execute(
+        "SELECT COUNT(*) AS c FROM rating_breakdowns WHERE year = ? AND method = 'keener'",
+        (year,),
+    ).fetchone()["c"]
+    assert breakdown_rows == 0
+    conn.close()
+
+
+def _seed_three_seasons(conn: sqlite3.Connection) -> None:
+    for tid in (1, 2, 3):
+        _insert_team(conn, tid, f"Team {tid}")
+        for year in (2001, 2002, 2003):
+            _insert_team_season(conn, tid, year, "fbs")
+    game_id = 0
+    scores = {
+        2001: [(1, 2, 42, 0), (2, 3, 35, 3), (3, 1, 7, 38)],
+        2002: [(1, 2, 21, 20), (2, 3, 24, 21), (3, 1, 17, 14)],
+        2003: [(1, 2, 3, 45), (2, 3, 10, 40), (3, 1, 49, 0)],
+    }
+    for year, rows in scores.items():
+        for home, away, hp, ap in rows:
+            game_id += 1
+            _insert_game(conn, game_id, year, home, away, hp, ap)
+    conn.commit()
+
+
+def test_elo_career_loads_prior_seasons(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    _seed_three_seasons(conn)
+
+    assert compute_and_store(conn, 2002, "elo") == 3
+    assert compute_and_store(conn, 2002, "elo_career") == 3
+
+    isolated = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings WHERE year = 2002 AND method = 'elo'"
+        ).fetchall()
+    }
+    career = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings WHERE year = 2002 AND method = 'elo_career'"
+        ).fetchall()
+    }
+    assert career.keys() == isolated.keys() == {1, 2, 3}
+    # 2001 carried forward, so the two must not agree.
+    assert any(career[t] != isolated[t] for t in career)
+    conn.close()
+
+
+def test_elo_career_does_not_leak_future_seasons(tmp_path: Path) -> None:
+    """`WHERE season <= ?`, not `!= ?`: 2003 exists in the db but must have
+    no effect on the 2002 rating."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    _seed_three_seasons(conn)
+
+    compute_and_store(conn, 2002, "elo_career")
+    with_2003 = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings WHERE year = 2002 AND method = 'elo_career'"
+        ).fetchall()
+    }
+    conn.execute("DELETE FROM games WHERE season = 2003")
+    conn.commit()
+
+    compute_and_store(conn, 2002, "elo_career")
+    without_2003 = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings WHERE year = 2002 AND method = 'elo_career'"
+        ).fetchall()
+    }
+    assert with_2003 == without_2003
+    conn.close()
+
+
+def test_elo_career_records_are_target_season_only(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    _seed_three_seasons(conn)
+
+    compute_and_store(conn, 2002, "elo_career")
+    rows = conn.execute(
+        "SELECT team_id, wins, losses FROM ratings WHERE year = 2002 AND method = 'elo_career'"
+    ).fetchall()
+    # Each team plays exactly two games in 2002; the rating carries across
+    # seasons but the record does not.
+    for row in rows:
+        assert row["wins"] + row["losses"] == 2
+    conn.close()
+
+
+def test_elo_career_writes_rows_only_for_target_year_teams(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+
+    for tid in (1, 2, 3):
+        _insert_team(conn, tid, f"Team {tid}")
+    for tid in (1, 2, 3):
+        _insert_team_season(conn, tid, 2001, "fbs")
+    for tid in (1, 2):
+        _insert_team_season(conn, tid, 2002, "fbs")
+    _insert_game(conn, 1, 2001, 1, 2, 28, 21)
+    _insert_game(conn, 2, 2001, 2, 3, 35, 7)
+    _insert_game(conn, 3, 2002, 1, 2, 24, 20)
+    conn.commit()
+
+    count = compute_and_store(conn, 2002, "elo_career")
+    assert count == 2
+    rows = conn.execute(
+        "SELECT team_id FROM ratings WHERE year = 2002 AND method = 'elo_career'"
+    ).fetchall()
+    assert {r["team_id"] for r in rows} == {1, 2}
+    conn.close()
+
+
+def test_elo_and_keener_coexist_for_the_same_year_and_sport(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    for tid in (1, 2, 3):
+        _insert_team(conn, tid, f"Team {tid}")
+        _insert_team_season(conn, tid, year, "fbs")
+    _insert_game(conn, 1, year, 1, 2, 30, 10)
+    _insert_game(conn, 2, year, 2, 3, 20, 17)
+    _insert_game(conn, 3, year, 3, 1, 3, 40)
+    conn.commit()
+
+    compute_and_store(conn, year, "keener")
+    keener_before = conn.execute(
+        "SELECT team_id, rating FROM ratings WHERE method = 'keener' ORDER BY team_id"
+    ).fetchall()
+
+    compute_and_store(conn, year, "elo")
+    compute_and_store(conn, year, "elo")  # recompute: delete-then-insert
+
+    keener_after = conn.execute(
+        "SELECT team_id, rating FROM ratings WHERE method = 'keener' ORDER BY team_id"
+    ).fetchall()
+    assert [tuple(r) for r in keener_after] == [tuple(r) for r in keener_before]
+    elo_rows = conn.execute(
+        "SELECT COUNT(*) AS c FROM ratings WHERE method = 'elo'"
+    ).fetchone()["c"]
+    assert elo_rows == 3
+    conn.close()
+
+
+def test_nfl_elo_uses_the_nfl_config(tmp_path: Path) -> None:
+    """A wrong-but-plausible failure mode: rating NFL games at CFB's
+    k=40/hfa=100. Same synthetic games under each sport must not produce
+    the same rating."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2023
+
+    for tid in (1, 2):
+        _insert_team(conn, tid, f"CFB {tid}", sport="cfb")
+        _insert_team_season(conn, tid, year, "fbs", sport="cfb")
+    _insert_game(conn, 1, year, 1, 2, 28, 21, sport="cfb")
+
+    for tid in (101, 102):
+        _insert_team(conn, tid, f"NFL {tid}", sport="nfl")
+        _insert_team_season(conn, tid, year, None, sport="nfl")
+    _insert_game(conn, 101, year, 101, 102, 28, 21, sport="nfl")
+    conn.commit()
+
+    compute_and_store(conn, year, "elo", "cfb")
+    compute_and_store(conn, year, "elo", "nfl")
+
+    cfb_top = conn.execute(
+        "SELECT rating FROM ratings WHERE method='elo' AND sport='cfb' AND rank=1"
+    ).fetchone()["rating"]
+    nfl_top = conn.execute(
+        "SELECT rating FROM ratings WHERE method='elo' AND sport='nfl' AND rank=1"
+    ).fetchone()["rating"]
+    assert cfb_top != nfl_top
+    conn.close()
+
+
+def test_load_games_ordering_is_a_total_order(tmp_path: Path) -> None:
+    """NULL `week` / NULL `start_date` must sort *last* within their
+    season/season-type group (sqlite sorts NULLs first by default, which
+    would put an undated bowl ahead of that postseason's week 1), and
+    repeated calls must return an identical list."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    for tid in (1, 2, 3, 4):
+        _insert_team(conn, tid, f"Team {tid}")
+        _insert_team_season(conn, tid, year, "fbs")
+
+    _insert_game_full(conn, 10, year, 1, 2, 20, 10, week=None, start_date=None)
+    _insert_game_full(conn, 11, year, 3, 4, 21, 14, week=2, start_date="2005-09-10")
+    _insert_game_full(conn, 12, year, 1, 3, 30, 7, week=1, start_date="2005-09-03")
+    _insert_game_full(
+        conn, 13, year, 2, 4, 17, 14, week=1, start_date=None, season_type="postseason"
+    )
+    _insert_game_full(
+        conn, 14, year, 1, 4, 24, 3, week=None, start_date=None, season_type="postseason"
+    )
+    conn.commit()
+
+    first = _load_games(conn, year, "cfb")
+    second = _load_games(conn, year, "cfb")
+    assert first == second
+
+    # Regular season before postseason; within each, NULL week last.
+    assert [g.season_type for g in first] == [
+        "regular",
+        "regular",
+        "regular",
+        "postseason",
+        "postseason",
+    ]
+    assert [g.week for g in first] == [1, 2, None, 1, None]
+    assert first[0].season == year
+    conn.close()
+
+
+def test_load_games_history_spans_prior_seasons_in_order(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    _seed_three_seasons(conn)
+
+    scoped = _load_games(conn, 2002, "cfb")
+    history = _load_games(conn, 2002, "cfb", history=True)
+    assert {g.season for g in scoped} == {2002}
+    seasons = [g.season for g in history if g.season is not None]
+    assert len(seasons) == len(history)
+    assert seasons == sorted(seasons)
+    assert set(seasons) == {2001, 2002}
+    conn.close()
+
+
+def test_main_accepts_elo_and_elo_career(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    _seed_three_seasons(conn)
+    conn.close()
+
+    monkeypatch.setattr(
+        "cfb_strength.ratings.compute_ratings.get_conn",
+        lambda: get_conn(db_path),
+    )
+
+    assert main(["--years", "2002", "--method", "elo"]) == 0
+    assert main(["--years", "2002", "--method", "elo_career"]) == 0
+
+    conn = get_conn(db_path)
+    methods = {
+        r["method"]
+        for r in conn.execute("SELECT DISTINCT method FROM ratings").fetchall()
+    }
+    assert methods == {"elo", "elo_career"}
+    conn.close()
+
+
+def test_unknown_method_message_lists_every_registered_method(tmp_path: Path) -> None:
+    """`test_unknown_method_raises` above is left untouched (it is one of
+    the 14 pre-existing regression tests); this pins the message content
+    now that the registry has three entries."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    with pytest.raises(ValueError) as exc:
+        compute_and_store(conn, 2005, "not-a-real-method")
+    message = str(exc.value)
+    for method in ("keener", "elo", "elo_career"):
+        assert method in message
+    conn.close()
+
+
+def test_franchise_successors_maps_source_ids_to_team_ids(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    conn.execute(
+        "INSERT INTO teams (id, school, classification, sport, source_id) "
+        "VALUES (?, ?, NULL, 'nfl', ?)",
+        (201, "St. Louis Rams", "STL"),
+    )
+    conn.execute(
+        "INSERT INTO teams (id, school, classification, sport, source_id) "
+        "VALUES (?, ?, NULL, 'nfl', ?)",
+        (202, "Los Angeles Rams", "LA"),
+    )
+    conn.commit()
+
+    successors = _franchise_successors(conn, "nfl")
+    # SD/LAC and OAK/LV are absent from this db -- a fixture covering only
+    # part of the league is legitimate, not an error, so they are skipped.
+    assert successors == {201: 202}
+    conn.close()
+
+
+def test_franchise_successors_is_empty_for_cfb(tmp_path: Path) -> None:
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    _insert_team(conn, 1, "Texas")
+    conn.commit()
+    assert _franchise_successors(conn, "cfb") == {}
+    conn.close()
+
+
+def _insert_nfl_team(
+    conn: sqlite3.Connection, team_id: int, school: str, source_id: str
+) -> None:
+    conn.execute(
+        "INSERT INTO teams (id, school, classification, sport, source_id) "
+        "VALUES (?, ?, NULL, 'nfl', ?)",
+        (team_id, school, source_id),
+    )
+
+
+def test_elo_career_carries_a_relocated_franchise_end_to_end(tmp_path: Path) -> None:
+    """F5. The join between `_franchise_successors` and `EloCareerRating`,
+    through `METHODS["elo_career"]`'s factory lambda, exercised for real.
+
+    Both halves were unit-tested in isolation -- `_franchise_successors`
+    against a `teams` fixture, and lineage carryover against a hand-built
+    `{STL: LA}` map in `test_elo.py` -- but nothing ran the two together, so
+    the factory lambda that wires them (the whole point of the lineage
+    feature) was unverified end to end. A lambda that passed `{}`, or looked
+    up the wrong sport, would have kept every existing test green.
+
+    St. Louis plays 2015, Los Angeles plays 2016, and the stored 2016 rating
+    for LA's team id must start from STL's reverted 2015 rating -- not from
+    `EloConfig.initial`.
+    """
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+
+    stl, la, opponent = 201, 202, 203
+    _insert_nfl_team(conn, stl, "St. Louis Rams", "STL")
+    _insert_nfl_team(conn, la, "Los Angeles Rams", "LA")
+    _insert_nfl_team(conn, opponent, "Chicago Bears", "CHI")
+    _insert_game(conn, 1, 2015, stl, opponent, 28, 21, sport="nfl")
+    _insert_game(conn, 2, 2016, la, opponent, 24, 20, sport="nfl")
+    conn.commit()
+
+    assert _franchise_successors(conn, "nfl") == {stl: la}
+    assert compute_and_store(conn, 2016, "elo_career", "nfl") == 2
+
+    stored = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings "
+            "WHERE year = 2016 AND method = 'elo_career' AND sport = 'nfl'"
+        ).fetchall()
+    }
+    # STL did not play 2016, so only LA and its opponent are emitted -- and
+    # LA, not STL, is the key, because LA is the id that played 2016.
+    assert set(stored) == {la, opponent}
+
+    nfl = ELO_CONFIGS["nfl"]
+    stl_end_2015 = nfl.initial + rating_shift(
+        nfl.initial, nfl.initial, 28, 21, False, nfl
+    )
+    opponent_end_2015 = nfl.initial - (stl_end_2015 - nfl.initial)
+    la_start_2016 = revert_between_seasons(stl_end_2015, nfl)
+    opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
+    shift = rating_shift(la_start_2016, opponent_start_2016, 24, 20, False, nfl)
+
+    assert stored[la] == la_start_2016 + shift
+    assert stored[opponent] == opponent_start_2016 - shift
+
+    # The assertion that actually catches a broken wire-up: with no lineage
+    # LA would have entered 2016 cold, at `initial`, and finished lower.
+    no_carryover = nfl.initial + rating_shift(
+        nfl.initial, opponent_start_2016, 24, 20, False, nfl
+    )
+    assert stored[la] != no_carryover
+    assert stored[la] > no_carryover
+    conn.close()
+
+
+def test_elo_career_nfl_without_a_lineage_row_starts_cold(tmp_path: Path) -> None:
+    """The matched negative of the test above: same games, but the 2015
+    team carries a `source_id` that is not in `FRANCHISE_LINEAGE`, so no
+    carryover happens and 2016's team starts at `initial`.
+
+    Without this pair, a factory lambda that carried *every* team forward
+    (or resolved the lineage too eagerly) would still satisfy the positive
+    test.
+    """
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+
+    old_team, new_team, opponent = 301, 302, 303
+    _insert_nfl_team(conn, old_team, "Not A Predecessor", "XXX")
+    _insert_nfl_team(conn, new_team, "Not A Successor", "YYY")
+    _insert_nfl_team(conn, opponent, "Chicago Bears", "CHI")
+    _insert_game(conn, 1, 2015, old_team, opponent, 28, 21, sport="nfl")
+    _insert_game(conn, 2, 2016, new_team, opponent, 24, 20, sport="nfl")
+    conn.commit()
+
+    assert _franchise_successors(conn, "nfl") == {}
+    compute_and_store(conn, 2016, "elo_career", "nfl")
+    stored = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings "
+            "WHERE year = 2016 AND method = 'elo_career' AND sport = 'nfl'"
+        ).fetchall()
+    }
+
+    nfl = ELO_CONFIGS["nfl"]
+    opponent_end_2015 = nfl.initial - rating_shift(
+        nfl.initial, nfl.initial, 28, 21, False, nfl
+    )
+    opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
+    shift = rating_shift(nfl.initial, opponent_start_2016, 24, 20, False, nfl)
+    assert stored[new_team] == nfl.initial + shift
     conn.close()
