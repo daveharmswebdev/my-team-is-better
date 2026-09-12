@@ -19,6 +19,11 @@ from cfb_strength.ratings.compute_ratings import (
     compute_and_store,
     main,
 )
+from cfb_strength.ratings.elo import (
+    ELO_CONFIGS,
+    rating_shift,
+    revert_between_seasons,
+)
 from cfb_strength.ratings.keener import KeenerRating
 
 
@@ -919,4 +924,116 @@ def test_franchise_successors_is_empty_for_cfb(tmp_path: Path) -> None:
     _insert_team(conn, 1, "Texas")
     conn.commit()
     assert _franchise_successors(conn, "cfb") == {}
+    conn.close()
+
+
+def _insert_nfl_team(
+    conn: sqlite3.Connection, team_id: int, school: str, source_id: str
+) -> None:
+    conn.execute(
+        "INSERT INTO teams (id, school, classification, sport, source_id) "
+        "VALUES (?, ?, NULL, 'nfl', ?)",
+        (team_id, school, source_id),
+    )
+
+
+def test_elo_career_carries_a_relocated_franchise_end_to_end(tmp_path: Path) -> None:
+    """F5. The join between `_franchise_successors` and `EloCareerRating`,
+    through `METHODS["elo_career"]`'s factory lambda, exercised for real.
+
+    Both halves were unit-tested in isolation -- `_franchise_successors`
+    against a `teams` fixture, and lineage carryover against a hand-built
+    `{STL: LA}` map in `test_elo.py` -- but nothing ran the two together, so
+    the factory lambda that wires them (the whole point of the lineage
+    feature) was unverified end to end. A lambda that passed `{}`, or looked
+    up the wrong sport, would have kept every existing test green.
+
+    St. Louis plays 2015, Los Angeles plays 2016, and the stored 2016 rating
+    for LA's team id must start from STL's reverted 2015 rating -- not from
+    `EloConfig.initial`.
+    """
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+
+    stl, la, opponent = 201, 202, 203
+    _insert_nfl_team(conn, stl, "St. Louis Rams", "STL")
+    _insert_nfl_team(conn, la, "Los Angeles Rams", "LA")
+    _insert_nfl_team(conn, opponent, "Chicago Bears", "CHI")
+    _insert_game(conn, 1, 2015, stl, opponent, 28, 21, sport="nfl")
+    _insert_game(conn, 2, 2016, la, opponent, 24, 20, sport="nfl")
+    conn.commit()
+
+    assert _franchise_successors(conn, "nfl") == {stl: la}
+    assert compute_and_store(conn, 2016, "elo_career", "nfl") == 2
+
+    stored = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings "
+            "WHERE year = 2016 AND method = 'elo_career' AND sport = 'nfl'"
+        ).fetchall()
+    }
+    # STL did not play 2016, so only LA and its opponent are emitted -- and
+    # LA, not STL, is the key, because LA is the id that played 2016.
+    assert set(stored) == {la, opponent}
+
+    nfl = ELO_CONFIGS["nfl"]
+    stl_end_2015 = nfl.initial + rating_shift(
+        nfl.initial, nfl.initial, 28, 21, False, nfl
+    )
+    opponent_end_2015 = nfl.initial - (stl_end_2015 - nfl.initial)
+    la_start_2016 = revert_between_seasons(stl_end_2015, nfl)
+    opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
+    shift = rating_shift(la_start_2016, opponent_start_2016, 24, 20, False, nfl)
+
+    assert stored[la] == la_start_2016 + shift
+    assert stored[opponent] == opponent_start_2016 - shift
+
+    # The assertion that actually catches a broken wire-up: with no lineage
+    # LA would have entered 2016 cold, at `initial`, and finished lower.
+    no_carryover = nfl.initial + rating_shift(
+        nfl.initial, opponent_start_2016, 24, 20, False, nfl
+    )
+    assert stored[la] != no_carryover
+    assert stored[la] > no_carryover
+    conn.close()
+
+
+def test_elo_career_nfl_without_a_lineage_row_starts_cold(tmp_path: Path) -> None:
+    """The matched negative of the test above: same games, but the 2015
+    team carries a `source_id` that is not in `FRANCHISE_LINEAGE`, so no
+    carryover happens and 2016's team starts at `initial`.
+
+    Without this pair, a factory lambda that carried *every* team forward
+    (or resolved the lineage too eagerly) would still satisfy the positive
+    test.
+    """
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+
+    old_team, new_team, opponent = 301, 302, 303
+    _insert_nfl_team(conn, old_team, "Not A Predecessor", "XXX")
+    _insert_nfl_team(conn, new_team, "Not A Successor", "YYY")
+    _insert_nfl_team(conn, opponent, "Chicago Bears", "CHI")
+    _insert_game(conn, 1, 2015, old_team, opponent, 28, 21, sport="nfl")
+    _insert_game(conn, 2, 2016, new_team, opponent, 24, 20, sport="nfl")
+    conn.commit()
+
+    assert _franchise_successors(conn, "nfl") == {}
+    compute_and_store(conn, 2016, "elo_career", "nfl")
+    stored = {
+        r["team_id"]: r["rating"]
+        for r in conn.execute(
+            "SELECT team_id, rating FROM ratings "
+            "WHERE year = 2016 AND method = 'elo_career' AND sport = 'nfl'"
+        ).fetchall()
+    }
+
+    nfl = ELO_CONFIGS["nfl"]
+    opponent_end_2015 = nfl.initial - rating_shift(
+        nfl.initial, nfl.initial, 28, 21, False, nfl
+    )
+    opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
+    shift = rating_shift(nfl.initial, opponent_start_2016, 24, 20, False, nfl)
+    assert stored[new_team] == nfl.initial + shift
     conn.close()

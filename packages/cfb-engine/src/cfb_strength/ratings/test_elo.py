@@ -30,6 +30,7 @@ from cfb_strength.ratings.elo import (
     game_result,
     mov_multiplier,
     rating_shift,
+    revert_across_offseasons,
     revert_between_seasons,
 )
 from cfb_strength.ratings.keener import KeenerRating
@@ -200,6 +201,68 @@ def test_mov_denominator_guard_prevents_sign_inversion() -> None:
     )
 
 
+def test_mov_multiplier_rejects_non_finite_inputs() -> None:
+    """F4. The denominator clamp is `max(...)`, and `max(nan, 1.1)` is `nan`
+    in Python -- every comparison against a NaN is False, so a NaN
+    `elo_diff` walked straight through the clamp and out of the function.
+    `rating_shift` then produced a NaN shift and `elo[root] += shift`
+    poisoned that team, its opponents, and every later season, with no
+    exception raised anywhere.
+
+    A NaN is not clampable to a correctly-signed bounded value the way an
+    extreme `elo_diff` is, so it raises instead.
+    """
+    for bad in (math.nan, math.inf, -math.inf):
+        with pytest.raises(ValueError, match="finite"):
+            mov_multiplier(7, bad, 1.0, CFB)
+        with pytest.raises(ValueError, match="finite"):
+            mov_multiplier(bad, 100.0, 1.0, CFB)
+        # A tie takes the `denom = 1.0` branch and must be guarded too.
+        with pytest.raises(ValueError, match="finite"):
+            mov_multiplier(0, bad, 0.5, CFB)
+
+    # And the guard reaches through `rating_shift`, which is what the walk
+    # actually calls.
+    with pytest.raises(ValueError, match="finite"):
+        rating_shift(math.nan, 1500.0, 28, 21, False, CFB)
+
+    # Sanity: an ordinary call is untouched by the guard.
+    assert mov_multiplier(7, 100.0, 1.0, CFB) == 1.9890310398676687
+
+
+def test_elo_config_rejects_a_silently_wrong_tuning() -> None:
+    """F4. `EloConfig` had no validation at all, which is inconsistent with
+    `_EloConfigRegistry`'s "refuses to be silently wrong" philosophy twenty
+    lines below it.
+
+    Each rejected field maps to a concrete downstream hazard: `scale` is
+    `expected_score`'s unguarded divisor, `mov_scale` is the basis of the
+    mandatory denominator floor (which evaporates at `mov_scale <= 0`,
+    re-enabling the very sign inversion the clamp exists to prevent), `k`
+    scales every shift, and a `revert` outside [0, 1] pushes ratings away
+    from the mean or oscillates past it instead of contracting.
+    """
+    base = dict(k=40.0, hfa=100.0, mean=1500.0, initial=1500.0)
+
+    for field_name in ("k", "scale", "mov_scale"):
+        for bad in (0.0, -1.0, math.nan, math.inf, -math.inf):
+            with pytest.raises(ValueError, match=field_name):
+                EloConfig(**{**base, field_name: bad})
+
+    for bad_revert in (-0.001, 1.001, 2.0, math.nan, math.inf):
+        with pytest.raises(ValueError, match="revert"):
+            EloConfig(**base, revert=bad_revert)
+
+    # The endpoints are legal: revert=0 is "never revert", revert=1 is
+    # "reset to the mean every offseason". Both are degenerate but coherent.
+    assert EloConfig(**base, revert=0.0).revert == 0.0
+    assert EloConfig(**base, revert=1.0).revert == 1.0
+
+    # And nothing about the shipped presets trips the new validation.
+    for cfg in ELO_CONFIGS.values():
+        assert EloConfig(**vars(cfg)) == cfg
+
+
 def test_reversion_pulls_toward_mean() -> None:
     """`pytest.approx`, not `==`: `1500.0 * (1/3) + 1800.0 * (1 - 1/3)`
     evaluates to 1700.0000000000002 in IEEE-754, because `1 - 1/3` is one
@@ -344,7 +407,16 @@ def test_records_count_target_season_only() -> None:
 
 def test_carried_rating_survives_a_skipped_season() -> None:
     """A team absent from an intermediate season is still carried; it just
-    is not emitted for the seasons it missed."""
+    is not emitted for the seasons it missed.
+
+    Asserts the *rating*, not merely `set(result)`. The set-only version of
+    this test passed both before and after the elapsed-offseason fix (F2),
+    because which teams are emitted never depended on the reversion count --
+    only the numbers did.
+
+    A plays 2001 and 2003 (a two-offseason gap, so two reversions); C plays
+    2002 and 2003 (one offseason, one reversion).
+    """
     games = [
         _game(A, B, 28, 21, season=2001),
         _game(C, D, 14, 10, season=2002),
@@ -353,11 +425,163 @@ def test_carried_rating_survives_a_skipped_season() -> None:
     result = EloCareerRating(CFB, {}).rate_through(games, 2003)
     assert set(result) == {A, C}
 
+    a_end_2001 = CFB.initial + rating_shift(
+        CFB.initial, CFB.initial, 28, 21, False, CFB
+    )
+    c_end_2002 = CFB.initial + rating_shift(
+        CFB.initial, CFB.initial, 14, 10, False, CFB
+    )
+    a_start_2003 = revert_across_offseasons(a_end_2001, CFB, 2)
+    c_start_2003 = revert_between_seasons(c_end_2002, CFB)
+    shift = rating_shift(a_start_2003, c_start_2003, 21, 20, False, CFB)
 
-def test_target_season_before_any_games_returns_empty() -> None:
+    assert result[A].rating == a_start_2003 + shift
+    assert result[C].rating == c_start_2003 - shift
+
+    # And two reversions really is two: the same composition applied once
+    # (the pre-fix behavior, which counted observed transitions rather than
+    # elapsed offseasons) leaves A measurably higher.
+    one_reversion_only = revert_between_seasons(a_end_2001, CFB)
+    assert one_reversion_only > a_start_2003 > CFB.mean
+    assert result[A].rating != one_reversion_only + rating_shift(
+        one_reversion_only, c_start_2003, 21, 20, False, CFB
+    )
+
+
+def test_reversion_count_is_elapsed_offseasons_not_observed_transitions() -> None:
+    """F2. A team that sits out three seasons reverts four times, not once.
+
+    The bug this pins was a one-line predicate (`last_season[root] != season`)
+    that fired once per *observed* season-to-season transition, so a 2001 ->
+    2005 reappearance got a single reversion and carried a four-year-stale
+    rating -- contradicting `revert_between_seasons`' own docstring ("exactly
+    once per team per offseason").
+    """
+    gapped = [
+        _game(A, B, 42, 0, season=2001),
+        _game(A, B, 24, 20, season=2005),
+    ]
+    result = EloCareerRating(CFB, {}).rate_through(gapped, 2005)
+
+    a_end_2001 = CFB.initial + rating_shift(
+        CFB.initial, CFB.initial, 42, 0, False, CFB
+    )
+    b_end_2001 = CFB.initial - (a_end_2001 - CFB.initial)
+    a_start = revert_across_offseasons(a_end_2001, CFB, 4)
+    b_start = revert_across_offseasons(b_end_2001, CFB, 4)
+    shift = rating_shift(a_start, b_start, 24, 20, False, CFB)
+
+    assert result[A].rating == a_start + shift
+    assert result[B].rating == b_start - shift
+
+    # Four reversions have pulled A most of the way back toward the mean;
+    # one would have left it far above. This is the assertion that fails
+    # against the pre-fix implementation.
+    one_only = revert_between_seasons(a_end_2001, CFB)
+    assert abs(a_start - CFB.mean) < abs(one_only - CFB.mean)
+    assert result[A].rating < one_only
+
+
+def test_closed_form_matches_repeated_reversion() -> None:
+    """`revert_across_offseasons` is defined as n applications of
+    `revert_between_seasons`; the closed form is an optimization, so the
+    equivalence is the actual contract and is pinned here.
+
+    `approx`, not `==`, and deliberately so: `mean*revert + elo*(1-revert)`
+    and `mean + (elo-mean)*(1-revert)**n` round differently in IEEE-754.
+    They agree to ~1e-12 absolute, which is nine orders of magnitude below
+    one Elo point.
+    """
+    for cfg in (CFB, NFL):
+        for elo in (1200.0, 1499.0, cfg.mean, 1650.5, 2100.0):
+            carried = elo
+            for n in range(1, 13):
+                carried = revert_between_seasons(carried, cfg)
+                assert revert_across_offseasons(elo, cfg, n) == pytest.approx(
+                    carried, abs=1e-9
+                )
+
+    # n == 1 is bit-identical, not merely approximate: the common case must
+    # not be perturbed by the closed form's different rounding.
+    for elo in (1200.0, 1650.5, 2100.0):
+        assert revert_across_offseasons(elo, CFB, 1) == revert_between_seasons(elo, CFB)
+
+    # n == 0 is the identity: a team playing two games in the same season
+    # must not revert between them.
+    assert revert_across_offseasons(1777.25, CFB, 0) == 1777.25
+
+
+def test_reversion_is_monotone_and_contracting_in_the_gap() -> None:
+    """Each extra elapsed offseason moves a rating strictly closer to the
+    mean and never overshoots it -- the property that makes the closed form
+    a reversion rather than an oscillation."""
+    for cfg in (CFB, NFL):
+        for elo in (1150.0, 1900.0):
+            previous = abs(elo - cfg.mean)
+            for n in range(1, 40):
+                current = abs(revert_across_offseasons(elo, cfg, n) - cfg.mean)
+                assert current < previous
+                previous = current
+            # A very large gap converges to the mean rather than diverging.
+            assert revert_across_offseasons(elo, cfg, 500) == pytest.approx(cfg.mean)
+
+
+def test_negative_offseason_gap_raises() -> None:
+    """A negative gap can only mean `games` was not in ascending season
+    order, which `RatingMethod` documents as guaranteed. `(1-revert) ** -n`
+    would silently *amplify* the deviation from the mean."""
+    with pytest.raises(ValueError, match="non-negative"):
+        revert_across_offseasons(1600.0, CFB, -1)
+
+
+def test_target_season_with_no_games_of_its_own_returns_empty() -> None:
+    """No game in the target season -> nothing to emit, even though earlier
+    seasons were replayed.
+
+    This used to also assert `rate_through([2001 game], 1999) == {}`. That
+    case is now a `ValueError` (see
+    `test_games_after_the_target_season_raise`): a game from *after* the
+    target violates the caller's contract, and answering it with `{}` was
+    only accidentally harmless.
+    """
     games = [_game(A, B, 28, 21, season=2001)]
-    assert EloCareerRating(CFB, {}).rate_through(games, 1999) == {}
+    assert EloCareerRating(CFB, {}).rate_through(games, 2002) == {}
     assert EloCareerRating(CFB, {}).rate_through([], 2001) == {}
+
+
+def test_games_after_the_target_season_raise() -> None:
+    """F1. A post-target season in `games` used to silently emit the rating
+    at the end of the *last* season present, not the target one.
+
+    `participants` was populated during the walk but `ratings` was read out
+    of `elo` only *after* the whole walk finished, so a 2002 game kept
+    moving A's rating after 2001 had been recorded as the target. With the
+    two games below the emitted 2001 rating was 1408.4856 -- A's post-2002
+    value -- where the correct answer is A's end-of-2001 value,
+    1528.6368755090734.
+
+    Safe today only because `_load_games(history=True)` filters
+    `season <= ?`. The walk already validates a `None` season one branch
+    above, and a wrong number is a worse failure than a crash, so this
+    raises rather than snapshotting and continuing.
+    """
+    games = [
+        _game(A, B, 28, 21, season=2001),
+        _game(A, B, 24, 20, season=2002),
+    ]
+    with pytest.raises(ValueError) as exc:
+        EloCareerRating(CFB, {}).rate_through(games, 2001)
+    message = str(exc.value)
+    assert "2002" in message and "2001" in message
+
+    # The boundary must NOT raise: `season == target_season` is the normal
+    # case (the target season's own games are part of the replay), and the
+    # answer is A's end-of-2001 rating.
+    ok = EloCareerRating(CFB, {}).rate_through(games[:1], 2001)
+    assert ok[A].rating == 1528.6368755090734
+
+    # Season-isolated `EloRating` has no target season and is unaffected.
+    assert set(EloRating(CFB).rate(games)) == {A, B}
 
 
 def test_none_season_raises() -> None:
@@ -449,6 +673,52 @@ def test_lineage_cycle_raises() -> None:
     """A bad lineage table must fail fast, not hang a 28-season backfill."""
     with pytest.raises(ValueError, match="cycle"):
         EloCareerRating(CFB, {STL: LA, LA: STL})
+
+
+def test_lineage_members_overlapping_in_the_target_season_raise() -> None:
+    """F3. `participants[root] = actual_id` was last-writer-wins.
+
+    If a lineage predecessor and its successor both play `record_season`,
+    only one of them survives into `participants` -- the other's team id
+    disappears from the result entirely, and its wins/losses are computed
+    and then thrown away, while the survivor is handed the *combined*
+    franchise rating next to only its own record. Before the fix this
+    fixture returned keys `[1, 901]`: STL (900) was simply gone.
+
+    Real data never does this (`franchise_lineage.py`'s three pairs are
+    strictly non-overlapping, pinned by
+    `test_franchise_lineage.py`), but the premise is now enforced rather
+    than assumed -- same reasoning as `_resolve_roots`' cycle guard.
+    """
+    games = [
+        _game(STL, A, 28, 21, season=2016),
+        _game(LA, A, 24, 20, season=2016),
+    ]
+    with pytest.raises(ValueError) as exc:
+        EloCareerRating(CFB, {STL: LA}).rate_through(games, 2016)
+    message = str(exc.value)
+    assert str(STL) in message and str(LA) in message
+
+    # Non-overlapping seasons are the supported case and must stay silent.
+    ok = EloCareerRating(CFB, {STL: LA}).rate_through(
+        [_game(STL, A, 28, 21, season=2015), _game(LA, A, 24, 20, season=2016)], 2016
+    )
+    assert set(ok) == {LA, A}
+
+
+def test_lineage_overlap_outside_the_target_season_is_not_an_error() -> None:
+    """Only `record_season` participants are checked. The walk deliberately
+    keys Elo state by root across every season, so a predecessor and
+    successor sharing an *earlier* season is a lineage-table problem for
+    `test_franchise_lineage.py` to catch, not something this guard can see
+    -- it only guards the ambiguity in the emitted keys."""
+    games = [
+        _game(STL, A, 28, 21, season=2015),
+        _game(LA, A, 24, 20, season=2015),
+        _game(LA, A, 31, 17, season=2016),
+    ]
+    result = EloCareerRating(CFB, {STL: LA}).rate_through(games, 2016)
+    assert set(result) == {LA, A}
 
 
 # ---------------------------------------------------------------------------

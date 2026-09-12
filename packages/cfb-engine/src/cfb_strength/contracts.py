@@ -99,16 +99,36 @@ class TeamRow:
 class Game:
     """One completed game, as handed to a `RatingMethod`.
 
-    The four ordering fields below were added for the Elo engine. Keener is
-    order-invariant by construction (it accumulates a credit matrix, then
-    solves for its dominant eigenvector), so it ignores all four; Elo is
-    sequential and cannot be computed without them.
+    The four ordering fields below were added for the Elo engine. Only
+    `season` is read by any current rating method (`EloCareerRating`, for
+    its offseason boundaries); `week`, `season_type` and `start_date` are
+    carried so a `Game` is self-describing when a failing test prints it,
+    and so a future in-memory reorder needs no second contract change. The
+    chronological ordering itself is imposed in SQL by
+    `ratings/compute_ratings.py::_load_games`, not in Python.
 
-    Every one is additive with a default, so no existing `Game(...)`
-    construction changes and Keener's output stays bit-identical -- see
-    `ratings/test_keener.py::test_rate_is_order_invariant`, added with this
-    amendment specifically to prove that, and the two golden-dataset
-    regression suites, which are the real guard.
+    Every field is additive with a default, so no existing `Game(...)`
+    construction changes and Keener -- which is order-invariant by
+    construction, accumulating a credit matrix and then solving for its
+    dominant eigenvector -- is unaffected in substance.
+
+    Precisely how unaffected, because the honest bound matters more than a
+    round claim: Keener is *exactly* reproducible on identical input, and
+    reordering real games perturbs its ratings by at most ~1e-16 (measured
+    at 1.39e-17 across all 55 ingested seasons, with **zero** rank
+    changes). It is not bit-identical under reordering in general. A credit
+    matrix cell accumulates one addend per meeting in *either* orientation,
+    and unordered meetings do reach three in real data -- an NFL
+    home-and-home plus a playoff rematch, or a CFB regular-season game plus
+    a conference-championship rematch -- at which point float addition's
+    non-associativity is reachable. See
+    `ratings/test_keener.py`, where the two halves need different fixtures
+    and different assertion strengths, so they are two tests:
+    `test_keener_is_bit_identical_under_game_reordering` pins the exact
+    two-meeting case, and `test_keener_reordering_drift_is_bounded_for_a_
+    three_meeting_pair` pins the bound for the three-meeting case real data
+    actually produces. The two golden-dataset regression suites remain the
+    real guard.
 
     `season` is `None`-able rather than required because Keener genuinely
     does not need it and the synthetic `Game`s in the test suites do not

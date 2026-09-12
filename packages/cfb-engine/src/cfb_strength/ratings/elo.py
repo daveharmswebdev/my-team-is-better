@@ -98,6 +98,45 @@ class EloConfig:
     mov_scale: float = 2.2
     mov_autocorr: float = 0.001
 
+    def __post_init__(self) -> None:
+        """Reject a config that would make the update math silently wrong.
+
+        Same philosophy as `_EloConfigRegistry` twenty lines below: the
+        failure mode being guarded is not a crash, it is a plausible-looking
+        wrong number. Each check corresponds to a concrete division or clamp
+        downstream:
+
+        * `scale` is `expected_score`'s unguarded divisor -- a 0.0 scale is a
+          `ZeroDivisionError`, a negative one silently inverts every
+          prediction (the favorite becomes the underdog).
+        * `mov_scale` is both the numerator of the margin-of-victory
+          multiplier and the basis of its mandatory denominator floor
+          (`_MIN_DENOM_FRACTION * cfg.mov_scale`). At `mov_scale <= 0` the
+          floor evaporates -- it can no longer stop the denominator reaching
+          zero or going negative -- which is exactly the sign inversion
+          `mov_multiplier`'s clamp exists to prevent.
+        * `k` scales every shift; a negative `k` rewards losing.
+        * `revert` outside `[0, 1]` is not a partial reversion at all: below
+          0 it pushes a rating *away* from the mean each offseason, above 1
+          it overshoots past it and oscillates. `revert_across_offseasons`'
+          closed form `(1 - revert) ** n` only contracts inside this range.
+
+        NaN is rejected explicitly rather than left to the comparisons: every
+        `<=` against a NaN is False, so a NaN would pass a bare
+        `if value <= 0` check and then poison every rating it touched.
+        """
+        for name in ("k", "scale", "mov_scale"):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"EloConfig.{name} must be finite and positive; got {value!r}"
+                )
+        if not math.isfinite(self.revert) or not 0.0 <= self.revert <= 1.0:
+            raise ValueError(
+                f"EloConfig.revert must be a finite fraction in [0, 1]; "
+                f"got {self.revert!r}"
+            )
+
 
 class _EloConfigRegistry(dict[str, EloConfig]):
     """A `dict[str, EloConfig]` that refuses to be silently wrong.
@@ -220,7 +259,24 @@ def mov_multiplier(
     A clamp and not an `assert`: an assert would abort a full backfill over
     one bad game, whereas the clamp saturates the multiplier at exactly 2x
     its undamped value -- a large but bounded, correctly-signed update.
+
+    NaN IS NOT CLAMPABLE
+    --------------------
+    The clamp above is `max(...)`, and `max(nan, 1.1)` returns `nan` in
+    Python -- every comparison against a NaN is False, so the floor passes a
+    NaN straight through untouched. The result is a NaN multiplier, a NaN
+    shift, and `elo[root] += shift` poisoning that team's rating for the
+    rest of the replay and, through it, every opponent it plays -- with no
+    exception anywhere to notice. A non-finite input is therefore rejected
+    outright rather than clamped: unlike a merely extreme `elo_diff`, there
+    is no correctly-signed bounded value to saturate to.
     """
+    if not math.isfinite(elo_diff) or not math.isfinite(point_diff):
+        raise ValueError(
+            "mov_multiplier requires finite inputs (a NaN survives the "
+            f"denominator clamp and silently poisons every later rating); got "
+            f"point_diff={point_diff!r} elo_diff={elo_diff!r}"
+        )
     if result == 0.5:
         # No winner: the autocorrelation term is undefined, not zero.
         denom = 1.0
@@ -263,9 +319,54 @@ def revert_between_seasons(elo: float, cfg: EloConfig) -> float:
     prediction of it. A partial reversion keeps the signal while bounding
     how long a single dominant (or disastrous) season echoes. Applied
     exactly once per team per offseason, on that team's first game of the
-    new season -- see `_walk`.
+    new season -- see `_walk` and `revert_across_offseasons`.
     """
     return cfg.mean * cfg.revert + elo * (1.0 - cfg.revert)
+
+
+def revert_across_offseasons(elo: float, cfg: EloConfig, offseasons: int) -> float:
+    """Apply `offseasons` consecutive reversions in one step.
+
+    "Once per team per offseason" means *per elapsed offseason*, not per
+    observed season-to-season transition. A team that plays 2001 and then
+    reappears in 2005 has sat out four offseasons, so its 2005 rating starts
+    four reversions from where 2001 ended -- not one. Counting observed
+    transitions instead (the obvious `last_season[root] != season`
+    implementation) would let a team carry a four-year-stale rating into a
+    league it has not played in since, which is precisely the staleness the
+    reversion exists to bound. This is reachable in CFB, where non-FBS teams
+    enter and leave the win-graph intermittently, and in the NFL only across
+    a season a franchise genuinely missed.
+
+    Closed form, not a loop: `revert_between_seasons` is affine, so n
+    applications collapse to
+
+        mean + (elo - mean) * (1 - revert) ** n
+
+    which is O(1) in the gap. A loop would be correct but would scale with a
+    gap that is attacker-free but unbounded in principle (a fixture db with
+    a 1900 game and a 2024 game).
+
+    `offseasons == 1` deliberately delegates to `revert_between_seasons`
+    rather than evaluating the closed form. The two agree to within a bit or
+    two, not exactly (`mean*revert + elo*(1-revert)` and
+    `mean + (elo-mean)*(1-revert)` round differently), and the one-season gap
+    is the overwhelmingly common case -- routing it through the closed form
+    would perturb every carried rating in every sport by ~1e-13 for no
+    benefit. Pinned by
+    `test_elo.py::test_closed_form_matches_repeated_reversion`.
+    """
+    if offseasons < 0:
+        raise ValueError(
+            f"offseasons must be non-negative; got {offseasons}. A negative gap "
+            "means `games` was not in ascending season order, which violates "
+            "`RatingMethod`'s documented chronological total order."
+        )
+    if offseasons == 0:
+        return elo
+    if offseasons == 1:
+        return revert_between_seasons(elo, cfg)
+    return cfg.mean + (elo - cfg.mean) * math.pow(1.0 - cfg.revert, offseasons)
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +427,38 @@ def _rank(ratings: dict[int, float], wins: dict[int, int], losses: dict[int, int
     }
 
 
+def _record_participant(
+    participants: dict[int, int],
+    root: int,
+    actual_id: int,
+    record_season: int | None,
+) -> None:
+    """Claim `root`'s result slot for the team id that actually played.
+
+    `participants` is keyed by lineage root and holds the *actual* team id
+    to emit, which is only unambiguous because a lineage's members never
+    overlap in a season (`franchise_lineage.py`, pinned by
+    `test_franchise_lineage.py::test_nfl_lineage_pairs_are_strictly_non_overlapping`).
+    A plain `participants[root] = actual_id` would make that premise
+    last-writer-wins: if a predecessor and its successor both played
+    `record_season`, the earlier-seen team would silently vanish from the
+    result while the survivor inherited the *combined* franchise rating
+    alongside only its own win/loss record. That is a corrupted table with
+    no error, so it raises instead -- same reasoning as `_resolve_roots`'
+    cycle guard.
+    """
+    existing = participants.get(root)
+    if existing is not None and existing != actual_id:
+        raise ValueError(
+            f"franchise lineage overlap: team ids {existing} and {actual_id} both "
+            f"resolve to lineage root {root} and both played season "
+            f"{record_season}. A lineage's members must not overlap in a single "
+            "season -- see franchise_lineage.py, whose non-overlap premise is what "
+            "makes 'the id that played the target season' unique."
+        )
+    participants[root] = actual_id
+
+
 def _walk(
     games: list[Game],
     cfg: EloConfig,
@@ -352,10 +485,13 @@ def _walk(
     not exist -- orphaning the row against `team_season` and breaking
     evidence's name resolution.
 
-    `career=True` enables the offseason reversion and requires every
+    `career=True` enables the offseason reversion (one per *elapsed*
+    offseason -- see `revert_across_offseasons`) and requires every
     `Game.season` to be populated. `record_season=None` means "count every
     game toward the record and emit every team", which is the
-    season-isolated case.
+    season-isolated case; when it is set, a game from a *later* season is a
+    caller-contract violation and raises, rather than silently making the
+    emitted rating the end-of-*last*-season one.
     """
     elo: dict[int, float] = {}
     last_season: dict[int, int] = {}
@@ -373,6 +509,15 @@ def _walk(
                 f"away_team_id={game.away_team_id}. The loader always sets it, so "
                 "a None here is a programming error, not a data gap."
             )
+        if record_season is not None and season is not None and season > record_season:
+            raise ValueError(
+                f"a game from season {season} was handed to a career walk targeting "
+                f"season {record_season}. `games` must span only seasons <= the "
+                "target (see compute_ratings._load_games' `season <= ?` history "
+                "branch). Continuing would emit the rating at the end of the LAST "
+                "season present rather than the end of the target season -- a wrong "
+                "number with no crash, so it is rejected here instead."
+            )
 
         home_id, away_id = game.home_team_id, game.away_team_id
         home_root = roots.get(home_id, home_id)
@@ -383,10 +528,19 @@ def _walk(
                 elo[root] = cfg.initial
                 if season is not None:
                     last_season[root] = season
-            elif career and season is not None and last_season.get(root) != season:
-                # First game of a new season for this franchise: revert once.
-                elo[root] = revert_between_seasons(elo[root], cfg)
-                last_season[root] = season
+            elif career and season is not None:
+                previous = last_season.get(root)
+                if previous is not None and previous != season:
+                    # First game of a new season for this franchise. Revert
+                    # once per *elapsed* offseason, not once per observed
+                    # transition: a team returning after a four-year absence
+                    # has sat out four offseasons and must not carry a
+                    # four-year-stale rating. See
+                    # `revert_across_offseasons`.
+                    elo[root] = revert_across_offseasons(
+                        elo[root], cfg, season - previous
+                    )
+                    last_season[root] = season
 
         shift = rating_shift(
             elo[home_root],
@@ -402,8 +556,8 @@ def _walk(
         if record_season is not None and season != record_season:
             continue
 
-        participants[home_root] = home_id
-        participants[away_root] = away_id
+        _record_participant(participants, home_root, home_id, record_season)
+        _record_participant(participants, away_root, away_id, record_season)
         for team_id in (home_id, away_id):
             wins.setdefault(team_id, 0)
             losses.setdefault(team_id, 0)
