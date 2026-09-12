@@ -17,11 +17,18 @@ const mockCredits: CreditsOut = {
     url: 'https://www.jstor.org/stable/2324033',
     summary: 'Eigenvector-based strength-of-schedule ranking.',
   },
-  data_source: {
-    name: 'CollegeFootballData.com (CFBD)',
-    url: 'https://collegefootballdata.com',
-    note: 'All game results are ingested from the CFBD API. This project performs no independent data collection and claims no ownership of the underlying game data.',
-  },
+  data_sources: [
+    {
+      name: 'CollegeFootballData.com (CFBD)',
+      url: 'https://collegefootballdata.com',
+      note: 'All game results are ingested from the CFBD API. This project performs no independent data collection and claims no ownership of the underlying game data.',
+    },
+    {
+      name: 'nflverse (Lee Sharpe)',
+      url: 'https://github.com/nflverse/nflverse-data',
+      note: 'NFL game results are ingested from nflverse, built on play-by-play data originated by Lee Sharpe.',
+    },
+  ],
 }
 
 function installCreditsFetch(handler: () => Promise<Response>) {
