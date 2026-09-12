@@ -200,7 +200,7 @@ export function isTeamCaseEnvelope(
 }
 
 // ---------------------------------------------------------------------------
-// error bodies -- mirrors apps/api/src/api/errors.py's three mapped cases.
+// error bodies -- mirrors apps/api/src/api/errors.py's four mapped cases.
 // ---------------------------------------------------------------------------
 
 export interface UnknownYearErrorBody {
@@ -215,26 +215,53 @@ export interface AmbiguousTeamErrorBody {
   candidates: string[]
 }
 
+/**
+ * 404: the name resolved to no team with a rating for that exact
+ * `year`/`sport` (issue #100). Split out of `ambiguous_team`, which used to
+ * carry this case with an *empty* `candidates` array and therefore rendered
+ * as "did you mean:" followed by nothing to pick.
+ *
+ * Deliberately carries **no** correction candidates. An earlier cut of this
+ * body had a fuzzy-matched `suggestions` array; it was removed from the wire
+ * because the engine's strict stage already resolves anything scoring >= 0.6,
+ * so the only names that could ever reach this branch score below that -- and
+ * at that range there is no cutoff separating signal from noise
+ * ("Gonzaga"/"Georgia" scores 0.5714, above "Texas"/"Houston Texans" at
+ * 0.5263). The pills would have offered real-but-irrelevant teams. This is a
+ * pure not-found state: `query`, plus the `year` and `sport` scope that came
+ * up empty, which is what `VerdictError`'s copy names.
+ */
+export interface UnknownTeamErrorBody {
+  error: 'unknown_team'
+  query: string
+  year: number
+  sport: Sport
+}
+
 export interface SameTeamComparisonErrorBody {
   error: 'same_team_comparison'
   team_name: string
 }
 
 export type VerdictErrorBody =
-  UnknownYearErrorBody | AmbiguousTeamErrorBody | SameTeamComparisonErrorBody
+  | UnknownYearErrorBody
+  | AmbiguousTeamErrorBody
+  | UnknownTeamErrorBody
+  | SameTeamComparisonErrorBody
 
 /**
- * Discriminated union covering the three mapped HTTP error cases plus a
+ * Discriminated union covering the four mapped HTTP error cases plus a
  * catch-all for network/unreachable-API failures -- shared by `VerdictError`
  * and `VerdictCard` so both render off the same shape.
  */
 export type VerdictErrorState =
   | { kind: 'unknown_year'; body: UnknownYearErrorBody }
   | { kind: 'ambiguous_team'; body: AmbiguousTeamErrorBody }
+  | { kind: 'unknown_team'; body: UnknownTeamErrorBody }
   | { kind: 'same_team_comparison'; body: SameTeamComparisonErrorBody }
   | { kind: 'network_error'; message: string }
 
-/** The full set of states `VerdictCard` renders -- loading, success, or one of the four error cases above. */
+/** The full set of states `VerdictCard` renders -- loading, success, or one of the five error cases above. */
 export type VerdictCardState =
   | { status: 'loading' }
   | { status: 'success'; envelope: VerdictEnvelope }
@@ -242,6 +269,10 @@ export type VerdictCardState =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function isSport(value: unknown): value is Sport {
+  return value === 'cfb' || value === 'nfl'
 }
 
 export function isVerdictErrorBody(value: unknown): value is VerdictErrorBody {
@@ -257,6 +288,12 @@ export function isVerdictErrorBody(value: unknown): value is VerdictErrorBody {
     case 'ambiguous_team':
       return (
         typeof value['query'] === 'string' && Array.isArray(value['candidates'])
+      )
+    case 'unknown_team':
+      return (
+        typeof value['query'] === 'string' &&
+        typeof value['year'] === 'number' &&
+        isSport(value['sport'])
       )
     case 'same_team_comparison':
       return typeof value['team_name'] === 'string'

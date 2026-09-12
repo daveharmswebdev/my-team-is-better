@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import type { TeamDetail } from '../../lib/api/types'
 import styles from './TeamCombobox.module.css'
+import { matchTeams } from './teamMatching'
 
 export interface TeamComboboxProps {
   /** Visible field label, rendered as this component's own `<label>`. */
@@ -35,79 +36,6 @@ export interface TeamComboboxProps {
 const SEPARATOR = ' · '
 
 const DEFAULT_MAX_RESULTS = 50
-
-/*
- * Ranking tiers, best first (issue #79): exact match, then canonical-name
- * prefix, then mascot/alias match, then substring anywhere. `RANK_NONE`
- * means "not a match at all" and is filtered out.
- */
-const RANK_EXACT = 0
-const RANK_NAME_PREFIX = 1
-const RANK_MASCOT_OR_ALIAS = 2
-const RANK_SUBSTRING = 3
-const RANK_NONE = 4
-
-/**
- * Case- and diacritic-insensitive fold for matching only -- never for
- * display or for anything emitted through `onChange`. NFD splits "é" into
- * "e" + a combining accent, which the `\p{Diacritic}` strip then removes, so
- * a user typing "san jose" finds "San José State".
- */
-function fold(text: string): string {
-  return text
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-}
-
-function rankTeam(team: TeamDetail, foldedQuery: string): number {
-  const name = fold(team.name)
-  const aliases = team.aliases.map(fold)
-  if (name === foldedQuery || aliases.includes(foldedQuery)) {
-    return RANK_EXACT
-  }
-  if (name.startsWith(foldedQuery)) {
-    return RANK_NAME_PREFIX
-  }
-  const mascot = team.mascot === null ? null : fold(team.mascot)
-  if (mascot !== null && mascot.includes(foldedQuery)) {
-    return RANK_MASCOT_OR_ALIAS
-  }
-  if (aliases.some((alias) => alias.includes(foldedQuery))) {
-    return RANK_MASCOT_OR_ALIAS
-  }
-  if (name.includes(foldedQuery)) {
-    return RANK_SUBSTRING
-  }
-  return RANK_NONE
-}
-
-/**
- * Substring (never prefix-only, never fuzzy) match across the canonical
- * name, the mascot, and every alias, ranked by `RANK_*` and then by the
- * caller's original order -- so an ambiguous query like "New York" keeps
- * both the Giants and the Jets, in catalog order, rather than collapsing to
- * one guess.
- */
-function matchTeams(
-  teams: TeamDetail[],
-  query: string,
-  maxResults: number,
-): TeamDetail[] {
-  const foldedQuery = fold(query.trim())
-  if (foldedQuery === '') {
-    return teams.slice(0, maxResults)
-  }
-  const ranked: { team: TeamDetail; rank: number; order: number }[] = []
-  teams.forEach((team, order) => {
-    const rank = rankTeam(team, foldedQuery)
-    if (rank !== RANK_NONE) {
-      ranked.push({ team, rank, order })
-    }
-  })
-  ranked.sort((a, b) => a.rank - b.rank || a.order - b.order)
-  return ranked.slice(0, maxResults).map((entry) => entry.team)
-}
 
 /**
  * Accessible team typeahead (ARIA 1.2 combobox-with-listbox, hand-rolled --

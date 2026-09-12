@@ -50,6 +50,60 @@ describe('VerdictError', () => {
     expect(onSelectCandidate).toHaveBeenCalledWith('Texas State')
   })
 
+  describe('unknown_team (issue #100)', () => {
+    it('renders a single not-found state naming the season and league, with nothing to pick', () => {
+      render(
+        <VerdictError
+          state={{
+            kind: 'unknown_team',
+            body: {
+              error: 'unknown_team',
+              query: 'Abilene Christian',
+              year: 2010,
+              sport: 'cfb',
+            },
+          }}
+          onSelectCandidate={vi.fn()}
+        />,
+      )
+
+      const alert = screen.getByRole('alert')
+      expect(alert).toHaveTextContent(/Abilene Christian/)
+      expect(alert).toHaveTextContent(/2010 college football/i)
+      // The exact defect being fixed: never claims the name was ambiguous,
+      // and never renders a pick list -- empty or otherwise. Correction
+      // pills were removed from this kind outright, so a `list` node here
+      // means a regression, not an empty array.
+      expect(alert).not.toHaveTextContent(/did you mean/i)
+      expect(alert).not.toHaveTextContent(/more than one team/i)
+      expect(screen.queryByRole('list')).not.toBeInTheDocument()
+      expect(screen.queryAllByRole('listitem')).toHaveLength(0)
+      expect(screen.queryByRole('button')).not.toBeInTheDocument()
+      // ...and it says what to do instead.
+      expect(alert).toHaveTextContent(/season/i)
+      expect(alert).toHaveTextContent(/league/i)
+    })
+
+    it('names the league as the NFL for an nfl question', () => {
+      render(
+        <VerdictError
+          state={{
+            kind: 'unknown_team',
+            body: {
+              error: 'unknown_team',
+              query: 'Baltimore Colts',
+              year: 2018,
+              sport: 'nfl',
+            },
+          }}
+        />,
+      )
+
+      expect(screen.getByRole('alert')).toHaveTextContent(/2018 NFL/)
+      expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    })
+  })
+
   it('renders the same_team_comparison message', () => {
     render(
       <VerdictError

@@ -20,6 +20,7 @@ from cfb_strength.contracts import (
     ComparisonTeamSummary,
     SameTeamComparisonError,
     TeamCase,
+    UnknownTeamError,
     UnknownYearError,
 )
 from cfb_strength.evidence.proof import (
@@ -237,3 +238,80 @@ def test_rating_breakdown_degrades_gracefully_with_no_rows(
     breakdown = _rating_breakdown(rated_conn, 2005, "keener", team_id=-1, games=[], sport="cfb")
     assert breakdown.entries == []
     assert breakdown.residual_contribution == 0.0
+
+
+# ---------------------------------------------------------------------------
+# issue #100 -- zero matches against the real 2005 rated set
+# ---------------------------------------------------------------------------
+
+
+def test_unrated_team_raises_unknown_team_error_not_ambiguous(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """"Abilene Christian" is a real school that has no 2005 keener rating in
+    this fixture -- a zero-match query, which used to come back as
+    AmbiguousTeamError with an empty candidate list."""
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Abilene Christian", method="keener")
+    assert exc_info.value.query == "Abilene Christian"
+    assert exc_info.value.year == 2005
+    assert exc_info.value.sport == "cfb"
+
+
+def test_unknown_team_error_carries_no_suggestion_list(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """contracts.py: UnknownTeamError deliberately carries only query/year/
+    sport, against the real 2005 rated set. The earlier near-miss pass could
+    not work here -- "Abilene Christian" has no plausible 2005 counterpart,
+    and the closest names by ratio ("Michigan", "Minnesota", "Ole Miss") are
+    pure noise that would read as a broken product.
+    """
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Abilene Christian", method="keener")
+    error = exc_info.value
+    assert not hasattr(error, "suggestions")
+    assert error.query == "Abilene Christian"
+    assert error.year == 2005
+    assert error.sport == "cfb"
+
+
+def test_unknown_team_error_for_a_wholly_invented_name(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """A name resembling nothing in the rated set is the same error, with the
+    same shape -- no crash, no AmbiguousTeamError, no suggestion list."""
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Zzyzx Polytechnic", method="keener")
+    error = exc_info.value
+    assert not hasattr(error, "suggestions")
+    assert error.query == "Zzyzx Polytechnic"
+    assert error.year == 2005
+    assert error.sport == "cfb"
+
+
+def test_unknown_team_propagates_through_build_team_case(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    with pytest.raises(UnknownTeamError):
+        build_team_case(rated_conn, 2005, "Zzyzx Polytechnic", method="keener")
+
+
+def test_ambiguous_team_error_never_carries_empty_candidates(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Invariant from contracts.py, swept against the real rated set:
+    AmbiguousTeamError means "too many", never "none"."""
+    queries = ["Texas", "State", "Southern", "Tech", "A&M", "Abilene Christian", "Zzyzx Polytechnic"]
+    raised_at_least_one = False
+    for query in queries:
+        try:
+            resolve_team(rated_conn, 2005, query, method="keener")
+        except AmbiguousTeamError as e:
+            raised_at_least_one = True
+            assert e.candidates, f"empty candidates for {query!r}"
+        except UnknownTeamError:
+            pass
+    # Without this sentinel the sweep silently degrades to a no-op if the
+    # fixture is ever regenerated thinner (mirrors the colocated unit twin).
+    assert raised_at_least_one, "expected at least one genuinely ambiguous query in the sweep"

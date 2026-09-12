@@ -127,16 +127,17 @@ export function HomePage() {
       return
     }
     if (submission.questionType === 'compare') {
-      const ambiguousQuery =
-        state?.status === 'error' && state.error.kind === 'ambiguous_team'
-          ? state.error.body.query
-          : undefined
+      // Which side of the compare the pill is correcting. `ambiguous_team`
+      // is now the only error kind that offers pills, and it carries the
+      // offending name in `query`, so this lookup names the side to replace
+      // and the other is left exactly as the user typed it.
+      const rejectedQuery = rejectedTeamQuery(state)
       applyCorrection({
         ...submission,
         teamA:
-          ambiguousQuery === submission.teamA ? candidate : submission.teamA,
+          rejectedQuery === submission.teamA ? candidate : submission.teamA,
         teamB:
-          ambiguousQuery === submission.teamB ? candidate : submission.teamB,
+          rejectedQuery === submission.teamB ? candidate : submission.teamB,
       })
     }
   }
@@ -168,6 +169,22 @@ export function HomePage() {
   )
 }
 
+/**
+ * The team name a pill correction is replacing. Still needed, and still a
+ * helper rather than an inline read: `ambiguous_team` remains a pill-bearing
+ * error, and its `query` is the only thing that says which side of a compare
+ * question the pill applies to. It no longer has to cover `unknown_team`,
+ * which offers no pills at all now. `undefined` for every other state, which
+ * leaves a compare submission untouched rather than guessing at a side.
+ */
+function rejectedTeamQuery(state: VerdictCardState | null): string | undefined {
+  if (state?.status !== 'error') {
+    return undefined
+  }
+  const { error } = state
+  return error.kind === 'ambiguous_team' ? error.body.query : undefined
+}
+
 function toErrorState(error: unknown): VerdictErrorState {
   if (error instanceof VerdictApiError) {
     // Switched (rather than `{ kind: error.body.error, body: error.body }`)
@@ -179,6 +196,8 @@ function toErrorState(error: unknown): VerdictErrorState {
         return { kind: 'unknown_year', body: error.body }
       case 'ambiguous_team':
         return { kind: 'ambiguous_team', body: error.body }
+      case 'unknown_team':
+        return { kind: 'unknown_team', body: error.body }
       case 'same_team_comparison':
         return { kind: 'same_team_comparison', body: error.body }
     }

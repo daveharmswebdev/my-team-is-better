@@ -509,6 +509,335 @@ describe('QuestionForm', () => {
     })
   })
 
+  describe('stale team values across a scope change (issue #100)', () => {
+    /**
+     * The flag copy, as a matcher. Deliberately asserts on the *scope* words
+     * too (season + league), because "we stopped recognising this" is only
+     * actionable if it says which season and which league stopped
+     * recognising it.
+     */
+    function staleNotice(team: string, scope: string): RegExp {
+      return new RegExp(`${team}.*isn't in the ${scope} team list`, 'i')
+    }
+
+    /**
+     * Every clear affordance currently on screen. Queried by the shared
+     * "Clear ..." accessible-name prefix rather than per-field, so these
+     * assertions don't quietly pass by asking for a button that was renamed.
+     */
+    function clearButtons() {
+      return screen.queryAllByRole('button', { name: /^Clear / })
+    }
+
+    /** Year-scoped teams: Texas is a 2005 team and nothing else. */
+    function stubYearScopedTeams() {
+      mockedFetchTeams.mockImplementation((_sport?: Sport, year?: number) =>
+        Promise.resolve(
+          teamsOut(
+            year === 2005
+              ? CFB_DETAILS
+              : [{ name: 'Alabama', mascot: 'Crimson Tide', aliases: [] }],
+          ),
+        ),
+      )
+    }
+
+    it('flags -- but keeps, and still submits -- a team that the newly selected league does not have', async () => {
+      stubSportScopedTeams()
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(
+        <QuestionForm
+          onSubmit={onSubmit}
+          initialQuestionType="team_case"
+          initialYear={2005}
+        />,
+      )
+      await waitForInitialCatalog()
+
+      const teamField = screen.getByLabelText(/^team$/i)
+      await waitFor(() => expect(teamField).toHaveAttribute('role', 'combobox'))
+      await user.type(teamField, 'Longhorns')
+      await waitFor(() => expect(screen.getByRole('listbox')).toBeVisible())
+      await user.click(suggestions().getByRole('option', { name: /Texas/ }))
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('Texas')
+      // A team the current scope *does* have is never flagged.
+      expect(
+        screen.queryByText(staleNotice('Texas', '2005 college football')),
+      ).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+      await waitFor(() =>
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', 2005),
+      )
+
+      // (a) the warning names the team, the season and the league...
+      expect(
+        await screen.findByText(staleNotice('Texas', '2005 NFL')),
+      ).toBeInTheDocument()
+      // ...and offers a one-click clear.
+      expect(clearButtons()).toHaveLength(1)
+
+      // (b) the founder's call: flag it, don't clear it. The typed value
+      // survives and still submits -- the submit button is never disabled.
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('Texas')
+      const submit = screen.getByRole('button', { name: /get the verdict/i })
+      expect(submit).not.toBeDisabled()
+      await user.click(submit)
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'team_case',
+        year: 2005,
+        team: 'Texas',
+        userTeam: null,
+        sport: 'nfl',
+      })
+    })
+
+    it('flags -- but keeps, and still submits -- a team that the newly entered season does not have', async () => {
+      stubYearScopedTeams()
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(
+        <QuestionForm
+          onSubmit={onSubmit}
+          initialQuestionType="team_case"
+          initialYear={2005}
+          initialTeam="Texas"
+        />,
+      )
+      await waitFor(() =>
+        expect(mockedFetchTeams).toHaveBeenCalledWith('cfb', 2005),
+      )
+      expect(clearButtons()).toHaveLength(0)
+
+      fireEvent.change(screen.getByLabelText(/year/i), {
+        target: { value: '2018' },
+      })
+      await waitFor(
+        () => expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', 2018),
+        { timeout: YEAR_DEBOUNCE_MS * 5 },
+      )
+
+      expect(
+        await screen.findByText(staleNotice('Texas', '2018 college football')),
+      ).toBeInTheDocument()
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('Texas')
+
+      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'team_case',
+        year: 2018,
+        team: 'Texas',
+        userTeam: null,
+        sport: 'cfb',
+      })
+    })
+
+    it('clears the field, but only when the user asks it to', async () => {
+      stubSportScopedTeams()
+      const user = userEvent.setup()
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialSport="nfl"
+          initialYear={2005}
+          initialTeam="Texas"
+        />,
+      )
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Clear the team' }),
+      )
+
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('')
+      expect(clearButtons()).toHaveLength(0)
+    })
+
+    it('flags each side of a compare question independently', async () => {
+      stubYearScopedTeams()
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="compare"
+          initialYear={2018}
+          initialTeamA="Alabama"
+          initialTeamB="Texas"
+        />,
+      )
+
+      expect(
+        await screen.findByText(staleNotice('Texas', '2018 college football')),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByText(staleNotice('Alabama', '2018 college football')),
+      ).not.toBeInTheDocument()
+      expect(clearButtons().map((button) => button.ariaLabel)).toEqual([
+        'Clear the second team',
+      ])
+    })
+
+    it('says nothing before the first catalog has landed', async () => {
+      mockedFetchTeams.mockReturnValue(new Promise(() => {}))
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialYear={2005}
+          initialTeam="Whatever FC"
+        />,
+      )
+
+      await waitForInitialCatalog()
+      // "Not in the catalog" is meaningless before the catalog has landed.
+      expect(clearButtons()).toHaveLength(0)
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('Whatever FC')
+    })
+
+    /**
+     * Reviewer finding F9. `loadTeams` only ever calls `setTeamCatalog` in
+     * its resolved and rejected paths, so a *refetch* never re-enters
+     * `status: 'loading'` -- the flag keeps evaluating against the
+     * previously loaded catalog for the whole in-flight window. That is
+     * kept deliberately rather than fixed: re-entering `loading` would blank
+     * an already-correct notice on every keystroke-triggered refetch and
+     * flash it back, and the copy is honest as-is because `catalogScope` is
+     * derived from the catalog the form actually holds, never from the
+     * pending selection. This test pins that window, which the renamed
+     * first-mount test above does not reach.
+     */
+    it('keeps naming the loaded scope, not the requested one, while a refetch is in flight', async () => {
+      let releaseRefetch: (value: TeamsOut) => void = () => {}
+      mockedFetchTeams
+        .mockResolvedValueOnce(
+          teamsOut([{ name: 'Alabama', mascot: 'Crimson Tide', aliases: [] }]),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise<TeamsOut>((resolve) => {
+              releaseRefetch = resolve
+            }),
+        )
+      const user = userEvent.setup()
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialYear={2018}
+          initialTeam="Texas"
+        />,
+      )
+
+      expect(
+        await screen.findByText(staleNotice('Texas', '2018 college football')),
+      ).toBeInTheDocument()
+
+      // The NFL catalog request is now in flight and will not resolve until
+      // it is released below.
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+      await waitFor(() =>
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', 2018),
+      )
+
+      // Mid-flight: still the scope that actually rejected the value, and
+      // never a claim about the league nothing has been checked against yet.
+      expect(
+        screen.getByText(staleNotice('Texas', '2018 college football')),
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByText(staleNotice('Texas', '2018 NFL')),
+      ).not.toBeInTheDocument()
+      expect(clearButtons()).toHaveLength(1)
+
+      releaseRefetch(teamsOut(NFL_DETAILS))
+
+      // Once it lands, the same notice re-scopes to the league that now
+      // rejects the value.
+      expect(
+        await screen.findByText(staleNotice('Texas', '2018 NFL')),
+      ).toBeInTheDocument()
+    })
+
+    it('says nothing when the season has no teams ingested at all', async () => {
+      mockedFetchTeams.mockResolvedValue({ teams: [], team_details: [] })
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialYear={2005}
+          initialTeam="Whatever FC"
+        />,
+      )
+
+      // The `empty` state has its own hint, which says the useful thing --
+      // on every team field, hence `findAllByText`.
+      expect(
+        await screen.findAllByText(/no teams found for/i),
+      ).not.toHaveLength(0)
+      expect(clearButtons()).toHaveLength(0)
+    })
+
+    it('says nothing when the team catalog fetch failed', async () => {
+      mockedFetchTeams.mockRejectedValue(new Error('network down'))
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialYear={2005}
+          initialTeam="Whatever FC"
+        />,
+      )
+
+      expect(
+        await screen.findAllByText(/couldn't load the team list/i),
+      ).not.toHaveLength(0)
+      expect(clearButtons()).toHaveLength(0)
+    })
+
+    it('flags an out-of-scope "your team", and forgets it only on an explicit clear', async () => {
+      stubYearScopedTeams()
+      const user = userEvent.setup()
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'Texas')
+      render(<QuestionForm onSubmit={vi.fn()} initialYear={2018} />)
+
+      expect(
+        await screen.findByText(staleNotice('Texas', '2018 college football')),
+      ).toBeInTheDocument()
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+        'Texas',
+      )
+
+      await user.click(
+        screen.getByRole('button', { name: 'Clear your saved team' }),
+      )
+
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+      // An explicit clear is the one thing that *does* forget the stored
+      // preference -- `setStoredUserTeam('')` removes the key outright.
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBeNull()
+    })
+
+    it('does not flag a differently-cased or aliased spelling of a team that is in scope', async () => {
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="compare"
+          initialTeamA="texas"
+          initialTeamB="TEX"
+        />,
+      )
+
+      await waitForInitialCatalog()
+      await waitFor(() =>
+        expect(screen.getByLabelText(/team a/i)).toHaveAttribute(
+          'role',
+          'combobox',
+        ),
+      )
+      expect(clearButtons()).toHaveLength(0)
+    })
+  })
+
   describe('guiding text (issue #52)', () => {
     it('shows the real ingested year range, sourced from /api/years', async () => {
       mockedFetchYears.mockResolvedValue({ years: [2001, 2005, 2013] })

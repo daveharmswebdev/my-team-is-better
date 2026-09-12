@@ -113,3 +113,31 @@ def test_unknown_year_for_nfl_reports_nfl_available_years(sport_client: TestClie
     detail = response.json()["detail"]
     assert detail["error"] == "unknown_year"
     assert detail["available_years"] == [YEAR]
+
+
+def test_team_from_the_other_league_is_unknown_team_not_ambiguous(
+    sport_client: TestClient,
+) -> None:
+    """Issue #100's wrong-league case: "Alpha State" is a real *CFB* team in
+    this fixture, so asking for it under sport='nfl' is a zero-match, not an
+    ambiguity -- 404 `unknown_team` echoing the sport that was asked about,
+    never 422 with an empty candidate list.
+    """
+    response = sport_client.post(
+        "/api/verdict/team-case",
+        json={"year": YEAR, "team": "Alpha State", "sport": "nfl"},
+    )
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail["error"] == "unknown_team"
+    assert detail["query"] == "Alpha State"
+    assert detail["year"] == YEAR
+    assert detail["sport"] == "nfl"
+    # The echoed `sport` is the one that was *asked about*, not the one the
+    # name belongs to -- that is what lets the client say "no NFL team by
+    # that name; try college football" instead of dead-ending. Asserted
+    # against the real CFB catalog so this stays honest about the name
+    # existing on the other side of the league line.
+    cfb_names = set(sport_client.get("/api/teams", params={"sport": "cfb"}).json()["teams"])
+    assert "Alpha State" in cfb_names, "fixture no longer has the cross-league case"

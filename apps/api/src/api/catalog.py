@@ -23,7 +23,7 @@ from cfb_strength.evidence.proof import list_available_years
 from fastapi import APIRouter, Depends
 
 from api.deps import get_db_conn, list_team_records
-from api.models import CreditsOut, Method, TeamDetailOut, TeamsOut, YearsOut
+from api.models import CreditsOut, Method, Sport, TeamDetailOut, TeamsOut, YearsOut
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api", tags=["catalog"])
 @router.get("/years", response_model=YearsOut)
 def years(
     method: Method = "keener",
-    sport: str = "cfb",
+    sport: Sport = "cfb",
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> YearsOut:
     """Distinct years with ratings under `method`/`sport`, ascending -- the
@@ -50,7 +50,7 @@ def years(
 
 @router.get("/teams", response_model=TeamsOut)
 def teams(
-    sport: str = "cfb",
+    sport: Sport = "cfb",
     year: int | None = None,
     method: Method = "keener",
     conn: sqlite3.Connection = Depends(get_db_conn),

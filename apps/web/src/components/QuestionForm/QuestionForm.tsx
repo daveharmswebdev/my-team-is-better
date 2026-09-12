@@ -4,6 +4,7 @@ import { fetchTeams, fetchYears } from '../../lib/api/client'
 import type { Sport, TeamDetail } from '../../lib/api/types'
 import { getStoredUserTeam, setStoredUserTeam } from '../../lib/userTeam'
 import { TeamCombobox } from '../TeamCombobox/TeamCombobox'
+import { isTeamInCatalog } from '../TeamCombobox/teamMatching'
 import styles from './QuestionForm.module.css'
 
 export type QuestionType = 'champion' | 'team_case' | 'compare'
@@ -91,15 +92,32 @@ interface YearCatalogState {
 interface TeamCatalogState {
   status: 'loading' | 'ready' | 'empty' | 'error'
   teams: TeamDetail[]
-  /** The year whose (empty) result produced this state, for the `empty` copy. */
+  /**
+   * The scope this catalog actually describes -- *not* the form's current
+   * selection, which can already have moved on while a refetch is in
+   * flight. The `empty` hint and the stale-value flag (issue #100) both name
+   * this scope to the user, so naming the requested-but-not-yet-loaded one
+   * would flash copy that was never true. `year` is `undefined` when the
+   * Year input was empty and the full per-sport list was requested.
+   */
   year: number | undefined
+  sport: Sport
 }
 
 const EMPTY_YEAR_CATALOG: YearCatalogState = { status: 'loading', years: [] }
+// `year`/`sport` are only ever read in the `ready`/`empty` states, so the
+// pre-first-response placeholder does not describe any real scope.
 const EMPTY_TEAM_CATALOG: TeamCatalogState = {
   status: 'loading',
   teams: [],
   year: undefined,
+  sport: 'cfb',
+}
+
+/** User-facing league names -- `cfb`/`nfl` are wire values, not copy. */
+const LEAGUE_LABEL: Record<Sport, string> = {
+  cfb: 'college football',
+  nfl: 'NFL',
 }
 
 const TEAM_FETCH_FAILED_HINT =
@@ -143,6 +161,51 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced
 }
 
+/**
+ * The inline flag for a team value the loaded catalog does not contain
+ * (issue #100). It names the value, the season and the league that stopped
+ * recognising it, because "we don't know this one" is only actionable with
+ * the scope attached -- and it offers a clear, rather than performing one.
+ *
+ * `role="status"` (polite), not `alert`: nothing is broken and nothing is
+ * blocked. The visible button text stays "Clear" so it is contained in
+ * `clearLabel`, the field-qualified accessible name -- WCAG 2.5.3 requires
+ * that containment, and the qualifier is what keeps two of these
+ * distinguishable on a compare question. `clearLabel` deliberately
+ * paraphrases the field ("the first team", not "Team A"): an `aria-label`
+ * is a label as far as `getByLabelText` is concerned, so echoing the
+ * field's own label here would make every existing query for that field
+ * ambiguous.
+ */
+function StaleTeamNotice({
+  clearLabel,
+  value,
+  scope,
+  onClear,
+}: {
+  clearLabel: string
+  value: string
+  scope: string
+  onClear: () => void
+}) {
+  return (
+    <div className={styles.staleTeam}>
+      <p role="status" className={styles.staleTeamText}>
+        &ldquo;{value}&rdquo; isn&apos;t in the {scope} team list -- you can
+        still ask about it.
+      </p>
+      <button
+        type="button"
+        className={styles.staleTeamClear}
+        aria-label={clearLabel}
+        onClick={onClear}
+      >
+        Clear
+      </button>
+    </div>
+  )
+}
+
 /** `Seasons with data: 2000-2023.` -- the real ingested range (issue #52),
  * derived from `/api/years` so it can never drift from what is actually
  * queryable, and honest about gaps rather than implying a solid span. */
@@ -183,6 +246,14 @@ function formatSeasonsHint(years: number[]): string | undefined {
  * year, and `HomePage` feeds an accepted correction back in through this
  * form's `initial*` props so the visible fields agree with what was asked
  * (issue #38).
+ *
+ * Changing the league or the year refetches that catalog but deliberately
+ * does **not** clear or revalidate the four team values (issue #100). A team
+ * picked for College and left behind by a switch to NFL is *flagged* --
+ * named, scoped and one click from being cleared -- and stays submittable.
+ * Silently discarding typed input is its own annoyance, and a freely-typed
+ * name has to stay submittable for the same reason the degraded catalog
+ * states above do.
  */
 export function QuestionForm({
   onSubmit,
@@ -261,10 +332,16 @@ export function QuestionForm({
           status: teams.length === 0 ? 'empty' : 'ready',
           teams,
           year: scopedYear,
+          sport,
         })
       } catch {
         if (!cancelled) {
-          setTeamCatalog({ status: 'error', teams: [], year: scopedYear })
+          setTeamCatalog({
+            status: 'error',
+            teams: [],
+            year: scopedYear,
+            sport,
+          })
         }
       }
     }
@@ -334,6 +411,28 @@ export function QuestionForm({
           ? 'No teams are ingested for this league yet -- you can still type a name.'
           : `No teams found for ${teamCatalog.year} -- try another season, or type a name anyway.`
         : teamMatchHint
+  /**
+   * Whether to flag `value` as out of scope. Only `ready` qualifies: while
+   * `loading` there is nothing to check against, and `empty`/`error` already
+   * say the useful thing in their own hint -- "not in the catalog" means
+   * nothing when there is no catalog. Blank values are never flagged, and
+   * the check is never a submission gate.
+   */
+  function isOutOfScope(value: string): boolean {
+    return (
+      teamCatalog.status === 'ready' &&
+      value.trim() !== '' &&
+      !isTeamInCatalog(teamCatalog.teams, value)
+    )
+  }
+
+  // Named off the catalog's own scope, not the current selection -- see
+  // `TeamCatalogState`.
+  const catalogScope =
+    teamCatalog.year === undefined
+      ? LEAGUE_LABEL[teamCatalog.sport]
+      : `${teamCatalog.year} ${LEAGUE_LABEL[teamCatalog.sport]}`
+
   const seasonsHint = formatSeasonsHint(yearCatalog.years)
   const yearHint =
     yearCatalog.status === 'error' ? YEAR_FETCH_FAILED_HINT : seasonsHint
@@ -408,37 +507,67 @@ export function QuestionForm({
       )}
 
       {questionType === 'team_case' && (
-        <TeamCombobox
-          label="Team"
-          teams={teamCatalog.teams}
-          value={team}
-          onChange={setTeam}
-          placeholder={teamPlaceholder}
-          hint={teamHint}
-          required
-        />
+        <div>
+          <TeamCombobox
+            label="Team"
+            teams={teamCatalog.teams}
+            value={team}
+            onChange={setTeam}
+            placeholder={teamPlaceholder}
+            hint={teamHint}
+            required
+          />
+          {isOutOfScope(team) && (
+            <StaleTeamNotice
+              clearLabel="Clear the team"
+              value={team.trim()}
+              scope={catalogScope}
+              onClear={() => setTeam('')}
+            />
+          )}
+        </div>
       )}
 
       {questionType === 'compare' && (
         <div className={styles.qfieldPair}>
-          <TeamCombobox
-            label="Team A"
-            teams={teamCatalog.teams}
-            value={teamA}
-            onChange={setTeamA}
-            placeholder={teamPlaceholder}
-            hint={teamHint}
-            required
-          />
-          <TeamCombobox
-            label="Team B"
-            teams={teamCatalog.teams}
-            value={teamB}
-            onChange={setTeamB}
-            placeholder={teamPlaceholder}
-            hint={teamHint}
-            required
-          />
+          <div>
+            <TeamCombobox
+              label="Team A"
+              teams={teamCatalog.teams}
+              value={teamA}
+              onChange={setTeamA}
+              placeholder={teamPlaceholder}
+              hint={teamHint}
+              required
+            />
+            {isOutOfScope(teamA) && (
+              <StaleTeamNotice
+                clearLabel="Clear the first team"
+                value={teamA.trim()}
+                scope={catalogScope}
+                onClear={() => setTeamA('')}
+              />
+            )}
+          </div>
+          <div>
+            <TeamCombobox
+              label="Team B"
+              teams={teamCatalog.teams}
+              value={teamB}
+              onChange={setTeamB}
+              placeholder={teamPlaceholder}
+              hint={teamHint}
+              required
+            />
+            {isOutOfScope(teamB) && (
+              <StaleTeamNotice
+                clearLabel="Clear the second team"
+                value={teamB.trim()}
+                scope={catalogScope}
+                onClear={() => setTeamB('')}
+              />
+            )}
+          </div>
         </div>
       )}
 
@@ -451,6 +580,14 @@ export function QuestionForm({
           placeholder={teamPlaceholder}
           hint={`${USER_TEAM_PRIVACY_HINT} ${teamHint}`}
         />
+        {isOutOfScope(userTeam) && (
+          <StaleTeamNotice
+            clearLabel="Clear your saved team"
+            value={userTeam.trim()}
+            scope={catalogScope}
+            onClear={() => handleUserTeamChange('')}
+          />
+        )}
       </div>
 
       <button

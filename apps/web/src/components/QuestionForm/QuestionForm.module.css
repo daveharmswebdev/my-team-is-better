@@ -156,3 +156,48 @@
   opacity: 0.72;
   cursor: not-allowed;
 }
+
+/*
+ * Inline flag for a team value the loaded catalog does not contain (issue
+ * #100) -- a warning, not an error: brick-tinted rather than brick-filled,
+ * and never accompanied by a disabled submit. It sits under the field's own
+ * hint, so the top margin closes the gap the hint leaves.
+ */
+.staleTeam {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--brick);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: var(--surface);
+}
+
+.staleTeamText {
+  margin: 0;
+  flex: 1 1 12rem;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
+.staleTeamClear {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brick);
+  background: transparent;
+  border: 1px solid var(--brick);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
+.staleTeamClear:hover {
+  background: var(--brick);
+  color: var(--on-leather);
+}

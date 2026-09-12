@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { TeamDetail } from '../../lib/api/types'
 import { TeamCombobox } from './TeamCombobox'
+import { isTeamInCatalog } from './teamMatching'
 
 /**
  * Calibrated against the real `/api/teams` detail rows quoted in issue #79:
@@ -262,5 +263,37 @@ describe('TeamCombobox', () => {
     expect(input).toHaveAttribute('aria-expanded', 'false')
     expect(onChange).toHaveBeenLastCalledWith('Longhrons')
     expect(input).toHaveValue('Longhrons')
+  })
+})
+
+/**
+ * The exported membership check behind `QuestionForm`'s stale-value flag
+ * (issue #100). It is the *submittable-name* test, not the suggestion test:
+ * a partial query or a mascot ranks as a typeahead match but is not a name
+ * the API resolves, so flagging must not treat either as "in scope".
+ */
+describe('isTeamInCatalog', () => {
+  it.each([
+    ['an exact canonical name', 'Texas'],
+    ['a differently-cased name', 'texas'],
+    ['a name with the accent dropped', 'San Jose State'],
+    ['an alias the API resolves', 'TEX'],
+    ['a value with surrounding whitespace', '  Texas  '],
+  ])('accepts %s', (_case, value) => {
+    expect(isTeamInCatalog(CFB_TEAMS, value)).toBe(true)
+  })
+
+  it.each([
+    ['a partial name the typeahead would still offer', 'Texa'],
+    ['a mascot, which is displayed but never submitted', 'Longhorns'],
+    ['a team from another league or season', 'Kansas City Chiefs'],
+    ['an empty value', ''],
+    ['a whitespace-only value', '   '],
+  ])('rejects %s', (_case, value) => {
+    expect(isTeamInCatalog(CFB_TEAMS, value)).toBe(false)
+  })
+
+  it('is false for every value when the catalog is empty', () => {
+    expect(isTeamInCatalog([], 'Texas')).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { VerdictApiError, VerdictNetworkError } from '../../lib/api/client'
@@ -187,6 +187,38 @@ describe('HomePage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       /could not reach the api/i,
     )
+  })
+
+  it('renders an unknown_team error as a not-found state with no correction pills', async () => {
+    const user = userEvent.setup()
+    mockedFetchTeamCase.mockRejectedValue(
+      new VerdictApiError(404, {
+        error: 'unknown_team',
+        query: 'Abilene Christian',
+        year: 2005,
+        sport: 'cfb',
+      }),
+    )
+
+    render(<HomePage />)
+    await user.selectOptions(
+      screen.getByLabelText(/what do you want to know/i),
+      'team_case',
+    )
+    await user.clear(screen.getByLabelText(/year/i))
+    await user.type(screen.getByLabelText(/year/i), '2005')
+    await user.type(screen.getByLabelText(/^team$/i), 'Abilene Christian')
+    await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+
+    // Scoped to the alert: the page itself always has buttons (submit, and
+    // possibly a stale-value clear), so an unscoped button query would say
+    // nothing about whether pills came back.
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/Abilene Christian/)
+    expect(alert).toHaveTextContent(/2005 college football/i)
+    expect(within(alert).queryByRole('list')).not.toBeInTheDocument()
+    expect(within(alert).queryByRole('listitem')).not.toBeInTheDocument()
+    expect(within(alert).queryByRole('button')).not.toBeInTheDocument()
   })
 
   describe('pill corrections update the visible form (issue #38)', () => {
