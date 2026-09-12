@@ -12,6 +12,18 @@
 # 1998/1999/2024/2025 were live-fetched from CFBD and committed to
 # `packages/cfb-engine/data/raw/` alongside that change, so this build
 # command's `--years 1998-2025` is a 100% cache hit, not a live API call.
+#
+# NFL ingest/rate steps (issue #51's deliberately-deferred gap, see PR #63's
+# "Known gap" note): left out of this build command until apps/api's
+# /api/teams and persona-grounding check were sport-scoped (#59) and
+# apps/web's toggle existed (#56/#60), so landing NFL teams into the live
+# db wouldn't leak into the still-CFB-only product's picker. All three are
+# merged now. `--years 1999-2025` matches nflverse's MIN_YEAR/MAX_YEAR
+# (ingest/nflverse/ingest_season.py) -- 2026 is excluded as in-progress,
+# same reasoning as CFB's own current-season exclusion. Cache-first from
+# the whole-history CSVs already committed under data/raw/nfl/, so this is
+# also a 100% cache hit, not a live fetch (verified locally: ~2.4s total
+# for the full cfb+nfl ingest+rate sequence).
 services:
   - type: web
     name: my-team-is-better-api
@@ -38,7 +50,9 @@ services:
     buildCommand: >-
       uv sync --frozen --no-dev &&
       uv run cfb ingest --years 1998-2025 &&
-      uv run cfb rate --years 1998-2025
+      uv run cfb rate --years 1998-2025 &&
+      uv run cfb ingest --sport nfl --years 1999-2025 &&
+      uv run cfb rate --years 1999-2025 --sport nfl
     startCommand: uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
