@@ -22,10 +22,12 @@ import importlib
 import sys
 from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from cfb_strength.db.connection import get_conn
 
+import api
 from api.deps import list_all_team_names
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
@@ -85,6 +87,31 @@ def _reimport_deps() -> object:
     return importlib.import_module("api.deps")
 
 
+def _restore_module(name: str, saved: ModuleType | None) -> None:
+    """Put `saved` back in `sys.modules` *and* back on its parent package.
+
+    Restoring `sys.modules` alone is not enough, and the gap is not
+    theoretical -- it cost a debugging round in issue #44. Importing a
+    submodule also rebinds it as an attribute of the parent package
+    (`api.deps`), and popping `sys.modules["api.deps"]` does not undo that
+    binding. So a `sys.modules`-only restore leaves the two disagreeing:
+    `sys.modules["api.deps"]` (what every `from api.deps import ...`, and
+    therefore every route's real dependency, resolves to) is the original
+    module, while the `api.deps` *attribute* still points at the reimported
+    one. A later test doing `import api.deps as deps` gets the attribute --
+    a module object no route ever looks at -- so monkeypatching anything on
+    it silently does nothing.
+    """
+    attr = name.rpartition(".")[2]
+    if saved is not None:
+        sys.modules[name] = saved
+        setattr(api, attr, saved)
+    else:
+        sys.modules.pop(name, None)
+        if hasattr(api, attr):
+            delattr(api, attr)
+
+
 @pytest.fixture(autouse=True)
 def _restore_api_deps_module() -> Iterator[None]:
     """Undoes `_reimport_deps`'s `sys.modules` surgery after each test in
@@ -103,14 +130,8 @@ def _restore_api_deps_module() -> Iterator[None]:
     saved_config = sys.modules.get("api.config")
     saved_deps = sys.modules.get("api.deps")
     yield
-    if saved_config is not None:
-        sys.modules["api.config"] = saved_config
-    else:
-        sys.modules.pop("api.config", None)
-    if saved_deps is not None:
-        sys.modules["api.deps"] = saved_deps
-    else:
-        sys.modules.pop("api.deps", None)
+    _restore_module("api.config", saved_config)
+    _restore_module("api.deps", saved_deps)
 
 
 def test_get_narration_cache_returns_in_memory_cache_in_test_mode(

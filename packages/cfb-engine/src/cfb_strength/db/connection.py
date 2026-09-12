@@ -26,13 +26,41 @@ _SOURCE_ID_TABLES = ("teams", "games")
 _TEAM_ALIAS_COLUMNS = (("mascot", "TEXT"), ("alternate_names", "TEXT"))
 
 
-def get_conn(db_path: Path | str = DB_PATH, *, read_only: bool = False) -> sqlite3.Connection:
+def get_conn(
+    db_path: Path | str = DB_PATH,
+    *,
+    read_only: bool = False,
+    check_same_thread: bool = True,
+) -> sqlite3.Connection:
+    """Open a connection to the project sqlite db.
+
+    `check_same_thread` (issue #44) forwards straight to `sqlite3.connect`.
+    It defaults to True -- sqlite's own strict behavior -- because that is
+    right for every single-threaded caller (the CLI, the MCP server, the
+    tests): using one connection from two threads is a real bug there and
+    should fail loudly.
+
+    `apps/api` passes False, and needs to. FastAPI dispatches a sync
+    generator dependency and the sync route handler to `run_in_threadpool`
+    *independently*, so the thread that opens the connection in
+    `api.deps.get_db_conn` is routinely not the thread the route body then
+    uses it on -- which sqlite rejects, surfacing as an intermittent HTTP
+    500. Opting out is safe there rather than merely expedient: that
+    dependency opens a fresh connection per request and closes it in the
+    same `finally`, so each connection belongs to exactly one logical
+    request and is never used by two threads *at once* -- only, possibly,
+    by two threads in sequence. Anything that genuinely shared one
+    connection across concurrent work would still be unsafe, and passing
+    this flag would be hiding the problem instead of fixing it.
+    """
     db_path = Path(db_path)
     if read_only:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn = sqlite3.connect(
+            f"file:{db_path}?mode=ro", uri=True, check_same_thread=check_same_thread
+        )
     else:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(db_path)
+        conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
