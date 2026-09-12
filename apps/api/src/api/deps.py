@@ -28,6 +28,12 @@ before.
 grounding-check input), promoted here so `api.catalog`'s `/api/teams` route
 and `api.persona.service`'s grounding check share one query rather than two
 hand-maintained copies of `SELECT DISTINCT school FROM teams`.
+
+Issue #59 scopes it by `sport` (default "cfb", matching every other call
+site's default): CFB and NFL can share a team name (e.g. "Wildcats"), so an
+unscoped universe would let a same-named team from the other sport
+contaminate the persona grounding check's known-team-name membership test
+for a case that was never about that team.
 """
 
 from __future__ import annotations
@@ -67,11 +73,12 @@ def get_narrator() -> Narrator:
     return ClaudeNarrator()
 
 
-def list_all_team_names(conn: sqlite3.Connection) -> list[str]:
-    """Every distinct team name in the db -- not scoped to a particular
-    year/method, since both this module's consumers (the persona grounding
-    check's "known team names" universe, and `api.catalog`'s `/api/teams`
-    route) want the full team-name universe, not a per-season subset.
+def list_all_team_names(conn: sqlite3.Connection, sport: str = "cfb") -> list[str]:
+    """Every distinct team name in the db for `sport` -- not scoped to a
+    particular year/method, since both this module's consumers (the persona
+    grounding check's "known team names" universe, and `api.catalog`'s
+    `/api/teams` route) want the full team-name universe for that sport, not
+    a per-season subset.
     """
-    rows = conn.execute("SELECT DISTINCT school FROM teams").fetchall()
+    rows = conn.execute("SELECT DISTINCT school FROM teams WHERE sport = ?", (sport,)).fetchall()
     return [str(row["school"]) for row in rows]

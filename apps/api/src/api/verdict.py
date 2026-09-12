@@ -51,15 +51,17 @@ from api.persona.service import narrate_comparison, narrate_team_case
 router = APIRouter(prefix="/api/verdict", tags=["verdict"])
 
 
-def _resolve_champion_name(conn: sqlite3.Connection, year: int, method: str) -> str | None:
+def _resolve_champion_name(
+    conn: sqlite3.Connection, year: int, method: str, sport: str
+) -> str | None:
     row = conn.execute(
         """
         SELECT t.school AS school
         FROM ratings r
         JOIN teams t ON t.id = r.team_id
-        WHERE r.year = ? AND r.method = ? AND r.rank = 1
+        WHERE r.year = ? AND r.method = ? AND r.rank = 1 AND r.sport = ?
         """,
-        (year, method),
+        (year, method, sport),
     ).fetchone()
     return str(row["school"]) if row is not None else None
 
@@ -74,12 +76,14 @@ def champion(
     """'Who was the best team in <year>?' -- resolve the #1-ranked team, then
     return its full evidentiary case (same shape as /team-case) plus its
     persona narration."""
-    name = _resolve_champion_name(conn, payload.year, payload.method)
-    # `name is None` (no ratings rows at all for year/method) still needs to
-    # surface as UnknownYearError -- build_team_case raises it for us as
-    # soon as resolve_team's `_require_year` check runs, whether we pass a
-    # real name or any placeholder query string.
-    case = build_team_case(conn, payload.year, name or "", method=payload.method)
+    name = _resolve_champion_name(conn, payload.year, payload.method, payload.sport)
+    # `name is None` (no ratings rows at all for year/method/sport) still
+    # needs to surface as UnknownYearError -- build_team_case raises it for
+    # us as soon as resolve_team's `_require_year` check runs, whether we
+    # pass a real name or any placeholder query string.
+    case = build_team_case(
+        conn, payload.year, name or "", method=payload.method, sport=payload.sport
+    )
     case_out = TeamCaseOut.from_dataclass(case)
     narration = narrate_team_case(
         conn,
@@ -87,6 +91,7 @@ def champion(
         user_team=payload.user_team,
         question_type="champion",
         method=payload.method,
+        sport=payload.sport,
         cache=cache,
         narrator=narrator,
     )
@@ -101,7 +106,9 @@ def team_case(
     narrator: Narrator = Depends(get_narrator),
 ) -> TeamCaseEnvelope:
     """'How good was <team> in <year>?'"""
-    case = build_team_case(conn, payload.year, payload.team, method=payload.method)
+    case = build_team_case(
+        conn, payload.year, payload.team, method=payload.method, sport=payload.sport
+    )
     case_out = TeamCaseOut.from_dataclass(case)
     narration = narrate_team_case(
         conn,
@@ -109,6 +116,7 @@ def team_case(
         user_team=payload.user_team,
         question_type="team_case",
         method=payload.method,
+        sport=payload.sport,
         cache=cache,
         narrator=narrator,
     )
@@ -124,7 +132,12 @@ def compare(
 ) -> ComparisonEnvelope:
     """'Was <team_a> better than <team_b> in <year>?'"""
     comparison = build_comparison(
-        conn, payload.year, payload.team_a, payload.team_b, method=payload.method
+        conn,
+        payload.year,
+        payload.team_a,
+        payload.team_b,
+        method=payload.method,
+        sport=payload.sport,
     )
     comparison_out = ComparisonResultOut.from_dataclass(comparison)
     narration = narrate_comparison(
@@ -132,6 +145,7 @@ def compare(
         comparison_out,
         user_team=payload.user_team,
         method=payload.method,
+        sport=payload.sport,
         cache=cache,
         narrator=narrator,
     )

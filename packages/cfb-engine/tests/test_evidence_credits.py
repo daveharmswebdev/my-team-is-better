@@ -15,7 +15,8 @@ def test_get_credits_returns_credits_instance() -> None:
     credits = get_credits()
     assert isinstance(credits, Credits)
     assert isinstance(credits.methodology, MethodologyCredit)
-    assert isinstance(credits.data_source, DataSourceCredit)
+    assert isinstance(credits.data_sources, list)
+    assert all(isinstance(source, DataSourceCredit) for source in credits.data_sources)
 
 
 def test_methodology_credit_matches_exact_citation() -> None:
@@ -36,13 +37,38 @@ def test_methodology_credit_matches_exact_citation() -> None:
     )
 
 
-def test_data_source_credit_matches_exact_text() -> None:
-    data_source = get_credits().data_source
+def _data_source_by_name(name_fragment: str) -> DataSourceCredit:
+    matches = [
+        source for source in get_credits().data_sources if name_fragment in source.name
+    ]
+    assert len(matches) == 1, f"expected exactly one data source matching {name_fragment!r}"
+    return matches[0]
+
+
+def test_data_sources_contains_exactly_two_entries() -> None:
+    assert len(get_credits().data_sources) == 2
+
+
+def test_cfbd_data_source_credit_matches_exact_text() -> None:
+    data_source = _data_source_by_name("CollegeFootballData.com")
     assert data_source.name == "CollegeFootballData.com (CFBD)"
     assert data_source.url == "https://collegefootballdata.com"
     assert data_source.note == (
         "All game results are ingested from the CFBD API. This project "
         "performs no independent data collection and claims no "
+        "ownership of the underlying game data."
+    )
+
+
+def test_nflverse_data_source_credit_matches_exact_text() -> None:
+    data_source = _data_source_by_name("nflverse")
+    assert data_source.name == "nflverse (Lee Sharpe's NFL schedule/game data)"
+    assert data_source.url == "https://github.com/nflverse/nflverse-data"
+    assert data_source.note == (
+        "NFL game results are ingested from nflverse's static CSV release "
+        "assets (the schedule data was originally compiled and maintained "
+        "by Lee Sharpe before nflverse took over publishing it). This "
+        "project performs no independent data collection and claims no "
         "ownership of the underlying game data."
     )
 

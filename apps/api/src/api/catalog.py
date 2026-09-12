@@ -31,24 +31,33 @@ router = APIRouter(prefix="/api", tags=["catalog"])
 @router.get("/years", response_model=YearsOut)
 def years(
     method: str = "keener",
+    sport: str = "cfb",
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> YearsOut:
-    """Distinct years with ratings under `method`, ascending -- the year
-    picker's valid-selection universe."""
-    return YearsOut(years=list_available_years(conn, method))
+    """Distinct years with ratings under `method`/`sport`, ascending -- the
+    year picker's valid-selection universe. `sport` defaults to "cfb"
+    (issue #59), matching today's behavior for a client that never sends it.
+    """
+    return YearsOut(years=list_available_years(conn, method, sport))
 
 
 @router.get("/teams", response_model=TeamsOut)
-def teams(conn: sqlite3.Connection = Depends(get_db_conn)) -> TeamsOut:
-    """Every team name in the db -- the team picker's valid-selection
-    universe, the same query the persona grounding check already uses."""
-    return TeamsOut(teams=list_all_team_names(conn))
+def teams(
+    sport: str = "cfb",
+    conn: sqlite3.Connection = Depends(get_db_conn),
+) -> TeamsOut:
+    """Every team name in the db for `sport` -- the team picker's valid-
+    selection universe, the same query the persona grounding check already
+    uses. `sport` defaults to "cfb" (issue #59), matching today's behavior
+    for a client that never sends it."""
+    return TeamsOut(teams=list_all_team_names(conn, sport))
 
 
 @router.get("/credits", response_model=CreditsOut)
 def credits() -> CreditsOut:
-    """The project's attribution data -- Keener methodology citation +
-    CollegeFootballData.com data source credit. No db connection: the
-    single source of truth (`cfb_strength.evidence.credits.get_credits()`)
-    is static content, not a db read."""
+    """The project's attribution data -- Keener methodology citation plus
+    both data-source credits (CollegeFootballData.com for CFB, nflverse/Lee
+    Sharpe for NFL, issue #59). No db connection: the single source of
+    truth (`cfb_strength.evidence.credits.get_credits()`) is static content,
+    not a db read."""
     return CreditsOut.from_dataclass(get_credits())
