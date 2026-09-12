@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { pickTeam } from './pickTeam.ts'
 
 // Golden-path smoke spec (issue #39) for the "compare" question type,
 // against year 2005, Texas vs USC -- the existing golden comparison used
@@ -12,8 +13,8 @@ test('submitting a compare question renders a verdict comparing Texas and USC in
     .getByLabel('What do you want to know?')
     .selectOption({ label: 'Was one team better than another?' })
   await page.getByLabel('Year').fill('2005')
-  await page.getByLabel('Team A').fill('Texas')
-  await page.getByLabel('Team B').fill('USC')
+  await pickTeam(page, 'Team A', 'Texas')
+  await pickTeam(page, 'Team B', 'USC')
   await page.getByRole('button', { name: 'Get the verdict' }).click()
 
   const verdict = page.getByRole('article')

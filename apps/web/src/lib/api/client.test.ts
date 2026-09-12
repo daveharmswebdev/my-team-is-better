@@ -200,6 +200,18 @@ describe('fetchYears', () => {
     expect(url).toContain('sport=nfl')
   })
 
+  it('sends exactly `?sport=...` and nothing else', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { years: [2004, 2005] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchYears('cfb')
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    expect(new URL(url).search).toBe('?sport=cfb')
+  })
+
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {
     vi.stubGlobal(
       'fetch',
@@ -225,23 +237,65 @@ describe('fetchTeams', () => {
   })
 
   it('resolves with the parsed team list on a 200 response, defaulting to sport=cfb', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(jsonResponse(200, { teams: ['Texas', 'USC'] }))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(200, {
+        teams: ['Texas', 'USC'],
+        team_details: [
+          { name: 'Texas', mascot: 'Longhorns', aliases: ['TEX'] },
+          { name: 'USC', mascot: 'Trojans', aliases: [] },
+        ],
+      }),
+    )
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await fetchTeams()
 
-    expect(result).toEqual({ teams: ['Texas', 'USC'] })
+    expect(result.teams).toEqual(['Texas', 'USC'])
+    expect(result.team_details).toEqual([
+      { name: 'Texas', mascot: 'Longhorns', aliases: ['TEX'] },
+      { name: 'USC', mascot: 'Trojans', aliases: [] },
+    ])
     const [url] = fetchMock.mock.calls[0] as [string]
     expect(url).toContain('/api/teams')
+    expect(url).toContain('sport=cfb')
+  })
+
+  it('sends the year as a query param when one is given', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { teams: [], team_details: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchTeams('cfb', 2005)
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    expect(url).toContain('sport=cfb')
+    expect(url).toContain('year=2005')
+  })
+
+  it.each([
+    ['omitted', undefined],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('sends no year param at all when the year is %s', async (_label, year) => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { teams: [], team_details: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchTeams('cfb', year)
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    expect(url).not.toContain('year')
     expect(url).toContain('sport=cfb')
   })
 
   it('passes an explicit sport through as a query param', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValue(jsonResponse(200, { teams: ['Chiefs', 'Bills'] }))
+      .mockResolvedValue(
+        jsonResponse(200, { teams: ['Chiefs', 'Bills'], team_details: [] }),
+      )
     vi.stubGlobal('fetch', fetchMock)
 
     await fetchTeams('nfl')

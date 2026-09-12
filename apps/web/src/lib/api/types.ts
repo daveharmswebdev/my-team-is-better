@@ -142,15 +142,24 @@ export interface CreditsOut {
 // ---------------------------------------------------------------------------
 // catalog -- mirrors apps/api/src/api/models.py's `YearsOut`/`TeamsOut`
 // (`/api/years`, `/api/teams`), the year/team picker's valid-selection
-// universe (`QuestionForm`'s datalist suggestions).
+// universe (`QuestionForm`'s year suggestions and `TeamCombobox` fields).
 // ---------------------------------------------------------------------------
 
 export interface YearsOut {
   years: number[]
 }
 
+/**
+ * Mirrors `apps/api`'s `TeamsOut`: `teams` is the canonical flat
+ * submitted-value list and stays exactly as it was, while `team_details`
+ * (epic #76 / issue #78) is a parallel array of the same names in the same
+ * order plus display metadata. Both arrays come from one query on the API
+ * side, so they cannot drift and may be zipped by index -- `QuestionForm`
+ * feeds `team_details` to `TeamCombobox` and nothing reads the two together.
+ */
 export interface TeamsOut {
   teams: string[]
+  team_details: TeamDetail[]
 }
 
 /**

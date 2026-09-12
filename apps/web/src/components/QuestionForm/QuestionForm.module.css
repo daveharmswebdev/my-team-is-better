@@ -77,15 +77,24 @@
   gap: var(--sp-3);
 }
 
-.qfieldPair .qfield {
+/*
+ * Direct-child selector rather than `.qfieldPair .qfield`: the Team A/Team B
+ * columns are `TeamCombobox`es now (issue #80), whose own wrapper class comes
+ * from TeamCombobox.module.css and is therefore invisible to this file.
+ */
+.qfieldPair > * {
   min-width: 0;
 }
 
 /*
- * Applied together with .qfield on the "your team" field wrapper -- it's a
- * low-stakes local preference, styled like a pencil note in the margin
- * (italic, dashed underline, no box) rather than another required field.
- * Declared after .qfield above so these rules win the same-specificity tie.
+ * Wraps the "your team" `TeamCombobox` -- it's a low-stakes local
+ * preference, styled like a pencil note in the margin (italic, dashed
+ * underline, no box) rather than another required field.
+ *
+ * The class is doubled (`.casual.casual`) on the descendant rules so they
+ * beat TeamCombobox.module.css's own `.field label` / `.input` outright.
+ * Those would otherwise be a specificity tie decided by stylesheet
+ * injection order, which is a build-order detail, not a decision.
  */
 .casual {
   margin-top: var(--sp-2);
@@ -93,7 +102,7 @@
   border-top: 1px dashed var(--rule);
 }
 
-.casual label {
+.casual.casual label {
   font-family: var(--font-body);
   font-style: italic;
   font-weight: 500;
@@ -103,7 +112,7 @@
   letter-spacing: 0;
 }
 
-.casual input {
+.casual.casual input {
   border: none;
   border-bottom: 1px dashed var(--rule-strong);
   border-radius: 0;
@@ -112,7 +121,7 @@
   font-style: italic;
 }
 
-.casual input:focus {
+.casual.casual input:focus {
   border-bottom-color: var(--leather);
   outline-offset: 4px;
 }
