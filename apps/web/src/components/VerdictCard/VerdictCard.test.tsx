@@ -127,6 +127,31 @@ describe('VerdictCard', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/did you mean/i)
   })
 
+  it('renders the unknown_team error state as a not-found state with no pick list', () => {
+    render(
+      <VerdictCard
+        state={{
+          status: 'error',
+          error: {
+            kind: 'unknown_team',
+            body: {
+              error: 'unknown_team',
+              query: 'Abilene Christian',
+              year: 2010,
+              sport: 'cfb',
+            },
+          },
+        }}
+      />,
+    )
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/Abilene Christian/)
+    expect(alert).toHaveTextContent(/2010 college football/i)
+    expect(screen.queryByRole('list')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
   it('renders the same_team_comparison error state', () => {
     render(
       <VerdictCard

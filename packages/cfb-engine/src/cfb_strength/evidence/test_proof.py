@@ -18,7 +18,12 @@ from pathlib import Path
 
 import pytest
 
-from cfb_strength.contracts import AmbiguousTeamError, SameTeamComparisonError, UnknownYearError
+from cfb_strength.contracts import (
+    AmbiguousTeamError,
+    SameTeamComparisonError,
+    UnknownTeamError,
+    UnknownYearError,
+)
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.evidence.proof import (
     build_comparison,
@@ -197,6 +202,16 @@ def _build_fixture(conn: sqlite3.Connection) -> None:
     _insert_rating(conn, YEAR, METHOD, 104, 0.3, 4, 0, 0, sport="nfl")
     _insert_breakdown(conn, YEAR, METHOD, 104, None, None, None, None, None, 0.1, sport="nfl")
 
+    # --- Issue #100: a rated NFL team whose name looks superficially close
+    # to a query that names a *CFB* school ("Texas" vs "Houston Texans"). It
+    # is neither an exact match, nor a substring either direction ("texas" is
+    # not inside "houston texans" -- "texan" is), nor close enough for the
+    # 0.6-cutoff fuzzy stage, so "Texas" under sport="nfl" is a genuine
+    # zero-match query even though a same-sport lookalike is rated.
+    _insert_team(conn, 106, "Houston Texans", classification=None, sport="nfl")
+    _insert_rating(conn, YEAR, METHOD, 106, 0.2, 5, 0, 0, sport="nfl")
+    _insert_breakdown(conn, YEAR, METHOD, 106, None, None, None, None, None, 0.1, sport="nfl")
+
 
 @pytest.fixture
 def conn(tmp_path: Path) -> sqlite3.Connection:
@@ -361,3 +376,106 @@ def test_ambiguous_team_error_within_a_single_sport_still_raised(
 ) -> None:
     # "Foxtrot" substring-matches only one NFL team -- unique, no error.
     assert resolve_team(conn, YEAR, "Foxtrot", method=METHOD, sport="nfl") == 103
+
+
+# ---------------------------------------------------------------------------
+# (d) issue #100 -- zero matches is UnknownTeamError, never AmbiguousTeamError
+# ---------------------------------------------------------------------------
+
+
+def test_zero_match_query_raises_unknown_team_error(conn: sqlite3.Connection) -> None:
+    """"Texas" names a CFB school; under sport="nfl" nothing matches at any
+    stage. Before #100 this raised AmbiguousTeamError(query, []) -- "which of
+    these did you mean?" with nothing under it."""
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(conn, YEAR, "Texas", method=METHOD, sport="nfl")
+    assert exc_info.value.query == "Texas"
+    assert exc_info.value.year == YEAR
+    assert exc_info.value.sport == "nfl"
+
+
+def test_zero_match_query_is_not_an_ambiguous_team_error(conn: sqlite3.Connection) -> None:
+    """UnknownTeamError subclasses ValueError, not AmbiguousTeamError -- a
+    caller that only catches AmbiguousTeamError must not swallow this."""
+    assert not issubclass(UnknownTeamError, AmbiguousTeamError)
+    with pytest.raises(UnknownTeamError):
+        resolve_team(conn, YEAR, "Texas", method=METHOD, sport="nfl")
+
+
+def test_unknown_team_error_carries_no_suggestion_list(
+    conn: sqlite3.Connection,
+) -> None:
+    """contracts.py: UnknownTeamError deliberately carries only query/year/
+    sport. "Texas" under sport="nfl" is the strongest case for a near-miss
+    list that exists in this fixture -- a rated lookalike ("Houston Texans")
+    sits right there in the same year and sport -- and the error still must
+    not offer it, because someone typing "Texas" wants the other league.
+    Consumers render a plain not-found state instead.
+    """
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(conn, YEAR, "Texas", method=METHOD, sport="nfl")
+    error = exc_info.value
+    assert not hasattr(error, "suggestions")
+    assert error.query == "Texas"
+    assert error.year == YEAR
+    assert error.sport == "nfl"
+    # The lookalike is genuinely rated for this year/sport -- so this test
+    # fails if a suggestion pass is ever reintroduced, not because the name
+    # is absent from the candidate pool.
+    assert resolve_team(conn, YEAR, "Houston Texans", method=METHOD, sport="nfl") == 106
+
+
+def test_zero_match_query_with_no_lookalike_at_all_is_unknown_team_error(
+    conn: sqlite3.Connection,
+) -> None:
+    """"Zebra" has no counterpart of any kind in the CFB rated set -- still
+    UnknownTeamError, emphatically not a crash or an AmbiguousTeamError."""
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(conn, YEAR, "Zebra", method=METHOD, sport="cfb")
+    assert exc_info.value.query == "Zebra"
+    assert exc_info.value.year == YEAR
+    assert exc_info.value.sport == "cfb"
+
+
+def test_unknown_team_propagates_through_build_team_case_and_comparison(
+    conn: sqlite3.Connection,
+) -> None:
+    with pytest.raises(UnknownTeamError):
+        build_team_case(conn, YEAR, "Zebra", method=METHOD, sport="cfb")
+    with pytest.raises(UnknownTeamError):
+        build_comparison(conn, YEAR, "Alpha State", "Zebra", method=METHOD, sport="cfb")
+
+
+def test_ambiguous_team_error_never_carries_empty_candidates(
+    conn: sqlite3.Connection,
+) -> None:
+    """Module-wide invariant (contracts.py: `candidates` is always non-empty
+    -- "too many matches", never "none"). Sweeps exact-, substring-,
+    fuzzy-stage and zero-match queries across both sports."""
+    queries = [
+        "Alpha State",
+        "alpha state",
+        "  Alpha State  ",
+        "Alpha",
+        "a",
+        "State",
+        "Tech",
+        "Wildcats",
+        "Foxtrot",
+        "Delta Squad",
+        "Texas",
+        "Zebra",
+        "Qqqqqqqqqq",
+        "",
+    ]
+    raised_at_least_one = False
+    for sport in ("cfb", "nfl"):
+        for query in queries:
+            try:
+                resolve_team(conn, YEAR, query, method=METHOD, sport=sport)
+            except AmbiguousTeamError as e:
+                raised_at_least_one = True
+                assert e.candidates, f"empty candidates for {query!r} (sport={sport})"
+            except UnknownTeamError:
+                pass
+    assert raised_at_least_one, "expected at least one genuinely ambiguous query in the sweep"

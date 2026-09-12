@@ -7,11 +7,14 @@ persona narration envelope (`{"evidence": ..., "narration": ...}` --
 unchanged from issue #3; narration is computed by
 `api.persona.service.narrate_team_case`/`narrate_comparison`, which handles
 the cache lookup, the Claude call, and the grounding retry/fallback. Typed
-engine exceptions (`UnknownYearError`, `AmbiguousTeamError`,
-`SameTeamComparisonError`) propagate up to the app-level exception handlers
-registered in `api.errors` -- routes never catch them themselves, so there
-is exactly one place the exception -> HTTP mapping is spelled out
-(Architecture Brief §4.4).
+engine exceptions (`UnknownYearError`, `UnknownTeamError`,
+`AmbiguousTeamError`, `SameTeamComparisonError`) propagate up to the
+app-level exception handlers registered in `api.errors` -- routes never
+catch them themselves, so there is exactly one place the exception -> HTTP
+mapping is spelled out (Architecture Brief §4.4). `UnknownTeamError` (issue
+#100) is the newest of the four: a team query that matches *no* rated team
+for the requested year/sport, which the engine used to conflate with
+`AmbiguousTeamError`.
 
 Question type 1 ("who was the best team in <year>?") has no `get_champion`
 in the evidence layer -- only `cfb_strength.mcp_server.server.get_champion`,

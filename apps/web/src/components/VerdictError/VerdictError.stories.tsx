@@ -42,6 +42,41 @@ export const AmbiguousTeam: Story = {
   },
 }
 
+/**
+ * 404 `unknown_team` (issue #100): the name resolved to nothing rated in
+ * that exact season and league. A single not-found render -- no correction
+ * pills, by contract. It names the scope that came up empty and what to
+ * change, so it is not a dead end.
+ */
+export const UnknownTeamNotFound: Story = {
+  args: {
+    state: {
+      kind: 'unknown_team',
+      body: {
+        error: 'unknown_team',
+        query: 'Abilene Christian',
+        year: 2010,
+        sport: 'cfb',
+      },
+    },
+  },
+}
+
+/** The league in the copy follows `sport`, never the raw wire value. */
+export const UnknownTeamNfl: Story = {
+  args: {
+    state: {
+      kind: 'unknown_team',
+      body: {
+        error: 'unknown_team',
+        query: 'Baltimore Colts',
+        year: 2018,
+        sport: 'nfl',
+      },
+    },
+  },
+}
+
 export const SameTeamComparison: Story = {
   args: {
     state: {

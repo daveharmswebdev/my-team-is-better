@@ -1,18 +1,34 @@
-import type { VerdictErrorState } from '../../lib/api/types'
+import type { Sport, VerdictErrorState } from '../../lib/api/types'
 import styles from './VerdictError.module.css'
+
+/**
+ * How a league is named in user-facing copy. Deliberately not the wire value
+ * (`cfb`/`nfl`): "no rating for 2010 cfb" is jargon, and the whole point of
+ * the `unknown_team` copy is to say which season *and* which league came up
+ * empty.
+ */
+const LEAGUE_LABEL: Record<Sport, string> = {
+  cfb: 'college football',
+  nfl: 'NFL',
+}
 
 export interface VerdictErrorProps {
   state: VerdictErrorState
   /** Re-submits the same question with a different, known-good year (unknown_year only). */
   onSelectYear?: (year: number) => void
-  /** Re-submits the same question with the exact resolved team name (ambiguous_team only). */
+  /**
+   * Re-submits the same question with the exact team name picked from a pill
+   * -- `ambiguous_team`'s candidates, and only those. `unknown_team` offers
+   * no pills at all (see that branch below), so this is unused there.
+   */
   onSelectCandidate?: (candidate: string) => void
 }
 
 /**
- * Renders one of the three HTTP error cases from `apps/api/src/api/errors.py`
- * (404 unknown_year, 422 ambiguous_team, 400 same_team_comparison) or a
- * generic network/unreachable-API failure, each distinctly.
+ * Renders one of the four HTTP error cases from `apps/api/src/api/errors.py`
+ * (404 unknown_year, 404 unknown_team, 422 ambiguous_team, 400
+ * same_team_comparison) or a generic network/unreachable-API failure, each
+ * distinctly.
  */
 export function VerdictError({
   state,
@@ -64,6 +80,27 @@ export function VerdictError({
           </ul>
         </div>
       )
+    case 'unknown_team': {
+      // Split out of `ambiguous_team` in issue #100, and deliberately a
+      // *single* render with no correction pills. An earlier cut offered
+      // fuzzy-matched suggestions; they were dropped from the contract
+      // because nothing that reaches this branch scores high enough to be a
+      // real correction (the engine resolves >= 0.6 upstream), so the pills
+      // could only ever show real-but-irrelevant teams. Saying plainly that
+      // nothing was found, and naming the scope that came up empty, is the
+      // honest answer -- and it is still not a dead end, because it says
+      // what to change.
+      const { query, year, sport } = state.body
+      const scope = `${year} ${LEAGUE_LABEL[sport]}`
+      return (
+        <div role="alert" className={`${styles.plain} ${styles.user}`}>
+          <p>
+            We don&apos;t have a {scope} rating for &ldquo;{query}&rdquo;. Try a
+            different season, or switch leagues.
+          </p>
+        </div>
+      )
+    }
     case 'same_team_comparison':
       return (
         <div role="alert" className={`${styles.plain} ${styles.user}`}>

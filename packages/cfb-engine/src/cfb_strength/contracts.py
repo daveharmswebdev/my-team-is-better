@@ -388,12 +388,59 @@ class ComparisonResult:
 
 
 class AmbiguousTeamError(ValueError):
-    """Raised by evidence.resolve_team when a query matches >1 team ambiguously."""
+    """Raised by evidence.resolve_team when a query matches >1 team ambiguously.
+
+    `candidates` is always non-empty -- "too many matches", never "none". A
+    zero-match query is `UnknownTeamError` below; the two were conflated
+    until issue #100, which produced an `ambiguous_team` payload carrying an
+    empty candidate list and therefore a "did you mean:" prompt with nothing
+    under it.
+    """
 
     def __init__(self, query: str, candidates: list[str]):
         super().__init__(f"could not uniquely resolve {query!r}: candidates={candidates}")
         self.query = query
         self.candidates = candidates
+
+
+class UnknownTeamError(ValueError):
+    """Raised by evidence.resolve_team when a query matches *no* rated team
+    for the requested year/sport (issue #100).
+
+    Distinct from AmbiguousTeamError, which means the opposite problem. This
+    fires in two real situations, and the caller cannot tell them apart from
+    this error alone (nor does it need to): the name belongs to another
+    league entirely ("Texas" under `sport="nfl"`), or it belongs to this
+    league but has no rating row for this particular season (an FCS school
+    in a year it wasn't rated). `UnknownYearError` already covers the third
+    case -- the season has no ratings at all -- and is raised first.
+
+    Only ever raised for a team the caller asked to *look up* -- a team-case
+    `team`, or a comparison's `team_a`/`team_b`. A request's `user_team` is
+    persona context and is never resolved.
+
+    **Deliberately carries no suggestion list.** The first cut of #100 added
+    one, built from a looser `difflib` pass over the rated names, and it
+    could not work: `resolve_team`'s strict stage already resolves anything
+    scoring >= 0.6, so this branch is reached only when *nothing* does, and
+    the remaining [cutoff, 0.6) window holds noise rather than near-misses.
+    Real typos never arrive here at all ("Alabma"/"Alabama" scores 0.9231
+    and resolves upstream). Worse, no cutoff separates signal from noise:
+    "Gonzaga"/"Georgia" scores 0.5714 and outranks "Texas"/"Houston Texans"
+    at 0.5263 -- and the latter was itself a bad suggestion, since someone
+    typing "Texas" under sport="nfl" wants the other league, not the Texans.
+    Consumers therefore render a plain not-found state ("no rating for that
+    season and league; try another season or switch leagues"), which is both
+    honest and dead-end-free. A genuinely useful correction here would
+    answer "which seasons *does* this team have?" -- a different query
+    against unscoped team data, not a string-similarity heuristic.
+    """
+
+    def __init__(self, query: str, year: int, sport: str):
+        super().__init__(f"no {sport} team matching {query!r} is rated for {year}")
+        self.query = query
+        self.year = year
+        self.sport = sport
 
 
 class UnknownYearError(ValueError):
@@ -513,7 +560,7 @@ class Credits:
 # about not assuming/erroring on NULL `teams.classification` values it reads
 # incidentally (e.g. team listings), not about new tiering logic here.
 #
-# mcp-agent imports these five names (plus AmbiguousTeamError/UnknownYearError/
-# SameTeamComparisonError from this file) from cfb_strength.evidence and must
+# mcp-agent imports these five names (plus AmbiguousTeamError/UnknownTeamError/
+# UnknownYearError/SameTeamComparisonError from this file) from cfb_strength.evidence and must
 # not reimplement their logic in mcp_server/.
 # ---------------------------------------------------------------------------

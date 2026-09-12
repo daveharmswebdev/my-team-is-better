@@ -66,6 +66,29 @@ is exactly the state a typo may no longer impersonate.
 """
 
 
+Sport = Literal["cfb", "nfl"]
+"""The leagues the engine actually has rated data for.
+
+Constrained for the same reason as `Method` above, with a second symptom on
+top. Inbound, `sport` was a bare `str`, so `GET /api/years?sport=basketball`
+answered `200 {"years": []}` -- indistinguishable from a real league whose
+seasons are not ingested yet. Outbound, `UnknownTeamErrorBody` echoes the
+requested `sport` straight back, and `apps/web` types that field as a
+`Sport` union whose `isVerdictErrorBody` guard rejects the **whole body**
+when the value is outside it: an unrecognised sport turned a mapped 404 into
+a generic network error, reintroducing the dead end issue #100 removed.
+Constraining the request boundary fixes both ends at once -- a value that
+cannot get in cannot be echoed back out.
+
+Hand-written rather than derived from the engine, for the same layering
+reason `Method` is: `apps/api` reaches the engine only through
+`cfb_strength.evidence` and `cfb_strength.db` (CLAUDE.md), so a shared sport
+enum is not importable from here. The duplication is the price of the
+boundary; `tests/test_sport_validation.py` is what catches it drifting when
+a third league is added.
+"""
+
+
 # ---------------------------------------------------------------------------
 # requests
 # ---------------------------------------------------------------------------
@@ -82,7 +105,7 @@ class ChampionRequest(BaseModel):
     # Issue #59: threaded through to the evidence-layer calls in
     # `cfb_strength.evidence.proof` (all default to "cfb" themselves, so an
     # existing client that never sends this gets today's exact behavior).
-    sport: str = "cfb"
+    sport: Sport = "cfb"
 
 
 class TeamCaseRequest(BaseModel):
@@ -94,7 +117,7 @@ class TeamCaseRequest(BaseModel):
     team: str
     method: Method = "keener"
     user_team: str | None = None
-    sport: str = "cfb"
+    sport: Sport = "cfb"
 
 
 class ComparisonRequest(BaseModel):
@@ -107,7 +130,7 @@ class ComparisonRequest(BaseModel):
     team_b: str
     method: Method = "keener"
     user_team: str | None = None
-    sport: str = "cfb"
+    sport: Sport = "cfb"
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +500,39 @@ class AmbiguousTeamErrorBody(BaseModel):
     error: Literal["ambiguous_team"] = "ambiguous_team"
     query: str
     candidates: list[str]
+
+
+class UnknownTeamErrorBody(BaseModel):
+    """The zero-match case (issue #100) -- the opposite problem from
+    `AmbiguousTeamErrorBody`, which is >1 match and whose `candidates` is
+    always non-empty.
+
+    **Deliberately carries no suggestion list.** The first cut of #100 added
+    one and it could not work: the engine's `resolve_team` already resolves
+    anything scoring >= 0.6, so this branch is reached only when *nothing*
+    does, and no cutoff separates signal from noise in what is left
+    ("Gonzaga"/"Georgia" scores 0.5714 and outranks "Texas"/"Houston
+    Texans" at 0.5263). Real typos never arrive here at all --
+    "Alabma"/"Alabama" scores 0.9231 and resolves upstream. The field
+    shipped nonsense: "Abilene Christian" came back suggesting Michigan,
+    Minnesota, Ole Miss and Virginia. See `contracts.UnknownTeamError` for
+    the full measurement.
+
+    Clients render a plain not-found state ("no rating for that team in that
+    season and league"), which still clears #100's dead end -- the bug #100
+    fixed was a 422 `ambiguous_team` "did you mean:" prompt with an *empty*
+    pick list under it, and an honest not-found is not that.
+
+    `sport` is the `Sport` literal, not a bare `str`, because `apps/web`'s
+    `isVerdictErrorBody` guard rejects this entire body if the value falls
+    outside its own `Sport` union -- which would collapse this mapped 404
+    back into a generic network error.
+    """
+
+    error: Literal["unknown_team"] = "unknown_team"
+    query: str
+    year: int
+    sport: Sport
 
 
 class SameTeamComparisonErrorBody(BaseModel):

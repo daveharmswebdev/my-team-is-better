@@ -119,6 +119,50 @@ def test_get_team_season_ambiguous_team_returns_error_dict_not_exception(
     assert len(result["candidates"]) > 1
 
 
+def test_get_team_season_unknown_team_returns_unknown_team_not_ambiguous(
+    mcp_fixture_db: Path,
+) -> None:
+    """Issue #100: a query matching *zero* rated teams used to come back as
+    `ambiguous_team` with an empty candidate list, which told the calling
+    LLM "did you mean one of these" and then offered none. Claude is the
+    second consumer of this dead end, after the browser."""
+    from cfb_strength.mcp_server.server import get_team_season
+
+    result = get_team_season(year=2005, team="Abilene Christian")
+    assert isinstance(result, dict)
+    assert result["error"] == "unknown_team"
+    assert result["query"] == "Abilene Christian"
+    assert result["year"] == 2005
+    assert "candidates" not in result
+
+
+def test_compare_teams_unknown_team_returns_unknown_team(mcp_fixture_db: Path) -> None:
+    """The mapping is per-tool, not app-wide as it is in apps/api, so each
+    tool needs its own coverage or one can silently regress alone."""
+    from cfb_strength.mcp_server.server import compare_teams
+
+    result = compare_teams(year=2005, team_a="Texas", team_b="Abilene Christian")
+    assert isinstance(result, dict)
+    assert result["error"] == "unknown_team"
+    assert result["query"] == "Abilene Christian"
+
+
+def test_unknown_team_and_ambiguous_team_stay_distinct(mcp_fixture_db: Path) -> None:
+    """The whole point of #100: the two errors must not collapse back into
+    one. "State" matches many rated teams, "Abilene Christian" matches none,
+    and they must report differently -- with `ambiguous_team` never carrying
+    an empty candidate list."""
+    from cfb_strength.mcp_server.server import get_team_season
+
+    ambiguous = get_team_season(year=2005, team="State")
+    unknown = get_team_season(year=2005, team="Abilene Christian")
+
+    assert ambiguous["error"] == "ambiguous_team"
+    assert len(ambiguous["candidates"]) > 1
+    assert unknown["error"] == "unknown_team"
+    assert ambiguous["error"] != unknown["error"]
+
+
 def test_compare_teams_valid_pair_returns_dict_citing_head_to_head(mcp_fixture_db: Path) -> None:
     from cfb_strength.mcp_server.server import compare_teams
 

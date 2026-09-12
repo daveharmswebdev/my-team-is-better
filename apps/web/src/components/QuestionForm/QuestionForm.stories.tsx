@@ -185,6 +185,57 @@ export const SeededByACorrection: Story = {
   },
 }
 
+/**
+ * Issue #100(b): a team picked for College, then left behind by a switch to
+ * NFL. The founder's call is to flag it, not clear it -- the typed value
+ * survives, the submit button stays enabled, and the user gets a one-click
+ * clear if they want one. Silently discarding typed input is its own
+ * annoyance, and a freely-typed name has to stay submittable for the same
+ * reason `CatalogError` below leaves a usable plain input.
+ */
+export const StaleTeamAfterLeagueSwitch: Story = {
+  args: {
+    initialQuestionType: 'team_case',
+    initialYear: 2005,
+    initialTeam: 'Texas',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('radio', { name: /nfl/i }))
+
+    await expect(
+      await canvas.findByText(/isn't in the 2005 NFL team list/i),
+    ).toBeVisible()
+    await expect(canvas.getByLabelText(/^team$/i)).toHaveValue('Texas')
+    await expect(
+      canvas.getByRole('button', { name: 'Clear the team' }),
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: /get the verdict/i }),
+    ).not.toBeDisabled()
+  },
+}
+
+/** The same flag on a compare question, raised against one side only. */
+export const StaleTeamOnOneSideOfACompare: Story = {
+  args: {
+    initialQuestionType: 'compare',
+    initialSport: 'nfl',
+    initialYear: 2021,
+    initialTeamA: 'New York Giants',
+    initialTeamB: 'Ohio State',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      await canvas.findByText(/Ohio State.*isn't in the 2021 NFL team list/i),
+    ).toBeVisible()
+    await expect(
+      canvas.queryByRole('button', { name: 'Clear the first team' }),
+    ).not.toBeInTheDocument()
+  },
+}
+
 export const Submitting: Story = {
   args: {
     isSubmitting: true,

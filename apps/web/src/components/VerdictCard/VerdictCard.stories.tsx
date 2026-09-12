@@ -196,6 +196,27 @@ export const AmbiguousTeamError: Story = {
   },
 }
 
+/**
+ * `unknown_team` -- a not-found state with no pick list at all, by contract
+ * (correction pills were removed from this error kind).
+ */
+export const UnknownTeamErrorNotFound: Story = {
+  args: {
+    state: {
+      status: 'error',
+      error: {
+        kind: 'unknown_team',
+        body: {
+          error: 'unknown_team',
+          query: 'Abilene Christian',
+          year: 2010,
+          sport: 'cfb',
+        },
+      },
+    },
+  },
+}
+
 export const SameTeamComparisonError: Story = {
   args: {
     state: {

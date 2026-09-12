@@ -31,7 +31,12 @@ import sqlite3
 from typing import Any
 
 from cfb_strength.config import DB_PATH
-from cfb_strength.contracts import AmbiguousTeamError, SameTeamComparisonError, UnknownYearError
+from cfb_strength.contracts import (
+    AmbiguousTeamError,
+    SameTeamComparisonError,
+    UnknownTeamError,
+    UnknownYearError,
+)
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
@@ -241,6 +246,11 @@ def get_team_season(year: int, team: str, method: str = "keener") -> dict[str, A
         return dataclasses.asdict(case)
     except AmbiguousTeamError as e:
         return {"error": "ambiguous_team", "query": e.query, "candidates": e.candidates}
+    except UnknownTeamError as e:
+        # Distinct from ambiguous_team on purpose (issue #100): zero matches is
+        # not "which of these did you mean". Deliberately carries no suggestion
+        # list -- see contracts.UnknownTeamError for why a fuzzy one cannot work.
+        return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
         return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
     except Exception as e:  # noqa: BLE001
@@ -268,6 +278,11 @@ def compare_teams(year: int, team_a: str, team_b: str, method: str = "keener") -
         return {"error": "same_team_comparison", "team": e.team_name}
     except AmbiguousTeamError as e:
         return {"error": "ambiguous_team", "query": e.query, "candidates": e.candidates}
+    except UnknownTeamError as e:
+        # Distinct from ambiguous_team on purpose (issue #100): zero matches is
+        # not "which of these did you mean". Deliberately carries no suggestion
+        # list -- see contracts.UnknownTeamError for why a fuzzy one cannot work.
+        return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
         return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
     except Exception as e:  # noqa: BLE001
@@ -304,6 +319,11 @@ def get_champion(year: int, method: str = "keener") -> dict[str, Any]:
         return dataclasses.asdict(case)
     except AmbiguousTeamError as e:
         return {"error": "ambiguous_team", "query": e.query, "candidates": e.candidates}
+    except UnknownTeamError as e:
+        # Distinct from ambiguous_team on purpose (issue #100): zero matches is
+        # not "which of these did you mean". Deliberately carries no suggestion
+        # list -- see contracts.UnknownTeamError for why a fuzzy one cannot work.
+        return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
         return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
     except Exception as e:  # noqa: BLE001

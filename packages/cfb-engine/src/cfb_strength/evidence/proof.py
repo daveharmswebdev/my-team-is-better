@@ -15,9 +15,9 @@ from typing import Literal
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
+    CommonOpponent,
     ComparisonResult,
     ComparisonTeamSummary,
-    CommonOpponent,
     HeadToHead,
     HeadToHeadMeeting,
     OpponentCredit,
@@ -25,6 +25,7 @@ from cfb_strength.contracts import (
     RatingBreakdown,
     SameTeamComparisonError,
     TeamCase,
+    UnknownTeamError,
     UnknownYearError,
 )
 from cfb_strength.evidence.credit_explain import explain_credit
@@ -32,6 +33,13 @@ from cfb_strength.evidence.credit_explain import explain_credit
 # Wins against an opponent ranked this or better count as "quality wins".
 # Take 1 used a top-25 threshold; we keep that convention here.
 QUALITY_WIN_RANK_THRESHOLD = 25
+
+# Fuzzy-match tuning for `resolve_team`'s third and last stage: one close
+# name at or above this ratio is a resolution. Anything below it is not a
+# match and gets no second, looser pass -- see UnknownTeamError in
+# contracts.py for why a near-miss list cannot be built here.
+FUZZY_MATCH_CUTOFF = 0.6
+FUZZY_MATCH_LIMIT = 10
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +218,10 @@ def resolve_team(
       3. Fuzzy match via difflib.get_close_matches.
 
     Raises AmbiguousTeamError if any stage other than a unique exact match
-    yields more than one candidate. Raises UnknownYearError if there are no
-    ratings at all for year/method/sport.
+    yields more than one candidate (its `candidates` list is always
+    non-empty). Raises UnknownTeamError -- carrying only the query, year and
+    sport -- if no stage matches anything at all. Raises UnknownYearError if
+    there are no ratings at all for year/method/sport.
     """
     _require_year(conn, year, method, sport)
     candidates = _rated_teams(conn, year, method, sport)
@@ -236,17 +246,21 @@ def resolve_team(
         raise AmbiguousTeamError(query, sorted(r["school"] for r in substring))
 
     names = [row["school"] for row in candidates]
-    close = difflib.get_close_matches(q, names, n=10, cutoff=0.6)
+    close = difflib.get_close_matches(q, names, n=FUZZY_MATCH_LIMIT, cutoff=FUZZY_MATCH_CUTOFF)
     if len(close) == 1:
         matched = close[0]
         return int(next(r["team_id"] for r in candidates if r["school"] == matched))
 
-    # Either 0 matches (genuinely not found) or >1 (ambiguous). contracts.py
-    # has no dedicated "not found" error, so we reuse AmbiguousTeamError with
-    # an empty candidate list for the 0 case -- its message ("could not
-    # uniquely resolve ...: candidates=[]") still reads correctly there.
-    # Reported as a contract-insufficiency note in the delegation return.
-    raise AmbiguousTeamError(query, sorted(close))
+    # 0 matches and >1 are opposite failures and must not share an error
+    # (issue #100): >1 is "which of these did you mean", 0 is "no such rated
+    # team". Conflating them produced an `ambiguous_team` payload with an
+    # empty candidate list, i.e. a "did you mean:" prompt with nothing under
+    # it. AmbiguousTeamError.candidates is therefore non-empty from every
+    # raise site in this module, by construction.
+    if len(close) > 1:
+        raise AmbiguousTeamError(query, sorted(close))
+
+    raise UnknownTeamError(query, year, sport)
 
 
 def _team_games(
