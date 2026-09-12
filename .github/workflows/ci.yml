@@ -30,15 +30,21 @@ jobs:
       - name: pytest
         run: uv run pytest -q
 
-      # contracts.py is the interface every spoke implements against; `ratings/`
-      # is where those implementations live, and `RatingMethod` /
+      # Was `contracts.py` alone, which meant the modules *implementing* that
+      # contract were never type-checked -- `RatingMethod` /
       # `CareerRatingMethod` conformance is only machine-checked if the
-      # implementing modules are type-checked too. Extended here alongside the
-      # Elo engine, which is the first method needing per-sport construction
-      # and protocol dispatch. Verified clean on the pre-Elo tree, so this
-      # gated nothing retroactively.
-      - name: mypy --strict (contracts.py + ratings/)
-        run: uv run mypy --strict src/cfb_strength/contracts.py src/cfb_strength/ratings
+      # implementations are checked too. Widened alongside the Elo engine.
+      #
+      # Scoped to the whole package rather than just `ratings/`: verified
+      # clean at 32 source files (colocated `test_*.py` included), so this
+      # gates nothing retroactively and there is no reason to leave the other
+      # modules uncovered. CLAUDE.md's standing rule is `mypy --strict` on
+      # anything crossing a module boundary, which in this package is most of
+      # it. If a future change makes one module genuinely un-annotatable,
+      # narrow it with a `[[tool.mypy.overrides]]` entry rather than shrinking
+      # this path back and silently dropping everything else.
+      - name: mypy --strict (whole package)
+        run: uv run mypy --strict src/cfb_strength
 
       - name: import-linter
         run: uv run lint-imports
