@@ -8,8 +8,8 @@ repos:
         pass_filenames: false
         always_run: true
       - id: cfb-engine-mypy-strict-contracts
-        name: cfb-engine — mypy --strict (contracts.py, the interface contract)
-        entry: bash -c 'cd packages/cfb-engine && uv run mypy --strict src/cfb_strength/contracts.py'
+        name: cfb-engine — mypy --strict (contracts.py + ratings/, the interface contract and its implementations)
+        entry: bash -c 'cd packages/cfb-engine && uv run mypy --strict src/cfb_strength/contracts.py src/cfb_strength/ratings'
         language: system
         pass_filenames: false
         always_run: true

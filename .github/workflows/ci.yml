@@ -30,8 +30,15 @@ jobs:
       - name: pytest
         run: uv run pytest -q
 
-      - name: mypy --strict (contracts.py)
-        run: uv run mypy --strict src/cfb_strength/contracts.py
+      # contracts.py is the interface every spoke implements against; `ratings/`
+      # is where those implementations live, and `RatingMethod` /
+      # `CareerRatingMethod` conformance is only machine-checked if the
+      # implementing modules are type-checked too. Extended here alongside the
+      # Elo engine, which is the first method needing per-sport construction
+      # and protocol dispatch. Verified clean on the pre-Elo tree, so this
+      # gated nothing retroactively.
+      - name: mypy --strict (contracts.py + ratings/)
+        run: uv run mypy --strict src/cfb_strength/contracts.py src/cfb_strength/ratings
 
       - name: import-linter
         run: uv run lint-imports
