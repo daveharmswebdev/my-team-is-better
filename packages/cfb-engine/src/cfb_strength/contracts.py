@@ -436,7 +436,7 @@ class UnknownTeamError(ValueError):
     against unscoped team data, not a string-similarity heuristic.
     """
 
-    def __init__(self, query: str, year: int, sport: str):
+    def __init__(self, query: str, year: int, sport: Literal["cfb", "nfl"]):
         super().__init__(f"no {sport} team matching {query!r} is rated for {year}")
         self.query = query
         self.year = year

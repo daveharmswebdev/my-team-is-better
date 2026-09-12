@@ -206,7 +206,7 @@ def resolve_team(
     year: int,
     query: str,
     method: str = "keener",
-    sport: str = "cfb",
+    sport: Literal["cfb", "nfl"] = "cfb",
 ) -> int:
     """Resolve a team name query to a team_id, scoped to teams that have a
     rating row for `year`/`method`/`sport` (a team without a rating can't have
@@ -320,7 +320,7 @@ def build_team_case(
     year: int,
     team: str,
     method: str = "keener",
-    sport: str = "cfb",
+    sport: Literal["cfb", "nfl"] = "cfb",
 ) -> TeamCase:
     team_id = resolve_team(conn, year, team, method=method, sport=sport)
 
@@ -400,7 +400,7 @@ def build_comparison(
     team_a: str,
     team_b: str,
     method: str = "keener",
-    sport: str = "cfb",
+    sport: Literal["cfb", "nfl"] = "cfb",
 ) -> ComparisonResult:
     team_a_id = resolve_team(conn, year, team_a, method=method, sport=sport)
     team_b_id = resolve_team(conn, year, team_b, method=method, sport=sport)
