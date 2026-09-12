@@ -17,6 +17,14 @@ _SPORT_COLUMN_TABLES = ("teams", "team_season", "games", "ratings", "rating_brea
 # re-ingest (see schema.sql's comment on the teams table).
 _SOURCE_ID_TABLES = ("teams", "games")
 
+# Columns `teams` gained for epic #76 (mascot/city-searchable typeahead),
+# populated by #77's CFBD `/teams` ingest. Same pre-existing-db problem as the
+# #51 columns above: schema.sql's `CREATE TABLE IF NOT EXISTS` is a no-op
+# against a real local `data/cfb.sqlite3`, so these are added here too.
+# Nullable with no default -- unlike `sport`, there is no sensible backfill
+# value, and populating them is the ingest's job, not the migration's.
+_TEAM_ALIAS_COLUMNS = (("mascot", "TEXT"), ("alternate_names", "TEXT"))
+
 
 def get_conn(db_path: Path | str = DB_PATH, *, read_only: bool = False) -> sqlite3.Connection:
     db_path = Path(db_path)
@@ -78,7 +86,24 @@ def _migrate_sport_columns(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_games_source_id ON games(source_id)")
 
 
+def _migrate_team_alias_columns(conn: sqlite3.Connection) -> None:
+    """Add `teams.mascot` / `teams.alternate_names` (epic #76) to a
+    pre-existing db. A no-op against a fresh db, where schema.sql already
+    declared them, and idempotent when called twice -- sqlite has no
+    "ADD COLUMN IF NOT EXISTS", hence the explicit `_has_column` guard.
+
+    Existing rows are left with NULL in both columns rather than backfilled:
+    the alias data comes from a CFBD `/teams` fetch the ingest path owns
+    (#77), and a NULL mascot is a legitimate end state anyway (every NFL row,
+    plus any CFB team CFBD has no mascot for).
+    """
+    for column, column_type in _TEAM_ALIAS_COLUMNS:
+        if not _has_column(conn, "teams", column):
+            conn.execute(f"ALTER TABLE teams ADD COLUMN {column} {column_type}")
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text())
     _migrate_sport_columns(conn)
+    _migrate_team_alias_columns(conn)
     conn.commit()

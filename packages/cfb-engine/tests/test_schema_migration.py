@@ -1,5 +1,8 @@
-"""Coverage for connection.py's `_migrate_sport_columns` (#51, sprint 2: NFL
-support): a pre-existing local `data/cfb.sqlite3` predates the `sport`/
+"""Coverage for connection.py's in-place migration branches --
+`_migrate_sport_columns` (#51, sprint 2: NFL support) and
+`_migrate_team_alias_columns` (epic #76).
+
+#51: a pre-existing local `data/cfb.sqlite3` predates the `sport`/
 `source_id` columns added to teams/team_season/games/ratings/rating_breakdowns
 and the widened `ingestion_log` primary key. `ensure_schema` must bring such a
 db up to date in place, without losing existing rows -- CI and a fresh Render
@@ -15,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from cfb_strength.db.connection import ensure_schema, get_conn
+from cfb_strength.db.connection import SCHEMA_PATH, ensure_schema, get_conn
 
 _PRE_51_SCHEMA = """
 CREATE TABLE teams (
@@ -235,5 +238,113 @@ def test_ensure_schema_on_fresh_db_has_new_columns_from_the_start(tmp_path: Path
     for table in ("teams", "team_season", "games", "ratings", "rating_breakdowns", "ingestion_log"):
         cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         assert "sport" in cols
+
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Epic #76 / issue #77: teams.mascot + teams.alternate_names. Same in-place
+# migration concern as the #51 block above -- and the same reason it can't
+# live in schema.sql alone: `CREATE TABLE IF NOT EXISTS teams` is a no-op
+# against the pre-existing db these tests build, so a column declared only
+# in the DDL would silently never appear. The fixtures below deliberately
+# cover *both* pre-existing shapes that exist in the wild: a pre-#51 db
+# (nothing added yet) and a post-#51/pre-#77 db (sport/source_id present,
+# alias columns not) -- the latter is what a real local `data/cfb.sqlite3`
+# actually looks like today.
+# ---------------------------------------------------------------------------
+
+_POST_51_PRE_77_SCHEMA = """
+CREATE TABLE teams (
+    id INTEGER PRIMARY KEY,
+    school TEXT NOT NULL,
+    classification TEXT,
+    sport TEXT NOT NULL DEFAULT 'cfb',
+    source_id TEXT
+);
+"""
+
+
+@pytest.fixture
+def post_51_pre_77_db(tmp_path: Path) -> Path:
+    """A `teams` table at the post-#51, pre-#77 shape, seeded with one CFB
+    and one NFL row -- what a real local db looks like immediately before
+    this migration."""
+    dest = tmp_path / "post_51_pre_77.sqlite3"
+    conn = sqlite3.connect(dest)
+    conn.executescript(_POST_51_PRE_77_SCHEMA)
+    conn.execute(
+        "INSERT INTO teams (id, school, classification, sport, source_id) "
+        "VALUES (251, 'Texas', 'fbs', 'cfb', NULL)"
+    )
+    conn.execute(
+        "INSERT INTO teams (id, school, classification, sport, source_id) "
+        "VALUES (1_000_000_001, 'New England Patriots', NULL, 'nfl', 'NE')"
+    )
+    conn.commit()
+    conn.close()
+    return dest
+
+
+def test_migration_adds_alias_columns_to_a_pre_existing_db(post_51_pre_77_db: Path) -> None:
+    conn = get_conn(post_51_pre_77_db)
+    ensure_schema(conn)
+
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(teams)")}
+    assert "mascot" in cols
+    assert "alternate_names" in cols
+
+    conn.close()
+
+
+def test_migration_leaves_existing_team_rows_with_null_aliases(post_51_pre_77_db: Path) -> None:
+    """Backfill is the ingest's job (#77), not the migration's -- existing
+    rows must survive with NULL aliases rather than being rewritten."""
+    conn = get_conn(post_51_pre_77_db)
+    ensure_schema(conn)
+
+    row = conn.execute(
+        "SELECT school, mascot, alternate_names FROM teams WHERE id = 251"
+    ).fetchone()
+    assert row["school"] == "Texas"
+    assert row["mascot"] is None
+    assert row["alternate_names"] is None
+
+    assert conn.execute("SELECT COUNT(*) AS c FROM teams").fetchone()["c"] == 2
+
+    conn.close()
+
+
+def test_migration_adds_alias_columns_to_a_pre_51_db_too(pre_51_db: Path) -> None:
+    """The oldest shape must land on the current schema in one pass, not
+    only the one-version-behind shape above."""
+    conn = get_conn(pre_51_db)
+    ensure_schema(conn)
+
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(teams)")}
+    assert {"sport", "source_id", "mascot", "alternate_names"} <= cols
+
+    conn.close()
+
+
+def test_alias_migration_is_idempotent_when_run_twice(post_51_pre_77_db: Path) -> None:
+    conn = get_conn(post_51_pre_77_db)
+    ensure_schema(conn)
+    ensure_schema(conn)  # must not raise "duplicate column name: mascot"
+
+    assert conn.execute("SELECT COUNT(*) AS c FROM teams").fetchone()["c"] == 2
+    conn.close()
+
+
+def test_fresh_db_has_alias_columns_from_the_ddl(tmp_path: Path) -> None:
+    """The fresh-db path must get these from schema.sql itself, so CI and a
+    clean Render deploy don't depend on the migration branch at all."""
+    dest = tmp_path / "fresh_alias.sqlite3"
+    conn = get_conn(dest)
+    conn.executescript(SCHEMA_PATH.read_text())  # DDL only -- no migration
+
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(teams)")}
+    assert "mascot" in cols
+    assert "alternate_names" in cols
 
     conn.close()
