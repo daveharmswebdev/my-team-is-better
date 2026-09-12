@@ -153,6 +153,15 @@ export interface TeamsOut {
   teams: string[]
 }
 
+// ---------------------------------------------------------------------------
+// sport -- mirrors `apps/api/src/api/models.py`'s `sport: str = "cfb"` field
+// (issue #59) on the catalog and verdict request models. `QuestionForm`'s
+// College/NFL toggle (issue #60) is the only producer of a non-default
+// value today.
+// ---------------------------------------------------------------------------
+
+export type Sport = 'cfb' | 'nfl'
+
 /** True when `evidence` is a `TeamCaseOut` (champion/team-case routes) rather than a `ComparisonResultOut` (compare route). */
 export function isTeamCaseEnvelope(
   envelope: VerdictEnvelope,

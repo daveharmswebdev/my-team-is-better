@@ -4,6 +4,35 @@
   gap: var(--sp-4);
 }
 
+.sportToggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.9rem;
+  font-family: var(--font-label);
+}
+
+.sportToggle legend {
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  padding: 0 0.3rem;
+}
+
+.sportToggle label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 .qfield {
   display: flex;
   flex-direction: column;

@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import type { FormEvent } from 'react'
 import { fetchTeams, fetchYears } from '../../lib/api/client'
+import type { Sport } from '../../lib/api/types'
 import { getStoredUserTeam, setStoredUserTeam } from '../../lib/userTeam'
 import styles from './QuestionForm.module.css'
 
@@ -10,6 +11,7 @@ export interface ChampionSubmission {
   questionType: 'champion'
   year: number
   userTeam: string | null
+  sport: Sport
 }
 
 export interface TeamCaseSubmission {
@@ -17,6 +19,7 @@ export interface TeamCaseSubmission {
   year: number
   team: string
   userTeam: string | null
+  sport: Sport
 }
 
 export interface CompareSubmission {
@@ -25,6 +28,7 @@ export interface CompareSubmission {
   teamA: string
   teamB: string
   userTeam: string | null
+  sport: Sport
 }
 
 export type QuestionSubmission =
@@ -66,6 +70,7 @@ export function QuestionForm({
   isSubmitting = false,
 }: QuestionFormProps) {
   const questionTypeId = useId()
+  const sportName = useId()
   const yearId = useId()
   const teamId = useId()
   const teamAId = useId()
@@ -75,6 +80,7 @@ export function QuestionForm({
   const teamListId = useId()
 
   const [questionType, setQuestionType] = useState<QuestionType>('champion')
+  const [sport, setSport] = useState<Sport>('cfb')
   const [year, setYear] = useState(String(CURRENT_YEAR))
   const [team, setTeam] = useState('')
   const [teamA, setTeamA] = useState('')
@@ -88,8 +94,8 @@ export function QuestionForm({
     async function loadCatalog() {
       try {
         const [yearsOut, teamsOut] = await Promise.all([
-          fetchYears(),
-          fetchTeams(),
+          fetchYears(sport),
+          fetchTeams(sport),
         ])
         if (!cancelled) {
           setCatalog({
@@ -109,7 +115,7 @@ export function QuestionForm({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [sport])
 
   function handleUserTeamChange(value: string) {
     setUserTeam(value)
@@ -130,6 +136,7 @@ export function QuestionForm({
         questionType: 'champion',
         year: parsedYear,
         userTeam: submissionUserTeam,
+        sport,
       })
       return
     }
@@ -139,6 +146,7 @@ export function QuestionForm({
         year: parsedYear,
         team: team.trim(),
         userTeam: submissionUserTeam,
+        sport,
       })
       return
     }
@@ -148,11 +156,36 @@ export function QuestionForm({
       teamA: teamA.trim(),
       teamB: teamB.trim(),
       userTeam: submissionUserTeam,
+      sport,
     })
   }
 
   return (
     <form className={styles.qform} onSubmit={handleSubmit}>
+      <fieldset className={styles.sportToggle}>
+        <legend>League</legend>
+        <label>
+          <input
+            type="radio"
+            name={sportName}
+            value="cfb"
+            checked={sport === 'cfb'}
+            onChange={() => setSport('cfb')}
+          />
+          College
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={sportName}
+            value="nfl"
+            checked={sport === 'nfl'}
+            onChange={() => setSport('nfl')}
+          />
+          NFL
+        </label>
+      </fieldset>
+
       <div className={styles.qfield}>
         <label htmlFor={questionTypeId}>What do you want to know?</label>
         <select

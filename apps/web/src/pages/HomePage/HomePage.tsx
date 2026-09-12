@@ -26,18 +26,24 @@ export function HomePage() {
     try {
       const envelope =
         next.questionType === 'champion'
-          ? await fetchChampion({ year: next.year, user_team: next.userTeam })
+          ? await fetchChampion({
+              year: next.year,
+              user_team: next.userTeam,
+              sport: next.sport,
+            })
           : next.questionType === 'team_case'
             ? await fetchTeamCase({
                 year: next.year,
                 team: next.team,
                 user_team: next.userTeam,
+                sport: next.sport,
               })
             : await fetchCompare({
                 year: next.year,
                 team_a: next.teamA,
                 team_b: next.teamB,
                 user_team: next.userTeam,
+                sport: next.sport,
               })
       setState({ status: 'success', envelope })
     } catch (error) {

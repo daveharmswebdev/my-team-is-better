@@ -63,6 +63,7 @@ describe('HomePage', () => {
     expect(mockedFetchChampion).toHaveBeenCalledWith({
       year: 2005,
       user_team: null,
+      sport: 'cfb',
     })
   })
 
@@ -120,6 +121,7 @@ describe('HomePage', () => {
       year: 2005,
       team: 'Texas State',
       user_team: null,
+      sport: 'cfb',
     })
   })
 

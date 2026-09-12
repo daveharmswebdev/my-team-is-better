@@ -11,6 +11,7 @@
 import type {
   ComparisonEnvelope,
   CreditsOut,
+  Sport,
   TeamCaseEnvelope,
   TeamsOut,
   VerdictErrorBody,
@@ -83,12 +84,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface ChampionPayload {
   year: number
   user_team: string | null
+  sport: Sport
 }
 
 export interface TeamCasePayload {
   year: number
   team: string
   user_team: string | null
+  sport: Sport
 }
 
 export interface ComparePayload {
@@ -96,6 +99,7 @@ export interface ComparePayload {
   team_a: string
   team_b: string
   user_team: string | null
+  sport: Sport
 }
 
 export function fetchChampion(
@@ -144,17 +148,19 @@ export async function fetchCredits(): Promise<CreditsOut> {
 
 /**
  * Shared GET helper for `apps/api/src/api/catalog.py`'s `/api/years` and
- * `/api/teams` -- both take an optional `sport` query param (issue #59)
- * that callers here intentionally never send, matching today's CFB-only
- * default (threading `sport` through is issue #60, not this one). Mirrors
- * `fetchCredits`'s error handling: any failure collapses to a
- * `VerdictNetworkError` so `QuestionForm` can degrade to unvalidated input
- * on a catalog-fetch failure rather than blocking submission.
+ * `/api/teams` -- both take an optional `sport` query param (issue #59),
+ * threaded through explicitly by callers here as of `QuestionForm`'s
+ * College/NFL toggle (issue #60). Mirrors `fetchCredits`'s error handling:
+ * any failure collapses to a `VerdictNetworkError` so `QuestionForm` can
+ * degrade to unvalidated input on a catalog-fetch failure rather than
+ * blocking submission.
  */
-async function getCatalog<T>(path: string): Promise<T> {
+async function getCatalog<T>(path: string, sport: Sport): Promise<T> {
   let response: Response
   try {
-    response = await fetch(`${API_BASE_URL}${path}`)
+    response = await fetch(
+      `${API_BASE_URL}${path}?sport=${encodeURIComponent(sport)}`,
+    )
   } catch {
     throw new VerdictNetworkError(
       'Could not reach the API. Check your connection and try again.',
@@ -170,12 +176,14 @@ async function getCatalog<T>(path: string): Promise<T> {
   return (await response.json()) as T
 }
 
-/** `GET /api/years` -- the year picker's valid-selection universe. */
-export function fetchYears(): Promise<YearsOut> {
-  return getCatalog<YearsOut>('/api/years')
+/** `GET /api/years` -- the year picker's valid-selection universe, scoped
+ * to `sport` (defaults to `"cfb"`, matching `apps/api`'s own default). */
+export function fetchYears(sport: Sport = 'cfb'): Promise<YearsOut> {
+  return getCatalog<YearsOut>('/api/years', sport)
 }
 
-/** `GET /api/teams` -- the team picker's valid-selection universe. */
-export function fetchTeams(): Promise<TeamsOut> {
-  return getCatalog<TeamsOut>('/api/teams')
+/** `GET /api/teams` -- the team picker's valid-selection universe, scoped
+ * to `sport` (defaults to `"cfb"`, matching `apps/api`'s own default). */
+export function fetchTeams(sport: Sport = 'cfb'): Promise<TeamsOut> {
+  return getCatalog<TeamsOut>('/api/teams', sport)
 }
