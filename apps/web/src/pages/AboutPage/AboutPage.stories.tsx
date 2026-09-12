@@ -8,15 +8,30 @@ import { AboutPage } from './AboutPage'
  * stubbed `window.fetch` rather than props. Each story installs its own
  * handler before rendering; only requests to `/api/credits` are intercepted,
  * everything else falls through to the real `fetch`.
+ *
+ * `mockCredits` mirrors the live payload's shape and ordering: `methodologies`
+ * is a list, Keener's method first and Elo second, and the page renders them
+ * in that order.
  */
 const mockCredits: CreditsOut = {
-  methodology: {
-    name: 'Keener',
-    citation:
-      'Keener, J. P. (1993). The Perron-Frobenius theorem and the ranking of football teams. The American Mathematical Monthly, 100(1), 80-93.',
-    url: 'https://www.jstor.org/stable/2324033',
-    summary: 'Eigenvector-based strength-of-schedule ranking.',
-  },
+  methodologies: [
+    {
+      name: "Keener's method",
+      citation:
+        'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking of Football Teams," SIAM Review, 35(1), 1993.',
+      url: 'https://dl.acm.org/doi/10.1137/1035004',
+      summary:
+        "A team's rating depends recursively on the strength of the teams it beat, whose strength depends on the strength of their opponents -- the same Perron-Frobenius eigenvector idea behind PageRank, applied to a win graph. This is stock Keener, with win/loss as the dominant signal: this method does not weight margin of victory, so running up the score doesn't move the needle. It is the default, and the only method checked against the golden dataset of undisputed champions.",
+    },
+    {
+      name: 'Elo',
+      citation:
+        'Arpad E. Elo, The Rating of Chessplayers, Past and Present, Arco, 1978 -- as adapted for professional football by FiveThirtyEight (fivethirtyeight/nfl-elo-game).',
+      url: 'https://github.com/fivethirtyeight/nfl-elo-game',
+      summary:
+        'Every team starts even and they trade points after each game: beat someone better than you and you take more from them than you would from a team you were supposed to beat. Arpad Elo built it for chess; FiveThirtyEight published the football adaptation implemented here -- including the margin-of-victory multiplier, so unlike Keener above, blowouts do count. Offered as a second opinion, not a replacement -- where Elo and Keener disagree about a season, that disagreement is the interesting part.',
+    },
+  ],
   data_sources: [
     {
       name: 'CollegeFootballData.com (CFBD)',
