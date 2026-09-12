@@ -119,11 +119,18 @@ describe('fetchCredits', () => {
         url: 'https://example.com/keener',
         summary: 'Eigenvector-based strength-of-schedule ranking.',
       },
-      data_source: {
-        name: 'CollegeFootballData.com',
-        url: 'https://collegefootballdata.com',
-        note: 'Game results and team data.',
-      },
+      data_sources: [
+        {
+          name: 'CollegeFootballData.com',
+          url: 'https://collegefootballdata.com',
+          note: 'Game results and team data.',
+        },
+        {
+          name: 'nflverse (Lee Sharpe)',
+          url: 'https://github.com/nflverse/nflverse-data',
+          note: 'NFL play-by-play and schedule data.',
+        },
+      ],
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, credits))
     vi.stubGlobal('fetch', fetchMock)

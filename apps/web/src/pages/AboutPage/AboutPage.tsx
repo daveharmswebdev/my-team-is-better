@@ -108,19 +108,16 @@ export function AboutPage() {
         {state.status === 'error' && (
           <p className={styles.error}>{state.message}</p>
         )}
-        {state.status === 'success' && (
-          <p className={styles.body}>
-            Every game result behind these rankings comes from{' '}
-            <a
-              href={state.credits.data_source.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {state.credits.data_source.name}
-            </a>
-            . {state.credits.data_source.note}
-          </p>
-        )}
+        {state.status === 'success' &&
+          state.credits.data_sources.map((source) => (
+            <p className={styles.body} key={source.url}>
+              Every game result behind these rankings comes from{' '}
+              <a href={source.url} target="_blank" rel="noreferrer">
+                {source.name}
+              </a>
+              . {source.note}
+            </p>
+          ))}
       </section>
     </main>
   )

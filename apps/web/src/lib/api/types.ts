@@ -136,7 +136,7 @@ export interface CreditsDataSourceOut {
 
 export interface CreditsOut {
   methodology: CreditsMethodologyOut
-  data_source: CreditsDataSourceOut
+  data_sources: CreditsDataSourceOut[]
 }
 
 /** True when `evidence` is a `TeamCaseOut` (champion/team-case routes) rather than a `ComparisonResultOut` (compare route). */

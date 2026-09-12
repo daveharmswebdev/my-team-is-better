@@ -26,11 +26,18 @@ const credits: CreditsOut = {
     url: 'https://www.jstor.org/stable/2324033',
     summary: 'Eigenvector-based strength-of-schedule ranking.',
   },
-  data_source: {
-    name: 'CollegeFootballData.com (CFBD)',
-    url: 'https://collegefootballdata.com/test-mock',
-    note: 'All game results are ingested from the CFBD API. This project performs no independent data collection and claims no ownership of the underlying game data.',
-  },
+  data_sources: [
+    {
+      name: 'CollegeFootballData.com (CFBD)',
+      url: 'https://collegefootballdata.com/test-mock',
+      note: 'All game results are ingested from the CFBD API. This project performs no independent data collection and claims no ownership of the underlying game data.',
+    },
+    {
+      name: 'nflverse (Lee Sharpe)',
+      url: 'https://github.com/nflverse/nflverse-data/test-mock',
+      note: 'NFL game results are ingested from nflverse, built on play-by-play data originated by Lee Sharpe.',
+    },
+  ],
 }
 
 describe('AboutPage', () => {
@@ -68,18 +75,20 @@ describe('AboutPage', () => {
     expect(link).toHaveAttribute('href', credits.methodology.url)
   })
 
-  it('renders the data source name, link, and note from the fetched credits, not hardcoded', async () => {
+  it('renders every data source name, link, and note from the fetched credits, not hardcoded', async () => {
     mockedFetchCredits.mockResolvedValue(credits)
 
     render(<AboutPage />)
 
-    const link = await screen.findByRole('link', {
-      name: credits.data_source.name,
-    })
-    expect(link).toHaveAttribute('href', credits.data_source.url)
-    expect(
-      screen.getByText(credits.data_source.note, { exact: false }),
-    ).toBeInTheDocument()
+    for (const source of credits.data_sources) {
+      const link = await screen.findByRole('link', {
+        name: source.name,
+      })
+      expect(link).toHaveAttribute('href', source.url)
+      expect(
+        screen.getByText(source.note, { exact: false }),
+      ).toBeInTheDocument()
+    }
   })
 
   it('shows an error state when the credits request fails', async () => {
