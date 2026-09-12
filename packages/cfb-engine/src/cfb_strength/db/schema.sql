@@ -15,12 +15,24 @@
 -- connection.py's migration below has had a chance to add the column. See
 -- `_migrate_sport_columns` in connection.py, which creates both indexes
 -- itself once it has guaranteed the column exists either way.
+--
+-- `mascot` / `alternate_names` (added for epic #76, populated by #77's CFBD
+-- `/teams` ingest) are display/search metadata only -- `school` remains the
+-- canonical identity string every other table, the verdict lookup, the
+-- persona grounding check, and the narration cache key on. `alternate_names`
+-- holds a JSON array of strings (CFBD's `alternateNames` plus its
+-- `abbreviation`, deduped); NULL and '[]' both mean "no aliases known".
+-- These are subject to the same pre-existing-db caveat as source_id above:
+-- declaring them here only covers a *fresh* db, so `_migrate_team_alias_columns`
+-- in connection.py adds them to an already-created `teams` table.
 CREATE TABLE IF NOT EXISTS teams (
     id INTEGER PRIMARY KEY,
     school TEXT NOT NULL,
     classification TEXT,
     sport TEXT NOT NULL DEFAULT 'cfb',
-    source_id TEXT
+    source_id TEXT,
+    mascot TEXT,
+    alternate_names TEXT
 );
 
 CREATE TABLE IF NOT EXISTS team_season (

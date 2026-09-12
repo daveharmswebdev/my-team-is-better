@@ -64,6 +64,29 @@ class TeamRow:
     # See GameRow's sport/source_id note above -- same reasoning applies here.
     sport: Literal["cfb", "nfl"] = "cfb"
     source_id: str | None = None
+    # mascot/alternate_names added for epic #76 (mascot- and city-searchable
+    # team typeahead), populated by issue #77's CFBD `/teams` ingest path.
+    #
+    # `school` stays the canonical identity string and is NOT affected: it is
+    # what the verdict lookup, the persona grounding check's known-team-names
+    # universe, the golden dataset, and every cached narration key are keyed
+    # on. These two fields are *display and search* metadata layered on top of
+    # it -- "Texas" is still submitted and stored; "Longhorns" only helps a
+    # user find it.
+    #
+    # Both default so the nflverse path (ingest/nflverse/normalize.py) and
+    # the CFBD `/games`-derived path (ingest/normalize.py) keep constructing
+    # `TeamRow` unchanged. NFL rows legitimately leave `mascot` None: their
+    # `school` is already the full "New England Patriots" string, so city and
+    # nickname are both substrings of the canonical name.
+    #
+    # `alternate_names` is a tuple (not a list) to keep the dataclass frozen
+    # and hashable, consistent with every other field here. It holds CFBD's
+    # `alternateNames` plus its `abbreviation` scalar, deduped -- e.g.
+    # ("North Carolina St.", "NCSU", "NC State") for NC State. Persisted as a
+    # JSON array in `teams.alternate_names`.
+    mascot: str | None = None
+    alternate_names: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
