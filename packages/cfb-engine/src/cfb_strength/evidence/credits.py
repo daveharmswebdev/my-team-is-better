@@ -1,4 +1,4 @@
-"""Static attribution data: methodology citation + data source credit.
+"""Static attribution data: methodology citation + data source credits.
 
 This is the single source of truth for the project's attribution copy --
 `mcp_server/server.py`'s `credits_resource()` and, via a direct Python
@@ -16,7 +16,8 @@ def get_credits() -> Credits:
     """Return the project's static attribution data.
 
     Covers the methodology this engine implements (Keener's method) and the
-    data source game results are ingested from (CollegeFootballData.com).
+    data sources game results are ingested from: CollegeFootballData.com for
+    CFB, nflverse (originally Lee Sharpe's schedule data) for NFL.
     """
     return Credits(
         methodology=MethodologyCredit(
@@ -35,13 +36,27 @@ def get_credits() -> Credits:
                 "is not weighted."
             ),
         ),
-        data_source=DataSourceCredit(
-            name="CollegeFootballData.com (CFBD)",
-            url="https://collegefootballdata.com",
-            note=(
-                "All game results are ingested from the CFBD API. This project "
-                "performs no independent data collection and claims no "
-                "ownership of the underlying game data."
+        data_sources=[
+            DataSourceCredit(
+                name="CollegeFootballData.com (CFBD)",
+                url="https://collegefootballdata.com",
+                note=(
+                    "All game results are ingested from the CFBD API. This project "
+                    "performs no independent data collection and claims no "
+                    "ownership of the underlying game data."
+                ),
             ),
-        ),
+            DataSourceCredit(
+                name="nflverse (Lee Sharpe's NFL schedule/game data)",
+                url="https://github.com/nflverse/nflverse-data",
+                note=(
+                    "NFL game results are ingested from nflverse's static CSV "
+                    "release assets (the schedule data was originally compiled "
+                    "and maintained by Lee Sharpe before nflverse took over "
+                    "publishing it). This project performs no independent data "
+                    "collection and claims no ownership of the underlying game "
+                    "data."
+                ),
+            ),
+        ],
     )

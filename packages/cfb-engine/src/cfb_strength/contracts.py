@@ -306,7 +306,7 @@ class DataSourceCredit:
 @dataclass(frozen=True)
 class Credits:
     methodology: MethodologyCredit
-    data_source: DataSourceCredit
+    data_sources: list[DataSourceCredit]
 
 
 # ---------------------------------------------------------------------------
