@@ -53,17 +53,25 @@ def _parse_years(spec: str) -> list[int]:
     return [int(spec)]
 
 
-def _load_games(conn: sqlite3.Connection, year: int) -> list[Game]:
+def _load_games(conn: sqlite3.Connection, year: int, sport: str) -> list[Game]:
+    """Load one year's completed games for a single `sport`.
+
+    `sport` must be filtered here, not left implicit: CFB and NFL games for
+    an overlapping season (e.g. 2023) live in the same `games` table (#51),
+    so an unfiltered query would silently merge two sports' games into one
+    win-graph.
+    """
     rows = conn.execute(
         """
         SELECT home_team_id, away_team_id, home_points, away_points, neutral_site
         FROM games
         WHERE season = ?
+          AND sport = ?
           AND completed = 1
           AND home_points IS NOT NULL
           AND away_points IS NOT NULL
         """,
-        (year,),
+        (year, sport),
     ).fetchall()
     return [
         Game(
@@ -77,30 +85,38 @@ def _load_games(conn: sqlite3.Connection, year: int) -> list[Game]:
     ]
 
 
-def _fbs_team_ids(conn: sqlite3.Connection, year: int) -> set[int]:
+def _fbs_team_ids(conn: sqlite3.Connection, year: int, sport: str) -> set[int]:
     rows = conn.execute(
         """
         SELECT team_id FROM team_season
-        WHERE year = ? AND lower(classification) = 'fbs'
+        WHERE year = ? AND sport = ? AND lower(classification) = 'fbs'
         """,
-        (year,),
+        (year, sport),
     ).fetchall()
     return {row["team_id"] for row in rows}
 
 
-def _rerank_fbs_only(
-    ratings: dict[int, TeamRating], fbs_team_ids: set[int]
+def _rerank_for_display(
+    ratings: dict[int, TeamRating], display_team_ids: set[int] | None
 ) -> list[TeamRating]:
-    """Filter to FBS teams and re-rank 1..K by rating descending.
+    """Filter to `display_team_ids` and re-rank 1..K by rating descending.
 
-    If `fbs_team_ids` is empty (e.g. `team_season` has no rows yet for this
-    year), falls back to keeping every team from `ratings` rather than
-    silently writing zero rows -- an empty classification table is a data
-    gap, not a signal that no team is FBS.
+    `display_team_ids=None` means "no classification-based restriction
+    applies" -- every team in `ratings` is displayed. This is the explicit
+    branch for sports with no FBS/FCS-style split (e.g. NFL: every team
+    that appears in the win-graph should be ranked/displayed), rather than
+    relying on `_fbs_team_ids` incidentally returning an empty set for a
+    sport whose `team_season` rows have no 'fbs' classification value.
+
+    If `display_team_ids` is an empty *set* (as opposed to `None`) -- e.g.
+    cfb's `team_season` has no rows yet for this year -- this still falls
+    back to keeping every team from `ratings` rather than silently writing
+    zero rows: an empty classification table is a data gap, not a signal
+    that no team is FBS.
     """
     candidates = (
-        [tr for tid, tr in ratings.items() if tid in fbs_team_ids]
-        if fbs_team_ids
+        [tr for tid, tr in ratings.items() if tid in display_team_ids]
+        if display_team_ids
         else list(ratings.values())
     )
     candidates.sort(key=lambda tr: (-tr.rating, tr.team_id))
@@ -118,31 +134,66 @@ def _rerank_fbs_only(
 
 
 def _store(
-    conn: sqlite3.Connection, year: int, method: str, ratings: list[TeamRating]
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    ratings: list[TeamRating],
+    sport: str,
 ) -> None:
+    """Delete-then-insert, scoped by (year, method, sport).
+
+    `sport` must be in both the DELETE and the INSERT: without it, recomputing
+    one sport's ratings for a year would delete the other sport's rows for
+    that same year too (both share the `ratings` table per #51), and every
+    inserted row would silently take the `sport` column's schema default
+    ('cfb') regardless of which sport was actually computed.
+    """
     computed_at = datetime.now(timezone.utc).isoformat()
     with conn:
-        conn.execute("DELETE FROM ratings WHERE year = ? AND method = ?", (year, method))
+        conn.execute(
+            "DELETE FROM ratings WHERE year = ? AND method = ? AND sport = ?",
+            (year, method, sport),
+        )
         conn.executemany(
             """
-            INSERT INTO ratings (year, method, team_id, rating, rank, wins, losses, computed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO ratings (year, method, team_id, rating, rank, wins, losses, computed_at, sport)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                (year, method, tr.team_id, tr.rating, tr.rank, tr.wins, tr.losses, computed_at)
+                (
+                    year,
+                    method,
+                    tr.team_id,
+                    tr.rating,
+                    tr.rank,
+                    tr.wins,
+                    tr.losses,
+                    computed_at,
+                    sport,
+                )
                 for tr in ratings
             ],
         )
 
 
 def _store_breakdowns(
-    conn: sqlite3.Connection, year: int, method: str, ratings: list[TeamRating]
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    ratings: list[TeamRating],
+    sport: str,
 ) -> None:
     """Delete-then-insert one row per `OpponentCredit` entry, plus one
     `opponent_team_id IS NULL` residual row, per displayed team -- same
-    pattern as `_store()`, scoped by year+method."""
+    pattern as `_store()`, scoped by year+method+sport (see `_store()`'s
+    docstring for why `sport` must be in both the DELETE and the INSERT)."""
     computed_at = datetime.now(timezone.utc).isoformat()
-    rows: list[tuple[int, str, int, int | None, int | None, int | None, int | None, float | None, float, str]] = []
+    rows: list[
+        tuple[
+            int, str, int, int | None, int | None, int | None, int | None,
+            float | None, float, str, str,
+        ]
+    ] = []
     for tr in ratings:
         for entry in tr.rating_breakdown.entries:
             rows.append(
@@ -157,6 +208,7 @@ def _store_breakdowns(
                     entry.credit,
                     entry.contribution,
                     computed_at,
+                    sport,
                 )
             )
         rows.append(
@@ -171,28 +223,37 @@ def _store_breakdowns(
                 None,
                 tr.rating_breakdown.residual_contribution,
                 computed_at,
+                sport,
             )
         )
 
     with conn:
         conn.execute(
-            "DELETE FROM rating_breakdowns WHERE year = ? AND method = ?", (year, method)
+            "DELETE FROM rating_breakdowns WHERE year = ? AND method = ? AND sport = ?",
+            (year, method, sport),
         )
         conn.executemany(
             """
             INSERT INTO rating_breakdowns (
                 year, method, team_id, opponent_team_id, games_played, wins, losses,
-                credit, contribution, computed_at
+                credit, contribution, computed_at, sport
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
 
 
-def compute_and_store(conn: sqlite3.Connection, year: int, method: str) -> int:
-    """Compute ratings for one year/method and store them. Returns the
-    number of FBS rows written."""
+def compute_and_store(
+    conn: sqlite3.Connection, year: int, method: str, sport: str = "cfb"
+) -> int:
+    """Compute ratings for one year/method/sport and store them. Returns the
+    number of displayed rows written.
+
+    `sport` defaults to "cfb" so every pre-existing call site (evidence/mcp
+    integration tests, golden-dataset regressions) that predates #57 is
+    unaffected and produces byte-for-byte identical CFB output.
+    """
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}; available: {sorted(METHODS)}")
 
@@ -202,17 +263,31 @@ def compute_and_store(conn: sqlite3.Connection, year: int, method: str) -> int:
     # a pre-built fixture db copied from before this table existed.
     ensure_schema(conn)
 
-    games = _load_games(conn, year)
+    games = _load_games(conn, year, sport)
     if not games:
-        _store(conn, year, method, [])
-        _store_breakdowns(conn, year, method, [])
+        _store(conn, year, method, [], sport)
+        _store_breakdowns(conn, year, method, [], sport)
         return 0
 
     full_ratings = METHODS[method].rate(games)
-    fbs_ids = _fbs_team_ids(conn, year)
-    display_ratings = _rerank_fbs_only(full_ratings, fbs_ids)
-    _store(conn, year, method, display_ratings)
-    _store_breakdowns(conn, year, method, display_ratings)
+
+    if sport == "cfb":
+        # FBS-only display ranks vs. full win-graph (see module docstring).
+        display_team_ids = _fbs_team_ids(conn, year, sport)
+    else:
+        # No FBS/FCS-style classification split exists for other sports
+        # (e.g. NFL has no `team_season.classification` concept -- #51
+        # writes `classification=None` for every NFL row) -- every team
+        # that appears in the win-graph is displayed. Explicit branch
+        # rather than relying on `_fbs_team_ids` incidentally returning an
+        # empty set for a sport with no 'fbs' classification value, which
+        # would trip `_rerank_for_display`'s empty-set data-gap fallback
+        # for the wrong reason.
+        display_team_ids = None
+
+    display_ratings = _rerank_for_display(full_ratings, display_team_ids)
+    _store(conn, year, method, display_ratings, sport)
+    _store_breakdowns(conn, year, method, display_ratings, sport)
     return len(display_ratings)
 
 
@@ -232,6 +307,15 @@ def main(argv: list[str] | None = None) -> int:
         choices=sorted(METHODS),
         help="Rating method to use (default: keener).",
     )
+    parser.add_argument(
+        "--sport",
+        default="cfb",
+        choices=("cfb", "nfl"),
+        help="Sport to compute ratings for (default: cfb). Mirrors "
+        "`ingest --sport`; scopes both the win-graph read and the "
+        "ratings/rating_breakdowns write so cfb and nfl rows for the same "
+        "year never collide or bleed into each other.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -244,8 +328,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         ensure_schema(conn)
         for year in years:
-            count = compute_and_store(conn, year, args.method)
-            print(f"{year} [{args.method}]: wrote {count} FBS team ratings")
+            count = compute_and_store(conn, year, args.method, args.sport)
+            print(f"{year} [{args.method}/{args.sport}]: wrote {count} team ratings")
     finally:
         conn.close()
     return 0
