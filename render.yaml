@@ -19,6 +19,22 @@ services:
     plan: starter
     region: oregon
     rootDir: apps/api
+    # `apps/api` depends on `packages/cfb-engine` as an editable uv workspace
+    # dependency (`cfb-strength-orchestrated = { workspace = true }` in
+    # apps/api/pyproject.toml, resolved via `editable = "packages/cfb-engine"`
+    # in the root uv.lock) -- this service's runtime behavior is a direct
+    # function of that package's source, not just apps/api's own files.
+    # Render's default per-service auto-deploy filter only fires on commits
+    # touching `rootDir` (apps/api/**), so an engine-only src change (e.g.
+    # PR #64's ratings fix) silently never auto-deployed this service --
+    # discovered when PR #70 touched packages/cfb-engine and only the web
+    # service redeployed. This explicit buildFilter closes that gap.
+    buildFilter:
+      paths:
+        - apps/api/**
+        - packages/cfb-engine/**
+        - pyproject.toml
+        - uv.lock
     buildCommand: >-
       uv sync --frozen --no-dev &&
       uv run cfb ingest --years 1998-2025 &&
