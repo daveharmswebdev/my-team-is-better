@@ -153,6 +153,22 @@ export interface TeamsOut {
   teams: string[]
 }
 
+/**
+ * One team's display/matching detail -- mirrors the per-team rows
+ * `/api/teams` returns alongside `TeamsOut`'s flat name list (epic #76).
+ * `name` is the canonical `teams.school` string and is the only thing a
+ * picker ever submits: byte-identical, because the verdict lookup, the
+ * persona grounding check, the golden dataset, and every cached narration
+ * key are keyed on it. `mascot` is `null` for every NFL team (the canonical
+ * name already contains city + nickname) and for a handful of CFB teams;
+ * `aliases` holds deduped abbreviations/alternate spellings and may be empty.
+ */
+export interface TeamDetail {
+  name: string
+  mascot: string | null
+  aliases: string[]
+}
+
 // ---------------------------------------------------------------------------
 // sport -- mirrors `apps/api/src/api/models.py`'s `sport: str = "cfb"` field
 // (issue #59) on the catalog and verdict request models. `QuestionForm`'s
