@@ -1,11 +1,31 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QuestionForm } from './QuestionForm'
 
+vi.mock('../../lib/api/client', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
+    '../../lib/api/client',
+  )
+  return {
+    ...actual,
+    fetchYears: vi.fn(),
+    fetchTeams: vi.fn(),
+  }
+})
+
+import { fetchTeams, fetchYears } from '../../lib/api/client'
+
+const mockedFetchYears = vi.mocked(fetchYears)
+const mockedFetchTeams = vi.mocked(fetchTeams)
+
 describe('QuestionForm', () => {
   beforeEach(() => {
     window.localStorage.clear()
+    mockedFetchYears.mockReset()
+    mockedFetchTeams.mockReset()
+    mockedFetchYears.mockResolvedValue({ years: [2004, 2005, 2006] })
+    mockedFetchTeams.mockResolvedValue({ teams: ['Texas', 'USC'] })
   })
   afterEach(() => {
     window.localStorage.clear()
@@ -131,5 +151,102 @@ describe('QuestionForm', () => {
     const select = screen.getByLabelText(/what do you want to know/i)
     const options = within(select).getAllByRole('option')
     expect(options).toHaveLength(3)
+  })
+
+  describe('catalog-backed year/team suggestions', () => {
+    it('fetches the catalog on mount and offers fetched years as datalist suggestions', async () => {
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalled())
+      const yearInput = screen.getByLabelText(/year/i)
+      const yearListId = yearInput.getAttribute('list')
+      expect(yearListId).toBeTruthy()
+      const yearList = document.getElementById(yearListId ?? '')
+      expect(yearList).not.toBeNull()
+      const yearOptions = within(yearList as HTMLElement).getAllByRole(
+        'option',
+        { hidden: true },
+      )
+      expect(yearOptions.map((option) => option.getAttribute('value'))).toEqual(
+        ['2004', '2005', '2006'],
+      )
+    })
+
+    it('offers fetched team names as datalist suggestions on the team field', async () => {
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      await user.selectOptions(
+        screen.getByLabelText(/what do you want to know/i),
+        'team_case',
+      )
+
+      const teamInput = await screen.findByLabelText(/^team$/i)
+      await waitFor(() => expect(mockedFetchTeams).toHaveBeenCalled())
+      await waitFor(() => expect(teamInput.getAttribute('list')).toBeTruthy())
+      const teamListId = teamInput.getAttribute('list')
+      const teamList = document.getElementById(teamListId ?? '')
+      expect(teamList).not.toBeNull()
+      const teamOptions = within(teamList as HTMLElement).getAllByRole(
+        'option',
+        { hidden: true },
+      )
+      expect(teamOptions.map((option) => option.getAttribute('value'))).toEqual(
+        ['Texas', 'USC'],
+      )
+    })
+
+    it('offers the same fetched team names on both compare fields', async () => {
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      await user.selectOptions(
+        screen.getByLabelText(/what do you want to know/i),
+        'compare',
+      )
+      await waitFor(() => expect(mockedFetchTeams).toHaveBeenCalled())
+
+      const teamAInput = screen.getByLabelText(/team a/i)
+      const teamBInput = screen.getByLabelText(/team b/i)
+      await waitFor(() => expect(teamAInput.getAttribute('list')).toBeTruthy())
+      expect(teamAInput.getAttribute('list')).toBe(
+        teamBInput.getAttribute('list'),
+      )
+    })
+
+    it('still lets the form be submitted with unvalidated input if the catalog fetch fails', async () => {
+      mockedFetchYears.mockRejectedValue(new Error('network down'))
+      mockedFetchTeams.mockRejectedValue(new Error('network down'))
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalled())
+
+      const yearInput = screen.getByLabelText(/year/i)
+      expect(yearInput.getAttribute('list')).toBeFalsy()
+
+      await user.clear(yearInput)
+      await user.type(yearInput, '2005')
+      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'champion',
+        year: 2005,
+        userTeam: null,
+      })
+    })
+
+    it('does not block initial render while the catalog fetch is still in flight', () => {
+      mockedFetchYears.mockReturnValue(new Promise(() => {}))
+      mockedFetchTeams.mockReturnValue(new Promise(() => {}))
+
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      expect(screen.getByLabelText(/year/i)).toBeInTheDocument()
+      expect(
+        screen.getByRole('button', { name: /get the verdict/i }),
+      ).not.toBeDisabled()
+    })
   })
 })

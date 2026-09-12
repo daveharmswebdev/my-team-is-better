@@ -1,14 +1,20 @@
 /**
- * Thin fetch client for `apps/api`'s `/api/verdict/*` routes. Pages call
- * into this module (or a page's own effect); components never fetch data
- * directly -- see `.dependency-cruiser.cjs` / CLAUDE.md's boundary.
+ * Thin fetch client for `apps/api`. Pages call into this module (or a
+ * page's own effect) for verdict/credits data -- see `.dependency-cruiser.cjs`
+ * / CLAUDE.md's components-vs-pages boundary. `fetchYears`/`fetchTeams`
+ * (issue #56) are the one documented exception: `QuestionForm` (a component)
+ * calls them directly to back its year/team datalists, since that data is
+ * purely presentational input-shaping local to the form, not page-level
+ * verdict data-fetching -- `.dependency-cruiser.cjs` does not forbid it.
  */
 
 import type {
   ComparisonEnvelope,
   CreditsOut,
   TeamCaseEnvelope,
+  TeamsOut,
   VerdictErrorBody,
+  YearsOut,
 } from './types'
 import { isVerdictErrorBody } from './types'
 
@@ -134,4 +140,42 @@ export async function fetchCredits(): Promise<CreditsOut> {
   }
 
   return (await response.json()) as CreditsOut
+}
+
+/**
+ * Shared GET helper for `apps/api/src/api/catalog.py`'s `/api/years` and
+ * `/api/teams` -- both take an optional `sport` query param (issue #59)
+ * that callers here intentionally never send, matching today's CFB-only
+ * default (threading `sport` through is issue #60, not this one). Mirrors
+ * `fetchCredits`'s error handling: any failure collapses to a
+ * `VerdictNetworkError` so `QuestionForm` can degrade to unvalidated input
+ * on a catalog-fetch failure rather than blocking submission.
+ */
+async function getCatalog<T>(path: string): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`)
+  } catch {
+    throw new VerdictNetworkError(
+      'Could not reach the API. Check your connection and try again.',
+    )
+  }
+
+  if (!response.ok) {
+    throw new VerdictNetworkError(
+      `Unexpected API error (status ${response.status}).`,
+    )
+  }
+
+  return (await response.json()) as T
+}
+
+/** `GET /api/years` -- the year picker's valid-selection universe. */
+export function fetchYears(): Promise<YearsOut> {
+  return getCatalog<YearsOut>('/api/years')
+}
+
+/** `GET /api/teams` -- the team picker's valid-selection universe. */
+export function fetchTeams(): Promise<TeamsOut> {
+  return getCatalog<TeamsOut>('/api/teams')
 }

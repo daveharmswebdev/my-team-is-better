@@ -139,6 +139,20 @@ export interface CreditsOut {
   data_source: CreditsDataSourceOut
 }
 
+// ---------------------------------------------------------------------------
+// catalog -- mirrors apps/api/src/api/models.py's `YearsOut`/`TeamsOut`
+// (`/api/years`, `/api/teams`), the year/team picker's valid-selection
+// universe (`QuestionForm`'s datalist suggestions).
+// ---------------------------------------------------------------------------
+
+export interface YearsOut {
+  years: number[]
+}
+
+export interface TeamsOut {
+  teams: string[]
+}
+
 /** True when `evidence` is a `TeamCaseOut` (champion/team-case routes) rather than a `ComparisonResultOut` (compare route). */
 export function isTeamCaseEnvelope(
   envelope: VerdictEnvelope,

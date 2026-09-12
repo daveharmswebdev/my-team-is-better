@@ -35,6 +35,13 @@
   border-color: var(--leather);
 }
 
+.catalogHint {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+}
+
 .qfieldPair {
   display: grid;
   grid-template-columns: 1fr 1fr;
