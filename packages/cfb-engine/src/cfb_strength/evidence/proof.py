@@ -39,24 +39,35 @@ QUALITY_WIN_RANK_THRESHOLD = 25
 # ---------------------------------------------------------------------------
 
 
-def _rated_teams(conn: sqlite3.Connection, year: int, method: str) -> list[sqlite3.Row]:
-    """All (team_id, school) pairs that have a rating row for year/method."""
+def _rated_teams(
+    conn: sqlite3.Connection, year: int, method: str, sport: str
+) -> list[sqlite3.Row]:
+    """All (team_id, school) pairs that have a rating row for year/method/sport.
+
+    `sport` must be filtered here (issue #58, same bug class as #57 in
+    ratings/compute_ratings.py): CFB and NFL rows can share a `year` value,
+    so an unfiltered join would let a same-named team from the other sport
+    bleed into `resolve_team`'s candidate pool.
+    """
     return conn.execute(
         """
         SELECT t.id AS team_id, t.school AS school
         FROM ratings r
         JOIN teams t ON t.id = r.team_id
-        WHERE r.year = ? AND r.method = ?
+        WHERE r.year = ? AND r.method = ? AND r.sport = ?
         """,
-        (year, method),
+        (year, method, sport),
     ).fetchall()
 
 
-def _ratings_map(conn: sqlite3.Connection, year: int, method: str) -> dict[int, sqlite3.Row]:
-    """team_id -> ratings row, for every team rated in year/method."""
+def _ratings_map(
+    conn: sqlite3.Connection, year: int, method: str, sport: str
+) -> dict[int, sqlite3.Row]:
+    """team_id -> ratings row, for every team rated in year/method/sport."""
     rows = conn.execute(
-        "SELECT team_id, rating, rank, wins, losses FROM ratings WHERE year = ? AND method = ?",
-        (year, method),
+        "SELECT team_id, rating, rank, wins, losses FROM ratings "
+        "WHERE year = ? AND method = ? AND sport = ?",
+        (year, method, sport),
     ).fetchall()
     return {int(r["team_id"]): r for r in rows}
 
@@ -92,6 +103,7 @@ def _rating_breakdown(
     method: str,
     team_id: int,
     games: list[sqlite3.Row],
+    sport: str,
 ) -> RatingBreakdown:
     """Reconstruct a team's `RatingBreakdown` from `rating_breakdowns` rows.
 
@@ -120,9 +132,9 @@ def _rating_breakdown(
         """
         SELECT opponent_team_id, games_played, wins, losses, credit, contribution
         FROM rating_breakdowns
-        WHERE year = ? AND method = ? AND team_id = ?
+        WHERE year = ? AND method = ? AND team_id = ? AND sport = ?
         """,
-        (year, method, team_id),
+        (year, method, team_id, sport),
     ).fetchall()
 
     entries: list[OpponentCredit] = []
@@ -159,8 +171,8 @@ def _rating_breakdown(
     return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
-def _require_year(conn: sqlite3.Connection, year: int, method: str) -> None:
-    years = list_available_years(conn, method)
+def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: str) -> None:
+    years = list_available_years(conn, method, sport)
     if year not in years:
         raise UnknownYearError(year, years)
 
@@ -170,20 +182,27 @@ def _require_year(conn: sqlite3.Connection, year: int, method: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def list_available_years(conn: sqlite3.Connection, method: str = "keener") -> list[int]:
-    """Distinct years for which ratings exist under `method`, ascending."""
+def list_available_years(
+    conn: sqlite3.Connection, method: str = "keener", sport: str = "cfb"
+) -> list[int]:
+    """Distinct years for which ratings exist under `method`/`sport`, ascending."""
     rows = conn.execute(
-        "SELECT DISTINCT year FROM ratings WHERE method = ? ORDER BY year", (method,)
+        "SELECT DISTINCT year FROM ratings WHERE method = ? AND sport = ? ORDER BY year",
+        (method, sport),
     ).fetchall()
     return [int(r["year"]) for r in rows]
 
 
 def resolve_team(
-    conn: sqlite3.Connection, year: int, query: str, method: str = "keener"
+    conn: sqlite3.Connection,
+    year: int,
+    query: str,
+    method: str = "keener",
+    sport: str = "cfb",
 ) -> int:
     """Resolve a team name query to a team_id, scoped to teams that have a
-    rating row for `year`/`method` (a team without a rating can't have a
-    TeamCase built for it anyway).
+    rating row for `year`/`method`/`sport` (a team without a rating can't have
+    a TeamCase built for it anyway).
 
     Resolution order:
       1. Exact match (case-insensitive, whitespace-trimmed).
@@ -192,10 +211,10 @@ def resolve_team(
 
     Raises AmbiguousTeamError if any stage other than a unique exact match
     yields more than one candidate. Raises UnknownYearError if there are no
-    ratings at all for year/method.
+    ratings at all for year/method/sport.
     """
-    _require_year(conn, year, method)
-    candidates = _rated_teams(conn, year, method)
+    _require_year(conn, year, method, sport)
+    candidates = _rated_teams(conn, year, method, sport)
 
     q = query.strip()
     q_lower = q.lower()
@@ -230,20 +249,22 @@ def resolve_team(
     raise AmbiguousTeamError(query, sorted(close))
 
 
-def _team_games(conn: sqlite3.Connection, year: int, team_id: int) -> list[sqlite3.Row]:
+def _team_games(
+    conn: sqlite3.Connection, year: int, team_id: int, sport: str
+) -> list[sqlite3.Row]:
     return conn.execute(
         """
         SELECT id, week, season_type, neutral_site,
                home_team_id, away_team_id, home_team, away_team,
                home_points, away_points
         FROM games
-        WHERE season = ? AND completed = 1
+        WHERE season = ? AND sport = ? AND completed = 1
           AND (home_team_id = ? OR away_team_id = ?)
         ORDER BY
             CASE season_type WHEN 'regular' THEN 0 ELSE 1 END,
             week
         """,
-        (year, team_id, team_id),
+        (year, sport, team_id, team_id),
     ).fetchall()
 
 
@@ -281,13 +302,18 @@ def _opponent_result(
 
 
 def build_team_case(
-    conn: sqlite3.Connection, year: int, team: str, method: str = "keener"
+    conn: sqlite3.Connection,
+    year: int,
+    team: str,
+    method: str = "keener",
+    sport: str = "cfb",
 ) -> TeamCase:
-    team_id = resolve_team(conn, year, team, method=method)
+    team_id = resolve_team(conn, year, team, method=method, sport=sport)
 
     rating_row = conn.execute(
-        "SELECT rating, rank, wins, losses FROM ratings WHERE year = ? AND method = ? AND team_id = ?",
-        (year, method, team_id),
+        "SELECT rating, rank, wins, losses FROM ratings "
+        "WHERE year = ? AND method = ? AND team_id = ? AND sport = ?",
+        (year, method, team_id, sport),
     ).fetchone()
     # resolve_team only returns ids scoped to rated teams, so this must exist.
     assert rating_row is not None
@@ -295,9 +321,9 @@ def build_team_case(
     team_name_row = conn.execute("SELECT school FROM teams WHERE id = ?", (team_id,)).fetchone()
     team_name = team_name_row["school"] if team_name_row is not None else team
 
-    ratings = _ratings_map(conn, year, method)
-    games = _team_games(conn, year, team_id)
-    rating_breakdown = _rating_breakdown(conn, year, method, team_id, games)
+    ratings = _ratings_map(conn, year, method, sport)
+    games = _team_games(conn, year, team_id, sport)
+    rating_breakdown = _rating_breakdown(conn, year, method, team_id, games, sport)
 
     opponent_results: list[OpponentResult] = []
     for game in games:
@@ -355,10 +381,15 @@ def _case_summary(case: TeamCase) -> ComparisonTeamSummary:
 
 
 def build_comparison(
-    conn: sqlite3.Connection, year: int, team_a: str, team_b: str, method: str = "keener"
+    conn: sqlite3.Connection,
+    year: int,
+    team_a: str,
+    team_b: str,
+    method: str = "keener",
+    sport: str = "cfb",
 ) -> ComparisonResult:
-    team_a_id = resolve_team(conn, year, team_a, method=method)
-    team_b_id = resolve_team(conn, year, team_b, method=method)
+    team_a_id = resolve_team(conn, year, team_a, method=method, sport=sport)
+    team_b_id = resolve_team(conn, year, team_b, method=method, sport=sport)
     if team_a_id == team_b_id:
         team_name_row = conn.execute(
             "SELECT school FROM teams WHERE id = ?", (team_a_id,)
@@ -366,8 +397,8 @@ def build_comparison(
         resolved_name = team_name_row["school"] if team_name_row is not None else team_a
         raise SameTeamComparisonError(resolved_name)
 
-    case_a = build_team_case(conn, year, team_a, method=method)
-    case_b = build_team_case(conn, year, team_b, method=method)
+    case_a = build_team_case(conn, year, team_a, method=method, sport=sport)
+    case_b = build_team_case(conn, year, team_b, method=method, sport=sport)
 
     # Head-to-head: any completed game this season between the two teams.
     h2h_games = conn.execute(
@@ -375,12 +406,12 @@ def build_comparison(
         SELECT week, season_type, neutral_site, home_team_id, away_team_id,
                home_team, away_team, home_points, away_points
         FROM games
-        WHERE season = ? AND completed = 1
+        WHERE season = ? AND sport = ? AND completed = 1
           AND ((home_team_id = ? AND away_team_id = ?)
             OR (home_team_id = ? AND away_team_id = ?))
         ORDER BY CASE season_type WHEN 'regular' THEN 0 ELSE 1 END, week
         """,
-        (year, case_a.team_id, case_b.team_id, case_b.team_id, case_a.team_id),
+        (year, sport, case_a.team_id, case_b.team_id, case_b.team_id, case_a.team_id),
     ).fetchall()
 
     meetings: list[HeadToHeadMeeting] = []

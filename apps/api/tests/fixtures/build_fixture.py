@@ -26,7 +26,7 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from cfb_strength.db.connection import get_conn
+from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ratings.compute_ratings import compute_and_store
 
 THIS_DIR = Path(__file__).parent
@@ -53,6 +53,12 @@ def build() -> None:
 
     conn: sqlite3.Connection = get_conn(OUTPUT_FIXTURE)
     try:
+        # SOURCE_FIXTURE predates #51's `sport` column (schema.sql's
+        # CREATE TABLE IF NOT EXISTS is a no-op against it, and get_conn
+        # alone applies no migration) -- bring the copy up to the current
+        # schema in place before writing ratings, or compute_and_store's
+        # sport-aware INSERTs below fail with "no such column: sport".
+        ensure_schema(conn)
         for year in YEARS:
             count = compute_and_store(conn, year, "keener")
             print(f"computed {count} keener ratings for {year}")

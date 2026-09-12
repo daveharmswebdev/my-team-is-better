@@ -234,6 +234,6 @@ def test_rating_breakdown_degrades_gracefully_with_no_rows(
     produce an empty RatingBreakdown rather than raising."""
     from cfb_strength.evidence.proof import _rating_breakdown
 
-    breakdown = _rating_breakdown(rated_conn, 2005, "keener", team_id=-1, games=[])
+    breakdown = _rating_breakdown(rated_conn, 2005, "keener", team_id=-1, games=[], sport="cfb")
     assert breakdown.entries == []
     assert breakdown.residual_contribution == 0.0
