@@ -319,28 +319,30 @@ class Credits:
 # shape:
 #
 #   def resolve_team(conn: sqlite3.Connection, year: int, query: str,
-#                     method: str = "keener") -> int: ...
+#                     method: str = "keener", sport: str = "cfb") -> int: ...
 #       Exact match first, then fuzzy match. Raises AmbiguousTeamError with
 #       candidates on ambiguity, UnknownYearError if no ratings exist for
-#       that year/method.
+#       that year/method/sport.
 #
 #   def build_team_case(conn: sqlite3.Connection, year: int, team: str,
-#                        method: str = "keener") -> TeamCase: ...
+#                        method: str = "keener", sport: str = "cfb") -> TeamCase: ...
 #       `team` is resolved via resolve_team. Raises the same two errors.
 #
 #   def build_comparison(conn: sqlite3.Connection, year: int, team_a: str,
-#                         team_b: str, method: str = "keener") -> ComparisonResult: ...
+#                         team_b: str, method: str = "keener",
+#                         sport: str = "cfb") -> ComparisonResult: ...
 #       Raises SameTeamComparisonError if team_a and team_b resolve to the same
 #       team_id (added in the Round 4 amendment below).
 #
-#   def list_available_years(conn: sqlite3.Connection, method: str = "keener") -> list[int]: ...
-#       `SELECT DISTINCT year FROM ratings WHERE method = ? ORDER BY year`. Added
-#       in the Round 4 amendment below: mcp-agent and evidence-agent had each
-#       independently implemented an identical private copy of this query
-#       (`_available_years`) because it wasn't originally part of the public API —
-#       `reviewer` flagged the duplication as an uncovered seam. Promoted here so
-#       there is exactly one implementation (evidence-agent's), which mcp-agent
-#       imports instead of reimplementing.
+#   def list_available_years(conn: sqlite3.Connection, method: str = "keener",
+#                             sport: str = "cfb") -> list[int]: ...
+#       `SELECT DISTINCT year FROM ratings WHERE method = ? AND sport = ? ORDER
+#       BY year`. Added in the Round 4 amendment below: mcp-agent and
+#       evidence-agent had each independently implemented an identical private
+#       copy of this query (`_available_years`) because it wasn't originally
+#       part of the public API — `reviewer` flagged the duplication as an
+#       uncovered seam. Promoted here so there is exactly one implementation
+#       (evidence-agent's), which mcp-agent imports instead of reimplementing.
 #
 #   def get_credits() -> Credits: ...
 #       Lives in evidence/credits.py, not proof.py (no db access, unlike the
@@ -350,6 +352,21 @@ class Credits:
 #       hardcoding a second copy (ARCHITECTURE §4.5). Content must match the
 #       pre-existing inline dict verbatim -- this is a relocation, not new
 #       copy.
+#
+# Round 5 amendment (#58, sprint 2 NFL support): `sport: str = "cfb"` added to
+# resolve_team/build_team_case/build_comparison/list_available_years, mirroring
+# the `sport` column added to ratings/games/teams/rating_breakdowns in #51 and
+# already threaded through compute_ratings.py in #57. Every one of these
+# functions currently scopes its SQL by `year`/`method` alone with no `sport`
+# filter -- the same cross-sport row-bleed bug class #57 fixed in ratings
+# (a CFB and an NFL season sharing a year value would blend into one team
+# pool/win-graph). Default preserves existing CFB-only callers' behavior
+# unmodified. No classification-based (FBS/FCS) filtering exists in
+# evidence/proof.py today -- quality-win/worst-loss logic keys off
+# `ratings.rank`, which is already sport- and classification-scoped upstream
+# by compute_ratings.py -- so evidence-agent's classification-NULL handling is
+# about not assuming/erroring on NULL `teams.classification` values it reads
+# incidentally (e.g. team listings), not about new tiering logic here.
 #
 # mcp-agent imports these five names (plus AmbiguousTeamError/UnknownYearError/
 # SameTeamComparisonError from this file) from cfb_strength.evidence and must
