@@ -269,3 +269,81 @@ def test_breakdown_credit_times_opponent_rating_equals_contribution() -> None:
         for e in tr.rating_breakdown.entries:
             opponent_rating = result[e.opponent_team_id].rating
             assert abs(e.credit * opponent_rating - e.contribution) < BREAKDOWN_TOL
+
+
+def test_keener_is_bit_identical_under_game_reordering() -> None:
+    """Reordering `games` must not change a single bit of Keener's output.
+
+    This is the machine-checked form of the claim that the `Game` dataclass
+    amendment (season/week/season_type/start_date, added for the sequential
+    Elo engine) cannot perturb Keener: Keener never reads those fields, and
+    the only thing they changed about the caller is the order rows arrive
+    in -- `compute_ratings._load_games` now has an `ORDER BY` where it
+    previously had none.
+
+    Bit-identity, not approximate equality, is the right assertion here:
+
+    * Each credit-matrix cell `raw[i, j]` accumulates one addend per game
+      in which team i hosted (or visited) team j *in that same
+      orientation*. IEEE-754 addition is commutative -- `a + b == b + a`
+      exactly -- and only *associativity* fails, so a cell fed exactly two
+      addends is exactly order-invariant regardless of their values.
+    * Three or more meetings between the same two teams with the same
+      home/away orientation in a single season do not occur in CFB or the
+      NFL, so two is the worst case in practice.
+    * Everything downstream of the matrix (row normalization, epsilon,
+      power iteration, the sort) is a deterministic function of the matrix
+      and of `team_ids`, which is itself sorted.
+
+    The graph below is built to hit that worst case deliberately: it
+    includes a repeated A-vs-B pairing with A at home both times.
+
+    Contrast `test_elo.py::test_order_dependence_is_real`, which pins the
+    opposite property for the sequential method.
+    """
+    import random
+
+    games = [
+        Game(
+            home_team_id=i,
+            away_team_id=j,
+            home_points=10 + ((i * 7 + j * 3) % 40),
+            away_points=3 + ((i * 5 + j * 11) % 35),
+        )
+        for i in range(1, 13)
+        for j in range(i + 1, 13)
+        if (i + j) % 3
+    ]
+    # The load-bearing case: a second A-at-home meeting with B, so one
+    # matrix cell takes two addends instead of one.
+    games.append(Game(home_team_id=A, away_team_id=B, home_points=31, away_points=17))
+
+    baseline = _rate(games)
+
+    for seed in range(8):
+        shuffled = list(games)
+        random.Random(seed).shuffle(shuffled)
+        result = _rate(shuffled)
+
+        assert set(result) == set(baseline)
+        for team_id, expected in baseline.items():
+            actual = result[team_id]
+            assert actual.rating == expected.rating
+            assert actual.rank == expected.rank
+            assert actual.wins == expected.wins
+            assert actual.losses == expected.losses
+
+            expected_entries = {
+                e.opponent_team_id: e for e in expected.rating_breakdown.entries
+            }
+            actual_entries = {
+                e.opponent_team_id: e for e in actual.rating_breakdown.entries
+            }
+            assert actual_entries.keys() == expected_entries.keys()
+            for opponent_id, expected_entry in expected_entries.items():
+                actual_entry = actual_entries[opponent_id]
+                assert actual_entry.credit == expected_entry.credit
+                assert actual_entry.contribution == expected_entry.contribution
+                assert actual_entry.games_played == expected_entry.games_played
+                assert actual_entry.wins == expected_entry.wins
+                assert actual_entry.losses == expected_entry.losses
