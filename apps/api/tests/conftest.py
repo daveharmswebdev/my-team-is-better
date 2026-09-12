@@ -25,6 +25,13 @@ both CFB and NFL rows, plus a cross-sport name collision -- unlike
 `sport='nfl'` rows at all. Tests that need to prove `sport` threads correctly
 through the HTTP layer (`test_verdict_sport.py`, `test_catalog_sport.py`) use
 this fixture instead of `client`.
+
+`team_catalog_client` (issue #78) is a third such client, wired to
+`tests/fixtures/team_catalog_fixture.py` -- two seasons either side of three
+real NFL relocations, plus populated `teams.mascot`/`teams.alternate_names`
+values. See that module's docstring for why neither of the other two
+fixtures can cover `/api/teams`' `?year=` scoping or its mascot/alias
+payload.
 """
 
 from __future__ import annotations
@@ -102,6 +109,38 @@ def sport_client(tmp_path: Path) -> Iterator[TestClient]:
 
     def _override() -> Iterator[sqlite3.Connection]:
         conn = get_conn(sport_db, read_only=True)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    app.dependency_overrides[get_db_conn] = _override
+    app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
+    app.dependency_overrides[get_narrator] = lambda: _StubNarrator()
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_db_conn, None)
+        app.dependency_overrides.pop(get_narration_cache, None)
+        app.dependency_overrides.pop(get_narrator, None)
+
+
+@pytest.fixture
+def team_catalog_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Same wiring as `client`, but against a freshly built db
+    (`tests/fixtures/team_catalog_fixture.py`) that has NFL relocations
+    across two seasons and populated mascot/alias columns -- see this
+    module's docstring."""
+    from fixtures.team_catalog_fixture import make_team_catalog_fixture_db
+
+    from api.deps import get_db_conn, get_narration_cache, get_narrator
+    from api.main import app
+    from api.persona.cache import InMemoryNarrationCache
+
+    catalog_db = make_team_catalog_fixture_db(tmp_path)
+
+    def _override() -> Iterator[sqlite3.Connection]:
+        conn = get_conn(catalog_db, read_only=True)
         try:
             yield conn
         finally:
