@@ -15,11 +15,16 @@ Flags:
                          per PRD §5.2's modern/BCS-CFP-era data scope).
     --force             Optional. Bypass the on-disk cache in data/raw/ and
                          re-fetch live from the CFBD API for every requested
-                         year/season-type, overwriting the cache file.
+                         year/season-type, overwriting the cache file. Also
+                         re-fetches data/raw/teams.json for the alias step.
     --season-types      Optional. Comma-separated subset of {"regular",
                          "postseason"}. Defaults to both (config.SEASON_TYPES).
     --db-path           Optional. Override the sqlite db path (defaults to
                          config.DB_PATH / $CFB_DB_PATH).
+
+After the year loop, the run enriches `teams.mascot` /
+`teams.alternate_names` from CFBD `/teams` exactly once (issue #77) -- see
+`enrich_team_aliases` for why that is once per run and not once per batch.
 
 Returns 0 if every requested year/season-type ingested without a hard error
 (individual years can still be logged as "suspect" in `ingestion_log` without
@@ -33,17 +38,22 @@ check stderr for exactly which batches failed and stdout for which succeeded.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from cfb_strength.config import DB_PATH, SEASON_TYPES
+from cfb_strength.config import DB_PATH, RAW_DIR, SEASON_TYPES
 from cfb_strength.contracts import GameRow, TeamRow
 from cfb_strength.db.connection import ensure_schema, get_conn
-from cfb_strength.ingest.client import CFBDClientError, get_games
-from cfb_strength.ingest.normalize import normalize_game, team_rows_from_game
+from cfb_strength.ingest.client import CFBDClientError, get_games, get_teams
+from cfb_strength.ingest.normalize import (
+    normalize_game,
+    team_rows_from_cfbd_teams,
+    team_rows_from_game,
+)
 
 MIN_YEAR = 1998
 MAX_YEAR = 2025
@@ -69,6 +79,16 @@ class IngestResult:
     game_count: int
     fbs_game_count: int
     status: str
+    fetched_live: bool
+
+
+@dataclass(frozen=True)
+class AliasEnrichmentResult:
+    """Outcome of the once-per-run `/teams` alias enrichment."""
+
+    payload_records: int
+    schools_with_aliases: int
+    rows_updated: int
     fetched_live: bool
 
 
@@ -180,6 +200,77 @@ def _write_games(conn: Any, game_rows: list[GameRow]) -> None:
                 "raw_json": gr.raw_json,
             },
         )
+
+
+def enrich_team_aliases(
+    conn: Any, *, force: bool = False, raw_dir: Path = RAW_DIR
+) -> AliasEnrichmentResult:
+    """Fill in `teams.mascot` / `teams.alternate_names` from CFBD `/teams`.
+
+    Runs ONCE per ingest run, not once per year/season-type: the `/teams`
+    payload this reads is fetched with no `year` param and is therefore
+    year-independent, so doing it inside `ingest_one` would repeat identical
+    work 56 times (28 years x 2 season types) for one identical result.
+
+    This is an *enrichment of teams the `/games` ingest already discovered*,
+    not a second source of team rows -- hence a plain UPDATE rather than the
+    INSERT ... ON CONFLICT upsert `_write_teams` uses. Inserting all 1933
+    `/teams` records would put unrated, never-played teams into the picker's
+    universe, and only an UPDATE can structurally guarantee that can't happen.
+    Three further consequences of the same choice:
+
+      * `school` is never written, only matched on. It is the canonical
+        identity string the verdict lookup, the persona grounding check's
+        known-team-names universe, the golden dataset, and every cached
+        narration key depend on.
+      * teams in our table but absent from `/teams` simply keep
+        `mascot = NULL`. Expected (Cal State Northridge is one), never an
+        error.
+      * `sport = 'cfb'` scopes the match, so a CFB school name can never
+        overwrite an NFL row's columns.
+
+    Idempotent by construction: re-running writes the same values to the same
+    rows. Raises `CFBDClientError` if there is neither a `data/raw/teams.json`
+    cache nor an API key -- the caller handles that the same way it handles a
+    failed year batch (report it, keep going).
+    """
+    teams_raw, fetched_live = get_teams(force=force, raw_dir=raw_dir)
+    by_school = team_rows_from_cfbd_teams(teams_raw)
+
+    schools_with_aliases = 0
+    rows_updated = 0
+    for tr in by_school.values():
+        if tr.mascot is None and not tr.alternate_names:
+            # Nothing to contribute; skip rather than write NULL/'[]' over
+            # whatever a previous run may have learned.
+            continue
+        schools_with_aliases += 1
+        cur = conn.execute(
+            """
+            UPDATE teams
+               SET mascot = COALESCE(:mascot, mascot),
+                   alternate_names = COALESCE(:alternate_names, alternate_names)
+             WHERE school = :school AND sport = 'cfb'
+            """,
+            {
+                "mascot": tr.mascot,
+                "alternate_names": (
+                    json.dumps(list(tr.alternate_names), ensure_ascii=False)
+                    if tr.alternate_names
+                    else None
+                ),
+                "school": tr.school,
+            },
+        )
+        rows_updated += max(cur.rowcount, 0)
+    conn.commit()
+
+    return AliasEnrichmentResult(
+        payload_records=len(teams_raw),
+        schools_with_aliases=schools_with_aliases,
+        rows_updated=rows_updated,
+        fetched_live=fetched_live,
+    )
 
 
 def _write_ingestion_log(
@@ -313,6 +404,23 @@ def main(argv: list[str] | None = None) -> int:
                     f"games={result.game_count:<5} fbs_games={result.fbs_game_count:<4} "
                     f"status={result.status}{flag}"
                 )
+
+        # Once per run, not once per batch -- the /teams payload is
+        # year-independent (see enrich_team_aliases).
+        try:
+            alias_result = enrich_team_aliases(conn, force=args.force)
+        except CFBDClientError as e:
+            hard_errors.append(f"team aliases: {e}")
+            print(f"error: team aliases: {e}", file=sys.stderr)
+        else:
+            if alias_result.fetched_live:
+                live_calls += 1
+            source = "live fetch" if alias_result.fetched_live else "cache"
+            print(
+                f"\nteam aliases   payload={alias_result.payload_records} "
+                f"with_aliases={alias_result.schools_with_aliases} "
+                f"rows_updated={alias_result.rows_updated} ({source})"
+            )
     finally:
         conn.close()
 
