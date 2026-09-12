@@ -7,6 +7,23 @@ No route imports `get_conn`/`DB_PATH` directly -- they depend on
 `get_db_conn`, which tests override via `app.dependency_overrides` to point
 at a fixture db instead (see tests/conftest.py).
 
+That connection is opened *non-strictly* (`check_same_thread=False`), which
+is deliberate and must stay -- issue #44, an intermittent production HTTP
+500 (`sqlite3.ProgrammingError: SQLite objects created in a thread can only
+be used in that same thread`). FastAPI dispatches each sync callable in the
+dependency-resolution chain to `run_in_threadpool` *independently*, so the
+worker thread that runs this generator's `yield` is routinely not the one
+the sync route body then uses the `Connection` on; sqlite's default
+same-thread check rejects the second thread. Per-request connections were
+already the right model -- only the strictness flag was wrong, so the fix is
+that flag and not a pool, a lock, or `async def` routes. It is safe because
+a connection opened here is closed in the same `finally` and therefore
+belongs to exactly one logical request: two threads may touch it in
+sequence, never at once. `cfb_strength.db.connection.get_conn` still
+defaults to strict, which is correct for every single-threaded caller (CLI,
+MCP server, tests), so this is the one place that opts out.
+`tests/test_deps_threading.py` fails without the flag.
+
 `get_narration_cache`/`get_narrator` (issue #4) follow the same override
 pattern: every persona test replaces both with an `InMemoryNarrationCache`
 and a fake `Narrator` via `app.dependency_overrides`, so the CI-safe test
@@ -63,7 +80,16 @@ from api.persona.claude_client import ClaudeNarrator, Narrator, StubNarrator
 
 
 def get_db_conn() -> Iterator[sqlite3.Connection]:
-    conn = get_conn(DB_PATH, read_only=True)
+    # `check_same_thread=False` (issue #44) is safe here, not merely
+    # expedient, and the reason is specific to this function: it opens a
+    # fresh connection per request and closes it in the same `finally`, so
+    # each connection belongs to exactly one logical request and is never
+    # used by two threads *at once* -- only, possibly, by two threads in
+    # sequence, because FastAPI dispatches this sync generator dependency
+    # and the sync route handler to `run_in_threadpool` independently.
+    # Don't copy this flag to anything that shares a connection across
+    # concurrent work: there it would hide a real bug instead of fixing one.
+    conn = get_conn(DB_PATH, read_only=True, check_same_thread=False)
     try:
         yield conn
     finally:

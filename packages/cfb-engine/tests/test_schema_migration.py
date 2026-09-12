@@ -14,6 +14,7 @@ itself gets exercised.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -347,4 +348,95 @@ def test_fresh_db_has_alias_columns_from_the_ddl(tmp_path: Path) -> None:
     assert "mascot" in cols
     assert "alternate_names" in cols
 
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# `check_same_thread` (issue #44). sqlite3 refuses to let a Connection be used
+# from a thread other than the one that created it. That is the right default
+# for the CLI, which is single-threaded and wants to hear about a mistake
+# loudly. It is wrong for `apps/api`: FastAPI dispatches a sync generator
+# dependency and the sync route handler to `run_in_threadpool`
+# *independently*, so the thread that opens the connection in
+# `api.deps.get_db_conn` is routinely not the thread the route body uses it
+# on. Each connection still belongs to exactly one logical request -- it is
+# never used concurrently -- so opting out of the check is safe there and
+# not merely expedient.
+# ---------------------------------------------------------------------------
+
+
+def test_get_conn_defaults_to_rejecting_cross_thread_use(tmp_path: Path) -> None:
+    """The default must stay strict, so the CLI keeps failing loudly."""
+    dest = tmp_path / "same_thread.sqlite3"
+    conn = get_conn(dest)
+    ensure_schema(conn)
+
+    errors: list[Exception] = []
+
+    def use_it() -> None:
+        try:
+            conn.execute("SELECT 1").fetchone()
+        except Exception as exc:  # noqa: BLE001 -- recording it is the assertion
+            errors.append(exc)
+
+    thread = threading.Thread(target=use_it)
+    thread.start()
+    thread.join()
+
+    assert len(errors) == 1
+    assert isinstance(errors[0], sqlite3.ProgrammingError)
+    conn.close()
+
+
+def test_get_conn_with_check_same_thread_false_allows_cross_thread_use(
+    tmp_path: Path,
+) -> None:
+    dest = tmp_path / "cross_thread.sqlite3"
+    conn = get_conn(dest, check_same_thread=False)
+    ensure_schema(conn)
+
+    results: list[int] = []
+    errors: list[Exception] = []
+
+    def use_it() -> None:
+        try:
+            row = conn.execute("SELECT 1 AS one").fetchone()
+            results.append(int(row["one"]))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread = threading.Thread(target=use_it)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+    assert results == [1]
+    conn.close()
+
+
+def test_read_only_conn_also_honors_check_same_thread(tmp_path: Path) -> None:
+    """The read-only branch takes a different `sqlite3.connect` call, so it
+    needs its own coverage -- read_only=True is exactly what apps/api uses."""
+    dest = tmp_path / "ro_cross_thread.sqlite3"
+    seed = get_conn(dest)
+    ensure_schema(seed)
+    seed.close()
+
+    conn = get_conn(dest, read_only=True, check_same_thread=False)
+    results: list[int] = []
+    errors: list[Exception] = []
+
+    def use_it() -> None:
+        try:
+            row = conn.execute("SELECT COUNT(*) AS c FROM teams").fetchone()
+            results.append(int(row["c"]))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    thread = threading.Thread(target=use_it)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+    assert results == [0]
     conn.close()
