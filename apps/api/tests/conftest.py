@@ -17,6 +17,14 @@ exist, and never opens a real Postgres connection or calls the real Claude
 API. Tests that care about narration behavior specifically (
 `test_verdict_persona.py`) override these two further, on top of this
 fixture, with their own scripted fakes.
+
+`sport_client` (issue #59) is a second, function-scoped `TestClient` wired to
+a freshly built, throwaway db (`tests/fixtures/sport_fixture.py`) that has
+both CFB and NFL rows, plus a cross-sport name collision -- unlike
+`cfb_verdict_fixture.sqlite3`, which predates NFL support and has no
+`sport='nfl'` rows at all. Tests that need to prove `sport` threads correctly
+through the HTTP layer (`test_verdict_sport.py`, `test_catalog_sport.py`) use
+this fixture instead of `client`.
 """
 
 from __future__ import annotations
@@ -28,6 +36,7 @@ from pathlib import Path
 import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
+from fixtures.sport_fixture import make_sport_fixture_db
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -64,6 +73,35 @@ def client() -> Iterator[TestClient]:
 
     def _override() -> Iterator[sqlite3.Connection]:
         conn = get_conn(FIXTURE_DB, read_only=True)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    app.dependency_overrides[get_db_conn] = _override
+    app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
+    app.dependency_overrides[get_narrator] = lambda: _StubNarrator()
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_db_conn, None)
+        app.dependency_overrides.pop(get_narration_cache, None)
+        app.dependency_overrides.pop(get_narrator, None)
+
+
+@pytest.fixture
+def sport_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Same wiring as `client`, but against a freshly built db
+    (`tests/fixtures/sport_fixture.py`) that has both CFB and NFL rows --
+    see this module's docstring."""
+    from api.deps import get_db_conn, get_narration_cache, get_narrator
+    from api.main import app
+    from api.persona.cache import InMemoryNarrationCache
+
+    sport_db = make_sport_fixture_db(tmp_path)
+
+    def _override() -> Iterator[sqlite3.Connection]:
+        conn = get_conn(sport_db, read_only=True)
         try:
             yield conn
         finally:

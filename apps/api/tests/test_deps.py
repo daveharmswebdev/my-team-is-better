@@ -43,6 +43,38 @@ def test_list_all_team_names_returns_real_teams_from_the_db() -> None:
     assert "Alabama" in names
 
 
+def test_list_all_team_names_default_sport_is_cfb() -> None:
+    """No pre-#59 call site ever passed `sport` -- the default must keep
+    producing the same result as an explicit sport='cfb' call."""
+    conn = get_conn(FIXTURE_DB, read_only=True)
+    try:
+        assert list_all_team_names(conn) == list_all_team_names(conn, sport="cfb")
+    finally:
+        conn.close()
+
+
+def test_list_all_team_names_scopes_by_sport(tmp_path: Path) -> None:
+    """Issue #59: a CFB/NFL name collision ("Wildcats" in both sports, same
+    year/method) must not cross-contaminate either sport's "known team
+    names" universe -- the grounding check's precondition."""
+    from fixtures.sport_fixture import make_sport_fixture_db
+
+    db_path = make_sport_fixture_db(tmp_path)
+    conn = get_conn(db_path, read_only=True)
+    try:
+        cfb_names = list_all_team_names(conn, sport="cfb")
+        nfl_names = list_all_team_names(conn, sport="nfl")
+    finally:
+        conn.close()
+
+    assert "Alpha State" in cfb_names
+    assert "Delta Squad" not in cfb_names
+    assert "Delta Squad" in nfl_names
+    assert "Alpha State" not in nfl_names
+    assert cfb_names.count("Wildcats") == 1
+    assert nfl_names.count("Wildcats") == 1
+
+
 def _reimport_deps() -> object:
     # `api.deps` binds `APP_TEST_MODE`/`DATABASE_URL` at import time, so a
     # stale `api.config` module (already imported with the old environment)

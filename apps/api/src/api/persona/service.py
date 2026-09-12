@@ -44,6 +44,7 @@ def narrate_team_case(
     user_team: str | None,
     question_type: str,
     method: str,
+    sport: str = "cfb",
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
@@ -66,7 +67,7 @@ def narrate_team_case(
         fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
-        known_team_names=list_all_team_names(conn),
+        known_team_names=list_all_team_names(conn, sport),
         narrator=narrator,
         fallback_text=team_case_fallback_text(case),
     )
@@ -81,6 +82,7 @@ def narrate_comparison(
     *,
     user_team: str | None,
     method: str,
+    sport: str = "cfb",
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
@@ -105,7 +107,7 @@ def narrate_comparison(
         fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
-        known_team_names=list_all_team_names(conn),
+        known_team_names=list_all_team_names(conn, sport),
         narrator=narrator,
         fallback_text=comparison_fallback_text(comparison),
     )

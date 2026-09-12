@@ -49,6 +49,10 @@ class ChampionRequest(BaseModel):
     year: int
     method: str = "keener"
     user_team: str | None = None
+    # Issue #59: threaded through to the evidence-layer calls in
+    # `cfb_strength.evidence.proof` (all default to "cfb" themselves, so an
+    # existing client that never sends this gets today's exact behavior).
+    sport: str = "cfb"
 
 
 class TeamCaseRequest(BaseModel):
@@ -60,6 +64,7 @@ class TeamCaseRequest(BaseModel):
     team: str
     method: str = "keener"
     user_team: str | None = None
+    sport: str = "cfb"
 
 
 class ComparisonRequest(BaseModel):
@@ -72,6 +77,7 @@ class ComparisonRequest(BaseModel):
     team_b: str
     method: str = "keener"
     user_team: str | None = None
+    sport: str = "cfb"
 
 
 # ---------------------------------------------------------------------------
@@ -342,13 +348,16 @@ class DataSourceCreditOut(BaseModel):
 
 class CreditsOut(BaseModel):
     methodology: MethodologyCreditOut
-    data_source: DataSourceCreditOut
+    data_sources: list[DataSourceCreditOut]
 
     @classmethod
     def from_dataclass(cls, credits: Credits) -> CreditsOut:
         return cls(
             methodology=MethodologyCreditOut.from_dataclass(credits.methodology),
-            data_source=DataSourceCreditOut.from_dataclass(credits.data_source),
+            data_sources=[
+                DataSourceCreditOut.from_dataclass(data_source)
+                for data_source in credits.data_sources
+            ],
         )
 
 
