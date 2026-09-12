@@ -11,17 +11,21 @@ import { defineConfig, devices } from '@playwright/test'
  */
 export default defineConfig({
   testDir: './e2e',
-  // Serial, not `fullyParallel` -- concurrent requests against the
-  // `APP_TEST_MODE=1` FastAPI server reproducibly hit a real thread-safety
-  // bug in `apps/api` (`sqlite3.ProgrammingError: SQLite objects created in
-  // a thread can only be used in that same thread`, from `get_db_conn`'s
-  // connection crossing FastAPI's per-request threadpool threads under
-  // concurrent load). That bug is outside this task's scope (`apps/api`) --
-  // reported as a contract gap -- but this e2e layer serializes its own
-  // three specs in the meantime so it is green and stable rather than
-  // reproducing a known, already-reported issue on every run.
-  fullyParallel: false,
-  workers: 1,
+  // Parallel again as of #44/#99. This was previously pinned to
+  // `fullyParallel: false, workers: 1` because concurrent requests against
+  // the `APP_TEST_MODE=1` FastAPI server reproducibly hit a real
+  // thread-safety bug in `apps/api` (`sqlite3.ProgrammingError: SQLite
+  // objects created in a thread can only be used in that same thread`, from
+  // `get_db_conn`'s connection crossing FastAPI's per-request threadpool
+  // threads under concurrent load). #99 fixed that at the source, so the
+  // workaround is not only unnecessary, it was actively harmful: serializing
+  // this layer removed the only cross-app concurrency the repo has, which
+  // means nothing in CI could have caught a regression of #44 -- a bug
+  // measured at 16 of 18 concurrent requests returning HTTP 500. Keeping
+  // these specs parallel is what makes this layer a real guard against it
+  // coming back, so do not re-serialize it to paper over flakiness: a
+  // concurrency failure here is a signal, not noise.
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: 'html',
