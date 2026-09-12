@@ -24,6 +24,7 @@ from cfb_strength.db.connection import get_conn
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 REGRESSION_FIXTURE_DB = FIXTURES_DIR / "cfb_regression.sqlite3"
+NFL_REGRESSION_FIXTURE_DB = FIXTURES_DIR / "nfl_regression.sqlite3"
 RAW_GAMES_SAMPLE = FIXTURES_DIR / "raw_games_sample.json"
 
 
@@ -41,6 +42,28 @@ def regression_db(tmp_path: Path) -> Path:
 @pytest.fixture
 def regression_conn(regression_db: Path):
     conn = get_conn(regression_db)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def nfl_regression_db(tmp_path: Path) -> Path:
+    """A writable per-test copy of the committed NFL golden-dataset fixture
+    db (1999/2004/2013/2022, sport='nfl') -- teams/team_season/games only,
+    same shape as `regression_db`'s CFB fixture, no precomputed `ratings`
+    rows. See test_golden_dataset_regressions.py's NFL section for how it
+    was produced (real nflverse data via `ingest.nflverse.ingest_season`,
+    cache-first, no live fetch)."""
+    dest = tmp_path / "nfl_regression.sqlite3"
+    shutil.copy(NFL_REGRESSION_FIXTURE_DB, dest)
+    return dest
+
+
+@pytest.fixture
+def nfl_regression_conn(nfl_regression_db: Path):
+    conn = get_conn(nfl_regression_db)
     try:
         yield conn
     finally:
