@@ -1,0 +1,66 @@
+; import-linter config for apps/api -- makes docs/ARCHITECTURE.md §2's
+; engine-layering rule a checked rule instead of a prose one (issue #54,
+; epic #113).
+;
+; The rule: apps/api is a top-layer consumer of packages/cfb-engine, exactly
+; like cfb_strength.cli and cfb_strength.mcp_server are. It may import
+; cfb_strength.evidence, cfb_strength.db, cfb_strength.contracts and
+; cfb_strength.config; it must not import cfb_strength.ratings,
+; cfb_strength.ingest, cfb_strength.mcp_server or cfb_strength.cli.
+;
+; Two properties of this file that are load-bearing -- read before editing:
+;
+; 1. `source_modules = api` is the *installed* `api` package, i.e. `src/api/`.
+;    `tests/fixtures/build_fixture.py` is a standalone generator script that
+;    is not part of the `api` package (and is not collected by pytest), so it
+;    is not in this graph at all. Its `cfb_strength.ratings` import is
+;    therefore a STRUCTURAL exception, not a suppressed one: there is no
+;    ignore rule here and none is wanted. If you ever find yourself adding an
+;    ignore/exception directive to "fix" that file, stop -- the boundary this
+;    contract is protecting is the running app, and the fixture builder is
+;    deliberately outside it. Moving that script into `src/api/` would (and
+;    should) break the first contract below.
+;
+; 2. `cfb_strength` must be listed in `root_packages` for a forbidden
+;    contract to be able to name engine submodules at all -- without it,
+;    import-linter never builds the engine half of the graph and the
+;    contracts below would be vacuously kept. `packages/cfb-engine` has its
+;    own separate `.importlinter` (`root_package = cfb_strength`) covering
+;    the engine's internal layering; this file does not replace or modify it.
+;
+; Note on why these are `forbidden` contracts (a deny list) rather than an
+; expression of the allow list above: import-linter's forbidden contracts
+; also catch *indirect* imports, and `cfb_strength.credit_math` is reachable
+; from `api` through the permitted `cfb_strength.evidence.credit_explain`.
+; The deny list names every engine top-level module apps/api must not reach;
+; when a new top-level engine module appears that apps/api has no business
+; importing, add it here.
+
+[importlinter]
+root_packages =
+    api
+    cfb_strength
+
+[importlinter:contract:no-engine-ratings-or-ingest]
+name = apps/api must not import the engine's ratings or ingest layers
+type = forbidden
+source_modules =
+    api
+forbidden_modules =
+    cfb_strength.ratings
+    cfb_strength.ingest
+
+; apps/api reaches the engine by direct Python call (Architecture Brief §1);
+; the MCP server and the CLI are sibling top-layer consumers of the same
+; engine, not things this app wraps. src/api/verdict.py already documents one
+; concrete temptation here: `get_champion` exists only on
+; `cfb_strength.mcp_server.server`, and this app must reimplement the query
+; against the evidence layer rather than import the LLM-tool surface.
+[importlinter:contract:no-engine-mcp-server-or-cli]
+name = apps/api must not import the engine's MCP-server or CLI surfaces
+type = forbidden
+source_modules =
+    api
+forbidden_modules =
+    cfb_strength.mcp_server
+    cfb_strength.cli

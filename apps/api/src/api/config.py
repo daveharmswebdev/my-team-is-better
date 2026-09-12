@@ -1,9 +1,11 @@
 """apps/api's own `.env` loader and small config surface (issue #4).
 
-Deliberately not a reuse of `cfb_strength.config`'s private `_load_dotenv` --
-that's the engine's own internal helper for its own `.env`, not part of the
-public evidence/db.connection surface this app is scoped to (per this app's
-Architecture Brief layering rule). This module loads `apps/api/.env` (via
+Deliberately not a reuse of `cfb_strength.config`'s private `_load_dotenv`.
+`cfb_strength.config` itself is on this app's permitted-import list (see
+docs/ARCHITECTURE.md §2; `api.deps` imports `DB_PATH` from it), so this is a
+privacy boundary rather than a layering one: `_load_dotenv` is the engine's
+own internal helper for the engine's own `.env`, not part of the surface
+this app is scoped to. This module loads `apps/api/.env` (via
 `python-dotenv`, gitignored, present locally for dev) and exposes:
 
 - `DATABASE_URL` / `ANTHROPIC_API_KEY`: `None` when unset (e.g. in CI, which

@@ -1,11 +1,16 @@
 """FastAPI dependency wiring for the verdict routes.
 
-Owns the single seam apps/api is allowed to cross per docs/ARCHITECTURE.md
-§2: opening a read-only `sqlite3.Connection` via
-`cfb_strength.db.connection.get_conn`, pointed at `cfb_strength.config.DB_PATH`.
-No route imports `get_conn`/`DB_PATH` directly -- they depend on
-`get_db_conn`, which tests override via `app.dependency_overrides` to point
-at a fixture db instead (see tests/conftest.py).
+Owns this app's database seam onto the engine: opening a read-only
+`sqlite3.Connection` via `cfb_strength.db.connection.get_conn`, pointed at
+`cfb_strength.config.DB_PATH`. Both of those imports are permitted by
+docs/ARCHITECTURE.md §2's layering rule (apps/api may import
+cfb_strength.evidence, cfb_strength.db, cfb_strength.contracts and
+cfb_strength.config, and must not import cfb_strength.ratings,
+cfb_strength.ingest, cfb_strength.mcp_server or cfb_strength.cli -- checked
+by `apps/api/.importlinter`, issue #54). No route imports `get_conn`/
+`DB_PATH` directly -- they depend on `get_db_conn`, which tests override via
+`app.dependency_overrides` to point at a fixture db instead (see
+tests/conftest.py).
 
 That connection is opened *non-strictly* (`check_same_thread=False`), which
 is deliberate and must stay -- issue #44, an intermittent production HTTP

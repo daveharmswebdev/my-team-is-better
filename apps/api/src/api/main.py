@@ -1,9 +1,12 @@
 """FastAPI application entrypoint for apps/api.
 
 Per docs/ARCHITECTURE.md §2, this app is a top-layer consumer of the
-cfb-engine, exactly like cli.py and mcp_server/ -- it may only import
-cfb_strength.evidence and cfb_strength.db.connection, never
-cfb_strength.ratings or cfb_strength.ingest directly.
+cfb-engine, exactly like cfb_strength.cli and cfb_strength.mcp_server are --
+it may import cfb_strength.evidence, cfb_strength.db, cfb_strength.contracts
+and cfb_strength.config, and must not import cfb_strength.ratings,
+cfb_strength.ingest, cfb_strength.mcp_server or cfb_strength.cli. That rule
+is checked rather than merely documented: `apps/api/.importlinter`, run as
+`uv run lint-imports` from `apps/api` (issue #54).
 
 `/api/verdict/*` implements PRD §5.1's three structured question types as
 evidence JSON (issue #3) wrapped in a persona narration envelope (issue

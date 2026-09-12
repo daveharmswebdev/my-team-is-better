@@ -19,10 +19,13 @@ collapsed into a generic network error, which is exactly the dead end issue
 nothing but `cfb`/`nfl` can get in, nothing but `cfb`/`nfl` can be echoed
 back out, since the error body echoes the request's sport.
 
-The Literal is written out by hand rather than imported from the engine, for
-the same layering reason `Method` is (CLAUDE.md: `apps/api` reaches the
-engine only through `cfb_strength.evidence` and `cfb_strength.db`). These
-tests are what catch the duplication drifting when a third league is added.
+The Literal is written out by hand because the engine exposes no shared
+sport alias to import -- it inlines the same `Literal["cfb", "nfl"]` on
+`cfb_strength.contracts`' row dataclasses, and defining a reusable alias
+there is an engine-side change `apps/api` may not make. (Unlike `Method`,
+this is *not* a layering restriction: `cfb_strength.contracts` is on this
+app's permitted-import list -- see `api.models`.) These tests are what catch
+the duplication drifting when a third league is added.
 
 422-shape note: as in `test_method_validation.py`, FastAPI's
 request-validation 422 carries `detail` as a **list** of error objects

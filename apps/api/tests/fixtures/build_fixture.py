@@ -13,6 +13,16 @@ actual pytest suite) only ever opens the pre-baked output db this script
 produces, via `get_conn`, which keeps the "no ratings/ingest import in
 app/test runtime" rule intact for every file pytest actually collects.
 
+That exception is sanctioned, and it is *structural* rather than suppressed:
+`apps/api/.importlinter` (issue #54) forbids `api -> cfb_strength.ratings`,
+and this file is not part of the `api` package, so it is not in that graph
+and needs no ignore rule. Verified both ways -- the contract stays KEPT with
+this import here, and copying this same file into `src/api/` reports
+`api._sabotage_fixture -> cfb_strength.ratings.compute_ratings (l.47)`
+BROKEN. So the rule to respect is: a build/generator script that reaches for
+`ratings` or `ingest` belongs here, never under `src/api/`. Do not "fix" a
+future violation by adding an ignore directive to `.importlinter`.
+
 Provenance: starts from `packages/cfb-engine/tests/fixtures/cfb_regression.sqlite3`
 (committed, real 2001/2005/2013 CFBD game data, no precomputed ratings), then
 bakes in real ratings for those same three years so `apps/api`'s test suite

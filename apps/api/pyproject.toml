@@ -29,6 +29,11 @@ dev = [
     "mypy>=1.14.0",
     "ruff>=0.8.0",
     "httpx>=0.27.0",
+    # Enforces this app's engine-layering rule (`.importlinter`, issue #54).
+    # `packages/cfb-engine` already dev-depends on import-linter for its own
+    # `.importlinter`, but that is a different environment -- `lint-imports`
+    # has to be runnable from `apps/api` to see this app's import graph.
+    "import-linter>=2.0",
 ]
 
 [tool.mypy]
