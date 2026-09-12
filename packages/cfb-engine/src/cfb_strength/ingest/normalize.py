@@ -1,5 +1,5 @@
-"""Normalize raw CFBD `/games` JSON records into `GameRow`/`TeamRow` contract
-objects.
+"""Normalize raw CFBD `/games` and `/teams` JSON records into
+`GameRow`/`TeamRow` contract objects.
 
 Field names below are taken verbatim from the CFBD OpenAPI spec's `Game`
 schema (confirmed live against https://api.collegefootballdata.com/api-docs.json
@@ -16,6 +16,22 @@ on 2026-09-09, and cross-checked against the cached responses in data/raw/):
 `homeClassification`/`awayClassification` are one of the CFBD
 `DivisionClassification` enum values: "fbs", "fcs", "ii", "ii/iii", "iii".
 
+The `/teams` half (added for issue #77 / epic #76) uses these fields of the
+`Team` response schema, confirmed against a real live call on 2026-09-12 (the
+full record also carries color/alternateColor/logos/twitter/location/division,
+none of which this project needs):
+
+    id, school, mascot, abbreviation, alternateNames, classification,
+    conference
+
+`mascot` is null for 998 of the 1933 records the year-independent call returns,
+but only one of those (Cal State Northridge) is a school our `/games` ingest
+actually stored -- the rest are teams we never see. `alternateNames` is a list
+of strings holding both abbreviations and alternate spellings (Texas ->
+["TEX", "Texas"], NC State -> ["North Carolina St.", "NCSU", "NC State"]), and
+`abbreviation` is a separate scalar that is usually *also* present inside it,
+hence the dedupe in `_alias_names`.
+
 NOTE for the coordinator: `GameRow` carries `home_classification` /
 `away_classification`, but `db/schema.sql`'s `games` table has no columns for
 them -- only `team_season.classification` does. That's intentional here: this
@@ -29,6 +45,7 @@ was intended -- see RETURN for the full note.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from cfb_strength.contracts import GameRow, TeamRow
@@ -95,3 +112,79 @@ def team_rows_from_game(raw: dict[str, Any]) -> list[TeamRow]:
             )
         )
     return rows
+
+
+def _alias_names(raw: dict[str, Any]) -> tuple[str, ...]:
+    """CFBD's `alternateNames` plus its `abbreviation` scalar, deduped.
+
+    Order-preserving (`alternateNames` first, then `abbreviation` if it isn't
+    already in there) so a later alias search gets CFBD's own ordering, and
+    deduped so it can't rank the same string twice -- `abbreviation` usually
+    repeats an entry of `alternateNames` ("TEX", "NCSU"), and a few records
+    repeat themselves outright (USC's `alternateNames` is `["USC", "USC"]`).
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    alternate = raw.get("alternateNames") or []
+    for candidate in [*alternate, raw.get("abbreviation")]:
+        if not isinstance(candidate, str):
+            continue
+        name = candidate.strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+    return tuple(names)
+
+
+def team_row_from_cfbd_team(raw: dict[str, Any]) -> TeamRow:
+    """Convert one raw CFBD `/teams` record into a `TeamRow`.
+
+    `school` is copied through verbatim and is the join key onto the
+    `/games`-derived rows already in the `teams` table -- it matches
+    byte-for-byte, accents included ("San José State"), so no fuzzy matching
+    is needed or wanted here. It is also the canonical identity string the
+    rest of the project keys on, so enrichment never rewrites it; `mascot` and
+    `alternate_names` are display/search metadata layered on top.
+    """
+    mascot = raw.get("mascot")
+    if isinstance(mascot, str):
+        mascot = mascot.strip() or None
+    return TeamRow(
+        id=raw["id"],
+        school=raw["school"],
+        classification=raw.get("classification"),
+        conference=raw.get("conference"),
+        mascot=mascot,
+        alternate_names=_alias_names(raw),
+    )
+
+
+def _alias_richness(row: TeamRow) -> tuple[int, int]:
+    """Sort key for picking between duplicate records of the same school:
+    having a mascot dominates, then having more aliases."""
+    return (1 if row.mascot else 0, len(row.alternate_names))
+
+
+def team_rows_from_cfbd_teams(records: Iterable[dict[str, Any]]) -> dict[str, TeamRow]:
+    """Collapse a raw `/teams` payload into one `TeamRow` per `school`.
+
+    42 of the schools our `/games` ingest stored have MORE THAN ONE record in
+    the `/teams` payload under the same `school` string, and the duplicate is
+    usually a stub with `mascot: null` and no aliases -- sometimes listed
+    *first* (e.g. Albany State: `(None, None)` then `("Golden Rams", "ABSU")`).
+    Taking `records[0]`, or building a naive `{school: record}` dict, would
+    therefore silently drop the mascot for roughly half of them. This prefers
+    the record that actually has a mascot, so the result does not depend on
+    payload order.
+    """
+    best: dict[str, TeamRow] = {}
+    for raw in records:
+        school = raw.get("school")
+        if not isinstance(school, str) or not school:
+            continue
+        row = team_row_from_cfbd_team(raw)
+        incumbent = best.get(school)
+        if incumbent is None or _alias_richness(row) > _alias_richness(incumbent):
+            best[school] = row
+    return best
