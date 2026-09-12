@@ -41,14 +41,18 @@ describe('api client', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, envelope))
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchChampion({ year: 2005, user_team: null })
+    const result = await fetchChampion({
+      year: 2005,
+      user_team: null,
+      sport: 'cfb',
+    })
 
     expect(result).toEqual(envelope)
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/verdict/champion'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ year: 2005, user_team: null }),
+        body: JSON.stringify({ year: 2005, user_team: null, sport: 'cfb' }),
       }),
     )
   })
@@ -69,13 +73,13 @@ describe('api client', () => {
     )
 
     await expect(
-      fetchChampion({ year: 1899, user_team: null }),
+      fetchChampion({ year: 1899, user_team: null, sport: 'cfb' }),
     ).rejects.toMatchObject({
       status: 404,
       body: detail,
     })
     await expect(
-      fetchChampion({ year: 1899, user_team: null }),
+      fetchChampion({ year: 1899, user_team: null, sport: 'cfb' }),
     ).rejects.toBeInstanceOf(VerdictApiError)
   })
 
@@ -91,6 +95,7 @@ describe('api client', () => {
         team_a: 'Texas',
         team_b: 'USC',
         user_team: null,
+        sport: 'cfb',
       }),
     ).rejects.toBeInstanceOf(VerdictNetworkError)
   })
@@ -102,7 +107,7 @@ describe('api client', () => {
     )
 
     await expect(
-      fetchChampion({ year: 2005, user_team: null }),
+      fetchChampion({ year: 2005, user_team: null, sport: 'cfb' }),
     ).rejects.toBeInstanceOf(VerdictNetworkError)
   })
 })
@@ -169,7 +174,7 @@ describe('fetchYears', () => {
     vi.unstubAllGlobals()
   })
 
-  it('resolves with the parsed years list on a 200 response, with no sport param', async () => {
+  it('resolves with the parsed years list on a 200 response, defaulting to sport=cfb', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { years: [2004, 2005, 2006] }))
@@ -180,7 +185,19 @@ describe('fetchYears', () => {
     expect(result).toEqual({ years: [2004, 2005, 2006] })
     const [url] = fetchMock.mock.calls[0] as [string]
     expect(url).toContain('/api/years')
-    expect(url).not.toContain('sport')
+    expect(url).toContain('sport=cfb')
+  })
+
+  it('passes an explicit sport through as a query param', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { years: [2021, 2022] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchYears('nfl')
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    expect(url).toContain('sport=nfl')
   })
 
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {
@@ -207,7 +224,7 @@ describe('fetchTeams', () => {
     vi.unstubAllGlobals()
   })
 
-  it('resolves with the parsed team list on a 200 response, with no sport param', async () => {
+  it('resolves with the parsed team list on a 200 response, defaulting to sport=cfb', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { teams: ['Texas', 'USC'] }))
@@ -218,7 +235,19 @@ describe('fetchTeams', () => {
     expect(result).toEqual({ teams: ['Texas', 'USC'] })
     const [url] = fetchMock.mock.calls[0] as [string]
     expect(url).toContain('/api/teams')
-    expect(url).not.toContain('sport')
+    expect(url).toContain('sport=cfb')
+  })
+
+  it('passes an explicit sport through as a query param', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(200, { teams: ['Chiefs', 'Bills'] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchTeams('nfl')
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    expect(url).toContain('sport=nfl')
   })
 
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {

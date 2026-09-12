@@ -80,6 +80,7 @@ describe('QuestionForm', () => {
       questionType: 'champion',
       year: 2005,
       userTeam: null,
+      sport: 'cfb',
     })
   })
 
@@ -102,6 +103,7 @@ describe('QuestionForm', () => {
       year: 2005,
       team: 'Texas',
       userTeam: null,
+      sport: 'cfb',
     })
   })
 
@@ -127,6 +129,7 @@ describe('QuestionForm', () => {
       teamA: 'Texas',
       teamB: 'USC',
       userTeam: 'Texas',
+      sport: 'cfb',
     })
     expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe('Texas')
   })
@@ -234,6 +237,7 @@ describe('QuestionForm', () => {
         questionType: 'champion',
         year: 2005,
         userTeam: null,
+        sport: 'cfb',
       })
     })
 
@@ -247,6 +251,51 @@ describe('QuestionForm', () => {
       expect(
         screen.getByRole('button', { name: /get the verdict/i }),
       ).not.toBeDisabled()
+    })
+  })
+
+  describe('college/NFL toggle', () => {
+    it('defaults to College and fetches the catalog scoped to "cfb"', async () => {
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      expect(screen.getByRole('radio', { name: /college/i })).toBeChecked()
+      expect(screen.getByRole('radio', { name: /nfl/i })).not.toBeChecked()
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+      expect(mockedFetchTeams).toHaveBeenCalledWith('cfb')
+    })
+
+    it('switching to NFL re-fetches the catalog scoped to "nfl"', async () => {
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+      expect(screen.getByRole('radio', { name: /nfl/i })).toBeChecked()
+      expect(screen.getByRole('radio', { name: /college/i })).not.toBeChecked()
+      await waitFor(() =>
+        expect(mockedFetchYears).toHaveBeenLastCalledWith('nfl'),
+      )
+      expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl')
+    })
+
+    it('submits with sport: "nfl" after switching to NFL', async () => {
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+      await user.clear(screen.getByLabelText(/year/i))
+      await user.type(screen.getByLabelText(/year/i), '2022')
+      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'champion',
+        year: 2022,
+        userTeam: null,
+        sport: 'nfl',
+      })
     })
   })
 })

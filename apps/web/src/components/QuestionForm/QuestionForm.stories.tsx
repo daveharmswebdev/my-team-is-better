@@ -1,26 +1,30 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { fn } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 import { QuestionForm } from './QuestionForm'
 
 /**
- * `QuestionForm` fetches `/api/years` and `/api/teams` on mount (issue #56)
- * to back its year/team datalist suggestions -- like `AboutPage.stories.tsx`
- * for `fetchCredits`, each story installs its own stubbed `window.fetch`
- * before rendering rather than mocking the module; only requests to those
- * two catalog endpoints are intercepted, everything else falls through to
- * the real `fetch`.
+ * `QuestionForm` fetches `/api/years` and `/api/teams` on mount (issue #56),
+ * scoped to the selected sport (issue #60), to back its year/team datalist
+ * suggestions -- like `AboutPage.stories.tsx` for `fetchCredits`, each story
+ * installs its own stubbed `window.fetch` before rendering rather than
+ * mocking the module; only requests to those two catalog endpoints are
+ * intercepted, everything else falls through to the real `fetch`.
  */
 function installCatalogFetch(
-  handler: (path: '/api/years' | '/api/teams') => Promise<Response>,
+  handler: (
+    path: '/api/years' | '/api/teams',
+    sport: string | null,
+  ) => Promise<Response>,
 ) {
   const realFetch = globalThis.fetch
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString()
+    const sport = new URL(url, 'http://localhost').searchParams.get('sport')
     if (url.includes('/api/years')) {
-      return handler('/api/years')
+      return handler('/api/years', sport)
     }
     if (url.includes('/api/teams')) {
-      return handler('/api/teams')
+      return handler('/api/teams', sport)
     }
     return realFetch(input, init)
   }) as typeof fetch
@@ -38,6 +42,20 @@ function jsonResponse(body: unknown): Promise<Response> {
 const mockYears = [2003, 2004, 2005, 2006, 2007]
 const mockTeams = ['Texas', 'USC', 'Ohio State', 'Texas State']
 
+const mockNflYears = [2020, 2021, 2022, 2023]
+const mockNflTeams = ['Chiefs', 'Bills', 'Eagles', '49ers']
+
+/** Serves sport-scoped catalog data -- `cfb` mocks by default, `nfl` mocks
+ * once `QuestionForm`'s toggle switches the fetched `sport` param. */
+function installSportScopedCatalogFetch() {
+  installCatalogFetch((path, sport) => {
+    const isNfl = sport === 'nfl'
+    const years = isNfl ? mockNflYears : mockYears
+    const teams = isNfl ? mockNflTeams : mockTeams
+    return jsonResponse(path === '/api/years' ? { years } : { teams })
+  })
+}
+
 const meta = {
   title: 'components/QuestionForm',
   component: QuestionForm,
@@ -47,11 +65,7 @@ const meta = {
   },
   decorators: [
     (Story) => {
-      installCatalogFetch((path) =>
-        jsonResponse(
-          path === '/api/years' ? { years: mockYears } : { teams: mockTeams },
-        ),
-      )
+      installSportScopedCatalogFetch()
       return <Story />
     },
   ],
@@ -61,7 +75,25 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
+/** Default College state -- untouched behavior from before issue #60's toggle. */
+export const Default: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('radio', { name: /college/i })).toBeChecked()
+  },
+}
+
+/** Switching the toggle to NFL re-fetches the catalog scoped to "nfl". */
+export const NflToggle: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('radio', { name: /nfl/i }))
+    await expect(canvas.getByRole('radio', { name: /nfl/i })).toBeChecked()
+    await expect(
+      canvas.getByRole('radio', { name: /college/i }),
+    ).not.toBeChecked()
+  },
+}
 
 export const Submitting: Story = {
   args: {
