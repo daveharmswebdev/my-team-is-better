@@ -389,16 +389,23 @@ def test_keener_reordering_drift_is_bounded_for_a_three_meeting_pair() -> None:
     Measured, not assumed. Replaying the pre-`ORDER BY` unordered query
     against the new total order across all 55 real seasons perturbs Keener
     ratings by at most 1.3877787807814457e-17 (matrix cells by at most
-    2.22e-16), with **zero** rank changes; this synthetic graph reproduces
-    the same scale (~2.8e-17). Keener is exactly reproducible on identical
-    input -- there is no BLAS nondeterminism here -- so that residue is
-    order-induced and nothing else.
+    2.22e-16), with **zero** rank changes.
+
+    Whether any *particular* graph drifts is platform-dependent, and this
+    test learned that the hard way: this exact fixture drifts ~2.8e-17 on
+    the author's machine and exactly 0.0 on the CI runner, because numpy's
+    eigenvector solve reduces in a different order under a different BLAS
+    build. Keener remains exactly reproducible on identical input on a given
+    machine -- rerunning it never moves -- so the residue is order-induced
+    rather than random. But "reordering always perturbs" is not a claim this
+    or any test can make, which is why the assertion below is a bound and
+    never a demand that drift be non-zero.
 
     The assertion is therefore a *bound plus exact ordinals*, not a
     weakening into vagueness: `rank`, `wins` and `losses` must still be
     exactly equal, and the rating tolerance (1e-12 absolute) is still five
-    orders of magnitude below the measured drift's own ceiling and far
-    below any rating difference that could reorder two teams.
+    orders of magnitude below the measured drift's ceiling and far below any
+    rating difference that could reorder two teams.
     """
     import random
 
@@ -459,10 +466,21 @@ def test_keener_reordering_drift_is_bounded_for_a_three_meeting_pair() -> None:
                     expected_entry.contribution, abs=1e-12
                 )
 
-    # The three-meeting pair really does produce drift -- if this graph ever
-    # became exactly order-invariant, the test above would be pinning
-    # nothing and the fixture should be re-derived rather than left in place.
-    assert worst_drift > 0.0
+    # Assert the BOUND, never that drift is non-zero.
+    #
+    # An earlier version of this test asserted `worst_drift > 0.0`, reasoning
+    # that a graph which never drifts would make the bound vacuous. That
+    # assertion is wrong, and CI proved it: this same fixture drifts by
+    # 2.78e-17 on the author's machine and by exactly 0.0 on the CI runner --
+    # numpy's eigenvector solve reduces in a different order under a
+    # different BLAS build. Requiring floating point to misbehave is not a
+    # property of Keener, it is a property of whoever's CPU is running it.
+    #
+    # The anti-vacuity guard is structural instead, at the bottom of this
+    # test: the fixture is asserted to actually CONTAIN a pair with three
+    # unordered meetings, which is the input capable of exposing
+    # non-associativity. Whether it does expose it here is the platform's
+    # business; that the fixture can represent the case is ours.
     assert worst_drift < 1e-14
 
     # A/B's own breakdown entry must record all three meetings, so a future
