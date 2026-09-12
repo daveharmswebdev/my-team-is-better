@@ -119,13 +119,21 @@ describe('fetchCredits', () => {
 
   it('resolves with the parsed credits payload on a 200 response', async () => {
     const credits = {
-      methodology: {
-        name: 'Keener',
-        citation:
-          'Keener, J. P. (1993). The Perron-Frobenius theorem and the ranking of football teams.',
-        url: 'https://example.com/keener',
-        summary: 'Eigenvector-based strength-of-schedule ranking.',
-      },
+      methodologies: [
+        {
+          name: "Keener's method",
+          citation:
+            'Keener, J. P. (1993). The Perron-Frobenius theorem and the ranking of football teams.',
+          url: 'https://example.com/keener',
+          summary: 'Eigenvector-based strength-of-schedule ranking.',
+        },
+        {
+          name: 'Elo',
+          citation: 'Arpad E. Elo, The Rating of Chessplayers (1978).',
+          url: 'https://example.com/elo',
+          summary: 'Teams trade rating points after every game.',
+        },
+      ],
       data_sources: [
         {
           name: 'CollegeFootballData.com',

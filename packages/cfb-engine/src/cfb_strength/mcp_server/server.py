@@ -152,9 +152,11 @@ def teams_resource() -> dict[str, Any]:
     "resource://cfb-strength/credits",
     name="credits",
     description=(
-        "Attribution for the ranking methodology and the underlying game "
-        "data. Read this before presenting a ranking as fact -- cite Keener's "
-        "method and CollegeFootballData.com as the data source rather than "
+        "Attribution for the ranking methodologies and the underlying game "
+        "data. Read this before presenting a ranking as fact -- cite the "
+        "method that produced it (the `method` field on every ranking tool; "
+        "`methodologies` here is a LIST, one entry per method this server "
+        "implements) and the data source for its sport, rather than "
         "presenting either as this server's own analysis or data collection."
     ),
     mime_type="application/json",

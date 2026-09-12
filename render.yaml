@@ -47,12 +47,34 @@ services:
         - packages/cfb-engine/**
         - pyproject.toml
         - uv.lock
+    # The four `--method elo` / `--method elo_career` legs are what make
+    # `?method=elo` return data rather than an empty 200. They ship in the
+    # same deploy as the API's `method` Literal deliberately: the Literal
+    # promotes `elo` from an invalid value to a valid one, so shipping it
+    # first would open a window where a valid method returns an empty list
+    # indistinguishable from an un-ingested season.
+    #
+    # Measured cost of the four added legs against a fully-ingested db:
+    # 0.25s (cfb elo) + 1.64s (cfb elo_career) + 0.12s (nfl elo) + 0.56s
+    # (nfl elo_career) = 2.58s. `elo_career` is the expensive pair because
+    # each target year replays full history from scratch -- O(seasons^2) by
+    # design, deliberately not optimized into a single-pass snapshot writer,
+    # because that would stop `rate --years 2005 --method elo_career` from
+    # being independently correct.
+    #
+    # Order matters in one respect: every `rate` leg must follow BOTH
+    # `ingest` legs, because `elo_career --sport nfl` loads `season <= ?`
+    # across the full history rather than a single season.
     buildCommand: >-
       uv sync --frozen --no-dev &&
       uv run cfb ingest --years 1998-2025 &&
-      uv run cfb rate --years 1998-2025 &&
       uv run cfb ingest --sport nfl --years 1999-2025 &&
-      uv run cfb rate --years 1999-2025 --sport nfl
+      uv run cfb rate --years 1998-2025 &&
+      uv run cfb rate --years 1998-2025 --method elo &&
+      uv run cfb rate --years 1998-2025 --method elo_career &&
+      uv run cfb rate --years 1999-2025 --sport nfl &&
+      uv run cfb rate --years 1999-2025 --method elo --sport nfl &&
+      uv run cfb rate --years 1999-2025 --method elo_career --sport nfl
     startCommand: uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:

@@ -15,9 +15,26 @@ app/test runtime" rule intact for every file pytest actually collects.
 
 Provenance: starts from `packages/cfb-engine/tests/fixtures/cfb_regression.sqlite3`
 (committed, real 2001/2005/2013 CFBD game data, no precomputed ratings), then
-bakes in real keener ratings for those same three years so `apps/api`'s test
-suite has real, non-mocked evidentiary data to hit through the HTTP layer --
+bakes in real ratings for those same three years so `apps/api`'s test suite
+has real, non-mocked evidentiary data to hit through the HTTP layer --
 including the 2005 Texas-over-USC golden-dataset case.
+
+Two methods are baked, `keener` and `elo`, for each of the three years. Elo
+was added when `method` became a validated Literal: `elo` is a shipped,
+credited method, and with keener-only rows no test could tell "Elo works
+end-to-end through the API" from "Elo is silently returning nothing". The
+two methods live side by side in the same `ratings`/`rating_breakdowns`
+tables, scoped by the `method` column, so every pre-existing keener
+assertion is untouched by the addition.
+
+`elo_career` is deliberately NOT baked. Its offseason mean reversion fires
+once per *elapsed* year, and these three seasons are non-contiguous on
+purpose (2001, 2005, 2013), so it would apply 4 and then 8 reversions for
+gaps that are an artifact of which seasons this fixture happens to carry,
+not of real football calendars. The resulting ratings would model nothing
+and would be actively misleading to assert against. Tracked as issue #98;
+`method="elo_career"` is still accepted by the API (it is a registered
+method) and correctly returns nothing here.
 """
 
 from __future__ import annotations
@@ -41,6 +58,8 @@ SOURCE_FIXTURE = (
 OUTPUT_FIXTURE = THIS_DIR / "cfb_verdict_fixture.sqlite3"
 
 YEARS = (2001, 2005, 2013)
+# See the module docstring for why `elo_career` is excluded.
+METHODS = ("keener", "elo")
 
 
 def build() -> None:
@@ -59,10 +78,17 @@ def build() -> None:
         # schema in place before writing ratings, or compute_and_store's
         # sport-aware INSERTs below fail with "no such column: sport".
         ensure_schema(conn)
-        for year in YEARS:
-            count = compute_and_store(conn, year, "keener")
-            print(f"computed {count} keener ratings for {year}")
+        for method in METHODS:
+            for year in YEARS:
+                count = compute_and_store(conn, year, method)
+                if count == 0:
+                    raise AssertionError(f"{method} produced no ratings for {year}")
+                print(f"computed {count} {method} ratings for {year}")
 
+        # The golden-dataset anchor: 2005 Texas is an undisputed champion, and
+        # `test_verdict.py` asserts on it by name. Checked here so a bad
+        # regeneration fails loudly at build time rather than as a puzzling
+        # assertion error in an unrelated test run later.
         champion = conn.execute(
             """
             SELECT t.school AS school, r.wins AS wins, r.losses AS losses
@@ -74,6 +100,42 @@ def build() -> None:
             raise AssertionError(f"expected 2005 keener champion to be Texas, got {champion}")
         record = f"{champion['wins']}-{champion['losses']}"
         print(f"confirmed 2005 champion: {champion['school']} ({record})")
+
+        # No equivalent hardcoded expectation for Elo. The CFB Elo constants
+        # are an uncalibrated first pass (see the Elo credit in
+        # `evidence/credits.py`), so pinning a specific #1 here would assert
+        # a tuning artifact as if it were a result. Report it instead, so a
+        # regeneration that changes it is visible in the diff of this
+        # script's output rather than silent.
+        for year in YEARS:
+            top = conn.execute(
+                """
+                SELECT t.school AS school, r.rating AS rating, r.wins AS wins,
+                       r.losses AS losses
+                FROM ratings r JOIN teams t ON t.id = r.team_id
+                WHERE r.year = ? AND r.method = 'elo' AND r.rank = 1
+                """,
+                (year,),
+            ).fetchone()
+            if top is None:
+                raise AssertionError(f"no elo rank-1 row for {year}")
+            print(
+                f"elo #1 for {year}: {top['school']} "
+                f"({top['wins']}-{top['losses']}, rating {top['rating']:.1f})"
+            )
+
+        for method in METHODS:
+            ratings_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM ratings WHERE method = ?", (method,)
+            ).fetchone()["n"]
+            breakdown_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM rating_breakdowns WHERE method = ?",
+                (method,),
+            ).fetchone()["n"]
+            print(
+                f"row counts for {method}: ratings={ratings_count} "
+                f"rating_breakdowns={breakdown_count}"
+            )
     finally:
         conn.close()
 

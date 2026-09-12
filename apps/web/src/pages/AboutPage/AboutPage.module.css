@@ -39,6 +39,51 @@
   color: var(--leather);
 }
 
+/*
+ * One panel per methodology. Two methods sit side by side conceptually --
+ * the default and the second opinion -- so each gets its own bounded card
+ * with a colored spine, alternating leather/navy, to keep them visually
+ * distinct from each other and from the page's plain prose sections.
+ */
+.methods {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.method {
+  background: var(--surface-alt);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--leather);
+  border-radius: var(--radius);
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.method:nth-child(even) {
+  border-left-color: var(--navy);
+}
+
+.methodName {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.25rem, 4.5vw, 1.6rem);
+  line-height: 1.1;
+  color: var(--leather-strong);
+}
+
+.method:nth-child(even) .methodName {
+  color: var(--navy);
+}
+
+@media (max-width: 30rem) {
+  .method {
+    padding: var(--sp-3);
+  }
+}
+
 .body {
   color: var(--ink);
   max-width: 68ch;

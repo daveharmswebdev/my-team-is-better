@@ -37,6 +37,36 @@ from cfb_strength.contracts import (
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
+# shared field types
+# ---------------------------------------------------------------------------
+
+
+Method = Literal["keener", "elo", "elo_career"]
+"""The rating methods the engine actually implements.
+
+`method` used to be a bare `str` here and on `api.catalog`'s query params,
+which meant a typo did not fail -- it succeeded and returned nothing.
+`GET /api/years?method=nonsense` answered `200 {"years": []}`, identical to
+the answer for a real method whose seasons are not ingested yet, and
+`/api/years` is what fills the web year picker. A misspelling was therefore
+indistinguishable from missing data, for the user and for us.
+
+Deliberately a hand-written literal rather than one derived from
+`cfb_strength.ratings.compute_ratings.METHODS`: `apps/api` may not import
+`cfb_strength.ratings` at all (CLAUDE.md's layering rule -- this app reaches
+the engine only through `cfb_strength.evidence` and `cfb_strength.db`, and
+`.importlinter` guards the equivalent seam inside the engine). The
+duplication is the price of the boundary; `tests/test_method_validation.py`
+is what catches it drifting when a method is added or removed.
+
+`elo_career` is admitted here regardless of whether anything has been
+computed under it in a given database -- it is a registered method, and
+"registered but not computed" must stay a 200 with empty results, since that
+is exactly the state a typo may no longer impersonate.
+"""
+
+
+# ---------------------------------------------------------------------------
 # requests
 # ---------------------------------------------------------------------------
 
@@ -47,7 +77,7 @@ class ChampionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     year: int
-    method: str = "keener"
+    method: Method = "keener"
     user_team: str | None = None
     # Issue #59: threaded through to the evidence-layer calls in
     # `cfb_strength.evidence.proof` (all default to "cfb" themselves, so an
@@ -62,7 +92,7 @@ class TeamCaseRequest(BaseModel):
 
     year: int
     team: str
-    method: str = "keener"
+    method: Method = "keener"
     user_team: str | None = None
     sport: str = "cfb"
 
@@ -75,7 +105,7 @@ class ComparisonRequest(BaseModel):
     year: int
     team_a: str
     team_b: str
-    method: str = "keener"
+    method: Method = "keener"
     user_team: str | None = None
     sport: str = "cfb"
 
@@ -380,13 +410,27 @@ class DataSourceCreditOut(BaseModel):
 
 
 class CreditsOut(BaseModel):
-    methodology: MethodologyCreditOut
+    """The About page's attribution payload, faithful to
+    `cfb_strength.contracts.Credits`.
+
+    `methodologies` is a list (it was a single `methodology` object until
+    the Elo engine landed) because the engine now implements more than one
+    rating method and PRD §5.6 credits the whole basis of the rankings, not
+    whichever method answered the current question. Order is `get_credits()`'s
+    order -- Keener's method, then Elo -- and is preserved here rather than
+    sorted, so the About page renders the default method first.
+    """
+
+    methodologies: list[MethodologyCreditOut]
     data_sources: list[DataSourceCreditOut]
 
     @classmethod
     def from_dataclass(cls, credits: Credits) -> CreditsOut:
         return cls(
-            methodology=MethodologyCreditOut.from_dataclass(credits.methodology),
+            methodologies=[
+                MethodologyCreditOut.from_dataclass(methodology)
+                for methodology in credits.methodologies
+            ],
             data_sources=[
                 DataSourceCreditOut.from_dataclass(data_source)
                 for data_source in credits.data_sources

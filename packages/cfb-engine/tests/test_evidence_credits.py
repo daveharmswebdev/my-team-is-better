@@ -14,27 +14,55 @@ from cfb_strength.evidence.credits import get_credits
 def test_get_credits_returns_credits_instance() -> None:
     credits = get_credits()
     assert isinstance(credits, Credits)
-    assert isinstance(credits.methodology, MethodologyCredit)
+    assert isinstance(credits.methodologies, list)
+    assert all(isinstance(m, MethodologyCredit) for m in credits.methodologies)
     assert isinstance(credits.data_sources, list)
     assert all(isinstance(source, DataSourceCredit) for source in credits.data_sources)
 
 
-def test_methodology_credit_matches_exact_citation() -> None:
-    methodology = get_credits().methodology
-    assert methodology.name == "Keener's method"
+def _methodology_by_name(name: str) -> MethodologyCredit:
+    matches = [m for m in get_credits().methodologies if m.name == name]
+    assert len(matches) == 1, f"expected exactly one methodology named {name!r}"
+    return matches[0]
+
+
+def test_methodologies_are_keener_and_elo_in_that_order() -> None:
+    """Order is asserted, not incidental: Keener is the golden-dataset-gated
+    default and should read first on the About page, with Elo presented as
+    the second opinion."""
+    assert [m.name for m in get_credits().methodologies] == ["Keener's method", "Elo"]
+
+
+def test_keener_methodology_credit_matches_exact_citation() -> None:
+    methodology = _methodology_by_name("Keener's method")
     assert methodology.citation == (
-        'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking of '
-        'Football Teams," SIAM Review, 35(1), 1993.'
+        'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking '
+        'of Football Teams," SIAM Review, 35(1), 1993.'
     )
     assert methodology.url == "https://dl.acm.org/doi/10.1137/1035004"
-    assert methodology.summary == (
-        "A team's rating depends recursively on the strength of the teams "
-        "it beat, whose strength depends on the strength of their "
-        "opponents -- the same Perron-Frobenius eigenvector idea behind "
-        "PageRank, applied to a win graph. This server computes stock "
-        "Keener with win/loss as the dominant signal; margin of victory "
-        "is not weighted."
-    )
+    # The old summary ended "margin of victory is not weighted" as a flat
+    # statement. That was true of the whole server when Keener was the only
+    # method and is false now that Elo weights it, so the claim is scoped to
+    # this method. Pinned because it is an accuracy fix, not phrasing.
+    assert "this method" in methodology.summary
+    assert "does not weight margin of victory" in methodology.summary
+
+
+def test_elo_methodology_credits_arpad_elo_and_fivethirtyeight() -> None:
+    """PRD 5.6 makes crediting a product requirement, so the specific names
+    are pinned: the originator and the published formulation implemented."""
+    methodology = _methodology_by_name("Elo")
+    assert "Arpad E. Elo" in methodology.citation
+    assert "FiveThirtyEight" in methodology.citation
+    assert methodology.url == "https://github.com/fivethirtyeight/nfl-elo-game"
+    # Three claims the summary must keep making, each load-bearing: that we
+    # wrote it from the published formula rather than vendoring anything,
+    # that this method DOES weight margin of victory (the opposite of
+    # Keener's line above), and that the college constants are ours and
+    # uncalibrated rather than 538's.
+    assert "clean-room" in methodology.summary
+    assert "blowouts do count" in methodology.summary
+    assert "not yet calibrated" in methodology.summary
 
 
 def _data_source_by_name(name_fragment: str) -> DataSourceCredit:

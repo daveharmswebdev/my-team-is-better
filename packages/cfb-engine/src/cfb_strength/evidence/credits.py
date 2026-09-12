@@ -15,27 +15,65 @@ from cfb_strength.contracts import Credits, DataSourceCredit, MethodologyCredit
 def get_credits() -> Credits:
     """Return the project's static attribution data.
 
-    Covers the methodology this engine implements (Keener's method) and the
-    data sources game results are ingested from: CollegeFootballData.com for
-    CFB, nflverse (originally Lee Sharpe's schedule data) for NFL.
+    Covers every methodology this engine implements -- Keener's method and
+    Elo -- and the data sources game results are ingested from:
+    CollegeFootballData.com for CFB, nflverse (originally Lee Sharpe's
+    schedule data) for NFL.
+
+    Takes no arguments and does not vary by the method that answered a given
+    question: the About page credits the whole basis of the rankings, not
+    whichever engine happened to run.
     """
     return Credits(
-        methodology=MethodologyCredit(
-            name="Keener's method",
-            citation=(
-                'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking of '
-                'Football Teams," SIAM Review, 35(1), 1993.'
+        methodologies=[
+            MethodologyCredit(
+                name="Keener's method",
+                citation=(
+                    'J. P. Keener, "The Perron-Frobenius Theorem and the Ranking '
+                    'of Football Teams," SIAM Review, 35(1), 1993.'
+                ),
+                url="https://dl.acm.org/doi/10.1137/1035004",
+                summary=(
+                    "A team's rating depends recursively on the strength of the "
+                    "teams it beat, whose strength depends on the strength of "
+                    "their opponents -- the same Perron-Frobenius eigenvector "
+                    "idea behind PageRank, applied to a win graph. This is stock "
+                    "Keener, with win/loss as the dominant signal: this method "
+                    "does not weight margin of victory, so running up the score "
+                    "doesn't move the needle. It is the default, and the only "
+                    "method checked against the golden dataset of undisputed "
+                    "champions."
+                ),
             ),
-            url="https://dl.acm.org/doi/10.1137/1035004",
-            summary=(
-                "A team's rating depends recursively on the strength of the teams "
-                "it beat, whose strength depends on the strength of their "
-                "opponents -- the same Perron-Frobenius eigenvector idea behind "
-                "PageRank, applied to a win graph. This server computes stock "
-                "Keener with win/loss as the dominant signal; margin of victory "
-                "is not weighted."
+            MethodologyCredit(
+                name="Elo",
+                citation=(
+                    "Arpad E. Elo, The Rating of Chessplayers, Past and Present, "
+                    "Arco, 1978 -- as adapted for professional football by "
+                    "FiveThirtyEight (fivethirtyeight/nfl-elo-game)."
+                ),
+                url="https://github.com/fivethirtyeight/nfl-elo-game",
+                summary=(
+                    "Every team starts even and they trade points after each "
+                    "game: beat someone better than you and you take more from "
+                    "them than you would from a team you were supposed to beat. "
+                    "Arpad Elo built it for chess; FiveThirtyEight published the "
+                    "football adaptation implemented here -- including the "
+                    "margin-of-victory multiplier, so unlike Keener above, "
+                    "blowouts do count, with diminishing returns and a damping "
+                    "term that stops a heavy favorite from farming easy wins. "
+                    "This is a clean-room implementation written from the "
+                    "published formula: no code and no data were taken from "
+                    "FiveThirtyEight, and they are credited here because they "
+                    "earned it, not because a license required it. The pro "
+                    "football constants are theirs; the college ones are our own "
+                    "first pass and are not yet calibrated against anything. "
+                    "Offered as a second opinion, not a replacement -- where Elo "
+                    "and Keener disagree about a season, that disagreement is "
+                    "the interesting part."
+                ),
             ),
-        ),
+        ],
         data_sources=[
             DataSourceCredit(
                 name="CollegeFootballData.com (CFBD)",

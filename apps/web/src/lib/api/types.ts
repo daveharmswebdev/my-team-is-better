@@ -135,7 +135,12 @@ export interface CreditsDataSourceOut {
 }
 
 export interface CreditsOut {
-  methodology: CreditsMethodologyOut
+  /**
+   * Every rating method the engine implements, in the order the API sends
+   * them -- Keener's method (the validated default) first, then Elo (the
+   * second opinion). Render in the order received; do not sort.
+   */
+  methodologies: CreditsMethodologyOut[]
   data_sources: CreditsDataSourceOut[]
 }
 

@@ -10,8 +10,12 @@ type CreditsState =
 
 /**
  * The site's "How this works / Credits" surface -- PRD §5.6 requires this be
- * visible, not just documented, and requires the Keener citation and
- * CollegeFootballData.com attribution be plain-language and prominent.
+ * visible, not just documented, and requires the methodology citations and
+ * data-source attribution be plain-language and prominent. Every word of
+ * that attribution copy -- names, summaries, citations -- comes from the
+ * engine's `evidence/credits.py` via `/api/credits` so the About page, the
+ * API and the MCP resource cannot drift (ARCHITECTURE §4.5); none of it is
+ * re-hardcoded here.
  * Pages own composition/data-fetching; components do not import from pages
  * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
  */
@@ -64,22 +68,10 @@ export function AboutPage() {
       </section>
 
       <section className={styles.section}>
-        <h2 className={styles.heading}>
-          The Method &mdash; Keener&rsquo;s Ranking
-        </h2>
-        <p className={styles.body}>
-          Every ranking on this site comes from Keener&rsquo;s method: a
-          team&rsquo;s rating depends on the strength of the teams it beat,
-          whose strength depends on the strength of the teams <em>they</em>{' '}
-          beat, and so on &mdash; the same eigenvector idea behind
-          Google&rsquo;s PageRank, applied to a season of wins and losses
-          instead of web links. Win/loss is the dominant signal; margin of
-          victory isn&rsquo;t weighted, so running up the score doesn&rsquo;t
-          move the needle.
-        </p>
+        <h2 className={styles.heading}>The Methods</h2>
         {state.status === 'loading' && (
           <p role="status" className={styles.loading}>
-            Loading citation&hellip;
+            Loading methods&hellip;
           </p>
         )}
         {state.status === 'error' && (
@@ -88,15 +80,25 @@ export function AboutPage() {
           </p>
         )}
         {state.status === 'success' && (
-          <p className={styles.citation}>
-            <a
-              href={state.credits.methodology.url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {state.credits.methodology.citation}
-            </a>
-          </p>
+          <div className={styles.methods}>
+            {/*
+              Rendered in the order the API sends them -- Keener's method
+              first as the validated default, Elo second as the second
+              opinion -- and never sorted. Keyed on `name`, not `url`: two
+              methodologies could plausibly share a DOI host.
+            */}
+            {state.credits.methodologies.map((methodology) => (
+              <article className={styles.method} key={methodology.name}>
+                <h3 className={styles.methodName}>{methodology.name}</h3>
+                <p className={styles.body}>{methodology.summary}</p>
+                <p className={styles.citation}>
+                  <a href={methodology.url} target="_blank" rel="noreferrer">
+                    {methodology.citation}
+                  </a>
+                </p>
+              </article>
+            ))}
+          </div>
         )}
       </section>
 

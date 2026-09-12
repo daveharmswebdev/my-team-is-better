@@ -188,9 +188,25 @@ class OpponentCredit:
 @dataclass(frozen=True)
 class RatingBreakdown:
     """The exact per-opponent decomposition of a Keener rating: `rating ==
-    sum(e.contribution for e in entries) + residual_contribution`, always,
-    by construction (residual_contribution is defined as whatever's left
-    over).
+    sum(e.contribution for e in entries) + residual_contribution`, by
+    construction (residual_contribution is defined as whatever's left over).
+
+    That identity holds **for a method that produces a decomposition at
+    all** -- which today means Keener. It is NOT a universal invariant of
+    this dataclass, and reading it as one is a live trap: Elo returns the
+    default-constructed `RatingBreakdown()` (no entries, zero residual)
+    alongside a real rating of ~1500, so the sum is 0.0 and the identity is
+    simply false there. Elo is a path through per-game K-scaled updates, not
+    a sum of per-opponent contributions; there is no decomposition to
+    report, and inventing one would be fabrication rather than evidence.
+
+    So an empty breakdown means "this method does not decompose", never
+    "this team had no opponents". A consumer rendering a receipts panel must
+    have an explicit empty state for it rather than showing a total of 0.00
+    next to a non-zero rating -- tracked as #82, along with the display-scale
+    problem the same surface has. `compute_ratings._store_breakdowns`
+    deliberately writes no rows at all for a default-constructed breakdown,
+    so the absence is visible in the database too, not just in Python.
 
     `residual_contribution` is real math, not a rounding artifact, and it is
     NOT small: for a real FBS season (~120+ teams) it typically accounts for
@@ -422,7 +438,19 @@ class DataSourceCredit:
 
 @dataclass(frozen=True)
 class Credits:
-    methodology: MethodologyCredit
+    # Pluralized when the Elo engine landed: this project now implements two
+    # rating methods and PRD 5.6 makes crediting both a product requirement,
+    # not a legal minimum. A list rather than a per-method lookup because the
+    # About page credits every method the engine implements, not just the one
+    # that answered the current question -- a reader deciding whether to
+    # trust the rankings should see the whole basis, and `get_credits()`
+    # stays argument-free and static.
+    #
+    # This is the same singular-to-plural shape change that broke AboutPage
+    # in #69 when `data_source` became `data_sources`, so every consumer
+    # moves in one commit: evidence/credits.py, mcp_server's asdict payload,
+    # apps/api's CreditsOut, and apps/web's hand-maintained types.ts mirror.
+    methodologies: list[MethodologyCredit]
     data_sources: list[DataSourceCredit]
 
 
