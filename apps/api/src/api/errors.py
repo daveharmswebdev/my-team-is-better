@@ -29,8 +29,13 @@ handles, both easy to get wrong:
   always includes `HTTPValidationError` alongside `ambiguous_team`.
 
 tests/test_openapi_error_responses.py checks all of this against real
-responses. It also fails if a handler is registered here that no route
-declares.
+responses. It works out, per route, which of these exceptions each endpoint
+can reach, and fails if the route's `responses=` does not match. Separately,
+it fails if a handler is registered here whose real response no route's
+declared schema accepts. That second check is shape-based: a new exception
+that reuses an existing envelope passes it as soon as the test has an example
+exception for it. The per-route check is what ties it to the routes that
+raise it.
 
 `UnknownTeamError` is 404 and not 422 on purpose (issue #100): it is the
 same "you asked about a thing we have no data for" case as
@@ -141,12 +146,21 @@ def register_exception_handlers(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 
+# NOT pydantic's ValidationError: a future `from pydantic import ValidationError`
+# here would collide. Don't rename it either: FastAPI takes the component name
+# from `__name__`, and the copied definition's `$ref` hardcodes "ValidationError".
 class ValidationError(BaseModel):
     """Documentation-only stand-in for FastAPI's `ValidationError` schema.
     Never instantiated. Its JSON schema is FastAPI's own definition, copied
-    verbatim, so there is no second hand-written copy to drift. The class
-    name is load-bearing: it is the component name FastAPI uses too, so this
-    model and FastAPI's default 422 publish one component, not two.
+    verbatim, so there is no hand-written copy to drift.
+
+    Which copy gets published depends on the app. If any route keeps
+    FastAPI's default 422 (in `api.main`, `/api/years` and `/api/teams` do),
+    `get_openapi` overwrites this component with FastAPI's own dict, and this
+    model's output is never shown. If no route does (e.g. an app with only
+    the verdict router), this model's output is what gets published.
+    tests/test_openapi_error_responses.py checks that the second case matches
+    FastAPI's definition, so both cases publish the same schema.
     """
 
     @classmethod

@@ -5,7 +5,9 @@ description = "FastAPI backend for My Team Is Better -- HTTP endpoints + persona
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
+    # >=0.137.2: tests/test_openapi_error_responses.py walks routes with
+    # `fastapi.routing.iter_route_contexts`/`RouteContext`, first shipped there.
+    "fastapi>=0.137.2",
     "uvicorn[standard]>=0.30.0",
     "cfb-strength-orchestrated",
     "anthropic>=1.5.0",

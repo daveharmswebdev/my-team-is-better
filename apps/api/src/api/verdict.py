@@ -20,8 +20,12 @@ Because routes never raise those exceptions directly, FastAPI cannot infer
 them for `/openapi.json`, so each route declares them via `responses=` using
 the prebuilt sets in `api.errors` (issue #111). Pick the set that matches
 the engine function the route calls (`build_team_case` or
-`build_comparison`). tests/test_openapi_error_responses.py fails if a route's
-declaration and its real error responses disagree.
+`build_comparison`). For every route in the app,
+tests/test_openapi_error_responses.py works out which handled engine
+exceptions the endpoint can reach by following the functions it references.
+It fails if the route's declaration does not accept a reachable exception's
+real handler response, or advertises one the route cannot reach. That test's
+docstring lists the call paths it cannot follow.
 
 Question type 1 ("who was the best team in <year>?") has no `get_champion`
 in the evidence layer -- only `cfb_strength.mcp_server.server.get_champion`,
