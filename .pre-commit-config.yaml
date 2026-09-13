@@ -37,7 +37,12 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-<<<<<<< HEAD
+      - id: apps-api-lint-imports
+        name: apps/api — import-linter (engine layering rule)
+        entry: bash -c 'cd apps/api && uv run lint-imports'
+        language: system
+        pass_filenames: false
+        always_run: true
       # apps/web's hooks, promised by a comment here since before #5/#45
       # scaffolded it and added in #55. These mirror the fast static-analysis
       # tier of the `apps-web` CI job only. Vitest and the Storybook build are
@@ -77,14 +82,3 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-=======
-      - id: apps-api-lint-imports
-        name: apps/api — import-linter (engine layering rule)
-        entry: bash -c 'cd apps/api && uv run lint-imports'
-        language: system
-        pass_filenames: false
-        always_run: true
-
-# apps/web gets its own hooks (eslint/tsc/dependency-cruiser) added here when
-# it is scaffolded — see CLAUDE.md "Engineering standards".
->>>>>>> e196386 (Make apps/api's engine-layering rule a checked rule (closes #54))
