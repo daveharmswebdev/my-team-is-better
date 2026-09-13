@@ -15,6 +15,7 @@ them.
 
 from __future__ import annotations
 
+import itertools
 import sqlite3
 import typing
 from dataclasses import dataclass
@@ -401,10 +402,17 @@ LEAGUE_SAMPLES: dict[str, LeagueSample] = {
 # by `Method` (checked below), so a newly registered method must state all
 # three before any parametrized test here can pass.
 RATING_SCALES: dict[str, tuple[float, float]] = {
+    # Open intervals, deliberately loose. A band doesn't check that a rating is
+    # plausible for its method, only which scale it is on, so a keener read
+    # that picked up an Elo row (or the reverse) lands outside its band. That
+    # only works if bands on different scales don't overlap. Methods on one
+    # scale share one band. test_rating_bands_are_identical_or_disjoint checks
+    # both.
+    #
     # A sum-to-1 eigenvector: every rating is a small positive fraction.
     "keener": (0.0, 1.0),
     # Seeded at 1500. The fixtures' real spread is about 1130-1990 (CFB) and
-    # 1290-1770 (NFL). The point is that the band is disjoint from Keener's.
+    # 1290-1770 (NFL).
     "elo": (500.0, 2500.0),
     "elo_career": (500.0, 2500.0),
 }
@@ -420,9 +428,32 @@ def test_per_method_expectations_cover_exactly_the_registered_vocabularies() -> 
     assert len(METHODS) > 1
 
 
+def test_rating_bands_are_identical_or_disjoint() -> None:
+    """Loosening a band until it overlaps another scale's band turns this red.
+    Without it, a band could grow wide enough to accept the wrong scale and
+    every test using it would still pass."""
+    assert len(set(RATING_SCALES.values())) > 1, "a single shared band can't separate scales"
+    for a, b in itertools.combinations(METHODS, 2):
+        (low_a, high_a), (low_b, high_b) = RATING_SCALES[a], RATING_SCALES[b]
+        assert (low_a, high_a) == (low_b, high_b) or high_a <= low_b or high_b <= low_a, (a, b)
+
+
 def _on_scale(method: str, rating: float) -> bool:
     low, high = RATING_SCALES[method]
     return low < rating < high
+
+
+def _stored_ratings_by_team(
+    conn: sqlite3.Connection, year: int, method: str, sport: str
+) -> dict[int, tuple[float, int]]:
+    """team_id -> (rating, rank) for every team `method` rated, straight from SQL."""
+    return {
+        int(row["team_id"]): (float(row["rating"]), int(row["rank"]))
+        for row in conn.execute(
+            "SELECT team_id, rating, rank FROM ratings WHERE year = ? AND method = ? AND sport = ?",
+            (year, method, sport),
+        )
+    }
 
 
 def _stored_rating(
@@ -456,7 +487,16 @@ class RatedLeague:
 )
 def rated_league(request: pytest.FixtureRequest) -> RatedLeague:
     """One league's fixture with `method` computed for every season but the
-    last, and a DIFFERENT method (the decoy) computed for only that last one.
+    last, and a DIFFERENT method (the decoy) computed for the last season and
+    for the sample year.
+
+    The decoy in the last season gives list_available_years' exclusion check
+    its meaning. The decoy in the sample year means every read below runs
+    beside another method's rows for the same season. That is only one other
+    method, though, read in whatever order SQLite happens to scan, so this
+    fixture does not prove isolation. The isolation section at the bottom of
+    this file carries that weight: it stores every method for one season and
+    runs each test in both scan orders.
 
     Every (method, league) pair is representable, including elo_career. Both
     fixtures hold non-contiguous seasons (CFB 2001/2005/2013), so elo_career
@@ -482,7 +522,8 @@ def rated_league(request: pytest.FixtureRequest) -> RatedLeague:
     for year in computed_years:
         compute_and_store(conn, year, method, sport=sport)
     decoy_method = METHODS[(METHODS.index(method) + 1) % len(METHODS)]
-    compute_and_store(conn, decoy_year, decoy_method, sport=sport)
+    for year in (sample.year, decoy_year):
+        compute_and_store(conn, year, decoy_method, sport=sport)
 
     return RatedLeague(conn, method, sport, sample, computed_years, decoy_method, decoy_year)
 
@@ -490,8 +531,8 @@ def rated_league(request: pytest.FixtureRequest) -> RatedLeague:
 def test_list_available_years_is_exactly_this_methods_seasons(rated_league: RatedLeague) -> None:
     r = rated_league
     assert list_available_years(r.conn, r.method, r.sport) == r.computed_years
-    # The decoy season really is stored, so its absence above means something.
-    assert list_available_years(r.conn, r.decoy_method, r.sport) == [r.decoy_year]
+    # The decoy's last season really is stored, so its absence above means something.
+    assert list_available_years(r.conn, r.decoy_method, r.sport) == [r.sample.year, r.decoy_year]
 
 
 def test_resolve_team_resolves_under_every_method(rated_league: RatedLeague) -> None:
@@ -529,6 +570,11 @@ def test_build_team_case_is_coherent_under_every_method(rated_league: RatedLeagu
     )
     assert len(case.games) == case.wins + case.losses + case.ties
 
+    stored_opponents = _stored_ratings_by_team(r.conn, r.sample.year, r.method, r.sport)
+    for game in case.games:
+        assert (game.opponent_rating, game.opponent_rank) == stored_opponents.get(
+            game.opponent_team_id, (None, None)
+        ), game.opponent_name
     rated_opponents = [g for g in case.games if g.opponent_rating is not None]
     assert rated_opponents
     for game in rated_opponents:
@@ -585,70 +631,113 @@ def test_build_comparison_is_coherent_under_every_method(rated_league: RatedLeag
 
 
 # ---------------------------------------------------------------------------
-# issue #95 -- method isolation: two methods' rows in one database
+# issue #95 -- method isolation: every registered method's rows in one season
 #
-# Every rating query in proof.py filters `AND method = ?`. Each test below
-# fails if any single one of those filters is dropped: list_available_years,
-# _rated_teams (resolve_team's candidates), build_team_case's own rating
-# lookup, _ratings_map (opponent ranks/ratings) and _rating_breakdown.
+# Production computes every method for every season, so the isolation db
+# stores all of them for ISOLATION_YEAR. Every rating query in proof.py
+# filters by `method = ?`: list_available_years, _rated_teams (resolve_team's
+# candidates), build_team_case's own rating lookup, _ratings_map (opponent
+# ranks/ratings) and _rating_breakdown. TOGETHER, the tests below fail if any
+# one of those filters is dropped, or loosened to a prefix match that lets an
+# `elo` request also read `elo_career` rows. No single test covers every site;
+# each docstring names the ones it guards.
+#
+# Scan order is part of it. None of those queries has an ORDER BY, and SQLite
+# returns their rows in idx_ratings_year_method order, where `elo` sorts
+# before `elo_career`. A prefix-matching rating lookup therefore still hands
+# an `elo` request its own row first, while _ratings_map's last-wins dict
+# ends on `elo_career`'s. So every test here runs twice: once in index order,
+# and once under PRAGMA reverse_unordered_selects.
 # ---------------------------------------------------------------------------
 
-# Overlapping in 2005 only, and each method has a season the other lacks.
-ISOLATION_YEARS: dict[str, tuple[int, ...]] = {"keener": (2005, 2013), "elo": (2001, 2005)}
+ISOLATION_YEAR = 2005
+ISOLATION_SEASONS = (2001, 2005, 2013)  # every season in the CFB fixture
+# Every method is stored for ISOLATION_YEAR. Outside it, each method lacks a
+# season, and methods whose names share a prefix lack different ones.
+ISOLATION_YEARS: dict[str, tuple[int, ...]] = {
+    "keener": (2005, 2013),
+    "elo": (2001, 2005),
+    "elo_career": (2005, 2013),
+}
 
 
-@pytest.fixture
-def two_method_conn(regression_conn: sqlite3.Connection) -> sqlite3.Connection:
+@pytest.fixture(params=["index-order", "reversed"])
+def isolation_conn(
+    request: pytest.FixtureRequest, regression_conn: sqlite3.Connection
+) -> sqlite3.Connection:
+    conn = regression_conn
+    # A method missing from the table would be isolated from nothing.
+    assert tuple(ISOLATION_YEARS) == METHODS
+    assert all(ISOLATION_YEAR in years for years in ISOLATION_YEARS.values())
     for method, years in ISOLATION_YEARS.items():
         for year in years:
-            compute_and_store(regression_conn, year, method)
-    return regression_conn
+            compute_and_store(conn, year, method)
+
+    # The pragma must really reverse this db's unordered scans, or the
+    # "reversed" run would silently repeat the other one.
+    scan = "SELECT id FROM ratings WHERE year = ? AND sport = 'cfb'"
+    conn.execute("PRAGMA reverse_unordered_selects = OFF")
+    in_index_order = [row["id"] for row in conn.execute(scan, (ISOLATION_YEAR,))]
+    conn.execute("PRAGMA reverse_unordered_selects = ON")
+    reversed_order = [row["id"] for row in conn.execute(scan, (ISOLATION_YEAR,))]
+    assert len(in_index_order) > 1
+    assert reversed_order == in_index_order[::-1]
+
+    if request.param == "index-order":
+        conn.execute("PRAGMA reverse_unordered_selects = OFF")
+    return conn
 
 
-def test_isolation_list_available_years(two_method_conn: sqlite3.Connection) -> None:
-    assert list_available_years(two_method_conn, "keener") == [2005, 2013]
-    assert list_available_years(two_method_conn, "elo") == [2001, 2005]
+def _methods_stored_differently(conn: sqlite3.Connection, school: str) -> dict[str, sqlite3.Row]:
+    """Each method's stored row for `school`, after checking the precondition
+    that no two methods stored the same rating. If two did, a test that read
+    the wrong method's row could still pass."""
+    stored = {m: _stored_rating(conn, ISOLATION_YEAR, m, "cfb", school) for m in METHODS}
+    for a, b in itertools.combinations(METHODS, 2):
+        assert stored[a]["rating"] != stored[b]["rating"], (school, a, b)
+    return stored
+
+
+def test_isolation_list_available_years(isolation_conn: sqlite3.Connection) -> None:
+    """Guards list_available_years (and so every _require_year check)."""
+    for method, years in ISOLATION_YEARS.items():
+        assert list_available_years(isolation_conn, method) == list(years), method
 
 
 def test_isolation_resolve_team_sees_only_its_methods_rated_teams(
-    two_method_conn: sqlite3.Connection,
+    isolation_conn: sqlite3.Connection,
 ) -> None:
-    conn = two_method_conn
+    """Guards _rated_teams and _require_year. Texas is rated once per method,
+    so a candidate pool that also read another method's rows would hold it
+    more than once and report "Texas" as ambiguous."""
+    conn = isolation_conn
     texas = conn.execute("SELECT id FROM teams WHERE school = 'Texas' AND sport = 'cfb'").fetchone()
-    # Texas is rated once per method. A candidate pool that ignored the
-    # method would hold it twice and report "Texas" as ambiguous.
-    assert resolve_team(conn, 2005, "Texas", method="keener") == texas["id"]
-    assert resolve_team(conn, 2005, "Texas", method="elo") == texas["id"]
-    with pytest.raises(UnknownYearError):
-        resolve_team(conn, 2001, "Miami", method="keener")
-    with pytest.raises(UnknownYearError):
-        resolve_team(conn, 2013, "Florida State", method="elo")
+    for method, years in ISOLATION_YEARS.items():
+        assert resolve_team(conn, ISOLATION_YEAR, "Texas", method=method) == texas["id"], method
+        missing = [season for season in ISOLATION_SEASONS if season not in years]
+        assert missing, method
+        for season in missing:
+            with pytest.raises(UnknownYearError):
+                resolve_team(conn, season, "Texas", method=method)
 
 
 @pytest.mark.parametrize("school", ["Penn State", "Ohio State"])
 def test_isolation_build_team_case_reads_only_its_own_methods_rows(
-    two_method_conn: sqlite3.Connection, school: str
+    isolation_conn: sqlite3.Connection, school: str
 ) -> None:
-    conn = two_method_conn
-    stored = {m: _stored_rating(conn, 2005, m, "cfb", school) for m in ISOLATION_YEARS}
-    # Precondition. 2005 Texas is #1 under both methods, so rank alone can't
-    # tell the rows apart for Texas. These two teams rank differently.
-    assert stored["keener"]["rank"] != stored["elo"]["rank"]
+    """Guards build_team_case's rating lookup and _ratings_map, each in the
+    scan order where a leaking query meets another method's row where it
+    counts, plus _rating_breakdown for keener's real rows."""
+    conn = isolation_conn
+    stored = _methods_stored_differently(conn, school)
 
     for method, row in stored.items():
-        case = build_team_case(conn, 2005, school, method=method)
+        case = build_team_case(conn, ISOLATION_YEAR, school, method=method)
         assert case.method == method
         assert (case.rating, case.rank) == (row["rating"], row["rank"]), method
         assert _on_scale(method, case.rating), (method, case.rating)
 
-        opponents = {
-            int(o["team_id"]): (float(o["rating"]), int(o["rank"]))
-            for o in conn.execute(
-                "SELECT team_id, rating, rank FROM ratings "
-                "WHERE year = 2005 AND method = ? AND sport = 'cfb'",
-                (method,),
-            )
-        }
+        opponents = _stored_ratings_by_team(conn, ISOLATION_YEAR, method, "cfb")
         for game in case.games:
             assert (game.opponent_rating, game.opponent_rank) == opponents.get(
                 game.opponent_team_id, (None, None)
@@ -659,17 +748,62 @@ def test_isolation_build_team_case_reads_only_its_own_methods_rows(
             assert case.rating_breakdown.residual_contribution == 0.0
 
 
-def test_isolation_verdict_leader_follows_the_requested_method(
-    two_method_conn: sqlite3.Connection,
+def test_isolation_breakdown_rows_never_cross_methods(
+    isolation_conn: sqlite3.Connection,
 ) -> None:
-    """Penn State and Ohio State met in 2005, and the two methods order them
-    oppositely, so the verdict's closing sentence names a different leader
-    depending only on which method's rows were read."""
-    conn = two_method_conn
-    for method in ISOLATION_YEARS:
-        penn_state = _stored_rating(conn, 2005, method, "cfb", "Penn State")
-        ohio_state = _stored_rating(conn, 2005, method, "cfb", "Ohio State")
-        comparison = build_comparison(conn, 2005, "Penn State", "Ohio State", method=method)
+    """Guards _rating_breakdown between methods that both have rows.
+
+    Elo methods store no breakdown rows, so on real data a breakdown read
+    that leaks from elo_career into elo is invisible: there is nothing to
+    leak. This test plants one row under each method that stores none,
+    standing in for a later method that does decompose, then checks every
+    method reads back exactly its own rows."""
+    conn = isolation_conn
+    penn_state = _stored_rating(conn, ISOLATION_YEAR, "keener", "cfb", "Penn State")["team_id"]
+    ohio_state = _stored_rating(conn, ISOLATION_YEAR, "keener", "cfb", "Ohio State")["team_id"]
+    planted = [method for method in METHODS if not HAS_BREAKDOWN[method]]
+    assert len(planted) > 1, "nothing to leak between"
+    for i, method in enumerate(planted):
+        conn.execute(
+            "INSERT INTO rating_breakdowns (year, method, team_id, opponent_team_id, "
+            "games_played, wins, losses, credit, contribution, computed_at, sport) "
+            "VALUES (?, ?, ?, ?, 1, 1, 0, 0.5, ?, 'planted by test', 'cfb')",
+            (ISOLATION_YEAR, method, penn_state, ohio_state, 1000.0 + i),
+        )
+    conn.commit()
+
+    for method in METHODS:
+        expected = sorted(
+            (int(row["opponent_team_id"]), float(row["contribution"]))
+            for row in conn.execute(
+                "SELECT opponent_team_id, contribution FROM rating_breakdowns "
+                "WHERE year = ? AND method = ? AND team_id = ? AND sport = 'cfb' "
+                "AND opponent_team_id IS NOT NULL",
+                (ISOLATION_YEAR, method, penn_state),
+            )
+        )
+        assert expected, method
+        breakdown = build_team_case(conn, ISOLATION_YEAR, "Penn State", method=method).rating_breakdown
+        assert sorted((e.opponent_team_id, e.contribution) for e in breakdown.entries) == expected, method
+
+
+def test_isolation_verdict_follows_the_requested_method(
+    isolation_conn: sqlite3.Connection,
+) -> None:
+    """Guards the whole comparison path. Penn State and Ohio State met in
+    2005. Keener and elo order them oppositely, so the closing sentence names
+    a different leader. Elo and elo_career order them the same way but store
+    different ratings, so the printed numbers differ."""
+    conn = isolation_conn
+    for school in ("Penn State", "Ohio State"):
+        _methods_stored_differently(conn, school)
+
+    for method in METHODS:
+        penn_state = _stored_rating(conn, ISOLATION_YEAR, method, "cfb", "Penn State")
+        ohio_state = _stored_rating(conn, ISOLATION_YEAR, method, "cfb", "Ohio State")
+        comparison = build_comparison(
+            conn, ISOLATION_YEAR, "Penn State", "Ohio State", method=method
+        )
 
         assert comparison.head_to_head.played is True
         assert comparison.rating_diff == penn_state["rating"] - ohio_state["rating"]
@@ -681,7 +815,7 @@ def test_isolation_verdict_leader_follows_the_requested_method(
             f"rank {penn_state['rank']} vs {ohio_state['rank']})."
         ), (method, comparison.verdict)
 
-    keener = build_comparison(conn, 2005, "Penn State", "Ohio State", method="keener")
-    elo = build_comparison(conn, 2005, "Penn State", "Ohio State", method="elo")
+    keener = build_comparison(conn, ISOLATION_YEAR, "Penn State", "Ohio State", method="keener")
+    elo = build_comparison(conn, ISOLATION_YEAR, "Penn State", "Ohio State", method="elo")
     assert keener.rating_diff > 0
     assert elo.rating_diff < 0

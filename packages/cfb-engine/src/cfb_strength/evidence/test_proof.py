@@ -678,15 +678,37 @@ def test_keener_verdict_text_is_byte_identical(conn: sqlite3.Connection) -> None
 @pytest.mark.parametrize("method", ["elo", "elo_career"])
 def test_elo_verdict_uses_one_decimal_place(conn: sqlite3.Connection, method: str) -> None:
     """Elo lives around 1100-2000. `.6f` printed `1523.456789`, false
-    precision nobody reads. One decimal place still separates two teams a few
-    tenths of a point apart, which an integer would render as a dead heat
-    beside a sentence claiming one "rates higher"."""
+    precision nobody reads. One decimal place separates most neighbouring
+    teams. It can't separate every pair (near-ties are #149)."""
     _insert_cfb_cycle_ratings(conn, method, (1523.456789, 1498.04, 1400.0))
 
     comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=method)
 
     assert comparison.verdict == (
         _ALPHA_BRAVO_PREFIX + "Alpha State rates higher overall (1523.5 vs 1498.0, rank 1 vs 2)."
+    )
+
+
+@pytest.mark.parametrize("method", typing.get_args(Method))
+def test_verdict_precision_is_read_from_the_format_table(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch, method: Method
+) -> None:
+    """The table is the single source of the verdict's precision. Checking
+    that its keys and values are right proves nothing if the verdict computes
+    a precision some other way (from the method's name, or the rating's
+    magnitude) that happens to agree today. A precision no method uses must
+    come straight through."""
+    if method != "keener":  # the shared fixture already rates the cycle under keener
+        _insert_cfb_cycle_ratings(conn, method, (1523.456789, 1498.04, 1400.0))
+    team_a = build_team_case(conn, YEAR, "Alpha State", method=method)
+    team_b = build_team_case(conn, YEAR, "Bravo Tech", method=method)
+
+    monkeypatch.setitem(proof.VERDICT_RATING_FORMATS, method, ".3f")
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=method)
+
+    assert comparison.verdict == (
+        _ALPHA_BRAVO_PREFIX + "Alpha State rates higher overall "
+        f"({team_a.rating:.3f} vs {team_b.rating:.3f}, rank 1 vs 2)."
     )
 
 

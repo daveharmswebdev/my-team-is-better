@@ -50,9 +50,14 @@ FUZZY_MATCH_LIMIT = 10
 #   CFB team), so fewer places would erase the differences. This is the
 #   pre-#95 text, byte for byte.
 # - elo / elo_career: one place. Ratings sit around 1100-2000, where `.6f`
-#   printed false precision ("1523.456789"). One place still separates two
-#   teams a few tenths apart. An integer would print a dead heat right beside
-#   a sentence claiming one of them "rates higher".
+#   printed false precision ("1523.456789"). One place separates most
+#   neighbouring teams, which an integer often would not.
+#
+# No fixed precision rules out a printed dead heat. Two ratings closer than
+# half the last printed place still read as equal beside "rates higher"
+# (e.g. "1531.2 vs 1531.2"), and keener's `.6f` already does this for a few
+# real pairs. This table makes such dead heats rare, not impossible. Widening
+# the precision on near-ties, for every method, is #149.
 #
 # Keyed by `Method` so a stray key is a mypy error. evidence/test_proof.py
 # checks the keys equal `typing.get_args(Method)`, so a newly registered
