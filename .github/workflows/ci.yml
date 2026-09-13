@@ -126,6 +126,18 @@ jobs:
       - name: Build Storybook
         run: npm run build-storybook
 
+      # Issue #90: `build-storybook` never runs a11y checks, so
+      # `.storybook/preview.tsx`'s `a11y.test: 'error'` is only enforced by
+      # this step -- every story runs in headless Chromium through
+      # @storybook/addon-vitest, and an axe violation (or a broken play
+      # function) fails the job. The browser install must precede it; the
+      # jsdom `npm run test` step above needs no browser.
+      - name: Install Playwright Chromium (storybook tests)
+        run: npx playwright install --with-deps chromium
+
+      - name: Storybook tests (a11y enforced)
+        run: npm run test-storybook
+
   e2e:
     name: e2e (Playwright, apps/api + apps/web)
     runs-on: ubuntu-latest

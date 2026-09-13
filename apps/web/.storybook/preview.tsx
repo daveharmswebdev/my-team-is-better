@@ -12,10 +12,14 @@ const preview: Preview = {
     },
 
     a11y: {
-      // 'todo' - show a11y violations in the test UI only
-      // 'error' - fail CI on a11y violations
-      // 'off' - skip a11y checks entirely
-      test: 'todo',
+      // 'error': any axe violation fails the story's test. Enforced by
+      // `npm run test-storybook` (vitest.storybook.config.ts, which runs every
+      // story in headless Chromium via @storybook/addon-vitest) -- issue #90.
+      // `npm run build-storybook` does NOT run axe, so this flag is only a
+      // gate because that script runs in CI. Do not set 'todo'/'off' here or
+      // on a story to silence a finding; suppress a single rule, per story,
+      // with a comment justifying it as a harness artifact.
+      test: 'error',
     },
   },
 }
