@@ -31,6 +31,19 @@ collected by pytest, so it sits outside the contract's graph structurally --
 there is no ignore rule, and none should be added. A generator script that
 needs `ratings` or `ingest` belongs there, never under `src/api/`.
 
+## `sport` / `method` vocabularies
+
+`Sport` and `Method` are `cfb_strength.contracts`' aliases, re-exported by
+`api.models`, never redeclared here (issue #112). `openapi-vocabularies.json`
+in this directory records the enum `/openapi.json` publishes for each, and
+`apps/web` is checked against it. It is generated from the live app, and
+`tests/test_openapi_vocabularies.py` fails when it is stale. Regenerate it
+after changing either alias:
+
+```bash
+cd apps/api && uv run python -m api.openapi_vocabularies > openapi-vocabularies.json
+```
+
 ## Local development
 
 Copy `.env.example` to `.env` (gitignored) and fill in `DATABASE_URL`

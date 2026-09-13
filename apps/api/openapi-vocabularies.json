@@ -1,0 +1,11 @@
+{
+  "method": [
+    "keener",
+    "elo",
+    "elo_career"
+  ],
+  "sport": [
+    "cfb",
+    "nfl"
+  ]
+}
