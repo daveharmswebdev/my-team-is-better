@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { YEAR_DEBOUNCE_MS } from '../../components/QuestionForm/QuestionForm'
 import { VerdictApiError, VerdictNetworkError } from '../../lib/api/client'
 import type { TeamCaseEnvelope, TeamsOut } from '../../lib/api/types'
 import { HomePage } from './HomePage'
@@ -81,6 +82,55 @@ const UNKNOWN_YEAR_ERROR = new VerdictApiError(404, {
  */
 async function waitForDefaultYear() {
   await waitFor(() => expect(screen.getByLabelText(/year/i)).toHaveValue(2018))
+}
+
+/**
+ * The year pill the correction tests pick. Deliberately *not* 2018, the
+ * newest season in this file's `/api/years` catalog: the corrected form is
+ * remounted, and a remounted form with no `initialYear` defaults to that
+ * newest season on its own, so a 2018 correction would look applied even if
+ * `HomePage` never passed it down.
+ */
+const CORRECTED_YEAR = 2005
+
+/** The Year edit whose team-list request is held open across a correction. */
+const IN_FLIGHT_YEAR = 2004
+
+/**
+ * Whether `promise` has settled yet, read off the promise itself rather than
+ * a flag the test flips when it releases one. An already-settled promise's
+ * reaction beats a zero-delay timer; a pending one loses to it.
+ */
+async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
+  let settled = false
+  await act(async () => {
+    settled = await Promise.race([
+      promise.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolveRace) =>
+        setTimeout(() => resolveRace(false), 0),
+      ),
+    ])
+  })
+  return settled
+}
+
+/**
+ * Asserts `assertion` holds continuously for two debounce intervals,
+ * re-checking every 20ms, so a stale response deferred by a timer still
+ * lands inside the window instead of after a one-shot absence check.
+ */
+async function expectThroughout(assertion: () => void) {
+  const deadline = Date.now() + YEAR_DEBOUNCE_MS * 2
+  do {
+    assertion()
+    await act(async () => {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20))
+    })
+  } while (Date.now() < deadline)
+  assertion()
 }
 
 describe('HomePage', () => {
@@ -365,10 +415,16 @@ describe('HomePage', () => {
       // Typed after the failed submission, so it was never part of it.
       await user.type(screen.getByLabelText(/your team/i), 'Bengals')
 
-      await user.click(await screen.findByRole('button', { name: '2018' }))
+      // 2005, not 2018: the corrected year must differ from the catalog's
+      // newest season, which the remounted form would default to on its own
+      // -- a pill year equal to it could not show whether the correction
+      // reached the form at all.
+      await user.click(
+        await screen.findByRole('button', { name: String(CORRECTED_YEAR) }),
+      )
 
       expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
-      expect(screen.getByLabelText(/year/i)).toHaveValue(2018)
+      expect(screen.getByLabelText(/year/i)).toHaveValue(CORRECTED_YEAR)
       expect(screen.getByRole('radio', { name: /nfl/i })).toBeChecked()
       expect(screen.getByLabelText(/your team/i)).toHaveValue('Bengals')
       // The pill re-asks *the question that was asked*, with one field
@@ -377,7 +433,7 @@ describe('HomePage', () => {
       // submitted `user_team` (none), while the field keeps what the user
       // has since typed for their next submission.
       expect(mockedFetchChampion).toHaveBeenLastCalledWith({
-        year: 2018,
+        year: CORRECTED_YEAR,
         user_team: null,
         sport: 'nfl',
       })
@@ -390,9 +446,12 @@ describe('HomePage', () => {
      * click, and its promise was then consumed by the remounted form's own
      * first fetch -- it could not fail for the reason it named.
      *
-     * What this does prove: the request is outstanding at the click (asserted,
-     * not assumed), and its late response does not reach the corrected form --
-     * no "No teams found for 2005" hint, no reverted year.
+     * What this does prove: the request is outstanding at the click, and its
+     * late response does not reach the corrected form -- no "No teams found
+     * for 2004" hint, no year other than the corrected one. The precondition
+     * is the call record (2004 was the last team-list request before the
+     * click) together with a pending-promise probe on the promise the fixture
+     * handed out for it; the probe guards the fixture, not production code.
      *
      * What it does NOT prove: that `QuestionForm`'s `cancelled` guard carries
      * that weight. The pill remounts the form (`HomePage` changes its `key`),
@@ -406,60 +465,72 @@ describe('HomePage', () => {
       mockedFetchChampion
         .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
-      let release2005Teams: () => void = () => {}
-      let teams2005Settled = false
-      mockedFetchTeams.mockImplementation((_sport, year) =>
-        year === 2005
-          ? new Promise<TeamsOut>((resolvePromise) => {
-              release2005Teams = () => {
-                teams2005Settled = true
-                // Empty, so a response that leaked onto the corrected form
-                // would show up as the year-scoped empty hint.
-                resolvePromise({ teams: [], team_details: [] })
-              }
-            })
-          : Promise.resolve(TEAMS),
-      )
+      const held: { promise?: Promise<TeamsOut>; release: () => void } = {
+        release: () => {},
+      }
+      mockedFetchTeams.mockImplementation((_sport, year) => {
+        if (year !== IN_FLIGHT_YEAR) {
+          return Promise.resolve(TEAMS)
+        }
+        held.promise = new Promise<TeamsOut>((resolvePromise) => {
+          // Empty, so a response that leaked onto the corrected form would
+          // show up as the year-scoped empty hint.
+          held.release = () => resolvePromise({ teams: [], team_details: [] })
+        })
+        return held.promise
+      })
 
       render(<HomePage />)
       const submit = screen.getByRole('button', { name: /get the verdict/i })
       await waitFor(() => expect(submit).not.toBeDisabled())
       await user.click(submit)
-      const pill = await screen.findByRole('button', { name: '2018' })
+      // Not the newest catalog season (2018), which the remounted form would
+      // default to by itself -- see the previous test.
+      const pill = await screen.findByRole('button', {
+        name: String(CORRECTED_YEAR),
+      })
 
       // An edit made after the failed submission, allowed to settle past the
       // form's debounce so its team-list request actually goes out.
       await user.clear(screen.getByLabelText(/year/i))
-      await user.type(screen.getByLabelText(/year/i), '2005')
+      await user.type(screen.getByLabelText(/year/i), String(IN_FLIGHT_YEAR))
       await waitFor(
-        () => expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', 2005),
-        { timeout: 2000 },
+        () =>
+          expect(mockedFetchTeams).toHaveBeenLastCalledWith(
+            'cfb',
+            IN_FLIGHT_YEAR,
+          ),
+        { timeout: YEAR_DEBOUNCE_MS * 5 },
       )
       const callsBeforeCorrection = mockedFetchTeams.mock.calls.length
+      const inFlight = held.promise
+      if (inFlight === undefined) {
+        throw new Error('the in-flight team-list request never went out')
+      }
+      expect(await hasSettled(inFlight)).toBe(false)
 
-      // The precondition the old test only claimed: in flight at the click.
-      expect(teams2005Settled).toBe(false)
       await user.click(pill)
 
       expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
-      // The corrected form issued its own request rather than inheriting the
-      // outstanding one.
+      // The corrected form issued its own request, for the corrected year,
+      // rather than inheriting the outstanding one.
       await waitFor(() =>
         expect(
           mockedFetchTeams.mock.calls.slice(callsBeforeCorrection),
-        ).toContainEqual(['cfb', 2018]),
+        ).toContainEqual(['cfb', CORRECTED_YEAR]),
       )
 
-      release2005Teams()
-      await act(async () => {
-        await new Promise((resolveWait) => setTimeout(resolveWait, 0))
-      })
+      held.release()
+      expect(await hasSettled(inFlight)).toBe(true)
 
-      expect(teams2005Settled).toBe(true)
-      expect(screen.getByLabelText(/year/i)).toHaveValue(2018)
-      expect(screen.queryByText(/no teams found for/i)).not.toBeInTheDocument()
+      await expectThroughout(() => {
+        expect(screen.getByLabelText(/year/i)).toHaveValue(CORRECTED_YEAR)
+        expect(
+          screen.queryByText(/no teams found for/i),
+        ).not.toBeInTheDocument()
+      })
       expect(mockedFetchChampion).toHaveBeenLastCalledWith({
-        year: 2018,
+        year: CORRECTED_YEAR,
         user_team: null,
         sport: 'cfb',
       })

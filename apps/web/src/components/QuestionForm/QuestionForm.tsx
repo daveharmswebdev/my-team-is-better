@@ -162,8 +162,10 @@ const USER_TEAM_PRIVACY_HINT = 'Stays on this device only.'
  * It would also contradict issue #136's rule that a failed or empty catalog
  * never blocks a typed year. What the bound does rule out is input that can
  * never be a season, which `<input type="number">` happily accepts: `999`,
- * `-2018`, `10000`, and exponent forms like `1e21`, which `String()` renders
- * as `"1e+21"`, a value the API's `int` `year` answers with a 422.
+ * `-2018`, `10000`, and exponent forms outside the range, like `1e21`, which
+ * `String()` renders as `"1e+21"`, a value the API's `int` `year` answers
+ * with a 422. An exponent form *inside* the range is not ruled out: `1e3` is
+ * `Number` 1000 and goes to the API as the plain `1000`, which is harmless.
  */
 const MIN_PLAUSIBLE_YEAR = 1000
 const MAX_PLAUSIBLE_YEAR = 9999
@@ -363,7 +365,8 @@ function formatSeasonsHint(years: number[]): string | undefined {
  * ingested for -- and an untouched default follows a league switch to the
  * new league's newest season, while a typed or parent-seeded year is never
  * overwritten. See `validateYear` for what counts as valid in each of the
- * year catalog's states; a failed catalog fetch never blocks.
+ * year catalog's states; a failed or empty catalog never blocks a whole
+ * four-digit year (`parseYear`'s shape check still applies in every state).
  *
  * Changing the **league** clears all four team values, "your team" and its
  * stored preference included (issue #137): a team name means nothing in the

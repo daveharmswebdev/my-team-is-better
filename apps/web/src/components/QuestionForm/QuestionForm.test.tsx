@@ -139,6 +139,50 @@ async function flushSettledRequests() {
   })
 }
 
+/**
+ * Whether `promise` has settled yet, read off the promise itself (a reaction
+ * attached to it) rather than a flag the test flips in its own release
+ * function -- so a fixture that hands out an already-settled promise fails
+ * the check instead of passing it. An already-settled promise's reaction
+ * beats a zero-delay timer; a pending one loses to it.
+ */
+async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
+  let settled = false
+  await act(async () => {
+    settled = await Promise.race([
+      promise.then(
+        () => true,
+        () => true,
+      ),
+      new Promise<boolean>((resolveRace) =>
+        setTimeout(() => resolveRace(false), 0),
+      ),
+    ])
+  })
+  return settled
+}
+
+/**
+ * Asserts `assertion` holds continuously for `windowMs`, re-checking every
+ * 20ms. A single zero-delay flush followed by an absence check only catches
+ * a stale response that lands directly behind its promise; one deferred by
+ * any timer would arrive after the check and pass it. Two debounce intervals
+ * outlast anything `QuestionForm` schedules itself.
+ */
+async function expectThroughout(
+  assertion: () => void,
+  windowMs = YEAR_DEBOUNCE_MS * 2,
+) {
+  const deadline = Date.now() + windowMs
+  do {
+    assertion()
+    await act(async () => {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 20))
+    })
+  } while (Date.now() < deadline)
+  assertion()
+}
+
 /** Every `year` `fetchTeams` has been called with that is not a whole number. */
 function nonIntegerTeamFetchYears(): unknown[] {
   return mockedFetchTeams.mock.calls
@@ -544,7 +588,7 @@ describe('QuestionForm', () => {
         await screen.findByText(/couldn't load the list of available years/i),
       ).toBeInTheDocument()
 
-      // Any finite year goes: there is no range to check it against.
+      // Any whole four-digit year goes: there is no range to check it against.
       await user.type(screen.getByLabelText(/year/i), '1850')
       expect(submitButton()).not.toBeDisabled()
       await new Promise((resolveWait) =>
@@ -577,7 +621,8 @@ describe('QuestionForm', () => {
       fireEvent.change(yearInput, { target: { value: '2005' } })
 
       // Like a failed fetch, an empty catalog has nothing to range-check
-      // against, so any finite year goes and `unknown_year` is the backstop.
+      // against, so any whole four-digit year goes and `unknown_year` is the
+      // backstop.
       expect(submitButton()).not.toBeDisabled()
       await new Promise((resolveWait) =>
         setTimeout(resolveWait, YEAR_DEBOUNCE_MS * 2),
@@ -1273,23 +1318,26 @@ describe('QuestionForm', () => {
       "keeps the newer year's team list when an earlier year's slower request %s after it",
       async (outcome) => {
         mockedFetchYears.mockResolvedValue({ years: [2017, 2018, 2019] })
-        let settleSlow2018: () => void = () => {}
-        let slow2018Settled = false
+        const slow2018: { promise?: Promise<TeamsOut>; settle: () => void } = {
+          settle: () => {},
+        }
         mockedFetchTeams.mockImplementation((_sport?: Sport, year?: number) => {
           if (year === 2018) {
-            return new Promise<TeamsOut>((resolvePromise, rejectPromise) => {
-              settleSlow2018 = () => {
-                slow2018Settled = true
-                // Texas *is* a 2018 team, so a leaked resolve would silently
-                // drop the 2019 flag; a leaked reject would swap the team
-                // hint for the failure copy.
-                if (outcome === 'resolves') {
-                  resolvePromise(teamsOut(CFB_DETAILS))
-                } else {
-                  rejectPromise(new Error('network down'))
+            slow2018.promise = new Promise<TeamsOut>(
+              (resolvePromise, rejectPromise) => {
+                slow2018.settle = () => {
+                  // Texas *is* a 2018 team, so a leaked resolve would
+                  // silently drop the 2019 flag; a leaked reject would swap
+                  // the team hint for the failure copy.
+                  if (outcome === 'resolves') {
+                    resolvePromise(teamsOut(CFB_DETAILS))
+                  } else {
+                    rejectPromise(new Error('network down'))
+                  }
                 }
-              }
-            })
+              },
+            )
+            return slow2018.promise
           }
           return Promise.resolve(
             teamsOut(year === 2019 ? [ALABAMA] : CFB_DETAILS),
@@ -1326,99 +1374,154 @@ describe('QuestionForm', () => {
             staleNotice('Texas', '2019 college football'),
           ),
         ).toBeInTheDocument()
-        // The precondition the guard exists for: 2018 is still outstanding
-        // *after* 2019 has landed.
-        expect(slow2018Settled).toBe(false)
+        // The precondition the guard exists for -- 2018 still outstanding
+        // after 2019 has landed -- is established by the call record above
+        // (2018 requested, then 2019) and the 2019 notice. This probe only
+        // checks the fixture's half of it: the promise handed out for 2018
+        // really is still pending, so an early-settling fixture fails here.
+        const pending2018 = slow2018.promise
+        if (pending2018 === undefined) {
+          throw new Error('the 2018 team-list request never went out')
+        }
+        expect(await hasSettled(pending2018)).toBe(false)
 
-        settleSlow2018()
-        await flushSettledRequests()
+        slow2018.settle()
+        expect(await hasSettled(pending2018)).toBe(true)
 
-        expect(slow2018Settled).toBe(true)
-        expect(
-          screen.getByText(staleNotice('Texas', '2019 college football')),
-        ).toBeInTheDocument()
-        expect(
-          screen.queryByText(staleNotice('Texas', '2018 college football')),
-        ).not.toBeInTheDocument()
-        expect(screen.queryByText(TEAM_LIST_FAILED)).not.toBeInTheDocument()
+        await expectThroughout(() => {
+          expect(
+            screen.getByText(staleNotice('Texas', '2019 college football')),
+          ).toBeInTheDocument()
+          expect(
+            screen.queryByText(staleNotice('Texas', '2018 college football')),
+          ).not.toBeInTheDocument()
+          expect(screen.queryByText(TEAM_LIST_FAILED)).not.toBeInTheDocument()
+        })
       },
     )
 
-    /** `/api/years` for College held open until released; NFL answers at once. */
-    function stubSlowCollegeYears(): { releaseCollegeYears: () => void } {
-      const handle = { releaseCollegeYears: () => {} }
-      mockedFetchYears.mockImplementation((sport?: Sport) =>
-        sport === 'nfl'
-          ? Promise.resolve({ years: [2021, NEWEST_NFL_YEAR] })
-          : new Promise((resolvePromise) => {
-              handle.releaseCollegeYears = () =>
-                resolvePromise({ years: [2004, 2005, 2006] })
-            }),
-      )
+    /**
+     * `/api/years` for College held open until `settle`, which resolves or
+     * rejects it per `outcome`; NFL answers at once. Both outcomes matter:
+     * the effect guards its success path and its failure path separately,
+     * and a leaked `{status: 'error', sport: 'cfb'}` replaces the NFL catalog
+     * just as surely as a leaked College year list does.
+     */
+    function stubSlowCollegeYears(outcome: 'resolves' | 'rejects'): {
+      promise?: Promise<{ years: number[] }>
+      settle: () => void
+    } {
+      const slow: {
+        promise?: Promise<{ years: number[] }>
+        settle: () => void
+      } = { settle: () => {} }
+      mockedFetchYears.mockImplementation((sport?: Sport) => {
+        if (sport === 'nfl') {
+          return Promise.resolve({ years: [2021, NEWEST_NFL_YEAR] })
+        }
+        slow.promise = new Promise((resolvePromise, rejectPromise) => {
+          slow.settle = () => {
+            if (outcome === 'resolves') {
+              resolvePromise({ years: [2004, 2005, 2006] })
+            } else {
+              rejectPromise(new Error('network down'))
+            }
+          }
+        })
+        return slow.promise
+      })
       mockedFetchTeams.mockImplementation((sport?: Sport) =>
         Promise.resolve(teamsOut(sport === 'nfl' ? NFL_DETAILS : CFB_DETAILS)),
       )
-      return handle
+      return slow
     }
 
-    it("keeps the NFL's default year when the College years request lands after a switch to the NFL", async () => {
-      const slow = stubSlowCollegeYears()
-      const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
-      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+    /** Settles the held College request, checking it really was pending. */
+    async function settleCollegeYears(slow: {
+      promise?: Promise<{ years: number[] }>
+      settle: () => void
+    }) {
+      const pending = slow.promise
+      if (pending === undefined) {
+        throw new Error('the College years request never went out')
+      }
+      expect(await hasSettled(pending)).toBe(false)
+      slow.settle()
+      expect(await hasSettled(pending)).toBe(true)
+    }
 
-      await user.click(screen.getByRole('radio', { name: 'NFL' }))
-      await waitFor(() =>
-        expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR),
-      )
-      expect(
-        screen.getByText(/seasons with data: 2021-2022/i),
-      ).toBeInTheDocument()
+    it.each(['resolves', 'rejects'] as const)(
+      "keeps the NFL's default year when the College years request %s after a switch to the NFL",
+      async (outcome) => {
+        const slow = stubSlowCollegeYears(outcome)
+        const user = userEvent.setup()
+        render(<QuestionForm onSubmit={vi.fn()} />)
+        await waitFor(() =>
+          expect(mockedFetchYears).toHaveBeenCalledWith('cfb'),
+        )
 
-      slow.releaseCollegeYears()
-      await flushSettledRequests()
+        await user.click(screen.getByRole('radio', { name: 'NFL' }))
+        await waitFor(() =>
+          expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR),
+        )
+        expect(
+          screen.getByText(/seasons with data: 2021-2022/i),
+        ).toBeInTheDocument()
 
-      // A leaked College catalog would replace the NFL one; the render-time
-      // league check would then treat the year catalog as still loading, so
-      // the default, the hint and the enabled button would all vanish.
-      expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR)
-      expect(
-        screen.getByText(/seasons with data: 2021-2022/i),
-      ).toBeInTheDocument()
-      expect(submitButton()).not.toBeDisabled()
-    })
+        await settleCollegeYears(slow)
 
-    it('keeps rejecting a year the NFL has no data for when the College years request lands after the switch', async () => {
-      const slow = stubSlowCollegeYears()
-      const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
-      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+        // A leaked College catalog -- years or error -- would replace the NFL
+        // one; the render-time league check would then treat the year catalog
+        // as still loading, so the default, the hint and the enabled button
+        // would all vanish.
+        await expectThroughout(() => {
+          expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR)
+          expect(
+            screen.getByText(/seasons with data: 2021-2022/i),
+          ).toBeInTheDocument()
+          expect(submitButton()).not.toBeDisabled()
+        })
+      },
+    )
 
-      // 2005 is a College season, not an NFL one in this catalog.
-      fireEvent.change(screen.getByLabelText(/year/i), {
-        target: { value: '2005' },
-      })
-      await user.click(screen.getByRole('radio', { name: 'NFL' }))
-      expect(
-        await screen.findByText(
-          /no NFL data for 2005/i,
-          {},
-          { timeout: YEAR_DEBOUNCE_MS * 5 },
-        ),
-      ).toBeInTheDocument()
+    it.each(['resolves', 'rejects'] as const)(
+      'keeps rejecting a year the NFL has no data for when the College years request %s after the switch',
+      async (outcome) => {
+        const slow = stubSlowCollegeYears(outcome)
+        const user = userEvent.setup()
+        render(<QuestionForm onSubmit={vi.fn()} />)
+        await waitFor(() =>
+          expect(mockedFetchYears).toHaveBeenCalledWith('cfb'),
+        )
 
-      slow.releaseCollegeYears()
-      await flushSettledRequests()
+        // 2005 is a College season, not an NFL one in this catalog.
+        fireEvent.change(screen.getByLabelText(/year/i), {
+          target: { value: '2005' },
+        })
+        await user.click(screen.getByRole('radio', { name: 'NFL' }))
+        expect(
+          await screen.findByText(
+            /no NFL data for 2005/i,
+            {},
+            { timeout: YEAR_DEBOUNCE_MS * 5 },
+          ),
+        ).toBeInTheDocument()
 
-      // A leaked College catalog would leave no NFL seasons to check against,
-      // and a year with no NFL data would quietly become submittable.
-      expect(screen.getByText(/no NFL data for 2005/i)).toBeInTheDocument()
-      expect(screen.getByLabelText(/year/i)).toHaveAttribute(
-        'aria-invalid',
-        'true',
-      )
-      expect(submitButton()).toBeDisabled()
-    })
+        await settleCollegeYears(slow)
+
+        // A leaked College catalog would leave no NFL seasons to check
+        // against, and a year with no NFL data would quietly become
+        // submittable.
+        await expectThroughout(() => {
+          expect(screen.getByText(/no NFL data for 2005/i)).toBeInTheDocument()
+          expect(screen.getByLabelText(/year/i)).toHaveAttribute(
+            'aria-invalid',
+            'true',
+          )
+          expect(submitButton()).toBeDisabled()
+        })
+      },
+    )
   })
 
   /**
