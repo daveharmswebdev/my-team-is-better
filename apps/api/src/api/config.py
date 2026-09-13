@@ -64,7 +64,9 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # is not -- it now carries `ties`, and a tied game appears as `result: "T"`
 # instead of being dropped. v1 narrations were written from tie-less facts.
 # persona-v3 (issue #152): prompt unchanged; compare fact blocks now carry `method`.
-PROMPT_VERSION = "persona-v3"
+# persona-v4 (issue #162): the prompt changed -- rule 1 now lets the narrator
+# round a team's `rating` (and only that), matching the grounding check.
+PROMPT_VERSION = "persona-v4"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
 

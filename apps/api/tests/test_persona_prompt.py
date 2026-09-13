@@ -38,6 +38,24 @@ def test_prompt_carries_the_non_negotiable_grounding_rules_verbatim() -> None:
     assert "Two or three sentences" in prompt
 
 
+_RULE_1_WITH_RATING_ROUNDING = (
+    "1. Every team name, record, score, and number you say MUST appear in the\n"
+    "   FACT BLOCK. Never invent, round, or guess at a stat that isn't there.\n"
+    "   The one exception: a `rating` or `opponent_rating` may be rounded to\n"
+    "   fewer decimal places (an Elo rating of 1933.19 can be said as 1933).\n"
+)
+
+
+def test_rule_1_permits_rounding_a_rating_and_nothing_else() -> None:
+    # issue #162: the grounding checker accepts a rounded `rating`, so the
+    # prompt has to say so -- and only for a rating, not any stat.
+    for user_team in ("Texas", None):
+        prompt = build_system_prompt(user_team)
+
+        assert _RULE_1_WITH_RATING_ROUNDING in prompt
+        assert "round differently" not in prompt
+
+
 def test_prompt_includes_the_worked_examples() -> None:
     prompt = build_system_prompt("Texas")
 
