@@ -508,12 +508,14 @@ def test_enrichment_leaves_nfl_rows_alone(
 def test_two_teams_rows_sharing_one_school_both_get_the_aliases(
     empty_schema_db: Path, cached_teams_dir: Path, no_network: list[object]
 ) -> None:
-    """Real, pre-existing condition in the ingested db (it predates #77): two
-    schools -- Charlotte and Edward Waters -- have TWO `teams` rows each,
-    because CFBD's own `/games` payloads report two different team ids for
-    them (Charlotte: 2429 with 149 games, 3253 with 1). A school-keyed UPDATE
-    correctly gives both rows the same mascot; what it must not do is insert,
-    drop, or renumber either row.
+    """Two `teams` rows can share one school string. CFBD's `/games` payloads
+    give "Charlotte" two ids: 2429 (the 49ers, 149 games) and 3253 (the
+    Charlotte Saints / "Faith NC", 1 game), which is a genuinely different
+    program (#91). Edward Waters also had a second row once, but that came from
+    a duplicate game record and is no longer minted (#125). A school-keyed
+    UPDATE gives both rows the same mascot. For 3253 that is the 49ers'
+    mascot, which is harmless while 3253 is unrated (#91). What the UPDATE
+    must not do is insert, drop, or renumber either row.
     """
     conn = _db_with_games_derived_teams(empty_schema_db)
     try:
