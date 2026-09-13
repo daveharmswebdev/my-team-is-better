@@ -511,18 +511,18 @@ class Credits:
 # shape:
 #
 #   def resolve_team(conn: sqlite3.Connection, year: int, query: str,
-#                     method: str = "keener", sport: str = "cfb") -> int: ...
+#                     method: str = "keener", sport: Literal["cfb", "nfl"] = "cfb") -> int: ...
 #       Exact match first, then fuzzy match. Raises AmbiguousTeamError with
 #       candidates on ambiguity, UnknownYearError if no ratings exist for
 #       that year/method/sport.
 #
 #   def build_team_case(conn: sqlite3.Connection, year: int, team: str,
-#                        method: str = "keener", sport: str = "cfb") -> TeamCase: ...
+#                        method: str = "keener", sport: Literal["cfb", "nfl"] = "cfb") -> TeamCase: ...
 #       `team` is resolved via resolve_team. Raises the same two errors.
 #
 #   def build_comparison(conn: sqlite3.Connection, year: int, team_a: str,
 #                         team_b: str, method: str = "keener",
-#                         sport: str = "cfb") -> ComparisonResult: ...
+#                         sport: Literal["cfb", "nfl"] = "cfb") -> ComparisonResult: ...
 #       Raises SameTeamComparisonError if team_a and team_b resolve to the same
 #       team_id (added in the Round 4 amendment below).
 #
@@ -559,6 +559,14 @@ class Credits:
 # by compute_ratings.py -- so evidence-agent's classification-NULL handling is
 # about not assuming/erroring on NULL `teams.classification` values it reads
 # incidentally (e.g. team listings), not about new tiering logic here.
+#
+# #102 amendment (epic #113): `sport` narrowed from `str` to
+# `Literal["cfb", "nfl"]` on resolve_team/build_team_case/build_comparison and
+# on UnknownTeamError.__init__, matching GameRow/TeamRow. Static only -- nothing
+# enforces it at runtime; it matters because packages/cfb-engine now ships
+# py.typed, so apps/api's call sites are type-checked against it.
+# list_available_years keeps `str`: no #102 finding required narrowing it, and a
+# single named `Sport` alias replacing all of these inline copies is #112's call.
 #
 # mcp-agent imports these five names (plus AmbiguousTeamError/UnknownTeamError/
 # UnknownYearError/SameTeamComparisonError from this file) from cfb_strength.evidence and must

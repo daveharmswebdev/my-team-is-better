@@ -40,9 +40,12 @@ strict = true
 # is checked against the engine's real signatures instead of being widened
 # to `Any`. That is what makes a typo'd keyword at the `get_conn` seam
 # (issue #44) or a typo'd attribute on a `contracts.py` exception fail CI
-# rather than production. Re-adding such an override would silently restore
-# that blind spot -- if a future engine symbol genuinely can't be typed,
-# narrow it to that symbol and say why.
+# rather than production. ANY `[[tool.mypy.overrides]]` entry for
+# `cfb_strength.*` that stops mypy reading the engine's types silently
+# restores that blind spot -- not only `ignore_missing_imports = true` but
+# equally `follow_imports = "skip"` (both verified to let a typo'd
+# `exc.querry` pass clean). If a future engine symbol genuinely can't be
+# typed, narrow the override to that one module and say why.
 
 [tool.ruff]
 line-length = 100
