@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import type { FormEvent } from 'react'
 import { fetchTeams, fetchYears } from '../../lib/api/client'
+import { SPORTS } from '../../lib/api/types'
 import type { Sport, TeamDetail } from '../../lib/api/types'
 import { getStoredUserTeam, setStoredUserTeam } from '../../lib/userTeam'
 import { TeamCombobox } from '../TeamCombobox/TeamCombobox'
@@ -133,6 +134,18 @@ const LEAGUE_LABEL: Record<Sport, string> = {
   nfl: 'NFL',
 }
 
+/**
+ * Each league radio's visible text, which is also its accessible name.
+ * Separate from `LEAGUE_LABEL` because a toggle reads differently from
+ * running copy ("College", not "college football"). The radios are rendered
+ * from `SPORTS` (issue #143), so tsc requires a label here for every league
+ * and none can be added to `SPORTS` without becoming selectable.
+ */
+const LEAGUE_RADIO_LABEL: Record<Sport, string> = {
+  cfb: 'College',
+  nfl: 'NFL',
+}
+
 const TEAM_FETCH_FAILED_HINT =
   "Couldn't load the team list -- you can still type any name."
 const YEAR_FETCH_FAILED_HINT =
@@ -141,19 +154,41 @@ const YEAR_FETCH_FAILED_HINT =
 const USER_TEAM_PRIVACY_HINT = 'Stays on this device only.'
 
 /**
+ * The widest range of values `parseYear` accepts as a year at all: four
+ * digits. This is a *shape* check, deliberately not a data check. Which
+ * seasons have data is `/api/years`' job (`validateYear`) with `apps/api`'s
+ * `unknown_year` as the backstop, and a football-history bound (say 1869, the
+ * first college game) would duplicate that job with a number that goes stale.
+ * It would also contradict issue #136's rule that a failed or empty catalog
+ * never blocks a typed year. What the bound does rule out is input that can
+ * never be a season, which `<input type="number">` happily accepts: `999`,
+ * `-2018`, `10000`, and exponent forms like `1e21`, which `String()` renders
+ * as `"1e+21"`, a value the API's `int` `year` answers with a 422.
+ */
+const MIN_PLAUSIBLE_YEAR = 1000
+const MAX_PLAUSIBLE_YEAR = 9999
+
+/**
  * Resolves the raw Year input string to a year worth sending to
  * `/api/teams`, or `undefined` to send no `year` param at all (which asks
  * for the full per-sport list -- the right pre-selection state).
  *
  * `Number('')` is `0`, a *finite* number, so an emptied input has to be
- * screened out here rather than relying on `Number.isFinite` alone.
+ * screened out here rather than relying on `Number.isFinite` alone. And a
+ * season is a whole number: `2018.5` is finite but no season, and the API's
+ * `int` `year` would answer it with a 422 (issue #101) -- so it resolves to
+ * `undefined` too, which `validateYear` reports in every catalog state.
  */
 function parseYear(raw: string): number | undefined {
   if (raw.trim() === '') {
     return undefined
   }
   const parsed = Number(raw)
-  return Number.isFinite(parsed) ? parsed : undefined
+  return Number.isInteger(parsed) &&
+    parsed >= MIN_PLAUSIBLE_YEAR &&
+    parsed <= MAX_PLAUSIBLE_YEAR
+    ? parsed
+    : undefined
 }
 
 /**
@@ -170,7 +205,8 @@ type YearValidity = { valid: true } | { valid: false; message?: string }
  * Only a `ready` catalog with at least one season range-checks, and it
  * checks *membership*, not min/max: `formatSeasonsHint` already admits
  * catalogs can have gaps, and a year inside a gap has no data either. Every
- * other state has nothing to check against, so any number goes: a catalog
+ * other state has nothing to check against, so any year `parseYear` accepts
+ * (a whole, four-digit number -- issue #101) goes: a catalog
  * still `loading`, one that `error`ed, and a `ready` but empty one -- a
  * league with nothing ingested yet, which the team hint likewise answers
  * with "you can still type a name". Neither a failed `/api/years` nor an
@@ -571,26 +607,18 @@ export function QuestionForm({
     <form className={styles.qform} onSubmit={handleSubmit}>
       <fieldset className={styles.sportToggle}>
         <legend>League</legend>
-        <label>
-          <input
-            type="radio"
-            name={sportName}
-            value="cfb"
-            checked={sport === 'cfb'}
-            onChange={() => handleSportChange('cfb')}
-          />
-          College
-        </label>
-        <label>
-          <input
-            type="radio"
-            name={sportName}
-            value="nfl"
-            checked={sport === 'nfl'}
-            onChange={() => handleSportChange('nfl')}
-          />
-          NFL
-        </label>
+        {SPORTS.map((league) => (
+          <label key={league}>
+            <input
+              type="radio"
+              name={sportName}
+              value={league}
+              checked={sport === league}
+              onChange={() => handleSportChange(league)}
+            />
+            {LEAGUE_RADIO_LABEL[league]}
+          </label>
+        ))}
       </fieldset>
 
       <div className={styles.qfield}>

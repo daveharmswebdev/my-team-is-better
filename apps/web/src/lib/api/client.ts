@@ -195,18 +195,20 @@ export function fetchYears(sport: Sport = 'cfb'): Promise<YearsOut> {
  * `sport` (defaults to `"cfb"`, matching `apps/api`'s own default) and,
  * when given, to `year`.
  *
- * A non-finite or omitted `year` sends **no** `year` param rather than a
- * placeholder: `apps/api` then returns the full per-sport list, which is
- * the right pre-selection state. (`Number('')` is `0`, a finite number, so
- * callers must resolve an empty year input to `undefined` themselves --
- * `QuestionForm.parseYear` does.)
+ * An omitted or non-integer `year` (`NaN`, `Infinity`, `2018.5`) sends **no**
+ * `year` param rather than a placeholder: `apps/api` then returns the full
+ * per-sport list, which is the right pre-selection state. Sending a
+ * non-integer would be worse than useless -- `/api/teams` declares `year` an
+ * `int`, so `2018.5` is a 422 (issue #101). (`Number('')` is `0`, an integer,
+ * so callers must resolve an empty year input to `undefined` themselves, and
+ * screen implausible magnitudes -- `QuestionForm.parseYear` does both.)
  */
 export function fetchTeams(
   sport: Sport = 'cfb',
   year?: number,
 ): Promise<TeamsOut> {
   const params: Record<string, string> =
-    year !== undefined && Number.isFinite(year)
+    year !== undefined && Number.isInteger(year)
       ? { sport, year: String(year) }
       : { sport }
   return getCatalog<TeamsOut>('/api/teams', params)

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -9,6 +10,7 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SPORTS } from '../../lib/api/types'
 import type { Sport, TeamDetail, TeamsOut } from '../../lib/api/types'
 import { QuestionForm, YEAR_DEBOUNCE_MS } from './QuestionForm'
 
@@ -105,6 +107,58 @@ function submitButton() {
 
 /** Any issue #100 stale-team flag, for any team, season or league. */
 const ANY_STALE_NOTICE = /isn't in the .* team list/i
+
+/**
+ * The issue #100 flag copy, as a matcher. Deliberately asserts on the *scope*
+ * words too (season + league), because "we stopped recognising this" is only
+ * actionable if it says which season and which league stopped recognising it.
+ */
+function staleNotice(team: string, scope: string): RegExp {
+  return new RegExp(`${team}.*isn't in the ${scope} team list`, 'i')
+}
+
+const ALABAMA: TeamDetail = {
+  name: 'Alabama',
+  mascot: 'Crimson Tide',
+  aliases: [],
+}
+
+const NOT_A_YEAR_MESSAGE = 'Enter the season as a year, e.g. 2025.'
+const TEAM_LIST_FAILED = /couldn't load the team list/i
+
+/**
+ * Lets every already-settled promise continuation run -- including an
+ * effect's `await fetchTeams(...)` resuming and calling `setState` -- inside
+ * `act`, so an assertion made afterwards sees whatever that continuation did.
+ * A macrotask, not a single microtask: the continuation is several
+ * microtasks deep.
+ */
+async function flushSettledRequests() {
+  await act(async () => {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 0))
+  })
+}
+
+/** Every `year` `fetchTeams` has been called with that is not a whole number. */
+function nonIntegerTeamFetchYears(): unknown[] {
+  return mockedFetchTeams.mock.calls
+    .map(([, year]) => year)
+    .filter((year) => year !== undefined && !Number.isInteger(year))
+}
+
+/**
+ * `/api/teams` as `apps/api` really serves it: `year` is declared `int`, so a
+ * non-integer one is a 422, which the client surfaces as a thrown error --
+ * and the form as "Couldn't load the team list". A mock that happily resolved
+ * `2018.5` could not represent the failure these tests are about.
+ */
+function stubTeamsRejectingNonIntegerYears() {
+  mockedFetchTeams.mockImplementation((_sport?: Sport, year?: number) =>
+    year !== undefined && !Number.isInteger(year)
+      ? Promise.reject(new Error('422: year is not an integer'))
+      : Promise.resolve(teamsOut(CFB_DETAILS)),
+  )
+}
 
 describe('QuestionForm', () => {
   beforeEach(() => {
@@ -930,16 +984,6 @@ describe('QuestionForm', () => {
 
   describe('stale team values across a scope change (issue #100)', () => {
     /**
-     * The flag copy, as a matcher. Deliberately asserts on the *scope* words
-     * too (season + league), because "we stopped recognising this" is only
-     * actionable if it says which season and which league stopped
-     * recognising it.
-     */
-    function staleNotice(team: string, scope: string): RegExp {
-      return new RegExp(`${team}.*isn't in the ${scope} team list`, 'i')
-    }
-
-    /**
      * Every clear affordance currently on screen. Queried by the shared
      * "Clear ..." accessible-name prefix rather than per-field, so these
      * assertions don't quietly pass by asking for a button that was renamed.
@@ -1214,6 +1258,304 @@ describe('QuestionForm', () => {
         ),
       )
       expect(clearButtons()).toHaveLength(0)
+    })
+  })
+
+  /**
+   * Issue #101. Both catalog effects set a `cancelled` flag in their cleanup
+   * and check it before every `setState`. These tests construct the one input
+   * that flag exists for -- an *older* request settling after a *newer* one
+   * has already landed, on the same mounted form -- and assert the newer
+   * catalog survives. Removing either guard turns them red.
+   */
+  describe('a slow, superseded catalog response never overwrites a newer one (issue #101)', () => {
+    it.each(['resolves', 'rejects'] as const)(
+      "keeps the newer year's team list when an earlier year's slower request %s after it",
+      async (outcome) => {
+        mockedFetchYears.mockResolvedValue({ years: [2017, 2018, 2019] })
+        let settleSlow2018: () => void = () => {}
+        let slow2018Settled = false
+        mockedFetchTeams.mockImplementation((_sport?: Sport, year?: number) => {
+          if (year === 2018) {
+            return new Promise<TeamsOut>((resolvePromise, rejectPromise) => {
+              settleSlow2018 = () => {
+                slow2018Settled = true
+                // Texas *is* a 2018 team, so a leaked resolve would silently
+                // drop the 2019 flag; a leaked reject would swap the team
+                // hint for the failure copy.
+                if (outcome === 'resolves') {
+                  resolvePromise(teamsOut(CFB_DETAILS))
+                } else {
+                  rejectPromise(new Error('network down'))
+                }
+              }
+            })
+          }
+          return Promise.resolve(
+            teamsOut(year === 2019 ? [ALABAMA] : CFB_DETAILS),
+          )
+        })
+        render(
+          <QuestionForm
+            onSubmit={vi.fn()}
+            initialQuestionType="team_case"
+            initialYear={2017}
+            initialTeam="Texas"
+          />,
+        )
+        await waitFor(() =>
+          expect(mockedFetchTeams).toHaveBeenCalledWith('cfb', 2017),
+        )
+        const yearInput = screen.getByLabelText(/year/i)
+
+        // Two separate edits, each allowed to settle past the debounce, so
+        // both requests genuinely fire -- one debounced edit would issue a
+        // single request and leave nothing out of order.
+        fireEvent.change(yearInput, { target: { value: '2018' } })
+        await waitFor(
+          () => expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', 2018),
+          { timeout: YEAR_DEBOUNCE_MS * 5 },
+        )
+        fireEvent.change(yearInput, { target: { value: '2019' } })
+        await waitFor(
+          () => expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', 2019),
+          { timeout: YEAR_DEBOUNCE_MS * 5 },
+        )
+        expect(
+          await screen.findByText(
+            staleNotice('Texas', '2019 college football'),
+          ),
+        ).toBeInTheDocument()
+        // The precondition the guard exists for: 2018 is still outstanding
+        // *after* 2019 has landed.
+        expect(slow2018Settled).toBe(false)
+
+        settleSlow2018()
+        await flushSettledRequests()
+
+        expect(slow2018Settled).toBe(true)
+        expect(
+          screen.getByText(staleNotice('Texas', '2019 college football')),
+        ).toBeInTheDocument()
+        expect(
+          screen.queryByText(staleNotice('Texas', '2018 college football')),
+        ).not.toBeInTheDocument()
+        expect(screen.queryByText(TEAM_LIST_FAILED)).not.toBeInTheDocument()
+      },
+    )
+
+    /** `/api/years` for College held open until released; NFL answers at once. */
+    function stubSlowCollegeYears(): { releaseCollegeYears: () => void } {
+      const handle = { releaseCollegeYears: () => {} }
+      mockedFetchYears.mockImplementation((sport?: Sport) =>
+        sport === 'nfl'
+          ? Promise.resolve({ years: [2021, NEWEST_NFL_YEAR] })
+          : new Promise((resolvePromise) => {
+              handle.releaseCollegeYears = () =>
+                resolvePromise({ years: [2004, 2005, 2006] })
+            }),
+      )
+      mockedFetchTeams.mockImplementation((sport?: Sport) =>
+        Promise.resolve(teamsOut(sport === 'nfl' ? NFL_DETAILS : CFB_DETAILS)),
+      )
+      return handle
+    }
+
+    it("keeps the NFL's default year when the College years request lands after a switch to the NFL", async () => {
+      const slow = stubSlowCollegeYears()
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+
+      await user.click(screen.getByRole('radio', { name: 'NFL' }))
+      await waitFor(() =>
+        expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR),
+      )
+      expect(
+        screen.getByText(/seasons with data: 2021-2022/i),
+      ).toBeInTheDocument()
+
+      slow.releaseCollegeYears()
+      await flushSettledRequests()
+
+      // A leaked College catalog would replace the NFL one; the render-time
+      // league check would then treat the year catalog as still loading, so
+      // the default, the hint and the enabled button would all vanish.
+      expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR)
+      expect(
+        screen.getByText(/seasons with data: 2021-2022/i),
+      ).toBeInTheDocument()
+      expect(submitButton()).not.toBeDisabled()
+    })
+
+    it('keeps rejecting a year the NFL has no data for when the College years request lands after the switch', async () => {
+      const slow = stubSlowCollegeYears()
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+
+      // 2005 is a College season, not an NFL one in this catalog.
+      fireEvent.change(screen.getByLabelText(/year/i), {
+        target: { value: '2005' },
+      })
+      await user.click(screen.getByRole('radio', { name: 'NFL' }))
+      expect(
+        await screen.findByText(
+          /no NFL data for 2005/i,
+          {},
+          { timeout: YEAR_DEBOUNCE_MS * 5 },
+        ),
+      ).toBeInTheDocument()
+
+      slow.releaseCollegeYears()
+      await flushSettledRequests()
+
+      // A leaked College catalog would leave no NFL seasons to check against,
+      // and a year with no NFL data would quietly become submittable.
+      expect(screen.getByText(/no NFL data for 2005/i)).toBeInTheDocument()
+      expect(screen.getByLabelText(/year/i)).toHaveAttribute(
+        'aria-invalid',
+        'true',
+      )
+      expect(submitButton()).toBeDisabled()
+    })
+  })
+
+  /**
+   * Issue #101. A Year that is not a whole number is not a season, in every
+   * year-catalog state -- including the three (`loading`, `error`, `ready`
+   * but empty) in which `validateYear` has no seasons to check membership
+   * against. And it never reaches `/api/teams`, whose `int` `year` would
+   * answer 422 and swap every team hint for "Couldn't load the team list".
+   */
+  describe('non-integer and implausible years (issue #101)', () => {
+    const CATALOG_STATES = [
+      {
+        state: 'ready, with seasons',
+        stubYears: () =>
+          mockedFetchYears.mockResolvedValue({ years: [2017, 2018, 2019] }),
+      },
+      {
+        state: 'still loading',
+        stubYears: () =>
+          mockedFetchYears.mockReturnValue(new Promise(() => {})),
+      },
+      {
+        state: 'failed',
+        stubYears: () =>
+          mockedFetchYears.mockRejectedValue(new Error('network down')),
+      },
+      {
+        state: 'ready, but empty',
+        stubYears: () => mockedFetchYears.mockResolvedValue({ years: [] }),
+      },
+    ]
+
+    it.each(CATALOG_STATES)(
+      'rejects "2018.5" while the years catalog is $state, and never sends it to /api/teams',
+      async ({ stubYears }) => {
+        stubYears()
+        stubTeamsRejectingNonIntegerYears()
+        render(<QuestionForm onSubmit={vi.fn()} initialYear={2018} />)
+        await waitForInitialCatalog()
+        await flushSettledRequests()
+        const yearInput = screen.getByLabelText(/year/i)
+
+        fireEvent.change(yearInput, { target: { value: '2018.5' } })
+
+        expect(submitButton()).toBeDisabled()
+        expect(
+          await screen.findByText(
+            NOT_A_YEAR_MESSAGE,
+            {},
+            { timeout: YEAR_DEBOUNCE_MS * 5 },
+          ),
+        ).toBeInTheDocument()
+        // The debounced team refetch fires alongside the message; let it land.
+        await flushSettledRequests()
+
+        expect(yearInput).toHaveAttribute('aria-invalid', 'true')
+        expect(submitButton()).toBeDisabled()
+        expect(nonIntegerTeamFetchYears()).toEqual([])
+        expect(screen.queryByText(TEAM_LIST_FAILED)).not.toBeInTheDocument()
+      },
+    )
+
+    // With no catalog to consult, only the plausibility bound can reject
+    // these -- so they are asserted in the failed-catalog state.
+    it.each(['999', '10000', '1e21'])(
+      'rejects the implausible year "%s" even with no years catalog, and never sends it to /api/teams',
+      async (typed) => {
+        mockedFetchYears.mockRejectedValue(new Error('network down'))
+        render(<QuestionForm onSubmit={vi.fn()} initialYear={2018} />)
+        expect(
+          await screen.findByText(/couldn't load the list of available years/i),
+        ).toBeInTheDocument()
+        const yearInput = screen.getByLabelText(/year/i)
+
+        fireEvent.change(yearInput, { target: { value: typed } })
+
+        expect(submitButton()).toBeDisabled()
+        expect(
+          await screen.findByText(
+            NOT_A_YEAR_MESSAGE,
+            {},
+            { timeout: YEAR_DEBOUNCE_MS * 5 },
+          ),
+        ).toBeInTheDocument()
+        await flushSettledRequests()
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', undefined)
+        expect(
+          mockedFetchTeams.mock.calls.map(([, year]) => year),
+        ).not.toContain(Number(typed))
+      },
+    )
+  })
+
+  describe('league radios (issue #143)', () => {
+    /**
+     * The accessible name each league's radio must carry. A `Record<Sport,
+     * string>`, so tsc refuses this file until a league added to `SPORTS` is
+     * given a name here too -- and the names are pinned, because tests,
+     * stories and e2e all query the radios by them.
+     */
+    const RADIO_NAME: Record<Sport, string> = {
+      cfb: 'College',
+      nfl: 'NFL',
+    }
+
+    it('renders exactly one radio per SPORTS entry, in SPORTS order, each with its value and name', () => {
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      const group = screen.getByRole('group', { name: 'League' })
+      const radios = within(group).getAllByRole('radio')
+
+      expect(radios.map((radio) => radio.getAttribute('value'))).toEqual([
+        ...SPORTS,
+      ])
+      SPORTS.forEach((sport, index) => {
+        expect(
+          within(group).getByRole('radio', { name: RADIO_NAME[sport] }),
+        ).toBe(radios[index])
+      })
+    })
+
+    it('selects a league through its radio', async () => {
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      const group = screen.getByRole('group', { name: 'League' })
+
+      for (const sport of [...SPORTS].reverse()) {
+        await user.click(
+          within(group).getByRole('radio', { name: RADIO_NAME[sport] }),
+        )
+        expect(
+          within(group).getByRole('radio', { checked: true }),
+        ).toHaveAttribute('value', sport)
+        await waitFor(() =>
+          expect(mockedFetchYears).toHaveBeenLastCalledWith(sport),
+        )
+      }
     })
   })
 

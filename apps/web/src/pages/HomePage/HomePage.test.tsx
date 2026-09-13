@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { VerdictApiError, VerdictNetworkError } from '../../lib/api/client'
@@ -365,17 +365,7 @@ describe('HomePage', () => {
       // Typed after the failed submission, so it was never part of it.
       await user.type(screen.getByLabelText(/your team/i), 'Bengals')
 
-      // A catalog request that is already in flight when the correction is
-      // applied must not land on the remounted form and undo it.
-      let releaseStaleFetch: (value: TeamsOut) => void = () => {}
-      mockedFetchTeams.mockReturnValueOnce(
-        new Promise<TeamsOut>((resolvePromise) => {
-          releaseStaleFetch = resolvePromise
-        }),
-      )
-
       await user.click(await screen.findByRole('button', { name: '2018' }))
-      releaseStaleFetch({ teams: [], team_details: [] })
 
       expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
       expect(screen.getByLabelText(/year/i)).toHaveValue(2018)
@@ -390,6 +380,88 @@ describe('HomePage', () => {
         year: 2018,
         user_team: null,
         sport: 'nfl',
+      })
+    })
+
+    /**
+     * Issue #101: a team-catalog request genuinely in flight at the moment a
+     * correction pill is clicked. The test this replaced resolved a pending
+     * promise "across" the correction with *no* request outstanding at the
+     * click, and its promise was then consumed by the remounted form's own
+     * first fetch -- it could not fail for the reason it named.
+     *
+     * What this does prove: the request is outstanding at the click (asserted,
+     * not assumed), and its late response does not reach the corrected form --
+     * no "No teams found for 2005" hint, no reverted year.
+     *
+     * What it does NOT prove: that `QuestionForm`'s `cancelled` guard carries
+     * that weight. The pill remounts the form (`HomePage` changes its `key`),
+     * so the old form's effect cleanup runs and React discards the stale
+     * `setState` on the unmounted instance whether or not the guard is there.
+     * The guard is load-bearing only on a form that stays mounted, which the
+     * out-of-order tests in `QuestionForm.test.tsx` cover.
+     */
+    it('does not let a team-list request in flight at the correction reach the corrected form', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion
+        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
+      let release2005Teams: () => void = () => {}
+      let teams2005Settled = false
+      mockedFetchTeams.mockImplementation((_sport, year) =>
+        year === 2005
+          ? new Promise<TeamsOut>((resolvePromise) => {
+              release2005Teams = () => {
+                teams2005Settled = true
+                // Empty, so a response that leaked onto the corrected form
+                // would show up as the year-scoped empty hint.
+                resolvePromise({ teams: [], team_details: [] })
+              }
+            })
+          : Promise.resolve(TEAMS),
+      )
+
+      render(<HomePage />)
+      const submit = screen.getByRole('button', { name: /get the verdict/i })
+      await waitFor(() => expect(submit).not.toBeDisabled())
+      await user.click(submit)
+      const pill = await screen.findByRole('button', { name: '2018' })
+
+      // An edit made after the failed submission, allowed to settle past the
+      // form's debounce so its team-list request actually goes out.
+      await user.clear(screen.getByLabelText(/year/i))
+      await user.type(screen.getByLabelText(/year/i), '2005')
+      await waitFor(
+        () => expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', 2005),
+        { timeout: 2000 },
+      )
+      const callsBeforeCorrection = mockedFetchTeams.mock.calls.length
+
+      // The precondition the old test only claimed: in flight at the click.
+      expect(teams2005Settled).toBe(false)
+      await user.click(pill)
+
+      expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
+      // The corrected form issued its own request rather than inheriting the
+      // outstanding one.
+      await waitFor(() =>
+        expect(
+          mockedFetchTeams.mock.calls.slice(callsBeforeCorrection),
+        ).toContainEqual(['cfb', 2018]),
+      )
+
+      release2005Teams()
+      await act(async () => {
+        await new Promise((resolveWait) => setTimeout(resolveWait, 0))
+      })
+
+      expect(teams2005Settled).toBe(true)
+      expect(screen.getByLabelText(/year/i)).toHaveValue(2018)
+      expect(screen.queryByText(/no teams found for/i)).not.toBeInTheDocument()
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
+        year: 2018,
+        user_team: null,
+        sport: 'cfb',
       })
     })
   })
