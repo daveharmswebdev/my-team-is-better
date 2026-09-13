@@ -1,4 +1,4 @@
-import { displayRatingPair } from '../../lib/formatRating'
+import { displayRatingPair, formatRating } from '../../lib/formatRating'
 import { formatRecord } from '../../lib/formatRecord'
 import { resultLabel } from '../../lib/resultLabel'
 import type {
@@ -10,6 +10,7 @@ import type {
   Method,
 } from '../../lib/api/types'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
+import { RATING_BREAKDOWN_BY_METHOD } from './ratingBreakdownByMethod'
 import styles from './ComparisonReceipts.module.css'
 
 const TAG_CLASS: Record<GameResult, string | undefined> = {
@@ -55,12 +56,17 @@ function TeamSummary({
         <div>
           <dt>Rating</dt>
           <dd>
-            <RatingBreakdownDisclosure
-              teamName={team.team_name}
-              method={method}
-              rating={team.rating}
-              breakdown={team.rating_breakdown}
-            />
+            {/* Issue #153: by method, never by the breakdown's emptiness. */}
+            {RATING_BREAKDOWN_BY_METHOD[method].hasBreakdown ? (
+              <RatingBreakdownDisclosure
+                teamName={team.team_name}
+                method={method}
+                rating={team.rating}
+                breakdown={team.rating_breakdown}
+              />
+            ) : (
+              formatRating(team.rating, method)
+            )}
           </dd>
         </div>
       </dl>
@@ -135,11 +141,16 @@ function verdictLine({ method, team_a, team_b }: ComparisonResultOut): string {
 /** The "receipts" for a compare verdict (PRD §3 / Architecture Brief §4.3's "show your work"). */
 export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
   const { method, team_a, team_b, head_to_head, common_opponents } = evidence
+  const breakdownSupport = RATING_BREAKDOWN_BY_METHOD[method]
 
   return (
     <section aria-label="comparison evidence" className={styles.receipts}>
       <TeamSummary team={team_a} method={method} />
       <TeamSummary team={team_b} method={method} />
+      {/* Once for the whole block, not once per team. */}
+      {!breakdownSupport.hasBreakdown && (
+        <p className={styles.ratingNote}>{breakdownSupport.explainer}</p>
+      )}
 
       <h4 className={styles.label}>Head to head</h4>
       {head_to_head.played ? (

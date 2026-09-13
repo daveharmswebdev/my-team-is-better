@@ -176,6 +176,36 @@ export const NflToggle: Story = {
   },
 }
 
+/**
+ * Issue #154: the Engine toggle, switched to Elo. The catalogs refetch for the
+ * new engine, and -- unlike a league switch -- the Year and the team stay put:
+ * same season, same games. The choice applies to the next submission only.
+ */
+export const EloSelected: Story = {
+  args: {
+    initialQuestionType: 'team_case',
+    initialYear: 2005,
+    initialTeam: 'Texas',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const engine = canvas.getByRole('group', { name: 'Engine' })
+    await expect(
+      within(engine).getByRole('radio', { name: 'Keener (default)' }),
+    ).toBeChecked()
+
+    await userEvent.click(
+      within(engine).getByRole('radio', { name: 'Elo (second opinion)' }),
+    )
+
+    await expect(
+      within(engine).getByRole('radio', { name: 'Elo (second opinion)' }),
+    ).toBeChecked()
+    await expect(canvas.getByLabelText(/^team$/i)).toHaveValue('Texas')
+    await expect(canvas.getByLabelText(/year/i)).toHaveValue(2005)
+  },
+}
+
 /** A parent-applied correction (issue #38): `HomePage` remounts the form
  * with a changed `key` and these seed props, so the visible fields match
  * the question that was actually just asked. */

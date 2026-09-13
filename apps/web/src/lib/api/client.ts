@@ -12,6 +12,7 @@
 import type {
   ComparisonEnvelope,
   CreditsOut,
+  Method,
   Sport,
   TeamCaseEnvelope,
   TeamsOut,
@@ -82,10 +83,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/**
+ * Every verdict payload carries the rating `method` the Engine toggle selected
+ * (issue #154). Required rather than optional, so a caller can't silently fall
+ * back to the API's `keener` default while the form shows Elo.
+ */
 export interface ChampionPayload {
   year: number
   user_team: string | null
   sport: Sport
+  method: Method
 }
 
 export interface TeamCasePayload {
@@ -93,6 +100,7 @@ export interface TeamCasePayload {
   team: string
   user_team: string | null
   sport: Sport
+  method: Method
 }
 
 export interface ComparePayload {
@@ -101,6 +109,7 @@ export interface ComparePayload {
   team_b: string
   user_team: string | null
   sport: Sport
+  method: Method
 }
 
 export function fetchChampion(
@@ -183,17 +192,21 @@ async function getCatalog<T>(
 }
 
 /** `GET /api/years` -- the year picker's valid-selection universe, scoped
- * to `sport` (defaults to `"cfb"`, matching `apps/api`'s own default).
- * Deliberately sends `sport` and nothing else: `/api/years` is not
- * year-scoped, so its request shape is unchanged by issue #78. */
-export function fetchYears(sport: Sport = 'cfb'): Promise<YearsOut> {
-  return getCatalog<YearsOut>('/api/years', { sport })
+ * to `sport` and rating `method` (defaulting to `"cfb"`/`"keener"`, matching
+ * `apps/api`'s own defaults): a season only has data for the engine that
+ * actually rated it (issue #154). Deliberately sends `sport` and `method` and
+ * nothing else: `/api/years` is not year-scoped (issue #78). */
+export function fetchYears(
+  sport: Sport = 'cfb',
+  method: Method = 'keener',
+): Promise<YearsOut> {
+  return getCatalog<YearsOut>('/api/years', { sport, method })
 }
 
 /**
  * `GET /api/teams` -- the team picker's valid-selection universe, scoped to
- * `sport` (defaults to `"cfb"`, matching `apps/api`'s own default) and,
- * when given, to `year`.
+ * `sport` and rating `method` (defaulting to `"cfb"`/`"keener"`, matching
+ * `apps/api`'s own defaults; issue #154) and, when given, to `year`.
  *
  * An omitted or non-integer `year` (`NaN`, `Infinity`, `2018.5`) sends **no**
  * `year` param rather than a placeholder: `apps/api` then returns the full
@@ -205,11 +218,12 @@ export function fetchYears(sport: Sport = 'cfb'): Promise<YearsOut> {
  */
 export function fetchTeams(
   sport: Sport = 'cfb',
+  method: Method = 'keener',
   year?: number,
 ): Promise<TeamsOut> {
   const params: Record<string, string> =
     year !== undefined && Number.isInteger(year)
-      ? { sport, year: String(year) }
-      : { sport }
+      ? { sport, method, year: String(year) }
+      : { sport, method }
   return getCatalog<TeamsOut>('/api/teams', params)
 }

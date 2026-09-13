@@ -202,12 +202,12 @@ describe('TeamCaseReceipts', () => {
           ...evidence,
           method: 'elo',
           rating: 1684.4,
-          rating_breakdown: { entries: [], residual_contribution: 1684.4 },
+          rating_breakdown: { entries: [], residual_contribution: 0 },
         }}
       />,
     )
 
-    expect(screen.getByRole('button', { name: '1,684' })).toBeInTheDocument()
+    expect(screen.getByText(/Rating 1,684/)).toBeInTheDocument()
     expect(container.textContent).not.toContain('1684400.00')
   })
 
@@ -304,5 +304,81 @@ describe('TeamCaseReceipts', () => {
 
     await user.unhover(ratingTrigger)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Issue #153: the breakdown disclosure explains Keener's math, and Elo
+   * writes no breakdown rows -- so under Elo it would print "Total 0" beside
+   * "Matches the displayed rating: 1,684". Whether to show it is decided by
+   * the method, never by the breakdown's emptiness.
+   */
+  describe('rating breakdown is decided by method, not by emptiness (issue #153)', () => {
+    const NO_BREAKDOWN_EXPLAINER =
+      'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
+
+    // The real Elo wire shape (zero rows deserialize to this), plus a
+    // non-empty one: an emptiness heuristic would show a disclosure for the
+    // second, a method decision never does.
+    const BREAKDOWN_SHAPES: ReadonlyArray<
+      readonly [string, TeamCaseOut['rating_breakdown']]
+    > = [
+      [
+        'empty, as the API really sends it',
+        { entries: [], residual_contribution: 0 },
+      ],
+      ['non-empty', evidence.rating_breakdown],
+    ]
+
+    describe.each(['elo', 'elo_career'] as const)('%s', (method) => {
+      it.each(BREAKDOWN_SHAPES)(
+        'renders the rating as plain Elo-format text with no breakdown trigger and no Keener copy (breakdown %s)',
+        (_label, rating_breakdown) => {
+          const { container } = render(
+            <TeamCaseReceipts
+              evidence={{
+                ...evidence,
+                method,
+                rating: 1684.4,
+                rating_breakdown,
+              }}
+            />,
+          )
+
+          expect(container.textContent).not.toMatch(/Keener/)
+          expect(container.querySelector('[aria-haspopup="dialog"]')).toBeNull()
+          expect(screen.queryByRole('button')).not.toBeInTheDocument()
+          expect(screen.getByText(/Rating 1,684/)).toBeInTheDocument()
+          expect(screen.getAllByText(NO_BREAKDOWN_EXPLAINER)).toHaveLength(1)
+        },
+      )
+    })
+
+    it('keeps the disclosure for a Keener rating, with no Elo explainer', () => {
+      render(<TeamCaseReceipts evidence={evidence} />)
+
+      expect(screen.getByRole('button', { name: '12.34' })).toHaveAttribute(
+        'aria-haspopup',
+        'dialog',
+      )
+      expect(screen.queryByText(NO_BREAKDOWN_EXPLAINER)).not.toBeInTheDocument()
+    })
+
+    it('keeps the disclosure for a legitimate all-zero Keener breakdown', () => {
+      render(
+        <TeamCaseReceipts
+          evidence={{
+            ...evidence,
+            rating: 0,
+            rating_breakdown: { entries: [], residual_contribution: 0 },
+          }}
+        />,
+      )
+
+      expect(screen.getByRole('button', { name: '0.00' })).toHaveAttribute(
+        'aria-haspopup',
+        'dialog',
+      )
+      expect(screen.queryByText(NO_BREAKDOWN_EXPLAINER)).not.toBeInTheDocument()
+    })
   })
 })

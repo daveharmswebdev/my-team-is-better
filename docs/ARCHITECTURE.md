@@ -402,13 +402,30 @@ weights config — is still unbuilt and still uses this same seam. The
 `EloConfig` frozen dataclass is the pattern to copy: calibration as data,
 never a subclass.
 
-**Not yet done, and tracked (epic #147):** `apps/web`'s display layer is
-method-aware — `formatRating(value, method)` shows Keener ×1000 and Elo as
-whole points, and compare verdicts echo `method` (#82, #152) — but no
-`QuestionForm` engine toggle exists yet, so every request still falls back
-to `keener` (#154). `RatingBreakdownDisclosure` explains Keener's math and
-must not open under Elo before that toggle ships (#153). CFB's Elo constants
-are an uncalibrated first pass (#87).
+**Elo in the front end (epic #147).**
+
+- **The toggle.** `QuestionForm`'s Engine toggle offers
+  `DISPLAYED_METHODS` (`keener`, the default, and `elo`, the second opinion;
+  `apps/web/src/lib/methods.ts`), and sends `method` on every verdict and
+  catalog request (#154). `elo_career` stays API-only;
+  `vocabularies.test.ts` records why, so a method the API adds fails web CI
+  until someone decides whether the toggle offers it.
+- **The card.** It names the engine that answered, read off the envelope's
+  echoed `method`. `formatRating(value, method)` shows Keener ×1000 and Elo
+  as whole points (#82).
+- **The rating breakdown.** Whether a rating gets `RatingBreakdownDisclosure`
+  is decided by method, not by emptiness (`RATING_BREAKDOWN_BY_METHOD`,
+  #153): Elo writes no breakdown rows, so it shows plain text and a one-line
+  explainer.
+- **Grounding.** Persona grounding accepts a rounded `rating` or
+  `opponent_rating`, so a narrator can repeat the whole-point number on
+  screen (#162). Derived figures are still open (#108).
+
+**Still tracked:**
+
+- The second-opinion cross-reference: #155.
+- `TeamCaseOut.method` publishing its enum: #139.
+- CFB's Elo constants, which are an uncalibrated first pass: #87.
 
 ## 7. Deployment (Render)
 

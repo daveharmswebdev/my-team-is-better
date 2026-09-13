@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 import type { TeamCaseOut } from '../../lib/api/types'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
 
@@ -191,9 +192,12 @@ export const RatingBreakdown: Story = {
 }
 
 /**
- * An Elo team case (epic #147 / issue #82): the rating prints on Elo's own
- * whole-point scale ("1,684"), picked from `evidence.method`, never Keener's
- * x1000 transform.
+ * An Elo team case (epic #147 / issues #82, #153): the rating prints on Elo's
+ * own whole-point scale ("1,684"), picked from `evidence.method`, never
+ * Keener's x1000 transform -- and as plain text, with no breakdown disclosure.
+ * Elo writes no breakdown rows (this is the real wire shape), so a Keener-style
+ * panel would claim "Total 0" matches 1,684; one explainer line says why there
+ * is nothing to open instead.
  */
 export const Elo: Story = {
   args: {
@@ -201,7 +205,18 @@ export const Elo: Story = {
       ...undefeated,
       method: 'elo',
       rating: 1684.4,
-      rating_breakdown: { entries: [], residual_contribution: 1684.4 },
+      rating_breakdown: { entries: [], residual_contribution: 0 },
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/Rating 1,684/)).toBeVisible()
+    await expect(
+      canvasElement.querySelector('[aria-haspopup="dialog"]'),
+    ).toBeNull()
+    await expect(
+      canvas.getByText(/has no per-opponent breakdown to show/),
+    ).toBeVisible()
+    await expect(canvasElement.textContent).not.toMatch(/Keener/)
   },
 }

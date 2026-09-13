@@ -16,6 +16,17 @@
   border-bottom: 1px solid var(--rule);
 }
 
+/* Issue #153: the one-line note a method without a rating breakdown (Elo)
+   prints in place of the breakdown disclosure -- quiet running copy, not a
+   stat. */
+.ratingNote {
+  margin: var(--sp-2) 0 0;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
 .label {
   font-family: var(--font-label);
   font-weight: 700;

@@ -630,4 +630,87 @@ describe('ComparisonReceipts', () => {
     await user.unhover(ratingTrigger)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
+
+  /**
+   * Issue #153: the breakdown disclosure explains Keener's math, and Elo
+   * writes no breakdown rows. Whether to show it is decided by the method,
+   * never by the breakdown's emptiness.
+   */
+  describe('rating breakdown is decided by method, not by emptiness (issue #153)', () => {
+    const NO_BREAKDOWN_EXPLAINER =
+      'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
+
+    const EMPTY = { entries: [], residual_contribution: 0 }
+
+    /** Both teams on `method`, with the given breakdowns. */
+    function eloComparison(
+      method: ComparisonResultOut['method'],
+      breakdowns: 'empty' | 'non-empty',
+    ): ComparisonResultOut {
+      const base = withRatings(
+        evidence,
+        method,
+        { team_name: 'Ohio State', rank: 3, rating: 1684.4 },
+        { team_name: 'Michigan', rank: 9, rating: 1650.2 },
+      )
+      return breakdowns === 'empty'
+        ? {
+            ...base,
+            team_a: { ...base.team_a, rating_breakdown: EMPTY },
+            team_b: { ...base.team_b, rating_breakdown: EMPTY },
+          }
+        : base
+    }
+
+    describe.each(['elo', 'elo_career'] as const)('%s', (method) => {
+      it.each(['empty', 'non-empty'] as const)(
+        'renders both ratings as plain Elo-format text, no breakdown trigger, no Keener copy, one explainer (breakdowns %s)',
+        (breakdowns) => {
+          const { container } = render(
+            <ComparisonReceipts evidence={eloComparison(method, breakdowns)} />,
+          )
+
+          expect(container.textContent).not.toMatch(/Keener/)
+          expect(container.querySelector('[aria-haspopup="dialog"]')).toBeNull()
+          expect(screen.queryByRole('button')).not.toBeInTheDocument()
+          expect(screen.getByText('1,684')).toBeInTheDocument()
+          expect(screen.getByText('1,650')).toBeInTheDocument()
+          // Once per receipts block, not once per team.
+          expect(screen.getAllByText(NO_BREAKDOWN_EXPLAINER)).toHaveLength(1)
+        },
+      )
+    })
+
+    it('keeps both disclosures for Keener ratings, with no Elo explainer', () => {
+      render(<ComparisonReceipts evidence={evidence} />)
+
+      for (const name of ['8.77', '6.02']) {
+        expect(screen.getByRole('button', { name })).toHaveAttribute(
+          'aria-haspopup',
+          'dialog',
+        )
+      }
+      expect(screen.queryByText(NO_BREAKDOWN_EXPLAINER)).not.toBeInTheDocument()
+    })
+
+    it('keeps the disclosures for legitimate all-zero Keener breakdowns', () => {
+      render(
+        <ComparisonReceipts
+          evidence={{
+            ...evidence,
+            team_a: { ...evidence.team_a, rating: 0, rating_breakdown: EMPTY },
+            team_b: { ...evidence.team_b, rating: 0, rating_breakdown: EMPTY },
+            rating_diff: 0,
+          }}
+        />,
+      )
+
+      const triggers = screen.getAllByRole('button', { name: '0.00' })
+      expect(triggers).toHaveLength(2)
+      for (const trigger of triggers) {
+        expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+      }
+      expect(screen.queryByText(NO_BREAKDOWN_EXPLAINER)).not.toBeInTheDocument()
+    })
+  })
 })

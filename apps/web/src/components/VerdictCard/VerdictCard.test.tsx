@@ -98,6 +98,43 @@ describe('VerdictCard', () => {
     expect(screen.queryByText(/Texas was better\./)).not.toBeInTheDocument()
   })
 
+  /**
+   * Issue #154: the card names the engine that actually answered, read off the
+   * response envelope -- never off the form, whose toggle may already have
+   * moved on to the next question.
+   */
+  describe('labels the answering engine from the envelope', () => {
+    const cases = [
+      ['team-case', 'keener', 'Engine: Keener (default)'],
+      ['team-case', 'elo', 'Engine: Elo (second opinion)'],
+      ['compare', 'keener', 'Engine: Keener (default)'],
+      ['compare', 'elo', 'Engine: Elo (second opinion)'],
+    ] as const
+
+    it.each(cases)('%s answered by %s shows "%s"', (kind, method, label) => {
+      const envelope =
+        kind === 'team-case'
+          ? {
+              ...teamCaseEnvelope,
+              evidence: { ...teamCaseEnvelope.evidence, method },
+            }
+          : {
+              ...comparisonEnvelope,
+              evidence: { ...comparisonEnvelope.evidence, method },
+            }
+
+      const { container } = render(
+        <VerdictCard state={{ status: 'success', envelope }} />,
+      )
+
+      expect(screen.getByText(label)).toBeInTheDocument()
+      expect(screen.getAllByText(/^Engine: /)).toHaveLength(1)
+      if (method === 'elo') {
+        expect(container.textContent).not.toMatch(/Keener/)
+      }
+    })
+  })
+
   it('renders the unknown_year error state', () => {
     render(
       <VerdictCard

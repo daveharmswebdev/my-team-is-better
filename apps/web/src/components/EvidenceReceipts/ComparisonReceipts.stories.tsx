@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 import type { ComparisonResultOut } from '../../lib/api/types'
 import { ComparisonReceipts } from './ComparisonReceipts'
 
@@ -194,9 +195,11 @@ export const RatingBreakdown: Story = {
 }
 
 /**
- * An Elo comparison (epic #147 / issue #82): ratings, the rating diff and the
- * bottom line all print on Elo's own whole-point scale ("1,684 vs 1,650"),
- * never Keener's x1000 transform.
+ * An Elo comparison (epic #147 / issues #82, #153): ratings, the rating diff
+ * and the bottom line all print on Elo's own whole-point scale ("1,684 vs
+ * 1,650"), never Keener's x1000 transform. Both ratings are plain text with no
+ * breakdown disclosure -- Elo writes no breakdown rows (this is the real wire
+ * shape) -- and one explainer line, once for the whole block, says why.
  */
 export const EloLeader: Story = {
   args: {
@@ -207,18 +210,30 @@ export const EloLeader: Story = {
         ...evidence.team_a,
         rank: 3,
         rating: 1684.4,
-        rating_breakdown: { entries: [], residual_contribution: 1684.4 },
+        rating_breakdown: { entries: [], residual_contribution: 0 },
       },
       team_b: {
         ...evidence.team_b,
         rank: 9,
         rating: 1650.2,
-        rating_breakdown: { entries: [], residual_contribution: 1650.2 },
+        rating_breakdown: { entries: [], residual_contribution: 0 },
       },
       rating_diff: 1684.4 - 1650.2,
       verdict:
         'Ohio State rates higher overall (1684.4 vs 1650.2, rank 3 vs 9).',
     },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('1,684')).toBeVisible()
+    await expect(canvas.getByText('1,650')).toBeVisible()
+    await expect(
+      canvasElement.querySelector('[aria-haspopup="dialog"]'),
+    ).toBeNull()
+    await expect(
+      canvas.getAllByText(/has no per-opponent breakdown to show/),
+    ).toHaveLength(1)
+    await expect(canvasElement.textContent).not.toMatch(/Keener/)
   },
 }
 
@@ -237,14 +252,14 @@ export const EloEqualAtDisplayPrecision: Story = {
         team_name: 'UNLV',
         rank: 60,
         rating: 1531.24,
-        rating_breakdown: { entries: [], residual_contribution: 1531.24 },
+        rating_breakdown: { entries: [], residual_contribution: 0 },
       },
       team_b: {
         ...evidence.team_b,
         team_name: 'Nevada',
         rank: 61,
         rating: 1530.9,
-        rating_breakdown: { entries: [], residual_contribution: 1530.9 },
+        rating_breakdown: { entries: [], residual_contribution: 0 },
       },
       common_opponents: [],
       rating_diff: 1531.24 - 1530.9,

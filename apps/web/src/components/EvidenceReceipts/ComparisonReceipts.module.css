@@ -50,6 +50,14 @@
   font-style: italic;
 }
 
+/* Issue #153: the one-line note a method without a rating breakdown (Elo)
+   prints once, under both team summaries, in place of the disclosures. */
+.ratingNote {
+  margin: var(--sp-3) 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
 .verdictLine {
   margin-top: var(--sp-3);
   font-weight: 600;

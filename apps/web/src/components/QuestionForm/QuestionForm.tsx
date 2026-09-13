@@ -2,7 +2,12 @@ import { useEffect, useId, useState } from 'react'
 import type { FormEvent } from 'react'
 import { fetchTeams, fetchYears } from '../../lib/api/client'
 import { SPORTS } from '../../lib/api/types'
-import type { Sport, TeamDetail } from '../../lib/api/types'
+import type { Method, Sport, TeamDetail } from '../../lib/api/types'
+import {
+  DISPLAYED_METHODS,
+  ENGINE_LEGEND,
+  METHOD_RADIO_LABEL,
+} from '../../lib/methods'
 import { getStoredUserTeam, setStoredUserTeam } from '../../lib/userTeam'
 import { TeamCombobox } from '../TeamCombobox/TeamCombobox'
 import { isTeamInCatalog } from '../TeamCombobox/teamMatching'
@@ -15,6 +20,8 @@ export interface ChampionSubmission {
   year: number
   userTeam: string | null
   sport: Sport
+  /** The Engine toggle's rating method at submit time (issue #154). */
+  method: Method
 }
 
 export interface TeamCaseSubmission {
@@ -23,6 +30,8 @@ export interface TeamCaseSubmission {
   team: string
   userTeam: string | null
   sport: Sport
+  /** The Engine toggle's rating method at submit time (issue #154). */
+  method: Method
 }
 
 export interface CompareSubmission {
@@ -32,6 +41,8 @@ export interface CompareSubmission {
   teamB: string
   userTeam: string | null
   sport: Sport
+  /** The Engine toggle's rating method at submit time (issue #154). */
+  method: Method
 }
 
 export type QuestionSubmission =
@@ -49,11 +60,13 @@ export interface QuestionFormProps {
    * so typing is never fought by a parent re-render. A parent applying a
    * correction (e.g. `HomePage`'s year/candidate pills) therefore remounts
    * this form with a changed `key` rather than pushing new props into a
-   * mounted one. Omitting them all preserves the defaults: College, the
-   * champion question, and the newest season with data (issue #136).
+   * mounted one. Omitting them all preserves the defaults: College, Keener,
+   * the champion question, and the newest season with data (issue #136).
    */
   initialQuestionType?: QuestionType
   initialSport?: Sport
+  /** The Engine toggle's initial method (issue #154) -- same read-once semantics. */
+  initialMethod?: Method
   initialYear?: number
   initialTeam?: string
   initialTeamA?: string
@@ -74,19 +87,22 @@ export const YEAR_DEBOUNCE_MS = 300
 /**
  * `/api/years` results, backing the Year input's default, its validation,
  * its `<datalist>` and its "seasons with data" hint. Not year-scoped, so
- * this refetches on a league change only. `error` degrades to a plain typed
- * year, never a block.
+ * this refetches on a league or engine change only. `error` degrades to a
+ * plain typed year, never a block.
  */
 interface YearCatalogState {
   status: 'loading' | 'ready' | 'error'
   years: number[]
   /**
-   * The league these years describe, or `null` before any response. A
-   * catalog for a league other than the selected one is treated as still
-   * `loading`, so a league switch can never validate against -- or default
-   * to -- the previous league's seasons while the new ones are in flight.
+   * The league and engine these years describe, both `null` before any
+   * response. A catalog for any other league *or* engine than the selected
+   * pair is treated as still `loading`, so a league or engine switch can
+   * never validate against -- or default to -- the previous scope's seasons
+   * while the new ones are in flight (issue #154: an engine only has seasons
+   * it actually rated).
    */
   sport: Sport | null
+  method: Method | null
 }
 
 /**
@@ -118,6 +134,7 @@ const EMPTY_YEAR_CATALOG: YearCatalogState = {
   status: 'loading',
   years: [],
   sport: null,
+  method: null,
 }
 // `year`/`sport` are only ever read in the `ready`/`empty` states, so the
 // pre-first-response placeholder does not describe any real scope.
@@ -368,6 +385,15 @@ function formatSeasonsHint(years: number[]): string | undefined {
  * year catalog's states; a failed or empty catalog never blocks a whole
  * four-digit year (`parseYear`'s shape check still applies in every state).
  *
+ * The **Engine** toggle (issue #154) picks the rating method both catalogs
+ * and the submission are scoped to. It offers `DISPLAYED_METHODS` only, and
+ * it affects the *next* submission only -- a verdict already on screen keeps
+ * the engine that answered it. Changing the engine keeps the Year and every
+ * team value: unlike a league switch it is the same season and the same
+ * games, so a team the new engine's catalog lacks is flagged like a year
+ * change's, never cleared. An untouched default Year follows the new
+ * engine's newest season exactly as it follows a league switch.
+ *
  * Changing the **league** clears all four team values, "your team" and its
  * stored preference included (issue #137): a team name means nothing in the
  * other league, so a College pick carried into an NFL question is only
@@ -384,6 +410,7 @@ export function QuestionForm({
   isSubmitting = false,
   initialQuestionType,
   initialSport,
+  initialMethod,
   initialYear,
   initialTeam,
   initialTeamA,
@@ -391,6 +418,7 @@ export function QuestionForm({
 }: QuestionFormProps) {
   const questionTypeId = useId()
   const sportName = useId()
+  const methodName = useId()
   const yearId = useId()
   const yearListId = useId()
   const yearErrorId = useId()
@@ -399,6 +427,7 @@ export function QuestionForm({
     initialQuestionType ?? 'champion',
   )
   const [sport, setSport] = useState<Sport>(initialSport ?? 'cfb')
+  const [method, setMethod] = useState<Method>(initialMethod ?? 'keener')
   /**
    * The Year the user (or the parent, via `initialYear`) actually chose, or
    * `null` while the field is still showing the catalog-derived default.
@@ -418,9 +447,12 @@ export function QuestionForm({
   const [teamCatalog, setTeamCatalog] =
     useState<TeamCatalogState>(EMPTY_TEAM_CATALOG)
 
-  // See `YearCatalogState.sport`: another league's years are no years at all.
+  // See `YearCatalogState.sport`/`.method`: another league's or another
+  // engine's years are no years at all.
   const yearCatalog =
-    loadedYearCatalog.sport === sport ? loadedYearCatalog : EMPTY_YEAR_CATALOG
+    loadedYearCatalog.sport === sport && loadedYearCatalog.method === method
+      ? loadedYearCatalog
+      : EMPTY_YEAR_CATALOG
   const newestYear =
     yearCatalog.status === 'ready' && yearCatalog.years.length > 0
       ? Math.max(...yearCatalog.years)
@@ -430,10 +462,11 @@ export function QuestionForm({
   const yearValidity = validateYear(year, yearCatalog, sport)
 
   // Only the *team* list is year-scoped, and only the year is free-typed, so
-  // the debounce sits on the typed value and not on the league toggle or the
-  // catalog-derived default: switching to NFL, or the default arriving,
-  // refetches immediately. Until a fresh edit has settled, the team fetch
-  // keeps the year the field showed before typing began.
+  // the debounce sits on the typed value and not on the league or engine
+  // toggles or the catalog-derived default: switching to NFL or to Elo, or
+  // the default arriving, refetches immediately. Until a fresh edit has
+  // settled, the team fetch keeps the year the field showed before typing
+  // began.
   const debouncedTypedYear = useDebouncedValue(typedYear, YEAR_DEBOUNCE_MS)
   const teamScopeYear =
     typedYear === null || debouncedTypedYear === null
@@ -448,13 +481,18 @@ export function QuestionForm({
 
     async function loadYears() {
       try {
-        const yearsOut = await fetchYears(sport)
+        const yearsOut = await fetchYears(sport, method)
         if (!cancelled) {
-          setYearCatalog({ status: 'ready', years: yearsOut.years, sport })
+          setYearCatalog({
+            status: 'ready',
+            years: yearsOut.years,
+            sport,
+            method,
+          })
         }
       } catch {
         if (!cancelled) {
-          setYearCatalog({ status: 'error', years: [], sport })
+          setYearCatalog({ status: 'error', years: [], sport, method })
         }
       }
     }
@@ -463,7 +501,7 @@ export function QuestionForm({
     return () => {
       cancelled = true
     }
-  }, [sport])
+  }, [sport, method])
 
   useEffect(() => {
     let cancelled = false
@@ -471,7 +509,7 @@ export function QuestionForm({
 
     async function loadTeams() {
       try {
-        const teamsOut = await fetchTeams(sport, scopedYear)
+        const teamsOut = await fetchTeams(sport, method, scopedYear)
         if (cancelled) {
           return
         }
@@ -504,7 +542,9 @@ export function QuestionForm({
     return () => {
       cancelled = true
     }
-  }, [sport, teamScopeYear])
+    // `method` in the deps is what makes `cancelled` cover an engine switch
+    // too: the previous engine's in-flight response is discarded.
+  }, [sport, method, teamScopeYear])
 
   function handleUserTeamChange(value: string) {
     setUserTeam(value)
@@ -541,6 +581,7 @@ export function QuestionForm({
         year: parsedYear,
         userTeam: submissionUserTeam,
         sport,
+        method,
       })
       return
     }
@@ -551,6 +592,7 @@ export function QuestionForm({
         team: team.trim(),
         userTeam: submissionUserTeam,
         sport,
+        method,
       })
       return
     }
@@ -561,6 +603,7 @@ export function QuestionForm({
       teamB: teamB.trim(),
       userTeam: submissionUserTeam,
       sport,
+      method,
     })
   }
 
@@ -620,6 +663,24 @@ export function QuestionForm({
               onChange={() => handleSportChange(league)}
             />
             {LEAGUE_RADIO_LABEL[league]}
+          </label>
+        ))}
+      </fieldset>
+
+      {/* Issue #154: the toggle affects the next submission only, and never
+          clears Year or team values -- see the component doc. */}
+      <fieldset className={styles.engineToggle}>
+        <legend>{ENGINE_LEGEND}</legend>
+        {DISPLAYED_METHODS.map((engine) => (
+          <label key={engine}>
+            <input
+              type="radio"
+              name={methodName}
+              value={engine}
+              checked={method === engine}
+              onChange={() => setMethod(engine)}
+            />
+            {METHOD_RADIO_LABEL[engine]}
           </label>
         ))}
       </fieldset>
