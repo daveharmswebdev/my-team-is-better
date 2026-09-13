@@ -49,10 +49,13 @@ repos:
       # deliberately CI-only -- both are too slow for a commit hook, and
       # neither is the kind of check a local mirror buys much on.
       #
-      # `tsc -b` is used rather than `tsc --noEmit`: this project is a
-      # multi-project TypeScript setup (tsconfig.app.json / tsconfig.node.json
-      # behind a solution tsconfig.json) and `--noEmit` is rejected on the
-      # command line in build mode. `-b` is what CI and `npm run build` run.
+      # `tsc -b` (build mode), not a plain `tsc --noEmit`: this is a
+      # multi-project TypeScript setup -- tsconfig.app.json and
+      # tsconfig.node.json behind a solution tsconfig.json with `"files": []`
+      # -- so a plain root `tsc --noEmit` compiles zero files and exits 0 even
+      # on a real type error (verified). Only build mode follows the references.
+      # It is also exactly what CI and `npm run build` run. (`.storybook/` is in
+      # neither project, so this hook does not check it -- see #126.)
       - id: apps-web-eslint
         name: apps/web — ESLint (typescript-eslint)
         entry: bash -c 'cd apps/web && npm run lint'
