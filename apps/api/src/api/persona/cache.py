@@ -43,13 +43,21 @@ def cache_key(
     teams: tuple[str, ...],
     user_team: str | None,
     method: str,
+    sport: str,
     prompt_version: str,
 ) -> str:
     """issue #4's cache key: `hash(question_type, year, team(s), user_team,
-    method, PROMPT_VERSION)`. `teams` should be the evidence layer's
+    method, sport, PROMPT_VERSION)`. `teams` should be the evidence layer's
     *resolved* canonical name(s) (e.g. `TeamCaseOut.team_name`), not the raw
     request string, so cache hits survive e.g. "Bama" vs "Alabama" both
     resolving to the same team.
+
+    `sport` is required with no default (issue #84): CFB and NFL share team
+    names ("Houston", "Miami", "Arizona", ...), so without it a CFB question
+    could be served the NFL narration for the same year/name/method, and
+    keep being served it from the cache. Adding it changed every key, which
+    invalidated all older entries on purpose, since they can't say which
+    league they describe.
     """
     payload = {
         "question_type": question_type,
@@ -57,6 +65,7 @@ def cache_key(
         "teams": list(teams),
         "user_team": user_team,
         "method": method,
+        "sport": sport,
         "prompt_version": prompt_version,
     }
     canonical = json.dumps(payload, sort_keys=True)

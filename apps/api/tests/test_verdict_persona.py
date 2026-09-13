@@ -135,6 +135,39 @@ def test_cache_hit_skips_the_claude_call_entirely(client: TestClient) -> None:
     assert len(narrator.calls) == 1
 
 
+def test_same_named_team_in_another_sport_does_not_get_the_other_sports_cached_narration(
+    sport_client: TestClient,
+) -> None:
+    """Issue #84: the sport fixture's "Wildcats" exist in both CFB and NFL
+    with the same year and method, so the two team-case questions differ
+    *only* by sport. The NFL narration is cached first; the CFB question
+    must miss the cache and get its own narration, not the NFL one.
+    """
+    nfl_text = "the pro version, no notes."
+    cfb_text = "the college version, no notes."
+    narrator = FakeNarrator(responses=[nfl_text, cfb_text])
+
+    with _wired(narrator):
+        nfl = sport_client.post(
+            "/api/verdict/team-case",
+            json={"year": 2023, "team": "Wildcats", "sport": "nfl"},
+        )
+        cfb = sport_client.post(
+            "/api/verdict/team-case",
+            json={"year": 2023, "team": "Wildcats", "sport": "cfb"},
+        )
+
+    assert nfl.status_code == 200
+    assert cfb.status_code == 200
+    # Same resolved name in both leagues, so only sport tells them apart.
+    assert nfl.json()["evidence"]["team_name"] == cfb.json()["evidence"]["team_name"]
+    assert nfl.json()["narration"]["text"] == nfl_text
+    assert cfb.json()["narration"]["text"] != nfl_text, "CFB question served the NFL narration"
+    assert cfb.json()["narration"]["text"] == cfb_text
+    assert cfb.json()["narration"]["cached"] is False
+    assert len(narrator.calls) == 2
+
+
 # ---------------------------------------------------------------------------
 # grounding retry-then-fallback
 # ---------------------------------------------------------------------------
