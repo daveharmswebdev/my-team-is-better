@@ -18,12 +18,18 @@ const preview: Preview = {
       // `npm run build-storybook` does NOT run axe, so this flag is only a
       // gate because that script runs in CI.
       //
-      // No story may opt out: 'todo'/'off', `disable`, `globals.a11y.manual`,
-      // a narrowed `config.rules`/`context`/`options`, or a `!test` tag. That
-      // rule is checked, not just stated here: src/test/storyA11yPolicy.test.ts
-      // (part of `npm run test`) composes every story with this file and fails
-      // on any of them. The only way out is an entry in
-      // src/test/storyA11yAllowlist.ts, with a justification.
+      // No story may opt out. Three checks enforce that; each covers only
+      // what it names:
+      // - src/test/storyA11yPolicy.test.ts (`npm run test`): literal and
+      //   composed annotations (this file + meta + story) and static vs
+      //   runtime tags.
+      // - .storybook/a11y-guard.setup.ts (`npm run test-storybook`): run-time
+      //   skips (loaders, beforeEach, decorators, play functions, a missing
+      //   addon-a11y) -- every story must end with a passed axe report.
+      // - .storybook/storyRunGuard.ts (`npm run test-storybook`): stories
+      //   skipped, filtered out or never collected.
+      // The only way out is a knob-specific, justified exemption in
+      // .storybook/a11yPolicy.ts.
       test: 'error',
     },
   },
