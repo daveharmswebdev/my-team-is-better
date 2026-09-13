@@ -47,13 +47,16 @@ uv run cfb serve                            # run the MCP server (stdio)
 
 ## Tools exposed
 
-- `list_seasons()` — years with computed ratings
-- `get_rankings(year, top_n=25, method="keener")` — ranked list for a season
-- `get_team_season(year, team, method="keener")` — a team's rank, rating, full schedule
-  with opponent context, quality wins, worst loss
-- `compare_teams(year, team_a, team_b, method="keener")` — head-to-head, common
-  opponents, rating comparison
-- `get_champion(year, method="keener")` — the #1 team with full evidence
+The database holds both leagues. Every tool below takes `sport="cfb"` (college
+football, the default) or `sport="nfl"`, and scopes everything it reads to that league.
+
+- `list_seasons()` — one entry per `(sport, year)` with computed ratings, listing its methods
+- `get_rankings(year, top_n=25, method="keener", sport="cfb")` — ranked list for a season
+- `get_team_season(year, team, method="keener", sport="cfb")` — a team's rank, rating,
+  full schedule with opponent context, quality wins, worst loss
+- `compare_teams(year, team_a, team_b, method="keener", sport="cfb")` — head-to-head,
+  common opponents, rating comparison
+- `get_champion(year, method="keener", sport="cfb")` — the #1 team with full evidence
 
 ## Development
 

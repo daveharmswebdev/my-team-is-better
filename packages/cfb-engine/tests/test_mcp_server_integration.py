@@ -45,7 +45,7 @@ def test_list_seasons_returns_dict_with_computed_year(mcp_fixture_db: Path) -> N
     result = list_seasons()
     assert isinstance(result, dict)
     assert "error" not in result
-    assert {"year": 2005, "methods": ["keener"]} in result["seasons"]
+    assert {"sport": "cfb", "year": 2005, "methods": ["keener"]} in result["seasons"]
 
 
 def test_get_rankings_valid_year_returns_dict_with_texas_first(mcp_fixture_db: Path) -> None:
@@ -180,3 +180,236 @@ def test_compare_teams_same_team_returns_error_dict_not_exception(mcp_fixture_db
     assert isinstance(result, dict)
     assert result["error"] == "same_team_comparison"
     assert result["team"] == "Texas"
+
+
+# ---------------------------------------------------------------------------
+# Issue #86: sport support. Everything below runs against ONE db holding both
+# leagues for the SAME year (2013 is in both committed fixtures), which is
+# what production looks like and what exposes unscoped queries: `ratings`'
+# UNIQUE(year, method, team_id) deliberately excludes `sport`, so a query
+# scoped only by year/method silently blends CFB and NFL rows.
+# ---------------------------------------------------------------------------
+
+BOTH_LEAGUES_YEAR = 2013
+
+
+@pytest.fixture
+def both_leagues_db(
+    regression_db: Path, nfl_regression_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """The CFB regression fixture with the NFL fixture's teams/team_season/
+    games merged in, then real 2013 ratings computed for both sports.
+
+    Team ids can't collide: CFBD's native ids top out near 1e6, nflverse's
+    minted surrogates start above 1e9 (see ingest/nflverse/).
+
+    NFL ratings are computed FIRST on purpose. The unscoped
+    `WHERE year = ? AND method = ? AND rank = 1` lookup in get_champion walks
+    idx_ratings_year_method in rowid order, so with NFL rows inserted first
+    it deterministically picks the NFL #1 for a CFB caller. Computing CFB
+    first would make that bug pass by insertion-order luck.
+    """
+    from cfb_strength.db.connection import ensure_schema
+
+    conn: sqlite3.Connection = get_conn(regression_db)
+    try:
+        # The committed CFB fixture predates #51's `sport` columns.
+        ensure_schema(conn)
+        conn.execute("ATTACH DATABASE ? AS nfl", (str(nfl_regression_db),))
+        conn.execute(
+            "INSERT INTO teams (id, school, classification, sport, source_id) "
+            "SELECT id, school, classification, sport, source_id FROM nfl.teams"
+        )
+        conn.execute(
+            "INSERT INTO team_season (team_id, year, conference, classification, sport) "
+            "SELECT team_id, year, conference, classification, sport FROM nfl.team_season"
+        )
+        game_cols = (
+            "id, season, week, season_type, start_date, neutral_site, completed, "
+            "home_team_id, away_team_id, home_team, away_team, home_points, away_points, "
+            "home_conference, away_conference, venue, raw_json, sport, source_id"
+        )
+        conn.execute(f"INSERT INTO games ({game_cols}) SELECT {game_cols} FROM nfl.games")
+        conn.commit()
+        conn.execute("DETACH DATABASE nfl")
+
+        assert compute_and_store(conn, BOTH_LEAGUES_YEAR, "keener", sport="nfl") > 0
+        assert compute_and_store(conn, BOTH_LEAGUES_YEAR, "keener", sport="cfb") > 0
+    finally:
+        conn.close()
+
+    import cfb_strength.mcp_server.server as server_module
+
+    monkeypatch.setattr(server_module, "DB_PATH", regression_db)
+    return regression_db
+
+
+def _nfl_schools(db: Path) -> set[str]:
+    conn = get_conn(db, read_only=True)
+    try:
+        rows = conn.execute("SELECT school FROM teams WHERE sport = 'nfl'").fetchall()
+    finally:
+        conn.close()
+    return {str(r["school"]) for r in rows}
+
+
+# --- red proofs: wrong answers on the default (cfb) path, no new kwargs ------
+
+
+def test_get_rankings_default_sport_excludes_nfl_teams_in_shared_year(
+    both_leagues_db: Path,
+) -> None:
+    from cfb_strength.mcp_server.server import get_rankings
+
+    result = get_rankings(year=BOTH_LEAGUES_YEAR, top_n=10)
+    assert "error" not in result
+
+    ranks = [r["rank"] for r in result["rankings"]]
+    assert ranks == list(range(1, 11)), f"duplicate/out-of-order ranks: {ranks}"
+
+    bleed = {r["team_name"] for r in result["rankings"]} & _nfl_schools(both_leagues_db)
+    assert bleed == set(), f"NFL teams in a CFB leaderboard: {sorted(bleed)}"
+    assert result["rankings"][0]["team_name"] == "Florida State"
+
+
+def test_list_seasons_reports_shared_year_separately_per_sport(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import list_seasons
+
+    result = list_seasons()
+    assert "error" not in result
+
+    shared = [s for s in result["seasons"] if s["year"] == BOTH_LEAGUES_YEAR]
+    assert len(shared) == 2, f"expected one entry per sport for {BOTH_LEAGUES_YEAR}: {shared}"
+    assert {"sport": "cfb", "year": BOTH_LEAGUES_YEAR, "methods": ["keener"]} in shared
+    assert {"sport": "nfl", "year": BOTH_LEAGUES_YEAR, "methods": ["keener"]} in shared
+
+
+def test_get_champion_default_sport_returns_cfb_number_one_in_shared_year(
+    both_leagues_db: Path,
+) -> None:
+    from cfb_strength.mcp_server.server import get_champion
+
+    result = get_champion(year=BOTH_LEAGUES_YEAR)
+    assert result.get("team_name") == "Florida State", f"got {result}"
+    assert result["rank"] == 1
+
+
+# --- per-tool NFL coverage (sport="nfl") -------------------------------------
+
+
+def test_get_champion_nfl_returns_nfl_number_one_in_shared_year(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import get_champion
+
+    result = get_champion(year=BOTH_LEAGUES_YEAR, sport="nfl")
+    assert result.get("team_name") == "Seattle Seahawks", f"got {result}"
+    assert result["rank"] == 1
+
+
+def test_get_rankings_nfl_returns_only_nfl_teams(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import get_rankings
+
+    result = get_rankings(year=BOTH_LEAGUES_YEAR, top_n=40, sport="nfl")
+    assert "error" not in result
+    assert result["sport"] == "nfl"
+    names = [r["team_name"] for r in result["rankings"]]
+    assert set(names) <= _nfl_schools(both_leagues_db)
+    assert len(names) == 32
+    assert [r["rank"] for r in result["rankings"]] == list(range(1, 33))
+    assert names[0] == "Seattle Seahawks"
+
+
+def test_get_team_season_nfl_returns_nfl_case(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import get_team_season
+
+    result = get_team_season(year=BOTH_LEAGUES_YEAR, team="Seattle Seahawks", sport="nfl")
+    assert "error" not in result, result
+    assert result["team_name"] == "Seattle Seahawks"
+    assert result["wins"] == 16
+    assert result["losses"] == 3
+
+
+def test_compare_teams_nfl_returns_nfl_comparison(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import compare_teams
+
+    result = compare_teams(
+        year=BOTH_LEAGUES_YEAR,
+        team_a="Seattle Seahawks",
+        team_b="Denver Broncos",
+        sport="nfl",
+    )
+    assert "error" not in result, result
+    assert result["head_to_head"]["played"] is True
+    assert result["head_to_head"]["meetings"][0]["winner"] == "Seattle Seahawks"
+
+
+def test_get_rankings_nfl_unknown_year_carries_sport(both_leagues_db: Path) -> None:
+    """2005 has CFB ratings but no NFL ratings: an NFL caller must get
+    unknown_year listing NFL's years, not CFB's 2005 leaderboard."""
+    from cfb_strength.mcp_server.server import get_rankings
+
+    result = get_rankings(year=2005, sport="nfl")
+    assert result["error"] == "unknown_year"
+    assert result["year"] == 2005
+    assert result["sport"] == "nfl"
+    assert result["available_years"] == [BOTH_LEAGUES_YEAR]
+
+
+@pytest.mark.parametrize("tool_name", ["get_team_season", "get_champion", "compare_teams"])
+def test_nfl_unknown_year_carries_sport_per_tool(both_leagues_db: Path, tool_name: str) -> None:
+    import cfb_strength.mcp_server.server as server_module
+
+    calls = {
+        "get_team_season": lambda: server_module.get_team_season(
+            year=1999, team="St. Louis Rams", sport="nfl"
+        ),
+        "get_champion": lambda: server_module.get_champion(year=1999, sport="nfl"),
+        "compare_teams": lambda: server_module.compare_teams(
+            year=1999, team_a="St. Louis Rams", team_b="Tennessee Titans", sport="nfl"
+        ),
+    }
+    result = calls[tool_name]()
+    assert result["error"] == "unknown_year", result
+    assert result["year"] == 1999
+    assert result["sport"] == "nfl"
+    assert result["available_years"] == [BOTH_LEAGUES_YEAR]
+
+
+def test_get_team_season_nfl_unknown_team_carries_sport(both_leagues_db: Path) -> None:
+    """A CFB school under sport="nfl" is unknown_team for the NFL, even
+    though it is rated in the same year in the other league."""
+    from cfb_strength.mcp_server.server import get_team_season
+
+    result = get_team_season(year=BOTH_LEAGUES_YEAR, team="Florida State", sport="nfl")
+    assert result["error"] == "unknown_team"
+    assert result["query"] == "Florida State"
+    assert result["sport"] == "nfl"
+
+
+def test_compare_teams_nfl_unknown_team_carries_sport(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import compare_teams
+
+    result = compare_teams(
+        year=BOTH_LEAGUES_YEAR, team_a="Seattle Seahawks", team_b="Florida State", sport="nfl"
+    )
+    assert result["error"] == "unknown_team"
+    assert result["query"] == "Florida State"
+    assert result["sport"] == "nfl"
+
+
+def test_teams_resource_entries_carry_sport(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import teams_resource
+
+    result = teams_resource()
+    by_school = {t["school"]: t for t in result["teams"]}
+    assert by_school["Florida State"]["sport"] == "cfb"
+    assert by_school["Seattle Seahawks"]["sport"] == "nfl"
+    assert all(t["sport"] in ("cfb", "nfl") for t in result["teams"])
+
+
+def test_seasons_resource_matches_list_seasons_tool(both_leagues_db: Path) -> None:
+    from cfb_strength.mcp_server.server import list_seasons, seasons_resource
+
+    catalog = seasons_resource()
+    assert catalog == list_seasons()
+    keys = [(s["sport"], s["year"]) for s in catalog["seasons"]]
+    assert keys == sorted(keys)
