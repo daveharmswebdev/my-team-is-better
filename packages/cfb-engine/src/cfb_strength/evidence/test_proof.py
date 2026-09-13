@@ -14,18 +14,21 @@ between `evidence` and `ratings`/`ingest`, not a Python import).
 from __future__ import annotations
 
 import sqlite3
+import typing
 from pathlib import Path
 
 import pytest
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
+    Method,
     SameTeamComparisonError,
     Sport,
     UnknownTeamError,
     UnknownYearError,
 )
 from cfb_strength.db.connection import ensure_schema, get_conn
+from cfb_strength.evidence import proof
 from cfb_strength.evidence.proof import (
     build_comparison,
     build_team_case,
@@ -631,3 +634,73 @@ def test_verdict_for_a_decided_head_to_head_is_unchanged(conn: sqlite3.Connectio
         "vs common opponent Charlie U (rank 3): Alpha State went W, Bravo Tech went W."
     )
     assert "tied" not in comparison.verdict
+
+
+# ---------------------------------------------------------------------------
+# (f) issue #95 -- the verdict's rating format is a per-method decision
+# ---------------------------------------------------------------------------
+
+# The fixed opening of the Alpha State / Bravo Tech verdict. Only the closing
+# "rates higher overall" sentence depends on the method.
+_ALPHA_BRAVO_PREFIX = (
+    "Alpha State beat Bravo Tech head-to-head 30-10 (Alpha State vs Bravo Tech, week 1). "
+    "vs common opponent Charlie U (rank 3): Alpha State went W, Bravo Tech went W. "
+)
+
+
+def _insert_cfb_cycle_ratings(
+    conn: sqlite3.Connection, method: str, ratings: tuple[float, float, float]
+) -> None:
+    """Rate the CFB win cycle (ids 1-3, ranks 1-3) under `method`, with no
+    `rating_breakdowns` rows -- the shape Elo really stores (PR #93)."""
+    for rank, (team_id, rating) in enumerate(zip((1, 2, 3), ratings, strict=True), start=1):
+        _insert_rating(conn, YEAR, method, team_id, rating, rank, 1, 1, sport="cfb")
+    conn.commit()
+
+
+def test_verdict_rating_formats_cover_exactly_the_registered_methods() -> None:
+    """The format is a checked decision for every registered method. Adding a
+    method to `contracts.Method` without choosing its verdict precision turns
+    this red, so it can never silently inherit Keener's `.6f`. Order included,
+    matching tests/test_contract_vocabularies.py's convention for the alias."""
+    assert tuple(proof.VERDICT_RATING_FORMATS) == typing.get_args(Method)
+
+
+def test_keener_verdict_text_is_byte_identical(conn: sqlite3.Connection) -> None:
+    """Exact full string, pinned from the pre-#95 output. Keener's six decimal
+    places suit its sum-to-1 eigenvector and must not move."""
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener")
+    assert comparison.verdict == (
+        _ALPHA_BRAVO_PREFIX + "Alpha State rates higher overall (1.500000 vs 1.000000, rank 1 vs 2)."
+    )
+
+
+@pytest.mark.parametrize("method", ["elo", "elo_career"])
+def test_elo_verdict_uses_one_decimal_place(conn: sqlite3.Connection, method: str) -> None:
+    """Elo lives around 1100-2000. `.6f` printed `1523.456789`, false
+    precision nobody reads. One decimal place still separates two teams a few
+    tenths of a point apart, which an integer would render as a dead heat
+    beside a sentence claiming one "rates higher"."""
+    _insert_cfb_cycle_ratings(conn, method, (1523.456789, 1498.04, 1400.0))
+
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=method)
+
+    assert comparison.verdict == (
+        _ALPHA_BRAVO_PREFIX + "Alpha State rates higher overall (1523.5 vs 1498.0, rank 1 vs 2)."
+    )
+
+
+def test_unregistered_method_verdict_raises_instead_of_falling_back(
+    conn: sqlite3.Connection,
+) -> None:
+    """Rows for a method with no registered format are reachable: a database
+    written by a newer or experimental engine. The verdict must refuse to
+    guess a precision rather than silently printing `.6f`."""
+    _insert_cfb_cycle_ratings(conn, "glicko", (1523.456789, 1498.04, 1400.0))
+
+    with pytest.raises(ValueError, match="glicko"):
+        build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="glicko")
+
+    # Scoped to the verdict's number formatting: the rest of the evidence
+    # surface does no formatting and is unchanged for such a method.
+    assert build_team_case(conn, YEAR, "Alpha State", method="glicko").rating == 1523.456789

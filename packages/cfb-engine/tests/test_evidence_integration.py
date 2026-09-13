@@ -6,11 +6,18 @@ fixture data: exception behavior (`AmbiguousTeamError`, `UnknownYearError`,
 Uses `regression_conn` (a writable copy of tests/fixtures/cfb_regression.sqlite3)
 with ratings freshly computed by the real `compute_and_store` pipeline --
 never a canned `ratings` table, and never the live `data/cfb.sqlite3`.
+
+The sections at the bottom (issue #95) run the same evidence surface under
+every registered rating method, for both leagues (`nfl_regression_conn`
+too), and prove that one database holding two methods' rows never mixes
+them.
 """
 
 from __future__ import annotations
 
 import sqlite3
+import typing
+from dataclasses import dataclass
 
 import pytest
 
@@ -18,11 +25,14 @@ from cfb_strength.contracts import (
     AmbiguousTeamError,
     ComparisonResult,
     ComparisonTeamSummary,
+    Method,
     SameTeamComparisonError,
+    Sport,
     TeamCase,
     UnknownTeamError,
     UnknownYearError,
 )
+from cfb_strength.db.connection import ensure_schema
 from cfb_strength.evidence.proof import (
     build_comparison,
     build_team_case,
@@ -338,3 +348,340 @@ def test_ambiguous_team_error_never_carries_empty_candidates(
     # Without this sentinel the sweep silently degrades to a no-op if the
     # fixture is ever regenerated thinner (mirrors the colocated unit twin).
     assert raised_at_least_one, "expected at least one genuinely ambiguous query in the sweep"
+
+
+# ---------------------------------------------------------------------------
+# issue #95 -- Keener's verdict text, pinned exactly against real ratings
+# ---------------------------------------------------------------------------
+
+
+def test_keener_texas_usc_verdict_text_is_byte_identical(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Pinned from the pre-#95 output. Giving Elo its own precision must not
+    move a single byte of Keener's verdict (both ratings sit well clear of a
+    sixth-decimal rounding boundary, so this is stable, not lucky)."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "USC", method="keener")
+    assert comparison.verdict == (
+        "Texas beat USC head-to-head 41-38 (Texas vs USC, week 1). "
+        "Texas rates higher overall (0.005044 vs 0.004736, rank 1 vs 2)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# issue #95 -- the whole evidence surface, under every method, in both leagues
+#
+# Before #95 nothing in this package called the evidence layer with a method
+# other than keener. Its correctness under Elo rested on a code comment in
+# compute_ratings._store_breakdowns. Everything below computes real ratings
+# with the real pipeline, for every (method, league) pair.
+# ---------------------------------------------------------------------------
+
+METHODS: tuple[str, ...] = typing.get_args(Method)
+SPORTS: tuple[str, ...] = typing.get_args(Sport)
+
+
+@dataclass(frozen=True)
+class LeagueSample:
+    conn_fixture: str  # the conftest fixture holding this league's games
+    year: int
+    team: str
+    opponent: str  # met `team` in `year`, so there is a head-to-head to report
+
+
+LEAGUE_SAMPLES: dict[str, LeagueSample] = {
+    "cfb": LeagueSample("regression_conn", 2005, "Texas", "USC"),
+    # Two meetings, one of them a 26-26 tie: the harder head-to-head shape.
+    "nfl": LeagueSample("nfl_regression_conn", 2013, "Green Bay Packers", "Minnesota Vikings"),
+}
+
+# Per-method expectations, written out by hand ON PURPOSE rather than read
+# from proof.py: a test that took its expected precision from the table under
+# test could never notice that table being wrong. Each table is keyed exactly
+# by `Method` (checked below), so a newly registered method must state all
+# three before any parametrized test here can pass.
+RATING_SCALES: dict[str, tuple[float, float]] = {
+    # A sum-to-1 eigenvector: every rating is a small positive fraction.
+    "keener": (0.0, 1.0),
+    # Seeded at 1500. The fixtures' real spread is about 1130-1990 (CFB) and
+    # 1290-1770 (NFL). The point is that the band is disjoint from Keener's.
+    "elo": (500.0, 2500.0),
+    "elo_career": (500.0, 2500.0),
+}
+HAS_BREAKDOWN: dict[str, bool] = {"keener": True, "elo": False, "elo_career": False}
+VERDICT_DECIMALS: dict[str, int] = {"keener": 6, "elo": 1, "elo_career": 1}
+
+
+def test_per_method_expectations_cover_exactly_the_registered_vocabularies() -> None:
+    for table in (RATING_SCALES, HAS_BREAKDOWN, VERDICT_DECIMALS):
+        assert tuple(table) == METHODS
+    assert tuple(LEAGUE_SAMPLES) == SPORTS
+    # The decoy method in `rated_league` needs a second registered method.
+    assert len(METHODS) > 1
+
+
+def _on_scale(method: str, rating: float) -> bool:
+    low, high = RATING_SCALES[method]
+    return low < rating < high
+
+
+def _stored_rating(
+    conn: sqlite3.Connection, year: int, method: str, sport: str, school: str
+) -> sqlite3.Row:
+    """The ratings row for one team, read straight from SQL -- the ground
+    truth the evidence layer's own queries are checked against."""
+    row = conn.execute(
+        "SELECT r.team_id, r.rating, r.rank FROM ratings r JOIN teams t ON t.id = r.team_id "
+        "WHERE r.year = ? AND r.method = ? AND r.sport = ? AND t.school = ?",
+        (year, method, sport, school),
+    ).fetchone()
+    assert row is not None, f"no {method}/{sport} rating stored for {school} in {year}"
+    return row
+
+
+@dataclass(frozen=True)
+class RatedLeague:
+    conn: sqlite3.Connection
+    method: str
+    sport: Sport
+    sample: LeagueSample
+    computed_years: list[int]
+    decoy_method: str
+    decoy_year: int
+
+
+@pytest.fixture(
+    params=[(method, sport) for method in METHODS for sport in SPORTS],
+    ids=[f"{method}-{sport}" for method in METHODS for sport in SPORTS],
+)
+def rated_league(request: pytest.FixtureRequest) -> RatedLeague:
+    """One league's fixture with `method` computed for every season but the
+    last, and a DIFFERENT method (the decoy) computed for only that last one.
+
+    Every (method, league) pair is representable, including elo_career. Both
+    fixtures hold non-contiguous seasons (CFB 2001/2005/2013), so elo_career
+    replays only those and reverts ratings across the missing years. Its values
+    therefore differ from a full-database run, which is a question for the
+    ratings suite. What this suite tests is the evidence layer reading back
+    whatever was stored, and that is fully represented.
+    """
+    method, sport = request.param
+    sample = LEAGUE_SAMPLES[sport]
+    conn: sqlite3.Connection = request.getfixturevalue(sample.conn_fixture)
+    ensure_schema(conn)  # the committed fixtures predate the `sport` column
+
+    seasons = [
+        int(row["season"])
+        for row in conn.execute(
+            "SELECT DISTINCT season FROM games WHERE sport = ? ORDER BY season", (sport,)
+        )
+    ]
+    computed_years, decoy_year = seasons[:-1], seasons[-1]
+    assert sample.year in computed_years
+
+    for year in computed_years:
+        compute_and_store(conn, year, method, sport=sport)
+    decoy_method = METHODS[(METHODS.index(method) + 1) % len(METHODS)]
+    compute_and_store(conn, decoy_year, decoy_method, sport=sport)
+
+    return RatedLeague(conn, method, sport, sample, computed_years, decoy_method, decoy_year)
+
+
+def test_list_available_years_is_exactly_this_methods_seasons(rated_league: RatedLeague) -> None:
+    r = rated_league
+    assert list_available_years(r.conn, r.method, r.sport) == r.computed_years
+    # The decoy season really is stored, so its absence above means something.
+    assert list_available_years(r.conn, r.decoy_method, r.sport) == [r.decoy_year]
+
+
+def test_resolve_team_resolves_under_every_method(rated_league: RatedLeague) -> None:
+    r = rated_league
+    ids = r.conn.execute(
+        "SELECT id FROM teams WHERE school = ? AND sport = ?", (r.sample.team, r.sport)
+    ).fetchall()
+    assert len(ids) == 1
+    for query in (r.sample.team, f"  {r.sample.team.lower()}  "):
+        assert (
+            resolve_team(r.conn, r.sample.year, query, method=r.method, sport=r.sport)
+            == ids[0]["id"]
+        )
+
+
+def test_build_team_case_is_coherent_under_every_method(rated_league: RatedLeague) -> None:
+    r = rated_league
+    case = build_team_case(r.conn, r.sample.year, r.sample.team, method=r.method, sport=r.sport)
+    stored = _stored_rating(r.conn, r.sample.year, r.method, r.sport, r.sample.team)
+
+    assert case.method == r.method
+    assert (case.year, case.team_name, case.team_id) == (
+        r.sample.year,
+        r.sample.team,
+        stored["team_id"],
+    )
+    assert _on_scale(r.method, case.rating), case.rating
+    assert (case.rating, case.rank) == (stored["rating"], stored["rank"])
+
+    results = [g.result for g in case.games]
+    assert (case.wins, case.losses, case.ties) == (
+        results.count("W"),
+        results.count("L"),
+        results.count("T"),
+    )
+    assert len(case.games) == case.wins + case.losses + case.ties
+
+    rated_opponents = [g for g in case.games if g.opponent_rating is not None]
+    assert rated_opponents
+    for game in rated_opponents:
+        assert game.opponent_rating is not None
+        assert _on_scale(r.method, game.opponent_rating), (game.opponent_name, game.opponent_rating)
+
+
+def test_rating_breakdown_matches_what_the_method_decomposes(rated_league: RatedLeague) -> None:
+    r = rated_league
+    breakdown = build_team_case(
+        r.conn, r.sample.year, r.sample.team, method=r.method, sport=r.sport
+    ).rating_breakdown
+    if HAS_BREAKDOWN[r.method]:
+        assert breakdown.entries
+    else:
+        # Elo writes no rating_breakdowns rows at all (PR #93), not even the
+        # residual row. That must read back as an empty breakdown, not raise.
+        assert breakdown.entries == []
+        assert breakdown.residual_contribution == 0.0
+
+
+def test_build_comparison_is_coherent_under_every_method(rated_league: RatedLeague) -> None:
+    r = rated_league
+    s = r.sample
+    comparison = build_comparison(
+        r.conn, s.year, s.team, s.opponent, method=r.method, sport=r.sport
+    )
+    a, b = comparison.team_a, comparison.team_b
+
+    assert comparison.year == s.year
+    assert (a.team_name, b.team_name) == (s.team, s.opponent)
+    for summary in (a, b):
+        stored = _stored_rating(r.conn, s.year, r.method, r.sport, summary.team_name)
+        assert (summary.rating, summary.rank) == (stored["rating"], stored["rank"])
+        assert _on_scale(r.method, summary.rating), summary.rating
+        assert bool(summary.rating_breakdown.entries) is HAS_BREAKDOWN[r.method]
+
+    assert comparison.rating_diff == a.rating - b.rating
+    assert comparison.rating_diff != 0
+
+    assert comparison.head_to_head.played is True
+    assert comparison.head_to_head.meetings
+    for meeting in comparison.head_to_head.meetings:
+        assert {meeting.home_team, meeting.away_team} == {s.team, s.opponent}
+
+    assert s.team in comparison.verdict
+    assert s.opponent in comparison.verdict
+    leader = s.team if comparison.rating_diff > 0 else s.opponent
+    d = VERDICT_DECIMALS[r.method]
+    assert comparison.verdict.endswith(
+        f"{leader} rates higher overall ({a.rating:.{d}f} vs {b.rating:.{d}f}, "
+        f"rank {a.rank} vs {b.rank})."
+    ), comparison.verdict
+
+
+# ---------------------------------------------------------------------------
+# issue #95 -- method isolation: two methods' rows in one database
+#
+# Every rating query in proof.py filters `AND method = ?`. Each test below
+# fails if any single one of those filters is dropped: list_available_years,
+# _rated_teams (resolve_team's candidates), build_team_case's own rating
+# lookup, _ratings_map (opponent ranks/ratings) and _rating_breakdown.
+# ---------------------------------------------------------------------------
+
+# Overlapping in 2005 only, and each method has a season the other lacks.
+ISOLATION_YEARS: dict[str, tuple[int, ...]] = {"keener": (2005, 2013), "elo": (2001, 2005)}
+
+
+@pytest.fixture
+def two_method_conn(regression_conn: sqlite3.Connection) -> sqlite3.Connection:
+    for method, years in ISOLATION_YEARS.items():
+        for year in years:
+            compute_and_store(regression_conn, year, method)
+    return regression_conn
+
+
+def test_isolation_list_available_years(two_method_conn: sqlite3.Connection) -> None:
+    assert list_available_years(two_method_conn, "keener") == [2005, 2013]
+    assert list_available_years(two_method_conn, "elo") == [2001, 2005]
+
+
+def test_isolation_resolve_team_sees_only_its_methods_rated_teams(
+    two_method_conn: sqlite3.Connection,
+) -> None:
+    conn = two_method_conn
+    texas = conn.execute("SELECT id FROM teams WHERE school = 'Texas' AND sport = 'cfb'").fetchone()
+    # Texas is rated once per method. A candidate pool that ignored the
+    # method would hold it twice and report "Texas" as ambiguous.
+    assert resolve_team(conn, 2005, "Texas", method="keener") == texas["id"]
+    assert resolve_team(conn, 2005, "Texas", method="elo") == texas["id"]
+    with pytest.raises(UnknownYearError):
+        resolve_team(conn, 2001, "Miami", method="keener")
+    with pytest.raises(UnknownYearError):
+        resolve_team(conn, 2013, "Florida State", method="elo")
+
+
+@pytest.mark.parametrize("school", ["Penn State", "Ohio State"])
+def test_isolation_build_team_case_reads_only_its_own_methods_rows(
+    two_method_conn: sqlite3.Connection, school: str
+) -> None:
+    conn = two_method_conn
+    stored = {m: _stored_rating(conn, 2005, m, "cfb", school) for m in ISOLATION_YEARS}
+    # Precondition. 2005 Texas is #1 under both methods, so rank alone can't
+    # tell the rows apart for Texas. These two teams rank differently.
+    assert stored["keener"]["rank"] != stored["elo"]["rank"]
+
+    for method, row in stored.items():
+        case = build_team_case(conn, 2005, school, method=method)
+        assert case.method == method
+        assert (case.rating, case.rank) == (row["rating"], row["rank"]), method
+        assert _on_scale(method, case.rating), (method, case.rating)
+
+        opponents = {
+            int(o["team_id"]): (float(o["rating"]), int(o["rank"]))
+            for o in conn.execute(
+                "SELECT team_id, rating, rank FROM ratings "
+                "WHERE year = 2005 AND method = ? AND sport = 'cfb'",
+                (method,),
+            )
+        }
+        for game in case.games:
+            assert (game.opponent_rating, game.opponent_rank) == opponents.get(
+                game.opponent_team_id, (None, None)
+            ), (method, game.opponent_name)
+
+        assert bool(case.rating_breakdown.entries) is HAS_BREAKDOWN[method], method
+        if not HAS_BREAKDOWN[method]:
+            assert case.rating_breakdown.residual_contribution == 0.0
+
+
+def test_isolation_verdict_leader_follows_the_requested_method(
+    two_method_conn: sqlite3.Connection,
+) -> None:
+    """Penn State and Ohio State met in 2005, and the two methods order them
+    oppositely, so the verdict's closing sentence names a different leader
+    depending only on which method's rows were read."""
+    conn = two_method_conn
+    for method in ISOLATION_YEARS:
+        penn_state = _stored_rating(conn, 2005, method, "cfb", "Penn State")
+        ohio_state = _stored_rating(conn, 2005, method, "cfb", "Ohio State")
+        comparison = build_comparison(conn, 2005, "Penn State", "Ohio State", method=method)
+
+        assert comparison.head_to_head.played is True
+        assert comparison.rating_diff == penn_state["rating"] - ohio_state["rating"]
+        leader = "Penn State" if penn_state["rank"] < ohio_state["rank"] else "Ohio State"
+        d = VERDICT_DECIMALS[method]
+        assert comparison.verdict.endswith(
+            f"{leader} rates higher overall "
+            f"({penn_state['rating']:.{d}f} vs {ohio_state['rating']:.{d}f}, "
+            f"rank {penn_state['rank']} vs {ohio_state['rank']})."
+        ), (method, comparison.verdict)
+
+    keener = build_comparison(conn, 2005, "Penn State", "Ohio State", method="keener")
+    elo = build_comparison(conn, 2005, "Penn State", "Ohio State", method="elo")
+    assert keener.rating_diff > 0
+    assert elo.rating_diff < 0

@@ -20,6 +20,7 @@ from cfb_strength.contracts import (
     ComparisonTeamSummary,
     HeadToHead,
     HeadToHeadMeeting,
+    Method,
     OpponentCredit,
     OpponentResult,
     RatingBreakdown,
@@ -41,6 +42,27 @@ QUALITY_WIN_RANK_THRESHOLD = 25
 # contracts.py for why a near-miss list cannot be built here.
 FUZZY_MATCH_CUTOFF = 0.6
 FUZZY_MATCH_LIMIT = 10
+
+# How `build_comparison`'s verdict prints a rating, per registered method
+# (issue #95). A rating's scale is the method's, so its precision is too:
+#
+# - keener: six places. Its ratings are a sum-to-1 eigenvector (~0.005 for a
+#   CFB team), so fewer places would erase the differences. This is the
+#   pre-#95 text, byte for byte.
+# - elo / elo_career: one place. Ratings sit around 1100-2000, where `.6f`
+#   printed false precision ("1523.456789"). One place still separates two
+#   teams a few tenths apart. An integer would print a dead heat right beside
+#   a sentence claiming one of them "rates higher".
+#
+# Keyed by `Method` so a stray key is a mypy error. evidence/test_proof.py
+# checks the keys equal `typing.get_args(Method)`, so a newly registered
+# method must choose a format here. `_verdict_rating_format` raises for
+# anything unlisted rather than falling back to `.6f`.
+VERDICT_RATING_FORMATS: dict[Method, str] = {
+    "keener": ".6f",
+    "elo": ".1f",
+    "elo_career": ".1f",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +529,23 @@ def build_comparison(
     )
 
 
+def _verdict_rating_format(method: str) -> str:
+    """The verdict's format spec for `method`'s ratings.
+
+    Raises ValueError for a method with no registered format. The public API
+    only reaches this with a method that has stored ratings, and a database
+    written by a newer or experimental engine can hold rows for a method this
+    table doesn't know. Guessing a precision for such a method is the bug
+    #95 fixed, so this refuses instead.
+    """
+    if method not in VERDICT_RATING_FORMATS:
+        raise ValueError(
+            f"no verdict rating format registered for method {method!r}; "
+            f"registered: {list(VERDICT_RATING_FORMATS)}"
+        )
+    return VERDICT_RATING_FORMATS[method]
+
+
 def _build_verdict(
     case_a: TeamCase,
     case_b: TeamCase,
@@ -514,6 +553,9 @@ def _build_verdict(
     common_opponents: list[CommonOpponent],
     rating_diff: float,
 ) -> str:
+    # Looked up before any prose is built, so an unregistered method raises
+    # whatever the data, including when the ratings are exactly tied.
+    rating_format = _verdict_rating_format(case_a.method)
     parts: list[str] = []
 
     if meetings:
@@ -552,7 +594,8 @@ def _build_verdict(
     leader = case_a.team_name if rating_diff > 0 else case_b.team_name if rating_diff < 0 else None
     if leader:
         parts.append(
-            f"{leader} rates higher overall ({case_a.rating:.6f} vs {case_b.rating:.6f}, "
+            f"{leader} rates higher overall "
+            f"({case_a.rating:{rating_format}} vs {case_b.rating:{rating_format}}, "
             f"rank {case_a.rank} vs {case_b.rank})."
         )
     else:
