@@ -5,12 +5,19 @@
  * reading it.
  */
 
+/**
+ * A single completed game's result from one team's side. `'T'` is a tie
+ * (equal scores, any sport -- issue #83); it can appear in `games` and in
+ * common-opponent results, but never in `quality_wins` or `worst_loss`.
+ */
+export type GameResult = 'W' | 'L' | 'T'
+
 export interface OpponentResultOut {
   opponent_team_id: number
   opponent_name: string
   opponent_rank: number | null
   opponent_rating: number | null
-  result: 'W' | 'L'
+  result: GameResult
   team_score: number
   opponent_score: number
   week: number | null
@@ -43,6 +50,8 @@ export interface TeamCaseOut {
   rating: number
   wins: number
   losses: number
+  /** Required on the API side (issue #83). Render records via `formatRecord`. */
+  ties: number
   rating_breakdown: RatingBreakdownOut
   games: OpponentResultOut[]
   quality_wins: OpponentResultOut[]
@@ -56,6 +65,8 @@ export interface ComparisonTeamSummaryOut {
   rating: number
   wins: number
   losses: number
+  /** Required on the API side (issue #83). Render records via `formatRecord`. */
+  ties: number
   rating_breakdown: RatingBreakdownOut
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
@@ -81,10 +92,10 @@ export interface CommonOpponentOut {
   opponent_team_id: number
   opponent_name: string
   opponent_rank: number | null
-  team_a_result: 'W' | 'L'
+  team_a_result: GameResult
   team_a_score: number
   team_a_opponent_score: number
-  team_b_result: 'W' | 'L'
+  team_b_result: GameResult
   team_b_score: number
   team_b_opponent_score: number
 }

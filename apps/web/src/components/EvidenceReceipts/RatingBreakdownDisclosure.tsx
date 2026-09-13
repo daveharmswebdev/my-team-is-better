@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { formatRating } from '../../lib/formatRating'
-import type { RatingBreakdownOut } from '../../lib/api/types'
+import { formatRecord } from '../../lib/formatRecord'
+import type { OpponentCreditOut, RatingBreakdownOut } from '../../lib/api/types'
 import styles from './RatingBreakdownDisclosure.module.css'
 
 export interface RatingBreakdownDisclosureProps {
@@ -41,6 +42,22 @@ function useIsTouchInteraction(): boolean {
   }, [])
 
   return isTouch
+}
+
+/**
+ * Per-opponent record for a breakdown row. The engine's per-opponent credit
+ * carries `games_played`/`wins`/`losses` but no `ties` field (issue #83), so
+ * ties are *derived* here as the games that were neither a win nor a loss --
+ * the same arithmetic the engine's own explanation text uses (e.g. "Played
+ * them 2 times (1-0-1)"). Clamped at 0 so a malformed entry can never render
+ * a negative tie count.
+ */
+function opponentRecord(entry: OpponentCreditOut): string {
+  const derivedTies = Math.max(
+    0,
+    entry.games_played - entry.wins - entry.losses,
+  )
+  return formatRecord(entry.wins, entry.losses, derivedTies)
 }
 
 /**
@@ -167,9 +184,7 @@ export function RatingBreakdownDisclosure({
           {breakdown.entries.map((entry) => (
             <li key={entry.opponent_team_id} className={styles.row}>
               <span className={styles.rowOpponent}>{entry.opponent_name}</span>
-              <span className={styles.rowRecord}>
-                {entry.wins}-{entry.losses}
-              </span>
+              <span className={styles.rowRecord}>{opponentRecord(entry)}</span>
               <span className={styles.rowNum}>
                 {formatRating(entry.credit)}
               </span>

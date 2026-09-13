@@ -1,12 +1,35 @@
 import { formatRating } from '../../lib/formatRating'
+import { formatRecord } from '../../lib/formatRecord'
+import { resultLabel } from '../../lib/resultLabel'
 import type {
   ComparisonResultOut,
   ComparisonTeamSummaryOut,
   CommonOpponentOut,
+  GameResult,
   HeadToHeadMeetingOut,
 } from '../../lib/api/types'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
 import styles from './ComparisonReceipts.module.css'
+
+const TAG_CLASS: Record<GameResult, string | undefined> = {
+  W: styles.gamelineTagW,
+  L: styles.gamelineTagL,
+  T: styles.gamelineTagT,
+}
+
+/**
+ * One side's W/L/T pill: the visible letter is hidden from assistive tech and
+ * the spoken word ("Win"/"Loss"/"Tie") is visually hidden, so a tie never
+ * reads as the bare letter "T" and never relies on colour alone.
+ */
+function ResultTag({ result }: { result: GameResult }) {
+  return (
+    <span className={`${styles.gamelineTag} ${TAG_CLASS[result]}`}>
+      <span aria-hidden="true">{result}</span>
+      <span className={styles.visuallyHidden}>{resultLabel(result)}</span>
+    </span>
+  )
+}
 
 export interface ComparisonReceiptsProps {
   evidence: ComparisonResultOut
@@ -20,9 +43,7 @@ function TeamSummary({ team }: { team: ComparisonTeamSummaryOut }) {
       <dl className={styles.kvGrid}>
         <div>
           <dt>Record</dt>
-          <dd>
-            {team.wins}-{team.losses}
-          </dd>
+          <dd>{formatRecord(team.wins, team.losses, team.ties)}</dd>
         </div>
         <div>
           <dt>Rating</dt>
@@ -52,27 +73,19 @@ function MeetingRow({ meeting }: { meeting: HeadToHeadMeetingOut }) {
   )
 }
 
-/** A common-opponent row: both teams' W/L tag and score against the shared opponent. */
+/** A common-opponent row: both teams' W/L/T tag and score against the shared opponent. */
 function CommonOpponentLine({ opponent }: { opponent: CommonOpponentOut }) {
-  const tagClassA =
-    opponent.team_a_result === 'W' ? styles.gamelineTagW : styles.gamelineTagL
-  const tagClassB =
-    opponent.team_b_result === 'W' ? styles.gamelineTagW : styles.gamelineTagL
   return (
     <li className={styles.gameline}>
       <span className={styles.gamelineOpp}>
         vs {opponent.opponent_name}
         {opponent.opponent_rank !== null ? ` (#${opponent.opponent_rank})` : ''}
       </span>
-      <span className={`${styles.gamelineTag} ${tagClassA}`}>
-        {opponent.team_a_result}
-      </span>
+      <ResultTag result={opponent.team_a_result} />
       <span>
         {opponent.team_a_score}-{opponent.team_a_opponent_score}
       </span>
-      <span className={`${styles.gamelineTag} ${tagClassB}`}>
-        {opponent.team_b_result}
-      </span>
+      <ResultTag result={opponent.team_b_result} />
       <span>
         {opponent.team_b_score}-{opponent.team_b_opponent_score}
       </span>

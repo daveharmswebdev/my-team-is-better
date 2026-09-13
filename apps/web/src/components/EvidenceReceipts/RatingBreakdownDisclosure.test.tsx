@@ -196,6 +196,51 @@ describe('RatingBreakdownDisclosure', () => {
     expect(within(dialog).getByText(/8\.77/)).toBeInTheDocument()
   })
 
+  it('shows a per-opponent W-L-T record when games_played exceeds wins + losses (a tie), and plain W-L otherwise', async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    render(
+      <RatingBreakdownDisclosure
+        teamName="Cincinnati Bengals"
+        rating={0.00877}
+        breakdown={{
+          ...breakdown,
+          entries: [
+            {
+              opponent_team_id: 16,
+              opponent_name: 'Washington Commanders',
+              // Played twice: one win, one tie -- the entry has no `ties`
+              // field of its own.
+              games_played: 2,
+              wins: 1,
+              losses: 0,
+              credit: 0.018,
+              contribution: 0.002,
+              explanation: 'Split the season series with a win and a tie.',
+            },
+            {
+              opponent_team_id: 999,
+              opponent_name: 'Rutgers',
+              games_played: 1,
+              wins: 1,
+              losses: 0,
+              credit: 0.009,
+              contribution: 0.001,
+              explanation: 'One clean win.',
+            },
+          ],
+        }}
+      />,
+    )
+
+    await user.hover(screen.getByRole('button', { name: /8\.77/ }))
+    const dialog = screen.getByRole('dialog')
+
+    expect(within(dialog).getByText('1-0-1')).toBeInTheDocument()
+    // Rutgers: games_played 1, 1-0 -- no tie, so no trailing "-0".
+    expect(within(dialog).getByText('1-0')).toBeInTheDocument()
+  })
+
   it('renders each entry’s own deterministic explanation line', async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()

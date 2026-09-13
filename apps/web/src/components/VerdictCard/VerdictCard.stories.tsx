@@ -13,6 +13,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
     rating: 0.01234,
     wins: 13,
     losses: 0,
+    ties: 0,
     rating_breakdown: {
       entries: [
         {
@@ -63,6 +64,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
       rating: 0.01234,
       wins: 13,
       losses: 0,
+      ties: 0,
       rating_breakdown: {
         entries: [
           {
@@ -89,6 +91,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
       rating: 0.01147,
       wins: 12,
       losses: 1,
+      ties: 0,
       rating_breakdown: {
         entries: [
           {

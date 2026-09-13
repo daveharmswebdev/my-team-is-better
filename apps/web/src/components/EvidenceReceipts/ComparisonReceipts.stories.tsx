@@ -11,6 +11,7 @@ const evidence: ComparisonResultOut = {
     rating: 0.00877,
     wins: 7,
     losses: 1,
+    ties: 0,
     rating_breakdown: {
       entries: [
         {
@@ -51,6 +52,7 @@ const evidence: ComparisonResultOut = {
     rating: 0.00602,
     wins: 2,
     losses: 4,
+    ties: 0,
     rating_breakdown: {
       entries: [
         {
@@ -144,6 +146,34 @@ export const NoCommonOpponents: Story = {
     evidence: {
       ...evidence,
       common_opponents: [],
+    },
+  },
+}
+
+/**
+ * Issue #83: team A tied a common opponent, so its record reads W-L-T
+ * ("6-9-1") and that side of the row carries its own neutral "T" tag,
+ * announced as "Tie", while team B's side is still an ordinary loss.
+ */
+export const CommonOpponentTie: Story = {
+  args: {
+    evidence: {
+      ...evidence,
+      team_a: { ...evidence.team_a, wins: 6, losses: 9, ties: 1 },
+      common_opponents: [
+        {
+          opponent_team_id: 84,
+          opponent_name: 'Indiana',
+          opponent_rank: 21,
+          team_a_result: 'T',
+          team_a_score: 26,
+          team_a_opponent_score: 26,
+          team_b_result: 'L',
+          team_b_score: 21,
+          team_b_opponent_score: 38,
+        },
+        ...evidence.common_opponents.slice(1),
+      ],
     },
   },
 }
