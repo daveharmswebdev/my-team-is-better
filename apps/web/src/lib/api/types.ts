@@ -43,7 +43,8 @@ export interface RatingBreakdownOut {
 
 export interface TeamCaseOut {
   year: number
-  method: string
+  /** Echoes the request's already-validated method; picks `formatRating`'s display scale. */
+  method: Method
   team_id: number
   team_name: string
   rank: number
@@ -102,11 +103,15 @@ export interface CommonOpponentOut {
 
 export interface ComparisonResultOut {
   year: number
+  /** Echoes the request's already-validated method (issue #152); picks `formatRating`'s display scale. */
+  method: Method
   team_a: ComparisonTeamSummaryOut
   team_b: ComparisonTeamSummaryOut
   head_to_head: HeadToHeadOut
   common_opponents: CommonOpponentOut[]
+  /** `team_a.rating - team_b.rating`, on the method's own scale. */
   rating_diff: number
+  /** Engine sentence, still sent for the persona and MCP; apps/web deliberately doesn't render it (#24). */
   verdict: string
 }
 
@@ -217,6 +222,24 @@ export interface TeamDetail {
 export const SPORTS = ['cfb', 'nfl'] as const
 
 export type Sport = (typeof SPORTS)[number]
+
+// ---------------------------------------------------------------------------
+// method -- mirrors the API's `Method` Literal (re-exported by
+// `apps/api/src/api/models.py` from the engine's `cfb_strength.contracts`),
+// echoed on `TeamCaseOut.method` and `ComparisonResultOut.method`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The source list for `Method` (epic #147 / issue #82). `formatRating` keys an
+ * exhaustive `Record<Method, ...>` display-rule table on it, so a method added
+ * here fails tsc until it picks a display scale. Checked against the API's
+ * published `apps/api/openapi-vocabularies.json` (`method`, order included) by
+ * `vocabularies.test.ts`, so a method the API gains without apps/web following
+ * it fails CI rather than rendering at the wrong scale.
+ */
+export const METHODS = ['keener', 'elo', 'elo_career'] as const
+
+export type Method = (typeof METHODS)[number]
 
 /** True when `evidence` is a `TeamCaseOut` (champion/team-case routes) rather than a `ComparisonResultOut` (compare route). */
 export function isTeamCaseEnvelope(

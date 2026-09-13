@@ -2,12 +2,18 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { KeyboardEvent, MouseEvent } from 'react'
 import { formatRating } from '../../lib/formatRating'
 import { formatRecord } from '../../lib/formatRecord'
-import type { OpponentCreditOut, RatingBreakdownOut } from '../../lib/api/types'
+import type {
+  Method,
+  OpponentCreditOut,
+  RatingBreakdownOut,
+} from '../../lib/api/types'
 import styles from './RatingBreakdownDisclosure.module.css'
 
 export interface RatingBreakdownDisclosureProps {
   /** Team this breakdown belongs to (used in labels only, not rendered as a heading of its own). */
   teamName: string
+  /** The rating method behind `rating`/`breakdown` -- picks every number's display scale via `formatRating`. */
+  method: Method
   /** The same rating value `ComparisonReceipts` already displays -- shown again in the footer total so a fan can see it's consistent with the entries + residual below it. */
   rating: number
   breakdown: RatingBreakdownOut
@@ -70,6 +76,7 @@ function opponentRecord(entry: OpponentCreditOut): string {
  */
 export function RatingBreakdownDisclosure({
   teamName,
+  method,
   rating,
   breakdown,
 }: RatingBreakdownDisclosureProps) {
@@ -186,10 +193,10 @@ export function RatingBreakdownDisclosure({
               <span className={styles.rowOpponent}>{entry.opponent_name}</span>
               <span className={styles.rowRecord}>{opponentRecord(entry)}</span>
               <span className={styles.rowNum}>
-                {formatRating(entry.credit)}
+                {formatRating(entry.credit, method)}
               </span>
               <span className={styles.rowNum}>
-                {formatRating(entry.contribution)}
+                {formatRating(entry.contribution, method)}
               </span>
               <span className={styles.rowExplanation}>{entry.explanation}</span>
             </li>
@@ -202,7 +209,7 @@ export function RatingBreakdownDisclosure({
       <div className={styles.residualRow}>
         <span className={styles.residualLabel}>Rating-system baseline</span>
         <span className={styles.rowNum}>
-          {formatRating(breakdown.residual_contribution)}
+          {formatRating(breakdown.residual_contribution, method)}
         </span>
       </div>
       <p className={styles.residualNote}>
@@ -213,10 +220,10 @@ export function RatingBreakdownDisclosure({
 
       <div className={styles.totalRow}>
         <span>Total</span>
-        <span className={styles.rowNum}>{formatRating(total)}</span>
+        <span className={styles.rowNum}>{formatRating(total, method)}</span>
       </div>
       <p className={styles.totalNote}>
-        Matches the displayed rating: {formatRating(rating)}
+        Matches the displayed rating: {formatRating(rating, method)}
       </p>
     </div>
   )
@@ -237,7 +244,7 @@ export function RatingBreakdownDisclosure({
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
       >
-        {formatRating(rating)}
+        {formatRating(rating, method)}
       </button>
 
       {open && !isTouch && (

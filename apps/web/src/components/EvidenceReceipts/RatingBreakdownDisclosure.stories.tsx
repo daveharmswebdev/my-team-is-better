@@ -66,6 +66,7 @@ const meta = {
   tags: ['autodocs'],
   args: {
     teamName: 'Ohio State',
+    method: 'keener',
     rating: 0.00877,
     breakdown,
   },

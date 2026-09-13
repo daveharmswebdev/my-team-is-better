@@ -328,6 +328,9 @@ class CommonOpponentOut(BaseModel):
 
 class ComparisonResultOut(BaseModel):
     year: int
+    # Issue #152: the method both teams' ranks/ratings/rating_diff come from.
+    # The engine field is already `Method`, so this publishes a real enum.
+    method: Method
     team_a: ComparisonTeamSummaryOut
     team_b: ComparisonTeamSummaryOut
     head_to_head: HeadToHeadOut
@@ -339,6 +342,7 @@ class ComparisonResultOut(BaseModel):
     def from_dataclass(cls, comparison: ComparisonResult) -> ComparisonResultOut:
         return cls(
             year=comparison.year,
+            method=comparison.method,
             team_a=ComparisonTeamSummaryOut.from_dataclass(comparison.team_a),
             team_b=ComparisonTeamSummaryOut.from_dataclass(comparison.team_b),
             head_to_head=HeadToHeadOut.from_dataclass(comparison.head_to_head),

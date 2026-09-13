@@ -63,7 +63,9 @@ def test_elo_champion_is_on_the_elo_scale_not_keeners(client: TestClient) -> Non
 
     assert 1500 < elo_rating < 2500, elo_rating
     assert 0 < keener_rating < 1, keener_rating
-    assert elo["evidence"]["team_name"] == keener["evidence"]["team_name"] == "Texas"
+    # Each method's champion is pinned on its own, never to the other's: there
+    # is no mandate that Keener and Elo agree (epic #147).
+    assert elo["evidence"]["team_name"] == "Texas"
 
 
 def test_elo_team_case_and_comparison_are_coherent(client: TestClient) -> None:

@@ -57,6 +57,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
 const comparisonEnvelope: ComparisonEnvelope = {
   evidence: {
     year: 2005,
+    method: 'keener',
     team_a: {
       team_id: 1,
       team_name: 'Texas',

@@ -630,6 +630,24 @@ def test_build_comparison_is_coherent_under_every_method(rated_league: RatedLeag
     ), comparison.verdict
 
 
+def test_build_comparison_says_which_method_answered_it(rated_league: RatedLeague) -> None:
+    """Issue #152: a compare verdict names the rating method behind it, and
+    that is the method requested -- the same one both underlying team cases
+    were built under -- never a default, and never the decoy method whose
+    rows sit beside it in the sample year."""
+    r = rated_league
+    s = r.sample
+    comparison = build_comparison(
+        r.conn, s.year, s.team, s.opponent, method=r.method, sport=r.sport
+    )
+    case_a = build_team_case(r.conn, s.year, s.team, method=r.method, sport=r.sport)
+    case_b = build_team_case(r.conn, s.year, s.opponent, method=r.method, sport=r.sport)
+
+    assert comparison.method == r.method
+    assert comparison.method == case_a.method == case_b.method
+    assert comparison.method != r.decoy_method
+
+
 # ---------------------------------------------------------------------------
 # issue #95 -- method isolation: every registered method's rows in one season
 #

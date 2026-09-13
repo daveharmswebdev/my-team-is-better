@@ -122,6 +122,7 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
         &middot; Rank #{evidence.rank} &middot; Rating{' '}
         <RatingBreakdownDisclosure
           teamName={evidence.team_name}
+          method={evidence.method}
           rating={evidence.rating}
           breakdown={evidence.rating_breakdown}
         />

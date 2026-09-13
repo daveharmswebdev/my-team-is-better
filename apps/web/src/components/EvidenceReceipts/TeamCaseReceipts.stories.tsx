@@ -189,3 +189,19 @@ export const RatingBreakdown: Story = {
     evidence: undefeated,
   },
 }
+
+/**
+ * An Elo team case (epic #147 / issue #82): the rating prints on Elo's own
+ * whole-point scale ("1,684"), picked from `evidence.method`, never Keener's
+ * x1000 transform.
+ */
+export const Elo: Story = {
+  args: {
+    evidence: {
+      ...undefeated,
+      method: 'elo',
+      rating: 1684.4,
+      rating_breakdown: { entries: [], residual_contribution: 1684.4 },
+    },
+  },
+}

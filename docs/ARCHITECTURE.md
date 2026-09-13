@@ -402,11 +402,13 @@ weights config — is still unbuilt and still uses this same seam. The
 `EloConfig` frozen dataclass is the pattern to copy: calibration as data,
 never a subclass.
 
-**Not yet done, and tracked:** no `QuestionForm` engine toggle exists, and
-one cannot ship until #82 — `apps/web`'s `formatRating` multiplies every
-rating by 1000 for Keener's sum-to-1 scale, which would render an Elo rating
-of ~1500 as `1,500,000`. CFB's Elo constants are an uncalibrated first pass
-(#87). The MCP surface still has no `sport` parameter at all (#86).
+**Not yet done, and tracked (epic #147):** `apps/web`'s display layer is
+method-aware — `formatRating(value, method)` shows Keener ×1000 and Elo as
+whole points, and compare verdicts echo `method` (#82, #152) — but no
+`QuestionForm` engine toggle exists yet, so every request still falls back
+to `keener` (#154). `RatingBreakdownDisclosure` explains Keener's math and
+must not open under Elo before that toggle ships (#153). CFB's Elo constants
+are an uncalibrated first pass (#87).
 
 ## 7. Deployment (Render)
 

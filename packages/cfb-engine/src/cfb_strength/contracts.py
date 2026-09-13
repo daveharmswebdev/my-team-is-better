@@ -454,6 +454,10 @@ class CommonOpponent:
 @dataclass(frozen=True)
 class ComparisonResult:
     year: int
+    # The rating method both teams' ranks, ratings and `rating_diff` come from
+    # (issue #152) -- `TeamCase.method`'s counterpart, so a compare verdict
+    # says which engine answered it instead of the caller having to remember.
+    method: Method
     team_a: ComparisonTeamSummary
     team_b: ComparisonTeamSummary
     head_to_head: HeadToHead

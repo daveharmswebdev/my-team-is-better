@@ -1,4 +1,4 @@
-import { formatRating } from '../../lib/formatRating'
+import { displayRatingPair } from '../../lib/formatRating'
 import { formatRecord } from '../../lib/formatRecord'
 import { resultLabel } from '../../lib/resultLabel'
 import type {
@@ -7,6 +7,7 @@ import type {
   CommonOpponentOut,
   GameResult,
   HeadToHeadMeetingOut,
+  Method,
 } from '../../lib/api/types'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
 import styles from './ComparisonReceipts.module.css'
@@ -36,7 +37,13 @@ export interface ComparisonReceiptsProps {
 }
 
 /** Per-team Record/Rating summary (design-system.html's "Comparison" mockup's `kv-grid`). */
-function TeamSummary({ team }: { team: ComparisonTeamSummaryOut }) {
+function TeamSummary({
+  team,
+  method,
+}: {
+  team: ComparisonTeamSummaryOut
+  method: Method
+}) {
   return (
     <>
       <h4 className={styles.label}>{team.team_name}</h4>
@@ -50,6 +57,7 @@ function TeamSummary({ team }: { team: ComparisonTeamSummaryOut }) {
           <dd>
             <RatingBreakdownDisclosure
               teamName={team.team_name}
+              method={method}
               rating={team.rating}
               breakdown={team.rating_breakdown}
             />
@@ -93,14 +101,45 @@ function CommonOpponentLine({ opponent }: { opponent: CommonOpponentOut }) {
   )
 }
 
+/**
+ * apps/web's own bottom line, "Rating diff: {diff} · {sentence}", built from
+ * the summaries at display precision (issue #24) instead of the engine's raw
+ * `verdict`, which restates head-to-head/common opponents already rendered
+ * above and prints ratings at engine precision. Numbers are always ordered
+ * team_a-then-team_b. When both ratings print identically (an exact tie
+ * included) it names no leader: a leader beside two identical printed numbers
+ * is the web half of #149's bug.
+ *
+ * The diff, the "same" test and the leader all come from `displayRatingPair`,
+ * i.e. from the two ratings rounded once to display precision. The API's raw
+ * `rating_diff` is deliberately NOT used here, even though it is right there:
+ * rounded on its own it can contradict the two printed ratings (Elo `1531.5`
+ * vs `1531.4` prints "Rating diff: 0" beside "1,532 vs 1,531"; `1531.49` vs
+ * `1530.5` prints "Rating diff: 1" beside "rate the same (1,531)").
+ */
+function verdictLine({ method, team_a, team_b }: ComparisonResultOut): string {
+  const {
+    a: fa,
+    b: fb,
+    diff,
+    leader,
+  } = displayRatingPair(team_a.rating, team_b.rating, method)
+  const ranks = `rank ${team_a.rank} vs ${team_b.rank}`
+  const sentence =
+    leader === null
+      ? `${team_a.team_name} and ${team_b.team_name} rate the same at display precision (${fa}; ${ranks}).`
+      : `${leader === 'a' ? team_a.team_name : team_b.team_name} rates higher overall (${fa} vs ${fb}, ${ranks}).`
+  return `Rating diff: ${diff} · ${sentence}`
+}
+
 /** The "receipts" for a compare verdict (PRD §3 / Architecture Brief §4.3's "show your work"). */
 export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
-  const { team_a, team_b, head_to_head, common_opponents } = evidence
+  const { method, team_a, team_b, head_to_head, common_opponents } = evidence
 
   return (
     <section aria-label="comparison evidence" className={styles.receipts}>
-      <TeamSummary team={team_a} />
-      <TeamSummary team={team_b} />
+      <TeamSummary team={team_a} method={method} />
+      <TeamSummary team={team_b} method={method} />
 
       <h4 className={styles.label}>Head to head</h4>
       {head_to_head.played ? (
@@ -131,10 +170,7 @@ export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
         <p className={styles.empty}>No common opponents.</p>
       )}
 
-      <p className={styles.verdictLine}>
-        Rating diff: {formatRating(evidence.rating_diff)} &middot;{' '}
-        {evidence.verdict}
-      </p>
+      <p className={styles.verdictLine}>{verdictLine(evidence)}</p>
     </section>
   )
 }
