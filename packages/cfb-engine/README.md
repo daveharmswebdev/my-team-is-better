@@ -32,7 +32,26 @@ uv run cfb ingest --years 2005              # ingest CFB game data (cached raw J
 uv run cfb ingest --sport nfl --years 2023-2025   # ingest NFL game data (cached raw CSV in data/raw/nfl/)
 uv run cfb rate --years 2005                # compute ratings from ingested games
 uv run cfb serve                            # run the MCP server (stdio)
+uv run cfb doctor                           # is the local db's *data* current? (read-only)
 ```
+
+### Is my local db stale? `cfb doctor`
+
+A stale `data/cfb.sqlite3` looks exactly like a fresh one, and `ensure_schema`
+migrating its missing columns in doesn't make its *data* any newer (a pre-#51
+build has no NFL rows and no mascots). `cfb doctor [--db-path PATH] [--raw-dir PATH]`
+opens the db read-only and exits 0 only when:
+- its schema matches what `ensure_schema` would produce
+- every league has games
+- no season in the committed raw cache is missing from `games`
+- every season with games is rated by every method
+- CFB teams have mascots
+
+Otherwise it exits 1 and names each problem. It never migrates or writes
+the file. When `ensure_schema` does migrate a db that already holds games, it
+emits a `StaleDatabaseWarning` pointing here. The usual fix is to rebuild from
+the committed cache with render.yaml's ingest/rate commands. `rate` has no
+`--db-path` flag, so pin every step with `CFB_DB_PATH=...`.
 
 ## Data sources
 

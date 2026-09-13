@@ -1,8 +1,10 @@
-"""Umbrella CLI for cfb-strength: `cfb ingest`, `cfb rate`, `cfb serve`.
+"""Umbrella CLI for cfb-strength: `cfb ingest`, `cfb rate`, `cfb serve`,
+`cfb doctor`.
 
 This module only dispatches to entry points owned by other modules
 (`ingest.ingest_season.main`, `ingest.nflverse.ingest_season.main`,
-`ratings.compute_ratings.main`, `mcp_server.server.main`) -- it contains no
+`ratings.compute_ratings.main`, `mcp_server.server.main`,
+`ingest.currency.main`) -- it contains no
 ingestion, rating, or evidence logic of its own. Imports are deferred into
 each branch so that, e.g., `cfb ingest --years 2005` doesn't pay the cost of
 importing the MCP SDK.
@@ -79,6 +81,12 @@ commands:
   serve
       Start the MCP server (stdio transport) exposing ranking/evidence tools.
 
+  doctor [--db-path PATH] [--raw-dir PATH]
+      Read-only check that the db's data is current: schema, every league
+      ({_SPORT_CHOICES}) ingested, no season behind the committed raw cache,
+      every method ({_METHOD_CHOICES}) rated, CFB mascots enriched. Exits 0
+      only when it is; never migrates or writes the db.
+
 Run 'cfb <command> --help' for command-specific options.
 """
 
@@ -148,6 +156,11 @@ def main(argv: list[str] | None = None) -> int:
 
         serve_main()
         return 0
+
+    if command == "doctor":
+        from cfb_strength.ingest.currency import main as doctor_main
+
+        return doctor_main(rest)
 
     print(f"error: unknown command {command!r}\n", file=sys.stderr)
     print(USAGE, file=sys.stderr)

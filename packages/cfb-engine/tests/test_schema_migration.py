@@ -15,11 +15,21 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import warnings
 from pathlib import Path
 
 import pytest
 
-from cfb_strength.db.connection import SCHEMA_PATH, ensure_schema, get_conn
+from cfb_strength.db.connection import SCHEMA_PATH, StaleDatabaseWarning, ensure_schema, get_conn
+
+# Issue #97: migrating a db that already holds games emits
+# `StaleDatabaseWarning`. The tests carrying this mark migrate the populated
+# `pre_51_db` fixture on purpose -- the warning is expected there, and is
+# asserted by the dedicated warning tests further down, so it is ignored
+# only on these tests rather than globally.
+_MIGRATES_A_POPULATED_STALE_DB = pytest.mark.filterwarnings(
+    "ignore::cfb_strength.db.connection.StaleDatabaseWarning"
+)
 
 _PRE_51_SCHEMA = """
 CREATE TABLE teams (
@@ -133,6 +143,7 @@ def pre_51_db(tmp_path: Path) -> Path:
     return dest
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_adds_sport_column_defaulting_existing_rows_to_cfb(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -144,6 +155,7 @@ def test_migration_adds_sport_column_defaulting_existing_rows_to_cfb(pre_51_db: 
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_adds_source_id_column_nullable_for_existing_rows(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -156,6 +168,7 @@ def test_migration_adds_source_id_column_nullable_for_existing_rows(pre_51_db: P
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_preserves_existing_rows_and_ids(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -172,6 +185,7 @@ def test_migration_preserves_existing_rows_and_ids(pre_51_db: Path) -> None:
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_widens_ingestion_log_primary_key_to_include_sport(pre_51_db: Path) -> None:
     """ingestion_log is dropped and recreated (not migrated in place -- see
     connection.py's comment: it's a regenerable operational log, not data
@@ -203,6 +217,7 @@ def test_migration_widens_ingestion_log_primary_key_to_include_sport(pre_51_db: 
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_creates_unique_indexes_on_source_id(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -222,6 +237,7 @@ def test_migration_creates_unique_indexes_on_source_id(pre_51_db: Path) -> None:
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_is_idempotent_when_run_twice(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -316,6 +332,7 @@ def test_migration_leaves_existing_team_rows_with_null_aliases(post_51_pre_77_db
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_adds_alias_columns_to_a_pre_51_db_too(pre_51_db: Path) -> None:
     """The oldest shape must land on the current schema in one pass, not
     only the one-version-behind shape above."""
@@ -362,6 +379,7 @@ def test_fresh_db_has_alias_columns_from_the_ddl(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_migration_adds_ties_column_defaulting_existing_ratings_to_zero(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -372,6 +390,7 @@ def test_migration_adds_ties_column_defaulting_existing_ratings_to_zero(pre_51_d
     conn.close()
 
 
+@_MIGRATES_A_POPULATED_STALE_DB
 def test_ties_migration_is_idempotent_when_run_twice(pre_51_db: Path) -> None:
     conn = get_conn(pre_51_db)
     ensure_schema(conn)
@@ -393,6 +412,113 @@ def test_fresh_db_has_ties_column_from_the_ddl(tmp_path: Path) -> None:
     assert cols["ties"]["notnull"] == 1
 
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #97: StaleDatabaseWarning. Schema currency disguises data staleness --
+# `ensure_schema` migrates the missing columns into a pre-#51 db and the
+# result looks current while holding no NFL rows and no mascots. A migration
+# that actually fires (a `_has_column` check came back False) on a db that
+# already holds games is the one moment the code *knows* the data predates
+# the schema, so it says so. It must stay quiet for a fresh db, an already
+# current db, and an empty pre-existing db (no data to be stale).
+# ---------------------------------------------------------------------------
+
+
+def _stale_warnings_from_ensure_schema(db: Path) -> list[warnings.WarningMessage]:
+    conn = get_conn(db)
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            ensure_schema(conn)
+    finally:
+        conn.close()
+    return [w for w in caught if issubclass(w.category, StaleDatabaseWarning)]
+
+
+def _insert_one_team_and_game(conn: sqlite3.Connection) -> None:
+    conn.execute("INSERT INTO teams (id, school, classification) VALUES (251, 'Texas', 'fbs')")
+    conn.execute(
+        """
+        INSERT INTO games (
+            id, season, week, season_type, completed, home_team_id, away_team_id,
+            home_team, away_team, home_points, away_points, raw_json
+        ) VALUES (1, 2005, 1, 'regular', 1, 251, 251, 'Texas', 'Texas', 41, 38, '{}')
+        """
+    )
+
+
+def test_stale_warning_fires_when_migrating_a_populated_pre_51_db(pre_51_db: Path) -> None:
+    stale = _stale_warnings_from_ensure_schema(pre_51_db)
+
+    assert len(stale) == 1
+    message = str(stale[0].message)
+    assert str(pre_51_db) in message
+    assert "predates the current schema" in message
+    assert "cfb doctor" in message
+
+
+@pytest.mark.parametrize(
+    "dropped",
+    [
+        pytest.param(
+            (("teams", "mascot"), ("teams", "alternate_names"), ("ratings", "ties")),
+            id="post_51_pre_77",
+        ),
+        pytest.param((("ratings", "ties"),), id="post_77_pre_83"),
+    ],
+)
+def test_stale_warning_fires_when_migrating_a_populated_post_51_db(
+    tmp_path: Path, dropped: tuple[tuple[str, str], ...]
+) -> None:
+    db = tmp_path / "post_51.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(SCHEMA_PATH.read_text())
+    for table, column in dropped:
+        conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+    _insert_one_team_and_game(conn)
+    conn.commit()
+    conn.close()
+
+    stale = _stale_warnings_from_ensure_schema(db)
+
+    assert len(stale) == 1
+    message = str(stale[0].message)
+    assert "predates the current schema" in message
+    for table, column in dropped:
+        assert f"{table}.{column}" in message
+
+
+def test_stale_warning_does_not_fire_for_a_fresh_db(tmp_path: Path) -> None:
+    assert _stale_warnings_from_ensure_schema(tmp_path / "fresh.sqlite3") == []
+
+
+def test_stale_warning_does_not_fire_for_a_populated_current_db(tmp_path: Path) -> None:
+    db = tmp_path / "current.sqlite3"
+    conn = get_conn(db)
+    ensure_schema(conn)
+    _insert_one_team_and_game(conn)
+    conn.commit()
+    conn.close()
+
+    assert _stale_warnings_from_ensure_schema(db) == []
+
+
+def test_stale_warning_does_not_fire_for_an_empty_pre_existing_db(tmp_path: Path) -> None:
+    db = tmp_path / "empty_pre_51.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(_PRE_51_SCHEMA)
+    conn.commit()
+    conn.close()
+
+    assert _stale_warnings_from_ensure_schema(db) == []
+
+    # Not vacuous: the migration really did fire on this db -- it just had no
+    # data that could be stale.
+    check = get_conn(db, read_only=True)
+    cols = {row["name"] for row in check.execute("PRAGMA table_info(teams)")}
+    check.close()
+    assert {"sport", "mascot", "alternate_names"} <= cols
 
 
 # ---------------------------------------------------------------------------

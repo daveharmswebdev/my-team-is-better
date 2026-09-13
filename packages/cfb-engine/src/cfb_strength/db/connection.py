@@ -1,4 +1,5 @@
 import sqlite3
+import warnings
 from pathlib import Path
 
 from cfb_strength.config import DB_PATH
@@ -24,6 +25,18 @@ _SOURCE_ID_TABLES = ("teams", "games")
 # Nullable with no default -- unlike `sport`, there is no sensible backfill
 # value, and populating them is the ingest's job, not the migration's.
 _TEAM_ALIAS_COLUMNS = (("mascot", "TEXT"), ("alternate_names", "TEXT"))
+
+
+class StaleDatabaseWarning(UserWarning):
+    """`ensure_schema` had to migrate a db that already holds games (#97).
+
+    Schema currency disguises data staleness: the migrations below add the
+    missing columns, but no migration can add the NFL rows or mascots an old
+    build never ingested. A migration firing on a populated db is the one
+    moment this code *knows* the db predates the current schema, so it says
+    so instead of returning a current-looking db silently. `cfb doctor` is
+    the full check.
+    """
 
 
 def get_conn(
@@ -71,18 +84,24 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     return any(row["name"] == column for row in rows)
 
 
-def _migrate_sport_columns(conn: sqlite3.Connection) -> None:
+def _migrate_sport_columns(conn: sqlite3.Connection) -> list[str]:
     """Bring a pre-#51 db up to the current schema in place, preserving
     existing rows. Safe to call against a brand-new db too -- every check is
     a no-op there since schema.sql already created these columns fresh.
+
+    Returns what it had to add (`table.column`), empty when nothing -- the
+    signal `ensure_schema`'s staleness warning keys on.
     """
+    added: list[str] = []
     for table in _SPORT_COLUMN_TABLES:
         if not _has_column(conn, table, "sport"):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN sport TEXT NOT NULL DEFAULT 'cfb'")
+            added.append(f"{table}.sport")
 
     for table in _SOURCE_ID_TABLES:
         if not _has_column(conn, table, "source_id"):
             conn.execute(f"ALTER TABLE {table} ADD COLUMN source_id TEXT")
+            added.append(f"{table}.source_id")
 
     # ingestion_log's PK widens from (year, season_type) to
     # (year, season_type, sport) -- sqlite can't ALTER a PRIMARY KEY, and
@@ -92,6 +111,7 @@ def _migrate_sport_columns(conn: sqlite3.Connection) -> None:
     # pre-existing old-shape table is dropped and recreated fresh rather than
     # migrated in place.
     if not _has_column(conn, "ingestion_log", "sport"):
+        added.append("ingestion_log.sport (table rebuilt)")
         conn.execute("DROP TABLE ingestion_log")
         conn.execute(
             """
@@ -112,9 +132,10 @@ def _migrate_sport_columns(conn: sqlite3.Connection) -> None:
     # statements in that file.
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_source_id ON teams(source_id)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_games_source_id ON games(source_id)")
+    return added
 
 
-def _migrate_team_alias_columns(conn: sqlite3.Connection) -> None:
+def _migrate_team_alias_columns(conn: sqlite3.Connection) -> list[str]:
     """Add `teams.mascot` / `teams.alternate_names` (epic #76) to a
     pre-existing db. A no-op against a fresh db, where schema.sql already
     declared them, and idempotent when called twice -- sqlite has no
@@ -125,12 +146,15 @@ def _migrate_team_alias_columns(conn: sqlite3.Connection) -> None:
     (#77), and a NULL mascot is a legitimate end state anyway (every NFL row,
     plus any CFB team CFBD has no mascot for).
     """
+    added: list[str] = []
     for column, column_type in _TEAM_ALIAS_COLUMNS:
         if not _has_column(conn, "teams", column):
             conn.execute(f"ALTER TABLE teams ADD COLUMN {column} {column_type}")
+            added.append(f"teams.{column}")
+    return added
 
 
-def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> None:
+def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> list[str]:
     """Add `ratings.ties` (issue #83) to a pre-existing db.
 
     Existing rows backfill to 0 via the column default. That is honest for
@@ -141,11 +165,31 @@ def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> None:
     """
     if not _has_column(conn, "ratings", "ties"):
         conn.execute("ALTER TABLE ratings ADD COLUMN ties INTEGER NOT NULL DEFAULT 0")
+        return ["ratings.ties"]
+    return []
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text())
-    _migrate_sport_columns(conn)
-    _migrate_team_alias_columns(conn)
-    _migrate_ratings_ties_column(conn)
+    added = [
+        *_migrate_sport_columns(conn),
+        *_migrate_team_alias_columns(conn),
+        *_migrate_ratings_ties_column(conn),
+    ]
     conn.commit()
+
+    # Issue #97. Only a migration that actually fired on a db already holding
+    # games is a staleness signal: a fresh db, an already-current db, and an
+    # empty pre-existing db (nothing in it can be stale) all stay quiet.
+    if added and conn.execute("SELECT EXISTS (SELECT 1 FROM games)").fetchone()[0]:
+        db_file = conn.execute("PRAGMA database_list").fetchone()[2] or "this database"
+        warnings.warn(
+            StaleDatabaseWarning(
+                f"{db_file} predates the current schema: ensure_schema just added "
+                f"{', '.join(added)} to a database that already holds games, so its data "
+                "may predate the current schema too (e.g. no NFL rows, no team mascots), "
+                "which no migration can backfill. Run `cfb doctor --db-path "
+                f"{db_file}` to check it, or rebuild it from the committed raw cache."
+            ),
+            stacklevel=2,
+        )

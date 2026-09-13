@@ -13,6 +13,18 @@ evidenced answer, don't force a specific outcome) against `packages/cfb-engine` 
 `get_champion`/`get_rankings` or the equivalent direct function calls. For each "must
 match" year, report PASS or FAIL with the actual top-3 and the cited evidence.
 
+**Never verify against a database you didn't confirm is current.** Every sqlite db you
+read was built by someone else, and the default `DB_PATH` (`packages/cfb-engine/data/
+cfb.sqlite3`) is machine-local state that can be a year stale while looking complete
+(issue #97). Use the path your brief pins, or build one fresh from the committed cache
+(render.yaml's `cfb ingest` / `cfb rate` commands with `CFB_DB_PATH=<path>` set on
+every one — `cfb rate` has no `--db-path` flag — zero live API calls). Before reading any data from it, run `uv run cfb doctor --db-path <path>` from
+`packages/cfb-engine`: a non-zero exit means the verification can't be trusted — stop
+and report that as your gap, never as a pass. Never run `ensure_schema` on a db to make
+it readable; migrating a stale db's columns in disguises that its data is stale too.
+Committed test fixtures are the exception: they hold deliberate season slices, so the
+doctor's full-coverage check doesn't apply to them.
+
 Once `apps/api`'s persona layer exists, also run its smoke eval (Architecture Brief
 §8): the same golden years, asserting the persona names the correct #1, never states a
 team/number outside its fact block, and stays within the tone bounds (PRD §3).
