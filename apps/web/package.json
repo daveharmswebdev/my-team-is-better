@@ -56,8 +56,7 @@
     "@storybook/addon-vitest": {
       "vitest": "5.0.0",
       "@vitest/browser": "5.0.0",
-      "@vitest/browser-playwright": "5.0.0",
-      "@vitest/runner": "5.0.0"
+      "@vitest/browser-playwright": "5.0.0"
     }
   }
 }

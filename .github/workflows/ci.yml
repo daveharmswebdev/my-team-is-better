@@ -90,7 +90,7 @@ jobs:
         run: uv run lint-imports
 
   apps-web:
-    name: apps-web (eslint, tsc, vitest, dependency-cruiser, storybook build)
+    name: apps-web (eslint, tsc, vitest, dependency-cruiser, storybook build + a11y tests)
     runs-on: ubuntu-latest
     defaults:
       run:

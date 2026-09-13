@@ -16,9 +16,14 @@ const preview: Preview = {
       // `npm run test-storybook` (vitest.storybook.config.ts, which runs every
       // story in headless Chromium via @storybook/addon-vitest) -- issue #90.
       // `npm run build-storybook` does NOT run axe, so this flag is only a
-      // gate because that script runs in CI. Do not set 'todo'/'off' here or
-      // on a story to silence a finding; suppress a single rule, per story,
-      // with a comment justifying it as a harness artifact.
+      // gate because that script runs in CI.
+      //
+      // No story may opt out: 'todo'/'off', `disable`, `globals.a11y.manual`,
+      // a narrowed `config.rules`/`context`/`options`, or a `!test` tag. That
+      // rule is checked, not just stated here: src/test/storyA11yPolicy.test.ts
+      // (part of `npm run test`) composes every story with this file and fails
+      // on any of them. The only way out is an entry in
+      // src/test/storyA11yAllowlist.ts, with a justification.
       test: 'error',
     },
   },

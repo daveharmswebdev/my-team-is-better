@@ -127,7 +127,7 @@ export const UserTeamSuggestionsOpen: Story = {
     // lands, `TeamCombobox` renders a plain fallback `<input>` and then
     // swaps in a *different* input node, so keystrokes sent to the first one
     // are lost (found when #90 started running play functions in CI -- a
-    // real component defect reported separately, not fixed by this wait).
+    // real component defect tracked as #156, not fixed by this wait).
     const userTeamInput = await canvas.findByRole('combobox', {
       name: /your team/i,
     })
