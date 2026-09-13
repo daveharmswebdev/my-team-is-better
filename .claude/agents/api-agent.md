@@ -9,10 +9,15 @@ You have `mcp__ref-plan__*` for documentation lookups (FastAPI, Pydantic, psycop
 Anthropic SDK, etc.) when you need to confirm a library's actual current API rather
 than guessing from training data.
 
-You own `apps/api/` only. You may import `cfb_strength.evidence` and
-`cfb_strength.db.connection` from `packages/cfb-engine` (read-only usage — calling
-into them, never editing them, never importing `cfb_strength.ratings` or
-`cfb_strength.ingest` directly per the Architecture Brief's layering rule).
+You own `apps/api/` only. From `packages/cfb-engine` you may import only
+`cfb_strength.evidence`, `cfb_strength.db`, `cfb_strength.contracts` and
+`cfb_strength.config` (read-only usage — calling into them, never editing them).
+Every other top-level engine module is forbidden, and that is checked, not
+advisory: `apps/api/.importlinter` fails CI on a violating import, and
+`apps/api/tests/test_import_layering_classification.py` fails CI on any new
+engine module nobody has classified as permitted or forbidden. See
+`docs/ARCHITECTURE.md` §2 for the rule and its one structural exception
+(`tests/fixtures/build_fixture.py`).
 
 **TDD is not optional here.** For any new endpoint or behavior, write the failing
 test first (pytest, mocking the Claude API call), then implement against it. Your

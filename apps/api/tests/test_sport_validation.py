@@ -24,8 +24,10 @@ sport alias to import -- it inlines the same `Literal["cfb", "nfl"]` on
 `cfb_strength.contracts`' row dataclasses, and defining a reusable alias
 there is an engine-side change `apps/api` may not make. (Unlike `Method`,
 this is *not* a layering restriction: `cfb_strength.contracts` is on this
-app's permitted-import list -- see `api.models`.) These tests are what catch
-the duplication drifting when a third league is added.
+app's permitted-import list -- see `api.models`.) These tests pin the
+request boundary to the two values; they do *not* catch the duplication
+drifting when the engine gains a third league -- see `api.models.Sport` and
+#112 for what is and isn't checked.
 
 422-shape note: as in `test_method_validation.py`, FastAPI's
 request-validation 422 carries `detail` as a **list** of error objects

@@ -2,13 +2,26 @@
 ; engine-layering rule a checked rule instead of a prose one (issue #54,
 ; epic #113).
 ;
-; The rule: apps/api is a top-layer consumer of packages/cfb-engine, exactly
-; like cfb_strength.cli and cfb_strength.mcp_server are. It may import
-; cfb_strength.evidence, cfb_strength.db, cfb_strength.contracts and
-; cfb_strength.config; it must not import cfb_strength.ratings,
-; cfb_strength.ingest, cfb_strength.mcp_server or cfb_strength.cli.
+; The rule is an ALLOW list: apps/api is a top-layer consumer of
+; packages/cfb-engine, exactly like cfb_strength.cli and
+; cfb_strength.mcp_server are, and it may import cfb_strength.evidence,
+; cfb_strength.db, cfb_strength.contracts and cfb_strength.config -- and no
+; other top-level engine module.
 ;
-; Two properties of this file that are load-bearing -- read before editing:
+; How that is enforced, and why it takes two pieces:
+;
+; import-linter 2.x has no contract type meaning "this source may import only
+; these modules" (its types are forbidden, layers, independence, protected,
+; acyclic_siblings). So the allow list is written here as `forbidden`
+; contracts naming every OTHER top-level module. On its own, a deny list like
+; that goes stale silently the moment the engine grows a module nobody adds
+; here -- which is exactly how `cfb_strength.credit_math` sat unforbidden while
+; the docs called it forbidden (caught in review of PR #118).
+; `tests/test_import_layering_classification.py` closes that: it fails CI on
+; any top-level engine module that is neither on its PERMITTED list nor named
+; in a forbidden contract below. A new engine module forces a decision.
+;
+; Three further properties that are load-bearing -- read before editing:
 ;
 ; 1. `source_modules = api` is the *installed* `api` package, i.e. `src/api/`.
 ;    `tests/fixtures/build_fixture.py` is a standalone generator script that
@@ -19,7 +32,8 @@
 ;    ignore/exception directive to "fix" that file, stop -- the boundary this
 ;    contract is protecting is the running app, and the fixture builder is
 ;    deliberately outside it. Moving that script into `src/api/` would (and
-;    should) break the first contract below.
+;    should) break the first contract below. The same is true of everything
+;    under `tests/`: the suite's own imports are not checked by this file.
 ;
 ; 2. `cfb_strength` must be listed in `root_packages` for a forbidden
 ;    contract to be able to name engine submodules at all -- without it,
@@ -28,13 +42,12 @@
 ;    own separate `.importlinter` (`root_package = cfb_strength`) covering
 ;    the engine's internal layering; this file does not replace or modify it.
 ;
-; Note on why these are `forbidden` contracts (a deny list) rather than an
-; expression of the allow list above: import-linter's forbidden contracts
-; also catch *indirect* imports, and `cfb_strength.credit_math` is reachable
-; from `api` through the permitted `cfb_strength.evidence.credit_explain`.
-; The deny list names every engine top-level module apps/api must not reach;
-; when a new top-level engine module appears that apps/api has no business
-; importing, add it here.
+; 3. Contracts 1 and 2 forbid indirect imports too, because nothing apps/api
+;    is permitted to import reaches those modules. Contract 3 cannot: this app
+;    legitimately reaches `credit_math` through the permitted evidence layer
+;    (api.verdict -> cfb_strength.evidence.proof ->
+;    cfb_strength.evidence.credit_explain -> cfb_strength.credit_math), so it
+;    sets `allow_indirect_imports = true` and forbids only a *direct* import.
 
 [importlinter]
 root_packages =
@@ -64,3 +77,13 @@ source_modules =
 forbidden_modules =
     cfb_strength.mcp_server
     cfb_strength.cli
+
+; See property 3 above for why indirect imports are allowed here and only here.
+[importlinter:contract:no-direct-engine-credit-math]
+name = apps/api must not import cfb_strength.credit_math directly (only via evidence)
+type = forbidden
+source_modules =
+    api
+forbidden_modules =
+    cfb_strength.credit_math
+allow_indirect_imports = true

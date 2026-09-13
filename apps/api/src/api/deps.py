@@ -5,9 +5,9 @@ Owns this app's database seam onto the engine: opening a read-only
 `cfb_strength.config.DB_PATH`. Both of those imports are permitted by
 docs/ARCHITECTURE.md §2's layering rule (apps/api may import
 cfb_strength.evidence, cfb_strength.db, cfb_strength.contracts and
-cfb_strength.config, and must not import cfb_strength.ratings,
-cfb_strength.ingest, cfb_strength.mcp_server or cfb_strength.cli -- checked
-by `apps/api/.importlinter`, issue #54). No route imports `get_conn`/
+cfb_strength.config, and no other top-level engine module -- checked by
+`apps/api/.importlinter` plus tests/test_import_layering_classification.py,
+issue #54). No route imports `get_conn`/
 `DB_PATH` directly -- they depend on `get_db_conn`, which tests override via
 `app.dependency_overrides` to point at a fixture db instead (see
 tests/conftest.py).

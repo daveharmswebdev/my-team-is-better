@@ -83,12 +83,16 @@ cannot get in cannot be echoed back out.
 
 Hand-written for a narrower reason than `Method` above: the engine simply
 exposes no shared sport alias to import. It inlines the same
-`Literal["cfb", "nfl"]` on `GameRow.sport`/`TeamSeasonRow.sport` in
+`Literal["cfb", "nfl"]` on `GameRow.sport`/`TeamRow.sport` in
 `cfb_strength.contracts`, which this app *is* permitted to import (and does,
 just below) under docs/ARCHITECTURE.md §2's layering rule. Defining that
 alias is an engine-side change, not one `apps/api` may make. The duplication
-is the price until then; `tests/test_sport_validation.py` is what catches it
-drifting when a third league is added.
+is the price until then, and it is only half-checked (see #112): since #102,
+mypy fails if this literal admits a league the engine's `resolve_team` /
+`build_team_case` / `build_comparison` signatures don't, but nothing yet
+fails if the *engine* gains a league this literal lacks.
+`tests/test_sport_validation.py` pins the request boundary to these two
+values; it does not detect that engine-ahead drift either.
 """
 
 

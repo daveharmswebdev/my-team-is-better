@@ -76,17 +76,27 @@ change together in one PR instead of a cross-repo version bump dance.
 **Layering stays enforced, just extended.** `apps/api` is a new top-layer
 consumer exactly like `cli.py` and `mcp_server/` are today. It **may** import
 `cfb_strength.evidence`, `cfb_strength.db`, `cfb_strength.contracts` and
-`cfb_strength.config`; it **must not** import `cfb_strength.ratings`,
-`cfb_strength.ingest`, `cfb_strength.mcp_server` or `cfb_strength.cli`.
+`cfb_strength.config`, and **no other** top-level engine module (today:
+`ratings`, `ingest`, `mcp_server`, `cli`, and `credit_math` — the last
+forbidden only as a *direct* import, since the permitted evidence layer uses
+it internally).
 (`contracts` is the shared contract by design — `api.models` and `api.errors`
 both depend on it; `config` supplies `DB_PATH`. An earlier version of this
 paragraph named only `evidence` and `db.connection`, which was never what the
 app actually did.)
 
-This is a checked rule, not a review convention (issue #54). `apps/api/.importlinter`
-declares `root_packages = api, cfb_strength` and two `forbidden` contracts
-covering the four banned modules; `uv run lint-imports` from `apps/api` runs
-them, in CI and in pre-commit. The claim this paragraph used to make — that
+This is a checked rule, not a review convention (issue #54), and it takes two
+pieces. import-linter has no contract type meaning "may import only these", so
+`apps/api/.importlinter` declares `root_packages = api, cfb_strength` and
+expresses the allow list as `forbidden` contracts over every other top-level
+engine module; `uv run lint-imports` from `apps/api` runs them, in CI and in
+pre-commit. A deny list alone goes stale the moment the engine grows a module
+nobody adds to it — that is how `credit_math` sat unforbidden while the docs
+said nothing else was permitted (caught in review of PR #118) — so
+`apps/api/tests/test_import_layering_classification.py` fails CI on any
+top-level engine module that is neither permitted nor forbidden.
+
+The claim this paragraph used to make — that
 import-linter "can't reach across package boundaries as configured today" —
 is wrong, and was the reason the rule went unchecked for so long: listing
 `cfb_strength` alongside `api` in `root_packages` builds both halves of the
