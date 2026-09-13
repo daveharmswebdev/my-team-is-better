@@ -50,6 +50,7 @@ from cfb_strength.contracts import GameRow, TeamRow
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest.client import CFBDClientError, get_games, get_teams
 from cfb_strength.ingest.normalize import (
+    dedupe_game_records,
     normalize_game,
     team_rows_from_cfbd_teams,
     team_rows_from_game,
@@ -80,6 +81,9 @@ class IngestResult:
     fbs_game_count: int
     status: str
     fetched_live: bool
+    # Raw records collapsed into another record for the same real game
+    # (issue #125). `game_count` is the number of games actually written.
+    duplicates_dropped: int = 0
 
 
 @dataclass(frozen=True)
@@ -301,30 +305,38 @@ def ingest_one(
     """Fetch (cache-first), normalize, and write one year/season-type batch."""
     games_raw, fetched_live = get_games(year, season_type, force=force)
 
-    game_rows = [normalize_game(g, season=year, season_type=season_type) for g in games_raw]
+    # Issue #125: CFBD lists some real games twice under two game ids. This
+    # collapse happens before anything else reads the batch, so a duplicated
+    # game is written once, counted once toward the completeness floor, and
+    # can't mint a `teams` row for an id seen only on the dropped copy
+    # (Edward Waters `1000899`, #91). See `dedupe_game_records`.
+    games = dedupe_game_records(games_raw)
+
+    game_rows = [normalize_game(g, season=year, season_type=season_type) for g in games]
 
     team_rows: dict[int, TeamRow] = {}
-    for g in games_raw:
+    for g in games:
         for tr in team_rows_from_game(g):
             team_rows[tr.id] = tr
 
     _write_teams(conn, team_rows, year)
     _write_games(conn, game_rows)
 
-    fbs_count = _fbs_game_count(games_raw)
+    fbs_count = _fbs_game_count(games)
     floor = REGULAR_FBS_GAME_FLOOR if season_type == "regular" else POSTSEASON_FBS_GAME_FLOOR
     status = "ok" if fbs_count >= floor else "suspect"
 
-    _write_ingestion_log(conn, year, season_type, len(games_raw), status)
+    _write_ingestion_log(conn, year, season_type, len(games), status)
     conn.commit()
 
     return IngestResult(
         year=year,
         season_type=season_type,
-        game_count=len(games_raw),
+        game_count=len(games),
         fbs_game_count=fbs_count,
         status=status,
         fetched_live=fetched_live,
+        duplicates_dropped=len(games_raw) - len(games),
     )
 
 
@@ -399,10 +411,15 @@ def main(argv: list[str] | None = None) -> int:
                 if result.fetched_live:
                     live_calls += 1
                 flag = "" if result.status == "ok" else "  <-- SUSPECT (below completeness floor)"
+                dupes = (
+                    f"  duplicates_dropped={result.duplicates_dropped}"
+                    if result.duplicates_dropped
+                    else ""
+                )
                 print(
                     f"{result.year} {result.season_type:<10} "
                     f"games={result.game_count:<5} fbs_games={result.fbs_game_count:<4} "
-                    f"status={result.status}{flag}"
+                    f"status={result.status}{flag}{dupes}"
                 )
 
         # Once per run, not once per batch -- the /teams payload is

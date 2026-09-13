@@ -82,6 +82,104 @@ def normalize_game(raw: dict[str, Any], *, season: int, season_type: str) -> Gam
     )
 
 
+_DuplicateKey = tuple[object, str, object, object, object, object]
+
+
+def _duplicate_key(raw: dict[str, Any]) -> _DuplicateKey | None:
+    """What makes two raw records the same real game (issue #125).
+
+    Keyed on team *names*, not ids: the one duplicate pair that matters for
+    #91 (FAU 49 - Edward Waters 15, 2004-11-27) reports Edward Waters as
+    `1000899` on one copy and `2206` on the other, so an id-keyed match would
+    miss it. The *date* part of `startDate` only, because 16 of the 17 cached
+    pairs disagree on kickoff time (the low-id 2004 copies carry a
+    midnight-Eastern placeholder, `T04:00`/`T05:00Z`). Both scores are in the
+    key, so the same two teams meeting twice with different results never
+    match. A record without a usable `startDate` is never treated as a
+    duplicate of anything (none exist in the 1998-2025 cache).
+    """
+    start = raw.get("startDate")
+    if not isinstance(start, str) or len(start) < 10:
+        return None
+    return (
+        raw.get("season"),
+        start[:10],
+        raw.get("homeTeam"),
+        raw.get("awayTeam"),
+        raw.get("homePoints"),
+        raw.get("awayPoints"),
+    )
+
+
+def _survivor_preference(raw: dict[str, Any]) -> tuple[int, int, int]:
+    """Sort key for which copy of a duplicated game is kept; highest wins.
+
+    The rule, and the cached-data evidence for each tier. Checked against all
+    17 duplicate groups in `data/raw/*_{regular,postseason}.json` for
+    1998-2025, all of them in regular-season payloads: 15 in 2004, 1 in 2008,
+    1 in 2025.
+
+      1. Line scores on both sides. All 15 2004 groups pair a low-id
+         `63826`-`63841` record that has empty `homeLineScores` and
+         `awayLineScores`, no venue, and a placeholder kickoff time with an
+         ESPN-id record (`2425...`-`2433...`) that has quarter-by-quarter line
+         scores, a real kickoff time and, for 8 of the 15, the venue. In
+         2025, `401833370` has line scores and `401806686` has `null` for
+         both. This tier decides 16 of the 17 groups.
+      2. CFBD's own pregame Elo. In 2008, `282430099` and `400361387` are
+         identical (same line scores, venue, attendance and kickoff) except
+         that only `282430099` carries `homePregameElo`/`awayPregameElo`.
+         That means CFBD's own Elo pipeline treats it as the canonical copy.
+         (In 2004 the placeholder copy sometimes has Elo and the ESPN copy
+         does not, which is why this ranks *below* line scores.)
+      3. Lowest game id. A final tiebreak that makes the choice total and
+         independent of payload order; no cached group reaches it. It is
+         not the primary rule, because in 2025 the better record has the
+         *higher* id.
+
+    Caveat, not a reason to mix fields across copies: in 2004 the
+    surviving ESPN copy sets `neutralSite: true` on 9 of the 15 games where
+    the dropped copy says `false`. Some of those look right (Florida A&M -
+    Tennessee State at the Georgia Dome), and some look wrong (Texas State
+    hosting FAU at its own Bobcat Stadium). The surviving record is written
+    as CFBD reports it.
+    """
+    has_line_scores = bool(raw.get("homeLineScores")) and bool(raw.get("awayLineScores"))
+    has_cfbd_elo = raw.get("homePregameElo") is not None or raw.get("awayPregameElo") is not None
+    return (int(has_line_scores), int(has_cfbd_elo), -int(raw["id"]))
+
+
+def dedupe_game_records(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse raw CFBD `/games` records that describe the same real game.
+
+    CFBD's `/games` payload lists some real games twice under two different
+    game ids. `games` is keyed by id, so without this each copy would be
+    ingested as a separate completed game and counted twice by every rating
+    method, W-L tally and evidence receipt. See `_duplicate_key` for what
+    counts as the same game and `_survivor_preference` for which copy is kept
+    and why.
+
+    This must run before `team_rows_from_game`, so a team id that appears
+    only on a dropped copy (Edward Waters `1000899`) never gets a `teams`
+    row. Output preserves the payload position of each game's first
+    occurrence, and the survivor does not depend on payload order.
+    """
+    kept: list[dict[str, Any]] = []
+    slot_by_key: dict[_DuplicateKey, int] = {}
+    for raw in records:
+        key = _duplicate_key(raw)
+        if key is None:
+            kept.append(raw)
+            continue
+        slot = slot_by_key.get(key)
+        if slot is None:
+            slot_by_key[key] = len(kept)
+            kept.append(raw)
+        elif _survivor_preference(raw) > _survivor_preference(kept[slot]):
+            kept[slot] = raw
+    return kept
+
+
 def team_rows_from_game(raw: dict[str, Any]) -> list[TeamRow]:
     """Derive `TeamRow`s for the home and away side of one raw game record.
 
