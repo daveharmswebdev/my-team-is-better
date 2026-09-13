@@ -16,6 +16,17 @@ mapping is spelled out (Architecture Brief §4.4). `UnknownTeamError` (issue
 for the requested year/sport, which the engine used to conflate with
 `AmbiguousTeamError`.
 
+Because routes never raise those exceptions directly, FastAPI cannot infer
+them for `/openapi.json`, so each route declares them via `responses=` using
+the prebuilt sets in `api.errors` (issue #111). Pick the set that matches
+the engine function the route calls (`build_team_case` or
+`build_comparison`). For every route in the app,
+tests/test_openapi_error_responses.py works out which handled engine
+exceptions the endpoint can reach by following the functions it references.
+It fails if the route's declaration does not accept a reachable exception's
+real handler response, or advertises one the route cannot reach. That test's
+docstring lists the call paths it cannot follow.
+
 Question type 1 ("who was the best team in <year>?") has no `get_champion`
 in the evidence layer -- only `cfb_strength.mcp_server.server.get_champion`,
 which this app must not import (it's the MCP/LLM-tool surface, wraps results
@@ -38,6 +49,7 @@ from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi import APIRouter, Depends
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
+from api.errors import COMPARISON_ERROR_RESPONSES, TEAM_CASE_ERROR_RESPONSES
 from api.models import (
     ChampionRequest,
     ComparisonEnvelope,
@@ -69,7 +81,7 @@ def _resolve_champion_name(
     return str(row["school"]) if row is not None else None
 
 
-@router.post("/champion", response_model=TeamCaseEnvelope)
+@router.post("/champion", response_model=TeamCaseEnvelope, responses=TEAM_CASE_ERROR_RESPONSES)
 def champion(
     payload: ChampionRequest,
     conn: sqlite3.Connection = Depends(get_db_conn),
@@ -101,7 +113,7 @@ def champion(
     return TeamCaseEnvelope(evidence=case_out, narration=narration)
 
 
-@router.post("/team-case", response_model=TeamCaseEnvelope)
+@router.post("/team-case", response_model=TeamCaseEnvelope, responses=TEAM_CASE_ERROR_RESPONSES)
 def team_case(
     payload: TeamCaseRequest,
     conn: sqlite3.Connection = Depends(get_db_conn),
@@ -126,7 +138,7 @@ def team_case(
     return TeamCaseEnvelope(evidence=case_out, narration=narration)
 
 
-@router.post("/compare", response_model=ComparisonEnvelope)
+@router.post("/compare", response_model=ComparisonEnvelope, responses=COMPARISON_ERROR_RESPONSES)
 def compare(
     payload: ComparisonRequest,
     conn: sqlite3.Connection = Depends(get_db_conn),
