@@ -124,7 +124,12 @@ def _build_current_db(path: Path) -> Path:
 
 
 _ONE_GAME_JSON = '[{"id": 1}]'
-_FINISHED_POSTSEASON_JSON = '[{"id": 1, "completed": true}, {"id": 2, "completed": true}]'
+_EARLY_BOWL_DATE = "2026-12-20T17:00:00.000Z"
+_TITLE_GAME_DATE = "2027-01-19T00:30:00.000Z"
+_FINISHED_POSTSEASON_JSON = (
+    f'[{{"id": 1, "startDate": "{_EARLY_BOWL_DATE}", "completed": true}},'
+    f' {{"id": 2, "startDate": "{_TITLE_GAME_DATE}", "completed": true}}]'
+)
 
 
 def _write_cfb_cache(raw_dir: Path, pairs: list[Pair]) -> None:
@@ -145,8 +150,10 @@ _NFL_HEADER = [
 ]
 
 
-def _nfl_row(season: int, game_type: str, *, scored: bool = True) -> list[object]:
-    scores = ["17", "24"] if scored else ["", ""]
+def _nfl_row(
+    season: int, game_type: str, *, scores: tuple[str, str] = ("17", "24")
+) -> list[object]:
+    """`scores` is (away_score, home_score) exactly as the csv cells hold them."""
     return [f"{season}_{game_type}_BUF_NE", season, game_type, 1, "BUF", "NE", *scores]
 
 
@@ -340,6 +347,25 @@ def test_an_unreadable_nfl_games_csv_is_not_green(
 
     assert _problems(report) == {("raw_cache_unrecognized", "nfl")}
     assert _run(current_db, raw_dir) == 1
+
+
+def test_a_row_with_an_unparseable_season_is_skipped_not_fatal(
+    current_db: Path, raw_dir: Path
+) -> None:
+    # ingest matches `season` as the string of a requested year, so it never
+    # ingests these rows; every valid row around them must still count.
+    _append_nfl_rows(
+        raw_dir,
+        [
+            ["x_NA_BUF_NE", "NA", "REG", 1, "BUF", "NE", "17", "24"],
+            ["x_blank_BUF_NE", "", "SB", 1, "BUF", "NE", "17", "24"],
+        ],
+    )
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    assert report.notes == ()
 
 
 def test_a_missing_nfl_games_csv_is_not_green(current_db: Path, raw_dir: Path) -> None:
@@ -639,19 +665,29 @@ def test_a_finished_nfl_season_past_max_year_fails(
     assert OK_LINE not in capsys.readouterr().out
 
 
+_PLAYED = ("17", "24")
+
+
 @pytest.mark.parametrize(
     "rows",
     [
-        pytest.param([("REG", True)], id="regular_season_only"),
-        pytest.param([("REG", True), ("WC", True), ("DIV", True), ("CON", True)], id="no_super_bowl"),
-        pytest.param([("REG", True), ("SB", False)], id="super_bowl_scheduled_not_played"),
+        pytest.param([("REG", _PLAYED)], id="regular_season_only"),
+        pytest.param(
+            [("REG", _PLAYED), ("WC", _PLAYED), ("DIV", _PLAYED), ("CON", _PLAYED)],
+            id="no_super_bowl",
+        ),
+        pytest.param([("REG", _PLAYED), ("SB", ("", ""))], id="super_bowl_scheduled_not_played"),
+        # nflverse-style missing values are strings, and "NA" is truthy.
+        pytest.param([("REG", _PLAYED), ("SB", ("NA", "NA"))], id="super_bowl_scores_NA"),
+        pytest.param([("REG", _PLAYED), ("SB", ("24", ""))], id="super_bowl_away_score_only"),
+        pytest.param([("REG", _PLAYED), ("SB", ("NA", "24"))], id="super_bowl_home_score_only"),
     ],
 )
 def test_an_unfinished_nfl_season_past_max_year_is_only_a_note(
-    current_db: Path, raw_dir: Path, rows: list[tuple[str, bool]]
+    current_db: Path, raw_dir: Path, rows: list[tuple[str, tuple[str, str]]]
 ) -> None:
     beyond = WINDOWS["nfl"][1] + 1
-    _append_nfl_rows(raw_dir, [_nfl_row(beyond, t, scored=scored) for t, scored in rows])
+    _append_nfl_rows(raw_dir, [_nfl_row(beyond, t, scores=scores) for t, scores in rows])
 
     report = currency.check_currency(current_db, raw_dir)
 
@@ -660,10 +696,28 @@ def test_an_unfinished_nfl_season_past_max_year_is_only_a_note(
     assert _run(current_db, raw_dir) == 0
 
 
-def test_a_finished_cfb_season_past_max_year_fails(current_db: Path, raw_dir: Path) -> None:
+@pytest.mark.parametrize(
+    "postseason",
+    [
+        pytest.param(_FINISHED_POSTSEASON_JSON, id="every_bowl_played"),
+        # CFBD keeps a game that was never played as `completed: false` for
+        # good -- the committed cache already holds such games (forfeits and
+        # cancellations in 2023_regular.json). One cancelled bowl must not
+        # leave a finished season a note forever.
+        pytest.param(
+            f'[{{"id": 1, "startDate": "{_EARLY_BOWL_DATE}", "completed": false,'
+            f' "homePoints": null, "awayPoints": null}},'
+            f' {{"id": 2, "startDate": "{_TITLE_GAME_DATE}", "completed": true}}]',
+            id="one_earlier_bowl_cancelled",
+        ),
+    ],
+)
+def test_a_finished_cfb_season_past_max_year_fails(
+    current_db: Path, raw_dir: Path, postseason: str
+) -> None:
     beyond = WINDOWS["cfb"][1] + 1
     (raw_dir / f"{beyond}_regular.json").write_text(_ONE_GAME_JSON)
-    (raw_dir / f"{beyond}_postseason.json").write_text(_FINISHED_POSTSEASON_JSON)
+    (raw_dir / f"{beyond}_postseason.json").write_text(postseason)
 
     _past_max_year(currency.check_currency(current_db, raw_dir), "cfb", beyond)
     assert _run(current_db, raw_dir) == 1
@@ -675,9 +729,16 @@ def test_a_finished_cfb_season_past_max_year_fails(current_db: Path, raw_dir: Pa
         pytest.param(None, id="no_postseason_file"),
         pytest.param("[]", id="empty_postseason_file"),
         pytest.param(
-            '[{"id": 1, "completed": true}, {"id": 2, "completed": false}]',
-            id="bowls_still_to_play",
+            f'[{{"id": 1, "startDate": "{_EARLY_BOWL_DATE}", "completed": true}},'
+            f' {{"id": 2, "startDate": "{_TITLE_GAME_DATE}", "completed": false}}]',
+            id="title_game_still_to_play",
         ),
+        pytest.param(
+            f'[{{"id": 1, "startDate": "{_TITLE_GAME_DATE}", "completed": true}},'
+            f' {{"id": 2, "startDate": "{_TITLE_GAME_DATE}", "completed": false}}]',
+            id="latest_date_shared_with_an_unplayed_game",
+        ),
+        pytest.param('[{"id": 1, "completed": true}]', id="no_game_has_a_start_date"),
     ],
 )
 def test_an_unfinished_cfb_season_past_max_year_is_only_a_note(
@@ -927,6 +988,27 @@ def test_a_wal_db_without_its_sidecar_files_still_reports_its_defects(
     assert _siblings(current_db) == siblings_before
 
 
+def test_a_wal_db_with_only_a_stale_shm_file_is_checked_normally_and_left_untouched(
+    current_db: Path, raw_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A -shm is only an index into a -wal: with no -wal there are no
+    # un-checkpointed commits to miss, so -wal alone decides. A plain
+    # mode=ro open would still try to use the lone -shm (SQLITE_CANTOPEN on
+    # macOS; possibly a new -wal next to the db elsewhere).
+    _to_wal_without_sidecars(current_db)
+    shm = Path(f"{current_db}-shm")
+    shm.write_bytes(b"\x00" * 32768)
+    before, shm_before = _sha256(current_db), _sha256(shm)
+    siblings_before = _siblings(current_db)
+
+    assert _run(current_db, raw_dir) == 0
+
+    assert OK_LINE in capsys.readouterr().out
+    assert _sha256(current_db) == before
+    assert _sha256(shm) == shm_before
+    assert _siblings(current_db) == siblings_before
+
+
 def test_a_live_wal_db_is_read_through_its_wal_file_never_around_it(
     current_db: Path, raw_dir: Path
 ) -> None:
@@ -952,12 +1034,14 @@ def test_a_live_wal_db_is_read_through_its_wal_file_never_around_it(
     ("header", "sidecar", "expect_wal_hint"),
     [
         pytest.param(WAL_HEADER, "-wal", True, id="wal_header_with_wal_file"),
-        pytest.param(WAL_HEADER, "-shm", True, id="wal_header_with_shm_file"),
+        # Without a -wal the db is opened immutable, which never touches the
+        # -shm, so a lone -shm cannot be why the open failed.
+        pytest.param(WAL_HEADER, "-shm", False, id="wal_header_with_only_a_shm_file"),
         pytest.param(WAL_HEADER, None, False, id="wal_looking_header_no_sidecars"),
         pytest.param(ROLLBACK_HEADER, "-wal", False, id="rollback_header"),
     ],
 )
-def test_the_wal_hint_is_shown_only_when_wal_sidecar_files_exist(
+def test_the_wal_hint_is_shown_only_when_a_wal_file_exists(
     tmp_path: Path,
     raw_dir: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -23,8 +23,9 @@ check that tells the two apart. It reports, per league:
      mascot for some real teams. A db with no CFB teams at all is (b)'s
      problem, not this one's.
   f. `cache_past_max_year` -- the cache holds a *finished* season past the
-     league's ingest `MAX_YEAR` (NFL: a Super Bowl row with a score; CFB: a
-     non-empty postseason file whose games are all completed). `cfb ingest`
+     league's ingest `MAX_YEAR` (NFL: a Super Bowl row whose two scores both
+     parse as integers; CFB: a postseason file whose latest-dated games are
+     all completed -- see `_postseason_finished`). `cfb ingest`
      skips it, so no db can ever be current with it: MAX_YEAR needs a bump
      (the #9 class of bug). An unfinished season past MAX_YEAR -- the season
      in progress -- is only a note, which never changes the exit code.
@@ -45,8 +46,9 @@ Guarantees:
   reference for (a) comes from running `ensure_schema` against a throwaway
   in-memory db instead, so a column added to schema.sql or a new `_migrate_*`
   step is expected here automatically, with no second hand-maintained column
-  list to drift. A WAL-mode db with no -wal/-shm files is opened `immutable`
-  so that no platform's SQLite creates them (see `_open_read_only`).
+  list to drift. A WAL-mode db with no -wal file is opened `immutable`, so
+  that no platform's SQLite creates -wal/-shm next to it (see
+  `_open_read_only`).
 * **Tolerant of old shapes.** Tables or columns a stale db lacks are read as
   the migration would backfill them. A pre-#51 `games` row with no `sport`
   column counts as CFB (the column's schema default), and a missing
@@ -187,17 +189,34 @@ def _holds_no_games(path: Path) -> bool:
 
 
 def _postseason_finished(path: Path) -> bool:
-    """A CFBD postseason file whose games have all been played. Only read for
-    seasons past MAX_YEAR, so it is small."""
+    """Whether a CFBD postseason file describes a finished postseason.
+
+    The rule: every game at the file's latest `startDate` is `completed`.
+    The last-dated postseason game is the national championship, played
+    after every bowl, so once it is complete the season is over. That holds
+    even if an earlier bowl never happens: CFBD keeps a game that was never
+    played as `completed: false` for good (the committed cache already holds
+    forfeited and cancelled games like that), so requiring *every* game to be
+    complete would leave a finished season stuck as a note forever. A file
+    with no dated game proves nothing and counts as unfinished. `startDate`s
+    are compared as CFBD's ISO-8601 UTC strings, which sort chronologically.
+    Only read for seasons past MAX_YEAR, so it is small.
+    """
     try:
         games = json.loads(path.read_text())
     except ValueError:
         return False
-    return (
-        isinstance(games, list)
-        and bool(games)
-        and all(isinstance(g, dict) and g.get("completed") is True for g in games)
-    )
+    if not isinstance(games, list):
+        return False
+    dated = [
+        game
+        for game in games
+        if isinstance(game, dict) and isinstance(game.get("startDate"), str) and game["startDate"]
+    ]
+    if not dated:
+        return False
+    last = max(str(game["startDate"]) for game in dated)
+    return all(game.get("completed") is True for game in dated if game["startDate"] == last)
 
 
 def _cfbd_cache_scan(raw_dir: Path) -> CacheScan:
@@ -245,6 +264,17 @@ _NFL_SEASON_TYPE_BY_GAME_TYPE: Mapping[str, str] = {
 _NFL_FINAL_GAME_TYPE = "SB"
 
 
+def _nfl_score(cell: str | None) -> int | None:
+    """An nflverse score cell as an int, or None when the game has no score
+    yet: empty, "NA", or anything else that isn't a whole number."""
+    if cell is None:
+        return None
+    try:
+        return int(cell)
+    except ValueError:
+        return None
+
+
 def _nflverse_cache_scan(raw_dir: Path) -> CacheScan:
     min_year, max_year = nflverse_ingest.MIN_YEAR, nflverse_ingest.MAX_YEAR
     path = nflverse_games_cache_path(raw_dir)
@@ -278,7 +308,10 @@ def _nflverse_cache_scan(raw_dir: Path) -> CacheScan:
             # finished, reported) whatever its rows' game types are.
             if season > max_year:
                 beyond.add(season)
-                played = not has_scores or bool(row["home_score"] and row["away_score"])
+                played = not has_scores or (
+                    _nfl_score(row["home_score"]) is not None
+                    and _nfl_score(row["away_score"]) is not None
+                )
                 if game_type == _NFL_FINAL_GAME_TYPE and played:
                     finished.add(season)
                 continue
@@ -624,36 +657,43 @@ def _is_wal_mode(db_path: Path) -> bool:
     return len(header) == 20 and header.startswith(b"SQLite format 3\x00") and header[18:20] == b"\x02\x02"
 
 
-def _wal_sidecars(db_path: Path) -> tuple[Path, ...]:
-    return tuple(p for p in (Path(f"{db_path}-wal"), Path(f"{db_path}-shm")) if p.exists())
+def _wal_file(db_path: Path) -> Path:
+    return Path(f"{db_path}-wal")
 
 
 def _open_read_only(db_path: Path) -> sqlite3.Connection:
     """Open `db_path` read-only, choosing `immutable` only when it is safe.
 
-    A WAL-mode db with neither a -wal nor a -shm file (a copied db, or one
-    whose last connection closed cleanly) has every committed page in the
-    main file. A plain `mode=ro` open of it is platform-dependent: macOS's
-    SQLite refuses it (SQLITE_CANTOPEN), while Linux's may succeed by
-    creating the -wal/-shm files next to the db. `immutable=1` reads the main
-    file as-is and creates nothing, on every platform.
+    The decision rests on the -wal file alone. When a WAL-mode db has no -wal
+    file, its main file holds every checkpointed commit and there is nothing
+    else to read. That is also exactly what a main-file-only copy of a live
+    db contains: commits still sitting in the live db's -wal were never in
+    that copy, and the doctor reports the file it was given. A -shm is only
+    an index into a -wal, so a stale lone -shm changes nothing. A plain
+    `mode=ro` open there is platform-dependent: macOS's SQLite refuses it
+    (SQLITE_CANTOPEN), while Linux's may succeed by creating -wal/-shm next
+    to the db. `immutable=1` reads the main file as-is and creates nothing,
+    on every platform.
 
     It is never used while a -wal file exists: immutable ignores -wal, so a
-    live db's un-checkpointed commits would be silently missed.
+    live db's un-checkpointed commits would be silently missed. Immutable
+    also takes no locks, so a db should not be checked this way while
+    `cfb ingest` or `cfb rate` is writing to it.
     """
-    immutable = _is_wal_mode(db_path) and not _wal_sidecars(db_path)
+    immutable = _is_wal_mode(db_path) and not _wal_file(db_path).exists()
     return get_conn(db_path, read_only=True, immutable=immutable)
 
 
 def _unreadable(db_path: Path, error: sqlite3.Error) -> DatabaseUnavailableError:
-    # The WAL hint only when WAL sidecar files really exist and could be the
-    # cause: a WAL-looking header alone may just be a corrupt file.
-    if _is_wal_mode(db_path) and _wal_sidecars(db_path):
+    # The WAL hint only when a -wal file exists, the one case the open used
+    # WAL machinery at all (see `_open_read_only`). A WAL-looking header on
+    # its own may just be a corrupt file.
+    if _is_wal_mode(db_path) and _wal_file(db_path).exists():
         return DatabaseUnavailableError(
             f"{db_path} is a WAL-mode sqlite database, and a read-only open could not use its "
-            f"-wal/-shm files ({error}): they are not usable from here, and the doctor will not "
-            "change them. Run it where those files are accessible, or check a copy switched out "
-            "of WAL mode (`PRAGMA journal_mode = DELETE`)."
+            f"-wal file ({error}): it, or its -shm, is not usable from here, and the doctor will "
+            "not change them. Run it where those files are accessible, or check a copy switched "
+            "out of WAL mode (`PRAGMA journal_mode = DELETE`)."
         )
     return DatabaseUnavailableError(f"{db_path} could not be read as a sqlite database: {error}")
 

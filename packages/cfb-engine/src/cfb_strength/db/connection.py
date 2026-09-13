@@ -51,8 +51,8 @@ def get_conn(
     `immutable` (issue #97, read-only only; default False, so every existing
     caller is unchanged) adds SQLite's `immutable=1` URI flag: the file is
     read as-is, with no locking and no -wal/-shm files created or consulted.
-    `cfb doctor` needs it to read a WAL-mode db that has no -wal/-shm files
-    without writing any next to it; see `ingest.currency._open_read_only`
+    `cfb doctor` needs it to read a WAL-mode db that has no -wal file without
+    writing -wal/-shm next to it; see `ingest.currency._open_read_only`
     for when that is safe. It lives here, rather than as a second
     `sqlite3.connect` in the doctor, so there is still exactly one place that
     builds this project's connection URIs and pragmas.

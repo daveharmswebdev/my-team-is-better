@@ -54,18 +54,26 @@ opens the db read-only and exits 0 only when:
   fails rather than skipping the cache checks. A partial but recognizable
   directory still passes when the db matches it.
 - the cache holds no *finished* season past a league's ingest `MAX_YEAR`.
-  For NFL that means a Super Bowl with a score; for CFB, a postseason file
-  whose games are all completed. `cfb ingest` skips such a season, so no db
-  can be current until `MAX_YEAR` is bumped.
+  For NFL that means a Super Bowl with both scores recorded. For CFB it means
+  a postseason file whose latest-dated games are all completed, so an earlier
+  bowl that was cancelled doesn't matter. `cfb ingest` skips such a season,
+  so no db can be current until `MAX_YEAR` is bumped.
 
 Otherwise it exits 1 and names each problem. An unfinished season past
 `MAX_YEAR`, like the season in progress, gets a note that doesn't change the
 exit code. The doctor never migrates or writes the file. It reads a WAL-mode
-db that has no `-wal`/`-shm` files without creating them. When `ensure_schema` does add a column, table or
-index to a db that already holds games, it emits a `StaleDatabaseWarning`
-pointing here. The usual fix is to rebuild from
-the committed cache with render.yaml's ingest/rate commands. `rate` has no
-`--db-path` flag, so pin every step with `CFB_DB_PATH=...`.
+db that has no `-wal` file without creating `-wal`/`-shm` next to it.
+
+Check a WAL-mode db together with its `-wal` file, never a copy of the main
+file alone: commits still in the `-wal` aren't in the main file yet. Don't
+run the doctor while `cfb ingest` or `cfb rate` is writing to the db either.
+Without a `-wal` it reads the main file with `immutable`, which takes no
+locks.
+
+When `ensure_schema` does add a column, table or index to a db that already
+holds games, it emits a `StaleDatabaseWarning` pointing here. The usual fix is
+to rebuild from the committed cache with render.yaml's ingest/rate commands.
+`rate` has no `--db-path` flag, so pin every step with `CFB_DB_PATH=...`.
 
 ## Data sources
 

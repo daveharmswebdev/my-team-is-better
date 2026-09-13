@@ -34,7 +34,11 @@ the doctor, and waive only these findings:
 Any other finding blocks verification of **every** league in that fixture, including
 `schema_not_current`, which has no league attached, and `no_cfb_mascots`. Report it as a
 gap, not a pass. (Until #110 rebuilds them, both committed engine fixtures fail on
-schema, so neither can certify anything on its own.)
+schema, so neither can certify anything on its own.) One blocking finding isn't about
+the db at all: `cache_past_max_year` means the committed cache holds a finished season
+that a league's ingest `MAX_YEAR` doesn't cover yet. Rebuilding won't clear it, only a
+code change bumping `MAX_YEAR` will (the #9 class). Report it as that, not as a stale
+db.
 
 Never run `apps/api`'s test suite from a checkout that has `apps/api/.env`, or with
 `DATABASE_URL`, `ANTHROPIC_API_KEY` or `MY_TEAM_IS_BETTER_API_ENV_FILE` set in the
