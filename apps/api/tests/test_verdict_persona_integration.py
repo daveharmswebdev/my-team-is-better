@@ -44,7 +44,7 @@ def test_repeated_champion_request_is_a_cache_hit_on_the_second_call(
     with psycopg.connect(DATABASE_URL) as conn:
         ensure_schema(conn)
         # 2005's champion (Texas, per the fixture db) with the request's
-        # defaults (method="keener", user_team=None) -- the exact cache key
+        # defaults (method="keener", sport="cfb", user_team=None) -- the exact cache key
         # `api.persona.service.narrate_team_case` will compute for this
         # request. Deleted up front so this test proves a genuine
         # miss-then-hit sequence, not a leftover row from a prior local run.
@@ -54,6 +54,7 @@ def test_repeated_champion_request_is_a_cache_hit_on_the_second_call(
             teams=("Texas",),
             user_team=None,
             method="keener",
+            sport="cfb",
             prompt_version=PROMPT_VERSION,
         )
         conn.execute("DELETE FROM persona_cache WHERE cache_key = %s", (key,))

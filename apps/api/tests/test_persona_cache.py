@@ -17,6 +17,7 @@ def _key(**overrides: object) -> str:
         "teams": ("Texas",),
         "user_team": None,
         "method": "keener",
+        "sport": "cfb",
         "prompt_version": "persona-v1",
     }
     base.update(overrides)
@@ -45,6 +46,12 @@ def test_cache_key_differs_by_user_team() -> None:
 
 def test_cache_key_differs_by_method() -> None:
     assert _key(method="keener") != _key(method="colley")
+
+
+def test_cache_key_differs_by_sport() -> None:
+    # Issue #84: "Houston" (CFB) and "Houston" (NFL) for the same year and
+    # method must never share a cached narration.
+    assert _key(teams=("Houston",), sport="cfb") != _key(teams=("Houston",), sport="nfl")
 
 
 def test_cache_key_differs_by_prompt_version() -> None:

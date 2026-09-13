@@ -55,6 +55,7 @@ def narrate_team_case(
         teams=(case.team_name,),
         user_team=user_team,
         method=method,
+        sport=sport,
         prompt_version=PROMPT_VERSION,
     )
 
@@ -95,6 +96,7 @@ def narrate_comparison(
         teams=(team_a_name, team_b_name),
         user_team=user_team,
         method=method,
+        sport=sport,
         prompt_version=PROMPT_VERSION,
     )
 
