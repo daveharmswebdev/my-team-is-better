@@ -10,10 +10,11 @@ this app is scoped to. This module loads `apps/api/.env` (via
 
 - `DATABASE_URL` / `ANTHROPIC_API_KEY`: `None` when unset (e.g. in CI, which
   intentionally has neither -- see CLAUDE.md/issue #4's negative scope).
-- `PROMPT_VERSION`: bumped whenever the persona system prompt text in
-  `api.persona.prompt` changes, so the Postgres response cache
-  (`api.persona.cache`) auto-busts on a prompt edit instead of serving
-  stale narration under a new voice.
+- `PROMPT_VERSION`: bumped whenever anything the model is given changes --
+  the persona system prompt text in `api.persona.prompt`, or the shape or
+  meaning of the fact block (the evidence JSON) -- so the Postgres response
+  cache (`api.persona.cache`) auto-busts instead of serving stale narration
+  written under an old voice or from old facts.
 - `CONTESTED_YEARS`: the first place this constant is defined anywhere in
   the project (checked -- no equivalent exists in `packages/cfb-engine`);
   scoped to `apps/api` only, per issue #4's brief.
@@ -59,7 +60,10 @@ CORS_ALLOWED_ORIGINS: list[str] = (
     else ["http://localhost:5173"]
 )
 
-PROMPT_VERSION = "persona-v1"
+# persona-v2 (issue #83): the prompt text is unchanged, but the fact block
+# is not -- it now carries `ties`, and a tied game appears as `result: "T"`
+# instead of being dropped. v1 narrations were written from tie-less facts.
+PROMPT_VERSION = "persona-v2"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
 

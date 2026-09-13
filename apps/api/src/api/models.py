@@ -150,7 +150,9 @@ class OpponentResultOut(BaseModel):
     opponent_name: str
     opponent_rank: int | None
     opponent_rating: float | None
-    result: Literal["W", "L"]
+    # "T" (issue #83): a completed game with equal scores -- see
+    # `cfb_strength.contracts.OpponentResult.result`.
+    result: Literal["W", "L", "T"]
     team_score: int
     opponent_score: int
     week: int | None
@@ -218,6 +220,9 @@ class TeamCaseOut(BaseModel):
     rating: float
     wins: int
     losses: int
+    # Required, like the dataclass field (issue #83) -- see
+    # `cfb_strength.contracts.TeamRating.ties`.
+    ties: int
     rating_breakdown: RatingBreakdownOut
     games: list[OpponentResultOut]
     quality_wins: list[OpponentResultOut]
@@ -234,6 +239,7 @@ class TeamCaseOut(BaseModel):
             rating=case.rating,
             wins=case.wins,
             losses=case.losses,
+            ties=case.ties,
             rating_breakdown=RatingBreakdownOut.from_dataclass(case.rating_breakdown),
             games=[OpponentResultOut.from_dataclass(g) for g in case.games],
             quality_wins=[OpponentResultOut.from_dataclass(g) for g in case.quality_wins],
@@ -252,6 +258,7 @@ class ComparisonTeamSummaryOut(BaseModel):
     rating: float
     wins: int
     losses: int
+    ties: int
     rating_breakdown: RatingBreakdownOut
     quality_wins: list[OpponentResultOut]
     worst_loss: OpponentResultOut | None
@@ -265,6 +272,7 @@ class ComparisonTeamSummaryOut(BaseModel):
             rating=summary.rating,
             wins=summary.wins,
             losses=summary.losses,
+            ties=summary.ties,
             rating_breakdown=RatingBreakdownOut.from_dataclass(summary.rating_breakdown),
             quality_wins=[OpponentResultOut.from_dataclass(g) for g in summary.quality_wins],
             worst_loss=(
@@ -315,10 +323,10 @@ class CommonOpponentOut(BaseModel):
     opponent_team_id: int
     opponent_name: str
     opponent_rank: int | None
-    team_a_result: Literal["W", "L"]
+    team_a_result: Literal["W", "L", "T"]
     team_a_score: int
     team_a_opponent_score: int
-    team_b_result: Literal["W", "L"]
+    team_b_result: Literal["W", "L", "T"]
     team_b_score: int
     team_b_opponent_score: int
 

@@ -9,11 +9,18 @@ from __future__ import annotations
 from api.models import ComparisonResultOut, TeamCaseOut
 
 
+def _record(wins: int, losses: int, ties: int) -> str:
+    """W-L-T once a tie is in the record, plain W-L otherwise (issue #83) --
+    the engine's own record rule, so a tied team reads "6-9-1" here exactly as
+    it does in the evidence prose, and a tie-less one still reads "13-0"."""
+    return f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
+
+
 def team_case_fallback_text(case: TeamCaseOut) -> str:
     return (
-        f"{case.team_name} finished {case.wins}-{case.losses} in {case.year}, "
-        f"ranked #{case.rank} -- you can see the full case below. My mouth's "
-        "a little tied up right now, but the numbers speak for themselves."
+        f"{case.team_name} finished {_record(case.wins, case.losses, case.ties)} "
+        f"in {case.year}, ranked #{case.rank} -- you can see the full case below. "
+        "My mouth's a little tied up right now, but the numbers speak for themselves."
     )
 
 
@@ -25,8 +32,8 @@ def comparison_fallback_text(comparison: ComparisonResultOut) -> str:
     team_a = comparison.team_a
     team_b = comparison.team_b
     return (
-        f"{team_a.team_name} went {team_a.wins}-{team_a.losses} and "
-        f"{team_b.team_name} went {team_b.wins}-{team_b.losses} in "
+        f"{team_a.team_name} went {_record(team_a.wins, team_a.losses, team_a.ties)} and "
+        f"{team_b.team_name} went {_record(team_b.wins, team_b.losses, team_b.ties)} in "
         f"{comparison.year} -- you can see the full breakdown below. My "
         "mouth's a little tied up right now, but the numbers speak for "
         "themselves."

@@ -72,6 +72,11 @@ YEARS = (2001, 2005, 2013)
 METHODS = ("keener", "elo")
 
 
+def _record(wins: int, losses: int, ties: int) -> str:
+    """W-L-T when ties > 0, W-L otherwise -- the engine's record rule (#83)."""
+    return f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
+
+
 def build() -> None:
     if not SOURCE_FIXTURE.exists():
         raise FileNotFoundError(f"source fixture not found: {SOURCE_FIXTURE}")
@@ -101,14 +106,15 @@ def build() -> None:
         # assertion error in an unrelated test run later.
         champion = conn.execute(
             """
-            SELECT t.school AS school, r.wins AS wins, r.losses AS losses
+            SELECT t.school AS school, r.wins AS wins, r.losses AS losses,
+                   r.ties AS ties
             FROM ratings r JOIN teams t ON t.id = r.team_id
             WHERE r.year = 2005 AND r.method = 'keener' AND r.rank = 1
             """
         ).fetchone()
         if champion is None or champion["school"] != "Texas":
             raise AssertionError(f"expected 2005 keener champion to be Texas, got {champion}")
-        record = f"{champion['wins']}-{champion['losses']}"
+        record = _record(champion["wins"], champion["losses"], champion["ties"])
         print(f"confirmed 2005 champion: {champion['school']} ({record})")
 
         # No equivalent hardcoded expectation for Elo. The CFB Elo constants
@@ -121,7 +127,7 @@ def build() -> None:
             top = conn.execute(
                 """
                 SELECT t.school AS school, r.rating AS rating, r.wins AS wins,
-                       r.losses AS losses
+                       r.losses AS losses, r.ties AS ties
                 FROM ratings r JOIN teams t ON t.id = r.team_id
                 WHERE r.year = ? AND r.method = 'elo' AND r.rank = 1
                 """,
@@ -129,10 +135,18 @@ def build() -> None:
             ).fetchone()
             if top is None:
                 raise AssertionError(f"no elo rank-1 row for {year}")
-            print(
-                f"elo #1 for {year}: {top['school']} "
-                f"({top['wins']}-{top['losses']}, rating {top['rating']:.1f})"
-            )
+            record = _record(top["wins"], top["losses"], top["ties"])
+            print(f"elo #1 for {year}: {top['school']} ({record}, rating {top['rating']:.1f})")
+
+        # Issue #83: a completed equal-score game is a tie. Reported, not
+        # asserted -- this CFB data may contain 0-0 rows for unreported
+        # small-school games, which count as ties until ingest drops them
+        # (#128), so a nonzero count here is expected, not a build failure.
+        for method in METHODS:
+            tied = conn.execute(
+                "SELECT COUNT(*) AS n FROM ratings WHERE method = ? AND ties > 0", (method,)
+            ).fetchone()["n"]
+            print(f"teams with ties > 0 for {method}: {tied}")
 
         for method in METHODS:
             ratings_count = conn.execute(
