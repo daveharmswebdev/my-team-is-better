@@ -565,8 +565,9 @@ def test_completed_game_with_null_scores_is_still_skipped(conn: sqlite3.Connecti
 
 def test_cfb_completed_zero_zero_row_is_reported_as_a_tie(conn: sqlite3.Connection) -> None:
     """One definition in every sport (contracts.TeamRating). CFB's completed
-    0-0 "unreported" rows are bad data tracked in #128 and belong at ingest;
-    the evidence layer does not carve out a sport exception for them."""
+    0-0 "unreported" rows are bad data, handled at ingest by nulling their
+    scores (#128); a 0-0 row that does reach the evidence layer is a tie, with
+    no sport exception carved out here."""
     _insert_team(conn, 21, "Lima Unreported", sport="cfb")
     _insert_team(conn, 22, "Mike Unreported", sport="cfb")
     _insert_game(conn, 21, TIE_YEAR, 21, 22, "Lima Unreported", "Mike Unreported", 0, 0)

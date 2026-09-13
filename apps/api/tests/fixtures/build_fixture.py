@@ -139,9 +139,9 @@ def build() -> None:
             print(f"elo #1 for {year}: {top['school']} ({record}, rating {top['rating']:.1f})")
 
         # Issue #83: a completed equal-score game is a tie. Reported, not
-        # asserted -- this CFB data may contain 0-0 rows for unreported
-        # small-school games, which count as ties until ingest drops them
-        # (#128), so a nonzero count here is expected, not a build failure.
+        # asserted. CFBD's unreported 0-0 small-school games are stored with
+        # NULL scores at ingest (#128) and never count as ties, so a nonzero
+        # count here means real ties in the data, not a build failure.
         for method in METHODS:
             tied = conn.execute(
                 "SELECT COUNT(*) AS n FROM ratings WHERE method = ? AND ties > 0", (method,)
