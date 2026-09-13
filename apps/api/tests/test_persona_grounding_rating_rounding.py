@@ -1,5 +1,6 @@
-"""Failing-first tests for issue #162: a display rounding of a *rating* is
-grounded; every other rounding or derived figure is not (#108 stays open).
+"""Failing-first tests for issue #162: a display rounding of a *rating* (a
+`rating` or an `opponent_rating`) is grounded; every other rounding or
+derived figure is not (#108 stays open).
 
 Every fact block here is the real one `api.persona.service` hands Claude,
 built the same way the routes build it (`build_team_case`/`build_comparison`
@@ -166,7 +167,7 @@ def test_grouped_rating_does_not_break_record_and_score_tokens(conn: sqlite3.Con
 
 
 # ---------------------------------------------------------------------------
-# rejected: anything that isn't the half-away-from-zero rounding of a `rating`
+# rejected: anything that isn't the half-away-from-zero rounding of a rating
 # ---------------------------------------------------------------------------
 
 

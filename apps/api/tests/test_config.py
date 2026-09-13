@@ -78,7 +78,7 @@ def test_prompt_version_is_past_the_method_less_compare_fact_blocks() -> None:
 
 def test_prompt_version_is_past_the_no_rating_rounding_prompt() -> None:
     """Issue #162 changed the system prompt itself: rule 1 now lets the
-    narrator round a team's `rating`. The cache key doesn't cover the prompt
+    narrator round a `rating` or `opponent_rating`. The cache key doesn't cover the prompt
     text, so narrations cached under `persona-v3` were written under the old
     "never round" rule and would keep being served unless the version moves."""
     config = _reimport_config()

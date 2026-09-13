@@ -32,7 +32,7 @@ This is a monorepo with three independently-owned pieces:
 
 | Path | What it is |
 | --- | --- |
-| `packages/cfb-engine/` | The deterministic ratings engine (Keener's method) and its MCP server. Python, `uv`-managed. See its own [README](packages/cfb-engine/README.md). |
+| `packages/cfb-engine/` | The deterministic ratings engine (Keener's method as the validated default, Elo as a second opinion) and its MCP server. Python, `uv`-managed. See its own [README](packages/cfb-engine/README.md). |
 | `apps/api/` | FastAPI backend — verdict/comparison endpoints over the engine, plus the Claude persona narration layer. See its own [README](apps/api/README.md). |
 | `apps/web/` | React + TypeScript + Storybook frontend. See its own [README](apps/web/README.md). |
 

@@ -65,7 +65,8 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # instead of being dropped. v1 narrations were written from tie-less facts.
 # persona-v3 (issue #152): prompt unchanged; compare fact blocks now carry `method`.
 # persona-v4 (issue #162): the prompt changed -- rule 1 now lets the narrator
-# round a team's `rating` (and only that), matching the grounding check.
+# round a `rating` or `opponent_rating` (and nothing else), matching the
+# grounding check.
 PROMPT_VERSION = "persona-v4"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}

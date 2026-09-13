@@ -46,9 +46,10 @@ _RULE_1_WITH_RATING_ROUNDING = (
 )
 
 
-def test_rule_1_permits_rounding_a_rating_and_nothing_else() -> None:
-    # issue #162: the grounding checker accepts a rounded `rating`, so the
-    # prompt has to say so -- and only for a rating, not any stat.
+def test_rule_1_permits_rounding_ratings_and_nothing_else() -> None:
+    # issue #162: the grounding checker accepts a rounded `rating` or
+    # `opponent_rating`, so the prompt has to say so -- and only for those
+    # two ratings, not any stat.
     for user_team in ("Texas", None):
         prompt = build_system_prompt(user_team)
 

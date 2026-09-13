@@ -185,7 +185,8 @@ def find_ungrounded_tokens(
 
 def _is_grounded_number(token: str, fact_numbers: set[str], rating_values: list[Decimal]) -> bool:
     """A response number token is grounded if its ungrouped form is a
-    number token of the fact block, or it is a rounding of a `rating`.
+    number token of the fact block, or it is a rounding of a value under
+    one of `_ROUNDABLE_KEYS` (`rating` or `opponent_rating`).
     """
     plain = token.replace(",", "")
     if plain in fact_numbers:
