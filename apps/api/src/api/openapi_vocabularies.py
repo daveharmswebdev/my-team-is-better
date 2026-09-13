@@ -40,7 +40,7 @@ UNCONSTRAINED_LOCATIONS: Final[Mapping[tuple[str, str], str]] = {
     # turn into a 500. In practice the value is always the request's
     # already-validated `method`, so the published schema is merely looser
     # than reality, never wrong. Remove this entry once the engine types
-    # `TeamCase.method` as `Method` and this field follows it; the test fails
+    # `TeamCase.method` as `Method` (#139) and this field follows it; the test fails
     # on the entry the moment the field gains an enum.
     ("method", "#/components/schemas/TeamCaseOut/properties/method"): (
         "response echo of the request's method; engine's TeamCase.method is str"
