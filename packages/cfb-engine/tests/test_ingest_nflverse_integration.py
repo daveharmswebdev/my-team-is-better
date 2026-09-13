@@ -115,8 +115,9 @@ def test_nfl_ingest_coexists_with_pre_existing_cfb_rows_without_id_collisions(
     games_raw = _load_games()
     team_lookup = _load_team_lookup()
     conn: sqlite3.Connection = get_conn(regression_db)
-    # regression_db is a pre-#51 fixture (no sport/source_id columns yet) --
-    # ensure_schema migrates it in place, same as a real pre-existing db.
+    # A no-op on the committed fixture, which is at the current schema
+    # (#110). A stale one fails here on the StaleDatabaseWarning gate. The
+    # in-place migration of a pre-#51 db is test_schema_migration.py's job.
     ensure_schema(conn)
 
     cfb_game_ids_before = {

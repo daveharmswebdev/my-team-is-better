@@ -4,14 +4,18 @@ has something concrete to certify NFL rankings against.
 
 Fixture provenance
 ------------------
-`tests/fixtures/nfl_regression.sqlite3` was built the same way as the CFB
-fixture: `cfb_strength.ingest.nflverse.ingest_season.main()` ingested real,
-cache-first nflverse data (`data/raw/nfl/games.csv` / `teams.csv`, never a
-live fetch) for season IN (1999, 2004, 2013, 2022), then every `teams` row
-referenced by those seasons' games (35 -- 32 franchises plus three
-relocation variants: STL/LA Rams, SD/LA Chargers, OAK/LV Raiders) and every
-`team_season` row for those team/year pairs was extracted into this
-fixture. It carries NO `ratings` rows -- every test below runs the real
+`tests/fixtures/nfl_regression.sqlite3` is generated the same way as the
+CFB fixture, by `tests/fixtures/build_regression_fixtures.py` (issue #110;
+its docstring has the regeneration command). `ingest.nflverse.ingest_season
+.ingest_one` ingests real, cache-first nflverse data (`data/raw/nfl/games.csv`
+/ `teams.csv`, live fetches disabled) for the whole ingest window into a
+fresh current-schema db, which is then pruned to season IN (1999, 2004,
+2013, 2022): those seasons' games, every `teams` row they reference (35 --
+32 franchises plus three relocation variants: STL/LA Rams, SD/LA Chargers,
+OAK/LV Raiders), every `team_season` row for those team/year pairs, and
+those seasons' `ingestion_log` rows. #110 regenerated it at the current
+schema; its games, teams and team_season content is unchanged from the
+earlier hand-built fixture. It carries NO `ratings` rows -- every test below runs the real
 `compute_and_store` / `KeenerRating.rate()` pipeline against these real
 games itself, exactly like the CFB fixture, so a regression in the
 algorithm re-fails these tests instead of silently passing against a

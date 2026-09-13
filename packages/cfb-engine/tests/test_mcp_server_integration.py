@@ -213,7 +213,9 @@ def both_leagues_db(
 
     conn: sqlite3.Connection = get_conn(regression_db)
     try:
-        # The committed CFB fixture predates #51's `sport` columns.
+        # A no-op on the committed fixtures, which are at the current schema
+        # (#110). A stale one fails here on the StaleDatabaseWarning gate,
+        # instead of on a missing `sport` column in the INSERTs below.
         ensure_schema(conn)
         conn.execute("ATTACH DATABASE ? AS nfl", (str(nfl_regression_db),))
         conn.execute(
