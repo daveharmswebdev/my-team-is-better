@@ -10,7 +10,12 @@ from.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from cfb_strength.credit_math import CreditComponents, single_game_credit
+
+# Same letters as `contracts.OpponentResult.result`.
+Outcome = Literal["W", "L", "T"]
 
 _CLOSE_LOW = 45
 _CLOSE_HIGH = 55
@@ -24,14 +29,34 @@ def _score(team_score: int, opponent_score: int) -> str:
     return f"{team_score}-{opponent_score}"
 
 
+def _outcome(team_score: int, opponent_score: int) -> Outcome:
+    if team_score > opponent_score:
+        return "W"
+    if team_score < opponent_score:
+        return "L"
+    return "T"
+
+
+def _record(wins: int, losses: int, ties: int) -> str:
+    """W-L, or W-L-T once a tie is in it -- so copy without a tie (all of
+    CFB's, in practice) reads exactly as it did before issue #83."""
+    return f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
+
+
 def _explain_single(team_score: int, opponent_score: int) -> str:
     components = single_game_credit(team_score, opponent_score)
     pct = _pct(components)
     score = _score(team_score, opponent_score)
     bonus = f"{components.bonus:.2f}"
-    won = team_score > opponent_score
+    outcome = _outcome(team_score, opponent_score)
 
-    if won:
+    if outcome == "T":
+        return (
+            f"Tied them, {score} — {pct}% of the points. A tie banks a flat "
+            f"{components.base:.2f}, with no margin bonus either way."
+        )
+
+    if outcome == "W":
         if components.capped:
             return (
                 f"Ran them off the field, {score} — {pct}% of the points, capped "
@@ -68,13 +93,17 @@ def _explain_single(team_score: int, opponent_score: int) -> str:
     )
 
 
-def _explain_pair(games: list[tuple[int, int]], won: bool) -> str:
+_PAIR_VERB: dict[Outcome, str] = {"W": "Swept", "L": "Lost to", "T": "Tied"}
+_PAIR_BASE: dict[Outcome, str] = {"W": "0.60 win", "L": "0.05 loss", "T": "0.50 tie"}
+
+
+def _explain_pair(games: list[tuple[int, int]], outcome: Outcome) -> str:
     (ts1, os1), (ts2, os2) = games
     c1 = single_game_credit(ts1, os1)
     c2 = single_game_credit(ts2, os2)
     s1, s2 = _score(ts1, os1), _score(ts2, os2)
-    verb = "Swept" if won else "Lost to"
-    base = "0.60 win" if won else "0.05 loss"
+    verb = _PAIR_VERB[outcome]
+    base = _PAIR_BASE[outcome]
 
     if c1.bonus == c2.bonus:
         return (
@@ -102,21 +131,22 @@ def _explain_pair(games: list[tuple[int, int]], won: bool) -> str:
 def _explain_fallback(games: list[tuple[int, int]]) -> str:
     wins = sum(1 for ts, os in games if ts > os)
     losses = sum(1 for ts, os in games if ts < os)
+    ties = sum(1 for ts, os in games if ts == os)
     parts = "; ".join(
         f"{_score(ts, os)} ({single_game_credit(ts, os).base:.2f} + "
         f"{single_game_credit(ts, os).bonus:.2f})"
         for ts, os in games
     )
-    return f"Played them {len(games)} times ({wins}-{losses}) — {parts}."
+    return f"Played them {len(games)} times ({_record(wins, losses, ties)}) — {parts}."
 
 
 def explain_credit(games: list[tuple[int, int]]) -> str:
     """games: (team_score, opponent_score) tuples for every game this team
     played against one specific opponent this season, in chronological
-    order. Precondition: every tuple has team_score != opponent_score (the
-    caller filters out ties/data-artifact equal-score rows before calling
-    this -- see _opponent_result's existing tie-skip logic in proof.py for
-    the precedent). Returns "" if games is empty."""
+    order -- every completed game with both scores, ties included. A tie
+    (equal scores, issue #83) is worded as a tie, never as a win or loss,
+    matching `OpponentResult.result == "T"` for the same game in proof.py.
+    Returns "" if games is empty."""
     if not games:
         return ""
 
@@ -124,8 +154,8 @@ def explain_credit(games: list[tuple[int, int]]) -> str:
         return _explain_single(*games[0])
 
     if len(games) == 2:
-        results = [ts > os for ts, os in games]
-        if results[0] == results[1]:
-            return _explain_pair(games, won=results[0])
+        first, second = (_outcome(ts, os) for ts, os in games)
+        if first == second:
+            return _explain_pair(games, outcome=first)
 
     return _explain_fallback(games)

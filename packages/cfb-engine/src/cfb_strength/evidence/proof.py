@@ -87,9 +87,11 @@ def _scores_vs_opponent(
     order, for every completed game in `games` (already scoped to `team_id`
     by `_team_games`) played against `opponent_team_id` specifically.
 
-    Mirrors `_opponent_result`'s is_home resolution and tie/data-artifact
-    skip exactly, so the games fed to `explain_credit` are the same games
-    (by score) `OpponentResult` itself would report for this matchup.
+    Mirrors `_opponent_result`'s is_home resolution and null-score skip
+    exactly, so the games fed to `explain_credit` are the same games (by
+    score) `OpponentResult` itself would report for this matchup -- ties
+    included (issue #83), which also keeps the explanation's game count in
+    step with the persisted `games_played`, which has always counted them.
     """
     pairs: list[tuple[int, int]] = []
     for game in games:
@@ -99,7 +101,7 @@ def _scores_vs_opponent(
             continue
         team_score = game["home_points"] if is_home else game["away_points"]
         opp_score = game["away_points"] if is_home else game["home_points"]
-        if team_score is None or opp_score is None or team_score == opp_score:
+        if team_score is None or opp_score is None:
             continue
         pairs.append((int(team_score), int(opp_score)))
     return pairs
@@ -291,14 +293,20 @@ def _opponent_result(
     opponent_id = game["away_team_id"] if is_home else game["home_team_id"]
     opponent_name = game["away_team"] if is_home else game["home_team"]
 
-    if team_score is None or opp_score is None or team_score == opp_score:
-        # Equal scores in this dataset are data artifacts (e.g. 0-0 rows for
-        # small-school games CFBD never reported), not real modern-era ties
-        # -- OpponentResult only models W/L, so skip anything without a
-        # well-defined winner.
+    if team_score is None or opp_score is None:
+        # No score, no result to report.
         return None
 
-    result: Literal["W", "L"] = "W" if team_score > opp_score else "L"
+    # Equal scores are a tie by definition (contracts.TeamRating.ties), in
+    # every sport -- the same definition the ratings layer uses to count
+    # `ratings.ties`, so the listed games and the record always agree. CFB's
+    # completed 0-0 rows for small-school games CFBD never reported are bad
+    # data, not ties, but they are a known ingest problem tracked in #128 and
+    # get fixed there, for every layer at once -- not with a sport exception
+    # here.
+    result: Literal["W", "L", "T"] = (
+        "W" if team_score > opp_score else "L" if team_score < opp_score else "T"
+    )
     opp_rating_row = ratings.get(int(opponent_id))
 
     return OpponentResult(
@@ -325,7 +333,7 @@ def build_team_case(
     team_id = resolve_team(conn, year, team, method=method, sport=sport)
 
     rating_row = conn.execute(
-        "SELECT rating, rank, wins, losses FROM ratings "
+        "SELECT rating, rank, wins, losses, ties FROM ratings "
         "WHERE year = ? AND method = ? AND team_id = ? AND sport = ?",
         (year, method, team_id, sport),
     ).fetchone()
@@ -373,6 +381,7 @@ def build_team_case(
         rating=float(rating_row["rating"]),
         wins=int(rating_row["wins"]),
         losses=int(rating_row["losses"]),
+        ties=int(rating_row["ties"]),
         rating_breakdown=rating_breakdown,
         games=opponent_results,
         quality_wins=quality_wins,
@@ -388,6 +397,7 @@ def _case_summary(case: TeamCase) -> ComparisonTeamSummary:
         rating=case.rating,
         wins=case.wins,
         losses=case.losses,
+        ties=case.ties,
         rating_breakdown=case.rating_breakdown,
         quality_wins=case.quality_wins,
         worst_loss=case.worst_loss,
@@ -517,6 +527,14 @@ def _build_verdict(
             elif m.winner == case_b.team_name:
                 parts.append(
                     f"{case_b.team_name} beat {case_a.team_name} head-to-head "
+                    f"{m.home_points}-{m.away_points} "
+                    f"({m.home_team} vs {m.away_team}, week {m.week})."
+                )
+            else:
+                # winner=None: a tied meeting (issue #83). Null-score meetings
+                # never reach `meetings`, so this is always equal scores.
+                parts.append(
+                    f"{case_a.team_name} and {case_b.team_name} tied head-to-head "
                     f"{m.home_points}-{m.away_points} "
                     f"({m.home_team} vs {m.away_team}, week {m.week})."
                 )
