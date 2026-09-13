@@ -51,6 +51,8 @@ from __future__ import annotations
 
 import sqlite3
 
+import pytest
+
 from cfb_strength.evidence.proof import build_team_case
 from cfb_strength.ratings.compute_ratings import compute_and_store
 
@@ -199,3 +201,80 @@ def test_2022_chiefs_case_cites_the_super_bowl_win_over_eagles(
     assert len(eagles_wins) == 1
     super_bowl = eagles_wins[0]
     assert (super_bowl.team_score, super_bowl.opponent_score) == (38, 35)
+
+
+# ---------------------------------------------------------------------------
+# Issue #83: real NFL ties are part of the stored record.
+#
+# Before #83 every rating method counted an equal-score game as neither a win
+# nor a loss and `ratings` had no column for a tie, so the tie vanished from
+# every displayed record.
+# ---------------------------------------------------------------------------
+
+
+def _stored_record(
+    conn: sqlite3.Connection, year: int, method: str, school: str
+) -> tuple[int, int, int]:
+    row = conn.execute(
+        """
+        SELECT r.wins AS wins, r.losses AS losses, r.ties AS ties
+        FROM ratings r JOIN teams t ON t.id = r.team_id
+        WHERE r.year = ? AND r.method = ? AND r.sport = 'nfl' AND t.school = ?
+        """,
+        (year, method, school),
+    ).fetchone()
+    assert row is not None, f"no {method} rating row for {school} {year}"
+    return (row["wins"], row["losses"], row["ties"])
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+def test_2013_packers_vikings_tie_is_in_both_stored_records(
+    nfl_regression_conn: sqlite3.Connection, method: str
+) -> None:
+    """2013 week 12: Green Bay 26, Minnesota 26 (OT), a real tie.
+
+    The stored record counts every completed game loaded for the season,
+    postseason included. Green Bay also lost its wild-card game, so it is
+    8-8-1 here, not its 8-7-1 regular-season record; Minnesota is 5-10-1.
+    """
+    compute_and_store(nfl_regression_conn, 2013, method, sport="nfl")
+    assert _stored_record(nfl_regression_conn, 2013, method, "Green Bay Packers") == (8, 8, 1)
+    assert _stored_record(nfl_regression_conn, 2013, method, "Minnesota Vikings") == (5, 10, 1)
+
+
+def _loaded_games_per_team(conn: sqlite3.Connection, year: int, sport: str) -> dict[int, int]:
+    """Completed games per team, with exactly `_load_games`' predicates."""
+    rows = conn.execute(
+        """
+        SELECT team_id, COUNT(*) AS n FROM (
+            SELECT home_team_id AS team_id FROM games
+            WHERE season = ? AND sport = ? AND completed = 1
+              AND home_points IS NOT NULL AND away_points IS NOT NULL
+            UNION ALL
+            SELECT away_team_id AS team_id FROM games
+            WHERE season = ? AND sport = ? AND completed = 1
+              AND home_points IS NOT NULL AND away_points IS NOT NULL
+        ) GROUP BY team_id
+        """,
+        (year, sport, year, sport),
+    ).fetchall()
+    return {row["team_id"]: row["n"] for row in rows}
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+@pytest.mark.parametrize("year", [1999, 2004, 2013, 2022])
+def test_record_sums_to_completed_games_for_every_nfl_team(
+    nfl_regression_conn: sqlite3.Connection, year: int, method: str
+) -> None:
+    """`TeamRating`'s invariant: `wins + losses + ties` equals the team's
+    completed games in the season, for every stored team."""
+    compute_and_store(nfl_regression_conn, year, method, sport="nfl")
+    expected = _loaded_games_per_team(nfl_regression_conn, year, "nfl")
+    rows = nfl_regression_conn.execute(
+        "SELECT team_id, wins, losses, ties FROM ratings "
+        "WHERE year = ? AND method = ? AND sport = 'nfl'",
+        (year, method),
+    ).fetchall()
+    assert rows
+    actual = {r["team_id"]: r["wins"] + r["losses"] + r["ties"] for r in rows}
+    assert actual == {team_id: expected[team_id] for team_id in actual}

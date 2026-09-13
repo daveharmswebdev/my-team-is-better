@@ -75,8 +75,11 @@ win or loss band via the clamped share, never across the win/loss
 boundary; the clamp (``MAX_SKEW``) additionally caps how much a single
 lopsided score can move that nudge, so an extreme (e.g. 70-0) score is
 capped at the same nudge as, say, a 65% points share. A tied game (score
-difference of 0; not possible under current NCAA rules but handled
-defensively) splits credit 0.5 / 0.5.
+difference of 0) gets 0.5 credit for each team from
+`credit_math.single_game_credit` (base 0.5, bonus 0.0). Ties are real data,
+not a defensive branch: nflverse has 15 completed NFL ties in 1999-2025.
+Each team's record counts a tie in `TeamRating.ties` (issue #83), never as a
+win or a loss.
 
 Irreducibility / disconnected components / periodicity
 ---------------------------------------------------------
@@ -204,6 +207,7 @@ class KeenerRating:
         raw = np.zeros((n, n), dtype=np.float64)
         wins = {team_id: 0 for team_id in team_ids}
         losses = {team_id: 0 for team_id in team_ids}
+        ties = {team_id: 0 for team_id in team_ids}
         games_played = {team_id: 0 for team_id in team_ids}
 
         # Per-opponent-pair bookkeeping for the rating breakdown (issue #31).
@@ -242,14 +246,19 @@ class KeenerRating:
                 losses[g.home_team_id] += 1
                 pair_wins[away_pair] += 1
                 pair_losses[home_pair] += 1
-            # a tie increments neither; not possible under current NCAA rules
+            else:
+                # A tie: a completed game with equal scores (TeamRating.ties,
+                # issue #83). Real NFL data has them. This changes only the
+                # reported record; the credit above already scored the game.
+                ties[g.home_team_id] += 1
+                ties[g.away_team_id] += 1
 
         if n == 1:
             only = team_ids[0]
             return {
                 only: TeamRating(
                     team_id=only, rating=1.0, rank=1,
-                    wins=wins[only], losses=losses[only],
+                    wins=wins[only], losses=losses[only], ties=ties[only],
                 )
             }
 
@@ -322,6 +331,7 @@ class KeenerRating:
                 rank=rank_of[i],
                 wins=wins[team_ids[i]],
                 losses=losses[team_ids[i]],
+                ties=ties[team_ids[i]],
                 rating_breakdown=_breakdown_for(i),
             )
             for i in range(n)

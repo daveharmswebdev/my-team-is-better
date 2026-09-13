@@ -45,8 +45,9 @@ Deliberate non-features
 * **No per-team QB / travel / rest adjustments.** Those are later 538
   refinements (Elo+/QB-adjusted Elo) and are out of scope here.
 * **Ties move ratings.** A tie is `result == 0.5` and pulls both teams
-  toward parity. It increments neither `wins` nor `losses`, matching
-  Keener's convention (see `keener.py`).
+  toward parity. In the reported record it increments `ties`, not `wins`
+  or `losses`. That is `TeamRating.ties`' one cross-method definition
+  (issue #83), so Keener counts it the same way.
 """
 
 from __future__ import annotations
@@ -406,7 +407,12 @@ def _resolve_roots(successors: Mapping[int, int]) -> dict[int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _rank(ratings: dict[int, float], wins: dict[int, int], losses: dict[int, int]) -> dict[int, TeamRating]:
+def _rank(
+    ratings: dict[int, float],
+    wins: dict[int, int],
+    losses: dict[int, int],
+    ties: dict[int, int],
+) -> dict[int, TeamRating]:
     """Rank 1..n by rating descending, team id ascending as the tiebreak.
 
     `compute_and_store` re-ranks for display anyway (FBS-only, per
@@ -422,6 +428,7 @@ def _rank(ratings: dict[int, float], wins: dict[int, int], losses: dict[int, int
             rank=position + 1,
             wins=wins.get(team_id, 0),
             losses=losses.get(team_id, 0),
+            ties=ties.get(team_id, 0),
         )
         for position, team_id in enumerate(order)
     }
@@ -499,6 +506,7 @@ def _walk(
     participants: dict[int, int] = {}
     wins: dict[int, int] = {}
     losses: dict[int, int] = {}
+    ties: dict[int, int] = {}
 
     for game in games:
         season = game.season
@@ -561,16 +569,21 @@ def _walk(
         for team_id in (home_id, away_id):
             wins.setdefault(team_id, 0)
             losses.setdefault(team_id, 0)
+            ties.setdefault(team_id, 0)
         if game.home_points > game.away_points:
             wins[home_id] += 1
             losses[away_id] += 1
         elif game.away_points > game.home_points:
             wins[away_id] += 1
             losses[home_id] += 1
-        # A tie increments neither, matching Keener's convention.
+        else:
+            # A tie, counted after the `record_season` filter above, so a
+            # career walk reports only target-season ties (issue #83).
+            ties[home_id] += 1
+            ties[away_id] += 1
 
     ratings = {actual_id: elo[root] for root, actual_id in participants.items()}
-    return _rank(ratings, wins, losses)
+    return _rank(ratings, wins, losses, ties)
 
 
 # ---------------------------------------------------------------------------
@@ -605,7 +618,7 @@ class EloCareerRating:
     seasons <= `target_season`, in chronological total order), reverting
     each team's rating toward `cfg.mean` once per offseason, and returns
     only the teams that played in `target_season` -- with
-    `target_season`-only win/loss records. A team carried through the replay
+    `target_season`-only win/loss/tie records. A team carried through the replay
     but absent from the target season influences its opponents' ratings and
     is then simply not emitted.
 

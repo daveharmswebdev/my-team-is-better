@@ -326,15 +326,34 @@ def test_every_team_starts_at_initial() -> None:
 
 
 def test_wins_losses_and_ties() -> None:
-    """A tie increments neither wins nor losses, matching Keener."""
+    """Issue #83: a tie is tallied as a tie, identically to Keener. Before
+    #83 it incremented neither wins nor losses and was silently dropped from
+    the record."""
     result = EloRating(CFB).rate([
         _game(A, B, 28, 21),
         _game(A, C, 17, 17),
         _game(C, B, 10, 3),
     ])
-    assert (result[A].wins, result[A].losses) == (1, 0)
-    assert (result[B].wins, result[B].losses) == (0, 2)
-    assert (result[C].wins, result[C].losses) == (1, 0)
+    assert (result[A].wins, result[A].losses, result[A].ties) == (1, 0, 1)
+    assert (result[B].wins, result[B].losses, result[B].ties) == (0, 2, 0)
+    assert (result[C].wins, result[C].losses, result[C].ties) == (1, 0, 1)
+
+
+def test_elo_and_keener_report_identical_records_including_ties() -> None:
+    """`TeamRating.ties` has one definition across every method (contracts.py),
+    so the two methods must agree on every team's full record."""
+    games = [
+        _game(A, B, 28, 21),
+        _game(A, C, 17, 17),
+        _game(C, B, 10, 3),
+        _game(B, D, 3, 3),
+        _game(D, A, 24, 0),
+    ]
+    elo = EloRating(CFB).rate(games)
+    keener = KeenerRating().rate(games)
+    assert {t: (r.wins, r.losses, r.ties) for t, r in elo.items()} == {
+        t: (r.wins, r.losses, r.ties) for t, r in keener.items()
+    }
 
 
 def test_ratings_sum_is_conserved() -> None:
@@ -403,6 +422,36 @@ def test_records_count_target_season_only() -> None:
     ]
     result = EloCareerRating(CFB, {}).rate_through(games, 2002)
     assert (result[A].wins, result[A].losses) == (1, 2)
+
+
+def test_career_ties_count_target_season_only() -> None:
+    """Issue #83, per `CareerRatingMethod`'s docstring: `ties` counts only
+    `target_season` games, exactly like wins/losses. Two prior-season ties
+    must not leak into the target season's record, and the target season's
+    own tie must not be dropped.
+
+    A lineage predecessor's prior-season tie is included too: ties are keyed
+    by the id that played, not the lineage root, same as wins/losses."""
+    stl, la = 11, 12
+    games = [
+        _game(A, B, 14, 14, season=2001),
+        _game(A, C, 21, 21, season=2001),
+        _game(stl, B, 10, 10, season=2001),
+        _game(A, B, 28, 21, season=2002),
+        _game(A, C, 20, 20, season=2002),
+        _game(la, B, 3, 3, season=2002),
+    ]
+    result = EloCareerRating(CFB, {stl: la}).rate_through(games, 2002)
+    assert set(result) == {A, B, C, la}
+    assert (result[A].wins, result[A].losses, result[A].ties) == (1, 0, 1)
+    assert (result[B].wins, result[B].losses, result[B].ties) == (0, 1, 1)
+    assert (result[C].wins, result[C].losses, result[C].ties) == (0, 0, 1)
+    assert (result[la].wins, result[la].losses, result[la].ties) == (0, 0, 1)
+
+    # And the prior season's ties are real when that season is the target.
+    earlier = EloCareerRating(CFB, {stl: la}).rate_through(games[:3], 2001)
+    assert (earlier[A].wins, earlier[A].losses, earlier[A].ties) == (0, 0, 2)
+    assert earlier[stl].ties == 1
 
 
 def test_carried_rating_survives_a_skipped_season() -> None:

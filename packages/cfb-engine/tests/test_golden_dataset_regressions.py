@@ -168,3 +168,41 @@ def test_champion_is_undefeated_or_best_recorded_in_all_three_golden_years(
     top2 = _top_n(regression_conn, year, n=2)
     assert len(top2) == 2
     assert top2[0]["losses"] <= top2[1]["losses"]
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+@pytest.mark.parametrize("year", [2001, 2005, 2013])
+def test_record_sums_to_completed_games_for_every_displayed_team(
+    regression_conn: sqlite3.Connection, year: int, method: str
+) -> None:
+    """Issue #83, `TeamRating`'s invariant: `wins + losses + ties` equals the
+    team's completed games loaded for the season -- counted over the whole
+    win-graph (FCS opponents included), not just FBS-vs-FBS games, for every
+    FBS team the display filter keeps. Uses exactly `_load_games`'
+    predicates."""
+    compute_and_store(regression_conn, year, method)
+    expected = {
+        row["team_id"]: row["n"]
+        for row in regression_conn.execute(
+            """
+            SELECT team_id, COUNT(*) AS n FROM (
+                SELECT home_team_id AS team_id FROM games
+                WHERE season = ? AND sport = 'cfb' AND completed = 1
+                  AND home_points IS NOT NULL AND away_points IS NOT NULL
+                UNION ALL
+                SELECT away_team_id AS team_id FROM games
+                WHERE season = ? AND sport = 'cfb' AND completed = 1
+                  AND home_points IS NOT NULL AND away_points IS NOT NULL
+            ) GROUP BY team_id
+            """,
+            (year, year),
+        ).fetchall()
+    }
+    rows = regression_conn.execute(
+        "SELECT team_id, wins, losses, ties FROM ratings "
+        "WHERE year = ? AND method = ? AND sport = 'cfb'",
+        (year, method),
+    ).fetchall()
+    assert rows
+    actual = {r["team_id"]: r["wins"] + r["losses"] + r["ties"] for r in rows}
+    assert actual == {team_id: expected[team_id] for team_id in actual}

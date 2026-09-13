@@ -704,12 +704,73 @@ def test_elo_career_records_are_target_season_only(tmp_path: Path) -> None:
 
     compute_and_store(conn, 2002, "elo_career")
     rows = conn.execute(
-        "SELECT team_id, wins, losses FROM ratings WHERE year = 2002 AND method = 'elo_career'"
+        "SELECT team_id, wins, losses, ties FROM ratings "
+        "WHERE year = 2002 AND method = 'elo_career'"
     ).fetchall()
     # Each team plays exactly two games in 2002; the rating carries across
     # seasons but the record does not.
     for row in rows:
-        assert row["wins"] + row["losses"] == 2
+        assert row["wins"] + row["losses"] + row["ties"] == 2
+    conn.close()
+
+
+@pytest.mark.parametrize("method", ["keener", "elo", "elo_career"])
+def test_compute_and_store_writes_ties_column(tmp_path: Path, method: str) -> None:
+    """Issue #83: a completed equal-score game is stored in `ratings.ties`,
+    through `_rerank_for_display` (which rebuilds every `TeamRating`) and
+    `_store`, for every registered method. Before #83 there was no column
+    and the tie vanished from the stored record."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2016
+
+    for tid in (101, 102, 103):
+        _insert_team(conn, tid, f"NFL Team {tid}", sport="nfl")
+        _insert_team_season(conn, tid, year, None, sport="nfl")
+    _insert_game(conn, 1, year, 101, 102, 27, 27, sport="nfl")
+    _insert_game(conn, 2, year, 102, 103, 24, 10, sport="nfl")
+    _insert_game(conn, 3, year, 103, 101, 17, 20, sport="nfl")
+    conn.commit()
+
+    assert compute_and_store(conn, year, method, "nfl") == 3
+    records = {
+        r["team_id"]: (r["wins"], r["losses"], r["ties"])
+        for r in conn.execute(
+            "SELECT team_id, wins, losses, ties FROM ratings "
+            "WHERE year = ? AND method = ? AND sport = 'nfl'",
+            (year, method),
+        ).fetchall()
+    }
+    assert records == {101: (1, 0, 1), 102: (1, 0, 1), 103: (0, 2, 0)}
+    conn.close()
+
+
+def test_cfb_fbs_display_filter_keeps_ties(tmp_path: Path) -> None:
+    """The CFB branch of `_rerank_for_display` (FBS filter + re-rank) must
+    carry `ties` too, including a tie against a non-displayed FCS team."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+
+    _insert_team(conn, 1, "FBS A")
+    _insert_team_season(conn, 1, year, "fbs")
+    _insert_team(conn, 2, "FBS B")
+    _insert_team_season(conn, 2, year, "fbs")
+    _insert_team(conn, 3, "FCS C")
+    _insert_team_season(conn, 3, year, "fcs")
+    _insert_game(conn, 1, year, 1, 3, 14, 14)
+    _insert_game(conn, 2, year, 1, 2, 30, 20)
+    conn.commit()
+
+    assert compute_and_store(conn, year, "keener") == 2
+    records = {
+        r["team_id"]: (r["wins"], r["losses"], r["ties"])
+        for r in conn.execute(
+            "SELECT team_id, wins, losses, ties FROM ratings WHERE year = ? AND method = 'keener'",
+            (year,),
+        ).fetchall()
+    }
+    assert records == {1: (1, 0, 1), 2: (0, 1, 0)}
     conn.close()
 
 

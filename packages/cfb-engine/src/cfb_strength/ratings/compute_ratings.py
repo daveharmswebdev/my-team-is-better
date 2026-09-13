@@ -253,6 +253,7 @@ def _rerank_for_display(
             rank=i + 1,
             wins=tr.wins,
             losses=tr.losses,
+            ties=tr.ties,
             rating_breakdown=tr.rating_breakdown,
         )
         for i, tr in enumerate(candidates)
@@ -282,8 +283,10 @@ def _store(
         )
         conn.executemany(
             """
-            INSERT INTO ratings (year, method, team_id, rating, rank, wins, losses, computed_at, sport)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO ratings (
+                year, method, team_id, rating, rank, wins, losses, ties, computed_at, sport
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -294,6 +297,7 @@ def _store(
                     tr.rank,
                     tr.wins,
                     tr.losses,
+                    tr.ties,
                     computed_at,
                     sport,
                 )
