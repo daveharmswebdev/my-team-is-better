@@ -203,11 +203,12 @@ export interface TeamDetail {
 // ---------------------------------------------------------------------------
 
 /**
- * The source list for `Sport` and for the runtime guard behind
- * `isVerdictErrorBody`, which both derive from it. Two per-league spots are not
- * derived from it: the `Record<Sport, string>` label maps (tsc requires an
- * entry per league) and `QuestionForm`'s two league radios (unchecked, #143).
- * Checked against the API's
+ * The source list for `Sport`, for the runtime guard behind
+ * `isVerdictErrorBody`, and for `QuestionForm`'s league radios (issue #143),
+ * which all derive from it. The per-league copy is not derived from it but is
+ * still checked: every `Record<Sport, string>` label map needs an entry per
+ * league or tsc fails, and `QuestionForm.test.tsx` asserts one radio per entry,
+ * in this order. Checked against the API's
  * published `apps/api/openapi-vocabularies.json` (`sport`, order included) by
  * `vocabularies.test.ts` (issue #112), so a league the API gains without
  * apps/web following it fails CI rather than silently degrading a mapped 404

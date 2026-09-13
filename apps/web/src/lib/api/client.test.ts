@@ -285,6 +285,9 @@ describe('fetchTeams', () => {
     ['omitted', undefined],
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
+    // Finite, but not a season -- and `apps/api` declares `year: int`, so
+    // sending it would be a 422 rather than the full per-sport list (#101).
+    ['a non-integer (2018.5)', 2018.5],
   ])('sends no year param at all when the year is %s', async (_label, year) => {
     const fetchMock = vi
       .fn()
