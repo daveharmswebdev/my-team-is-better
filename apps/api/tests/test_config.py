@@ -54,6 +54,17 @@ def test_config_exposes_prompt_version_string(monkeypatch: pytest.MonkeyPatch) -
     assert config.PROMPT_VERSION  # type: ignore[attr-defined]
 
 
+def test_prompt_version_is_past_the_tie_less_fact_blocks() -> None:
+    """Issue #83 changed what Claude is given: every fact block now carries
+    `ties`, and a tied game appears in `games` as `result: "T"` where it used
+    to be dropped. Narrations cached under `persona-v1` were written from the
+    old facts (the 2016 Bengals as 6-9, not 6-9-1), and the cache key includes
+    this version, so it must have moved on for them to stop being served."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION != "persona-v1"  # type: ignore[attr-defined]
+
+
 def test_config_exposes_contested_years() -> None:
     config = _reimport_config()
 

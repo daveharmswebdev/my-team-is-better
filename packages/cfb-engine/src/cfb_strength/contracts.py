@@ -229,11 +229,33 @@ class RatingBreakdown:
 
 @dataclass(frozen=True)
 class TeamRating:
+    """One team's rating and its win-loss-tie record for the rated season.
+
+    `ties` (issue #83): a **tie is a completed game with equal scores**, in
+    every sport, counted identically by every rating method and by the
+    evidence layer -- one definition, so a record can never read 6-9 in one
+    place and 6-9-1 in another. It is required (no default) on purpose: a
+    method that forgets to tally ties fails `mypy --strict` rather than
+    silently reporting zero. `wins + losses + ties` equals the team's
+    completed games in the season.
+
+    This is the *reported record* only. It does not change how any method
+    scores a tie -- Keener's credit math and Elo's `result == 0.5` already
+    see every equal-score game.
+
+    The definition is deliberately not sport-specific. CFB's completed
+    0-0 rows for unreported small-school games are bad data, not ties, but
+    Elo and Keener's credit math already treat them as ties today, so the
+    fix for those belongs at ingest (where they can be excluded for every
+    layer at once), not as a per-sport exception here -- tracked as #128.
+    """
+
     team_id: int
     rating: float
     rank: int
     wins: int
     losses: int
+    ties: int
     rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
 
 
@@ -275,8 +297,8 @@ class CareerRatingMethod(Protocol):
       `target_season`**. A team that appeared in an earlier season but not
       this one is carried through the replay (its rating still influences
       opponents) but is absent from the result.
-    - Each `TeamRating.wins`/`losses` counts **only `target_season` games**.
-      The rating carries across seasons; the win-loss record does not.
+    - Each `TeamRating.wins`/`losses`/`ties` counts **only `target_season`
+      games**. The rating carries across seasons; the record does not.
 
     `@runtime_checkable` is load-bearing, not decoration:
     `compute_ratings.compute_and_store` dispatches on
@@ -306,7 +328,12 @@ class OpponentResult:
     opponent_name: str
     opponent_rank: int | None
     opponent_rating: float | None
-    result: Literal["W", "L"]
+    # "T" (issue #83): a completed game with equal scores -- the same
+    # definition as `TeamRating.ties`. A tie is neither a quality win nor a
+    # loss, so it is never selected as `quality_wins` or `worst_loss`, but it
+    # always appears in `TeamCase.games`: before #83 it was silently dropped
+    # from the receipts entirely.
+    result: Literal["W", "L", "T"]
     team_score: int
     opponent_score: int
     week: int | None
@@ -324,6 +351,8 @@ class TeamCase:
     rating: float
     wins: int
     losses: int
+    # Read from `ratings.ties`, like wins/losses -- see `TeamRating.ties`.
+    ties: int
     rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
     games: list[OpponentResult] = field(default_factory=list)
     quality_wins: list[OpponentResult] = field(default_factory=list)
@@ -340,6 +369,7 @@ class ComparisonTeamSummary:
     rating: float
     wins: int
     losses: int
+    ties: int
     rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
     quality_wins: list[OpponentResult] = field(default_factory=list)
     worst_loss: OpponentResult | None = None
@@ -368,10 +398,10 @@ class CommonOpponent:
     opponent_team_id: int
     opponent_name: str
     opponent_rank: int | None
-    team_a_result: Literal["W", "L"]
+    team_a_result: Literal["W", "L", "T"]
     team_a_score: int
     team_a_opponent_score: int
-    team_b_result: Literal["W", "L"]
+    team_b_result: Literal["W", "L", "T"]
     team_b_score: int
     team_b_opponent_score: int
 

@@ -85,8 +85,8 @@ def single_game_credit(points_for: int, points_against: int) -> CreditComponents
 
     See `ratings/keener.py`'s module docstring for the full derivation and
     why this shape (fixed win/loss base, clamped-share margin nudge) passes
-    the golden historical-championship dataset. A tie (not possible under
-    current NCAA rules, handled defensively) splits credit 0.5/0.0 (base/bonus).
+    the golden historical-championship dataset. A tie (a completed game with
+    equal scores -- real in the NFL, see issue #83) splits credit 0.5/0.0 (base/bonus).
     """
     share = clamped_share(points_for, points_against)
     total_points = points_for + points_against

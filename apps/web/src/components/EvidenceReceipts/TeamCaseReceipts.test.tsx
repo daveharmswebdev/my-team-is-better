@@ -65,6 +65,7 @@ const evidence: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
+  ties: 0,
   // Real entries (not just a residual-only placeholder) so this component's
   // tests can exercise the same rating breakdown disclosure ComparisonReceipts
   // already tests -- contribution + residual sum exactly to `rating`
@@ -94,11 +95,98 @@ const evidence: TeamCaseOut = {
   worst_loss: null,
 }
 
+/** The result tag (W/L/T pill) inside a single game row. */
+function resultTagIn(row: HTMLElement): HTMLElement {
+  const tag = row.querySelector<HTMLElement>('[class*="gamelineTag"]')
+  if (tag === null) {
+    throw new Error('no result tag in row')
+  }
+  return tag
+}
+
+// Issue #83: an NFL tie carried through from the engine -- 8-8-1 overall
+// with one tied game (26-26) on the schedule.
+const tiedGame = {
+  ...baseOpponent,
+  opponent_team_id: 16,
+  opponent_name: 'Minnesota Vikings',
+  opponent_rank: null,
+  result: 'T' as const,
+  team_score: 26,
+  opponent_score: 26,
+  week: 7,
+  season_type: 'regular',
+}
+
+const tiedSeason: TeamCaseOut = {
+  ...evidence,
+  wins: 8,
+  losses: 8,
+  ties: 1,
+  games: [...evidence.games, tiedGame],
+}
+
 describe('TeamCaseReceipts', () => {
   it('renders the win-loss record', () => {
     render(<TeamCaseReceipts evidence={evidence} />)
 
     expect(screen.getByText(/13-0/)).toBeInTheDocument()
+  })
+
+  it('keeps a tie-free record as plain W-L (no trailing "-0"), so CFB display is unchanged', () => {
+    render(<TeamCaseReceipts evidence={{ ...evidence, ties: 0 }} />)
+
+    expect(screen.getByText(/Record: 13-0 /)).toBeInTheDocument()
+    expect(screen.queryByText(/13-0-0/)).not.toBeInTheDocument()
+  })
+
+  it('renders a W-L-T record when the team has ties', () => {
+    render(<TeamCaseReceipts evidence={tiedSeason} />)
+
+    expect(screen.getByText(/Record: 8-8-1 /)).toBeInTheDocument()
+  })
+
+  it('renders a tied game with its own tie tag -- visible "T", read as "Tie", not styled as a loss', () => {
+    render(<TeamCaseReceipts evidence={tiedSeason} />)
+
+    const schedule = screen.getByRole('list', { name: /full schedule/i })
+    const tiedRow = within(schedule)
+      .getByText(/Minnesota Vikings/)
+      .closest('li') as HTMLElement
+    const tag = resultTagIn(tiedRow)
+
+    expect(tag.className).toMatch(/gamelineTagT/)
+    expect(tag.className).not.toMatch(/gamelineTagL/)
+    expect(tag.className).not.toMatch(/gamelineTagW/)
+    // Visible short label, hidden from assistive tech so it isn't read as the letter...
+    expect(within(tag).getByText('T')).toHaveAttribute('aria-hidden', 'true')
+    // ...and a full word for screen readers.
+    expect(within(tag).getByText('Tie')).toBeInTheDocument()
+  })
+
+  it('gives win and loss tags the same visible-letter / spoken-word treatment', () => {
+    render(
+      <TeamCaseReceipts
+        evidence={{
+          ...evidence,
+          losses: 1,
+          worst_loss: { ...baseOpponent, opponent_name: 'Baylor', result: 'L' },
+        }}
+      />,
+    )
+
+    const worstLoss = screen.getByRole('list', { name: /worst loss/i })
+    const lossTag = resultTagIn(within(worstLoss).getByRole('listitem'))
+    expect(within(lossTag).getByText('L')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    )
+    expect(within(lossTag).getByText('Loss')).toBeInTheDocument()
+
+    const qualityWins = screen.getByRole('list', { name: /quality wins/i })
+    const winTag = resultTagIn(within(qualityWins).getByRole('listitem'))
+    expect(within(winTag).getByText('W')).toHaveAttribute('aria-hidden', 'true')
+    expect(within(winTag).getByText('Win')).toBeInTheDocument()
   })
 
   it('renders the rating scaled by 1000 via formatRating, not the raw eigenvector value', () => {

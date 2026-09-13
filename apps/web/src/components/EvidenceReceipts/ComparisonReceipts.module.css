@@ -88,6 +88,25 @@
   background: var(--brick);
 }
 
+/* A tie (issue #83) is neither a win nor a loss, so it gets the neutral
+   `--slate` rather than borrowing hunter/brick. Its "T"/"Tie" text label,
+   not this colour, is what distinguishes it. */
+.gamelineTagT {
+  background: var(--slate);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .gamelineOpp {
   color: var(--ink-muted);
 }

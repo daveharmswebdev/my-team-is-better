@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -70,8 +71,8 @@ def _insert_game(
     away_id: int,
     home_team: str,
     away_team: str,
-    home_points: int,
-    away_points: int,
+    home_points: int | None,
+    away_points: int | None,
     week: int = 1,
     season_type: str = "regular",
     completed: bool = True,
@@ -112,13 +113,16 @@ def _insert_rating(
     wins: int,
     losses: int,
     sport: str = "cfb",
+    ties: int = 0,
 ) -> None:
     conn.execute(
         """
-        INSERT INTO ratings (year, method, team_id, rating, rank, wins, losses, computed_at, sport)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'test', ?)
+        INSERT INTO ratings (
+            year, method, team_id, rating, rank, wins, losses, ties, computed_at, sport
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'test', ?)
         """,
-        (year, method, team_id, rating, rank, wins, losses, sport),
+        (year, method, team_id, rating, rank, wins, losses, ties, sport),
     )
 
 
@@ -479,3 +483,150 @@ def test_ambiguous_team_error_never_carries_empty_candidates(
             except UnknownTeamError:
                 pass
     assert raised_at_least_one, "expected at least one genuinely ambiguous query in the sweep"
+
+
+# ---------------------------------------------------------------------------
+# (e) issue #83 -- a completed game with equal scores is a tie ("T"), in every
+# sport, and is never dropped from the receipts
+# ---------------------------------------------------------------------------
+
+TIE_YEAR = 2019
+
+
+def _build_tie_fixture(conn: sqlite3.Connection, sport: str) -> None:
+    """Three teams in their own year, so the shared fixture above is
+    untouched:
+
+      week 1  Juliet Draws 17, India Ties 17     (tie)
+      week 2  India Ties 10, Kilo Beats 20       (India loses)
+      week 3  Juliet Draws 21, Kilo Beats 7      (Juliet wins)
+
+    Juliet is ranked #1, so a tie against it is exactly the case that must
+    not be mistaken for a quality win. Ids are offset per sport.
+    """
+    base = 10 if sport == "cfb" else 110
+    india, juliet, kilo = base + 1, base + 2, base + 3
+    for tid, name in ((india, "India Ties"), (juliet, "Juliet Draws"), (kilo, "Kilo Beats")):
+        _insert_team(conn, tid, name, sport=sport)
+    _insert_game(conn, base + 1, TIE_YEAR, juliet, india, "Juliet Draws", "India Ties", 17, 17, week=1, sport=sport)
+    _insert_game(conn, base + 2, TIE_YEAR, india, kilo, "India Ties", "Kilo Beats", 10, 20, week=2, sport=sport)
+    _insert_game(conn, base + 3, TIE_YEAR, juliet, kilo, "Juliet Draws", "Kilo Beats", 21, 7, week=3, sport=sport)
+    _insert_rating(conn, TIE_YEAR, METHOD, juliet, 1.2, 1, 1, 0, sport=sport, ties=1)
+    _insert_rating(conn, TIE_YEAR, METHOD, kilo, 0.9, 2, 1, 1, sport=sport)
+    _insert_rating(conn, TIE_YEAR, METHOD, india, 0.4, 3, 0, 1, sport=sport, ties=1)
+    conn.commit()
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_build_team_case_lists_an_equal_score_game_as_a_tie(
+    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+) -> None:
+    _build_tie_fixture(conn, sport)
+
+    case = build_team_case(conn, TIE_YEAR, "India Ties", method=METHOD, sport=sport)
+
+    assert (case.wins, case.losses, case.ties) == (0, 1, 1)
+    assert [(g.opponent_name, g.result, g.team_score, g.opponent_score) for g in case.games] == [
+        ("Juliet Draws", "T", 17, 17),
+        ("Kilo Beats", "L", 10, 20),
+    ]
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_tie_is_never_a_quality_win_or_worst_loss(
+    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+) -> None:
+    _build_tie_fixture(conn, sport)
+
+    # India tied the #1 team and lost to #2: the tie against #1 is neither a
+    # quality win nor the worst loss, even though #1 is the best-ranked
+    # opponent on the schedule.
+    india = build_team_case(conn, TIE_YEAR, "India Ties", method=METHOD, sport=sport)
+    assert india.quality_wins == []
+    assert india.worst_loss is not None
+    assert (india.worst_loss.result, india.worst_loss.opponent_name) == ("L", "Kilo Beats")
+
+    # Juliet tied the #3 team and beat #2: only the win is a quality win, and
+    # with no loss there is no worst loss at all -- the tie does not fill it.
+    juliet = build_team_case(conn, TIE_YEAR, "Juliet Draws", method=METHOD, sport=sport)
+    assert [(g.result, g.opponent_name) for g in juliet.quality_wins] == [("W", "Kilo Beats")]
+    assert juliet.worst_loss is None
+    assert juliet.ties == 1
+
+
+def test_completed_game_with_null_scores_is_still_skipped(conn: sqlite3.Connection) -> None:
+    _build_tie_fixture(conn, "cfb")
+    _insert_game(conn, 19, TIE_YEAR, 11, 13, "India Ties", "Kilo Beats", None, None, week=4)
+    conn.commit()
+
+    case = build_team_case(conn, TIE_YEAR, "India Ties", method=METHOD, sport="cfb")
+    assert len(case.games) == 2
+
+
+def test_cfb_completed_zero_zero_row_is_reported_as_a_tie(conn: sqlite3.Connection) -> None:
+    """One definition in every sport (contracts.TeamRating). CFB's completed
+    0-0 "unreported" rows are bad data tracked in #128 and belong at ingest;
+    the evidence layer does not carve out a sport exception for them."""
+    _insert_team(conn, 21, "Lima Unreported", sport="cfb")
+    _insert_team(conn, 22, "Mike Unreported", sport="cfb")
+    _insert_game(conn, 21, TIE_YEAR, 21, 22, "Lima Unreported", "Mike Unreported", 0, 0)
+    _insert_rating(conn, TIE_YEAR, METHOD, 21, 0.5, 1, 0, 0, sport="cfb", ties=1)
+    _insert_rating(conn, TIE_YEAR, METHOD, 22, 0.5, 2, 0, 0, sport="cfb", ties=1)
+    conn.commit()
+
+    case = build_team_case(conn, TIE_YEAR, "Lima Unreported", method=METHOD, sport="cfb")
+    assert [(g.result, g.team_score, g.opponent_score) for g in case.games] == [("T", 0, 0)]
+    assert case.ties == 1
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_build_comparison_common_opponent_reports_a_tie(
+    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+) -> None:
+    _build_tie_fixture(conn, sport)
+
+    # India is the common opponent: Juliet tied it, Kilo beat it.
+    comparison = build_comparison(
+        conn, TIE_YEAR, "Juliet Draws", "Kilo Beats", method=METHOD, sport=sport
+    )
+    assert [
+        (c.opponent_name, c.team_a_result, c.team_a_score, c.team_a_opponent_score,
+         c.team_b_result, c.team_b_score, c.team_b_opponent_score)
+        for c in comparison.common_opponents
+    ] == [("India Ties", "T", 17, 17, "W", 20, 10)]
+    assert (comparison.team_a.wins, comparison.team_a.losses, comparison.team_a.ties) == (1, 0, 1)
+    assert comparison.team_b.ties == 0
+    assert (
+        "vs common opponent India Ties (rank 3): Juliet Draws went T, Kilo Beats went W."
+        in comparison.verdict
+    )
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_verdict_describes_a_tied_head_to_head_meeting(
+    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+) -> None:
+    """`head_to_head` already modeled the tie (winner=None); the verdict only
+    had a sentence for a winner, so it said nothing about the meeting."""
+    _build_tie_fixture(conn, sport)
+
+    comparison = build_comparison(
+        conn, TIE_YEAR, "India Ties", "Juliet Draws", method=METHOD, sport=sport
+    )
+    assert [m.winner for m in comparison.head_to_head.meetings] == [None]
+    assert comparison.verdict.startswith(
+        "India Ties and Juliet Draws tied head-to-head 17-17 "
+        "(Juliet Draws vs India Ties, week 1)."
+    )
+    assert "did not play each other" not in comparison.verdict
+
+
+def test_verdict_for_a_decided_head_to_head_is_unchanged(conn: sqlite3.Connection) -> None:
+    """Regression guard for existing CFB prose: no tie, same wording as
+    before #83."""
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb")
+    assert comparison.verdict.startswith(
+        "Alpha State beat Bravo Tech head-to-head 30-10 (Alpha State vs Bravo Tech, week 1). "
+        "vs common opponent Charlie U (rank 3): Alpha State went W, Bravo Tech went W."
+    )
+    assert "tied" not in comparison.verdict

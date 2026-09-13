@@ -40,6 +40,40 @@ def test_single_game_no_opponents() -> None:
     assert result[A].rating > result[B].rating
 
 
+def test_tie_is_tallied_as_a_tie_not_dropped() -> None:
+    """Issue #83: an equal-score completed game is a tie for both teams.
+
+    Before #83 it incremented neither `wins` nor `losses`, so a 1-0-1 team
+    was reported as 1-0. `wins + losses + ties` must equal games played."""
+    result = _rate([
+        Game(home_team_id=A, away_team_id=B, home_points=28, away_points=21),
+        Game(home_team_id=A, away_team_id=C, home_points=17, away_points=17),
+        Game(home_team_id=C, away_team_id=B, home_points=10, away_points=3),
+        Game(home_team_id=B, away_team_id=C, home_points=0, away_points=0),
+    ])
+    assert (result[A].wins, result[A].losses, result[A].ties) == (1, 0, 1)
+    assert (result[B].wins, result[B].losses, result[B].ties) == (0, 2, 1)
+    assert (result[C].wins, result[C].losses, result[C].ties) == (1, 0, 2)
+
+
+def test_tie_does_not_change_the_rating_only_the_record() -> None:
+    """The tie tally is bookkeeping: Keener already split a tied game's
+    credit before #83, so the rating is exactly what the credit math gives.
+    Pinned by comparing a tied game against itself with the teams swapped
+    home/away -- symmetric credit means symmetric ratings, bit for bit."""
+    result = _rate([Game(home_team_id=A, away_team_id=B, home_points=20, away_points=20)])
+    assert result[A].rating == result[B].rating
+    assert (result[A].wins, result[A].losses, result[A].ties) == (0, 0, 1)
+    assert (result[B].wins, result[B].losses, result[B].ties) == (0, 0, 1)
+
+
+def test_single_team_early_return_tallies_ties() -> None:
+    """The `n == 1` early-return path (a degenerate self-game) builds its
+    `TeamRating` separately from the main path, so it needs its own pin."""
+    result = _rate([Game(home_team_id=A, away_team_id=A, home_points=7, away_points=7)])
+    assert result[A].ties == 2
+
+
 def test_chain_a_beats_b_beats_c() -> None:
     """A > B > C transitively should rate A above B above C."""
     games = [

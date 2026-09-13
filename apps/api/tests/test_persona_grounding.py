@@ -205,3 +205,75 @@ def test_relational_mismatch_message_states_the_correct_order_explicitly() -> No
     mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
 
     assert any("should be stated 34-31" in m and "not 31-34" in m for m in mismatches)
+
+
+# ---------------------------------------------------------------------------
+# issue #83: a tied team's own W-L-T record, and its tied game, ground
+# against the *real* fact block `api.persona.service` hands Claude
+# (`TeamCaseOut.model_dump_json()`), not a hand-typed string. The numbers are
+# chosen so the digit "1" appears in that JSON only as `ties` -- the 2016
+# Bengals' 27-27 tie with Washington in London, week 8.
+# ---------------------------------------------------------------------------
+
+BENGALS_KNOWN_TEAMS = ["Cincinnati Bengals", "Washington Redskins", "Pittsburgh Steelers"]
+
+
+def _bengals_fact_block(*, with_tie_game: bool) -> str:
+    from api.models import OpponentResultOut, RatingBreakdownOut, TeamCaseOut
+
+    games = (
+        [
+            OpponentResultOut(
+                opponent_team_id=33,
+                opponent_name="Washington Redskins",
+                opponent_rank=14,
+                opponent_rating=0.4,
+                result="T",
+                team_score=27,
+                opponent_score=27,
+                week=8,
+                season_type="regular",
+                neutral_site=True,
+            )
+        ]
+        if with_tie_game
+        else []
+    )
+    return TeamCaseOut(
+        year=2016,
+        method="keener",
+        team_id=7,
+        team_name="Cincinnati Bengals",
+        rank=20,
+        rating=0.35,
+        wins=6,
+        losses=9,
+        ties=1,
+        rating_breakdown=RatingBreakdownOut(entries=[], residual_contribution=0.0),
+        games=games,
+        quality_wins=[],
+        worst_loss=None,
+    ).model_dump_json()
+
+
+def test_tied_teams_own_w_l_t_record_is_grounded() -> None:
+    fact_block = _bengals_fact_block(with_tie_game=False)
+    response = "Cincinnati Bengals went 6-9-1 in 2016, and that's all you need to know."
+
+    assert find_ungrounded_tokens(response, fact_block, BENGALS_KNOWN_TEAMS) == []
+
+
+def test_invented_tie_count_is_still_flagged() -> None:
+    fact_block = _bengals_fact_block(with_tie_game=False)
+    response = "Cincinnati Bengals went 6-9-2 in 2016."
+
+    assert "2" in find_ungrounded_tokens(response, fact_block, BENGALS_KNOWN_TEAMS)
+
+
+def test_tied_game_score_is_grounded_against_the_tied_opponent() -> None:
+    fact_block = _bengals_fact_block(with_tie_game=True)
+    response = (
+        "Cincinnati Bengals went 6-9-1 in 2016. They tied the Washington Redskins 27-27 in London."
+    )
+
+    assert find_ungrounded_tokens(response, fact_block, BENGALS_KNOWN_TEAMS) == []

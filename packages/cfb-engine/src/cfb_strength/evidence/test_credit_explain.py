@@ -145,6 +145,44 @@ def test_mixed_record_two_games_falls_back_to_mechanical_listing() -> None:
     assert explain_credit([g1, g2]) == expected
 
 
+def test_single_tie_is_worded_as_a_tie() -> None:
+    """Issue #83: before, a tie fell through to the loss branch ("Lost a
+    close one, 26-26 ... the flat 0.05 every loss keeps"), which is wrong on
+    both counts -- single_game_credit scores a tie at a flat 0.50."""
+    c = single_game_credit(26, 26)
+    assert (c.base, c.bonus) == (0.5, 0.0)
+    assert explain_credit([(26, 26)]) == (
+        "Tied them, 26-26 — 50% of the points. A tie banks a flat 0.50, "
+        "with no margin bonus either way."
+    )
+
+
+def test_two_ties_are_worded_as_ties() -> None:
+    assert explain_credit([(20, 20), (17, 17)]) == (
+        "Tied them twice, 20-20 and 17-17 — the flat 0.50 tie baseline both "
+        "times, with the same 0.00 margin bonus each game."
+    )
+
+
+def test_win_and_tie_record_is_w_l_t() -> None:
+    """The fallback's record string reads W-L-T once a tie is in it. The
+    2013 Packers-Vikings pair (44-31, then 26-26) is the real case."""
+    games = [(44, 31), (26, 26)]
+    c1, c2 = (single_game_credit(*g) for g in games)
+    assert explain_credit(games) == (
+        "Played them 2 times (1-0-1) — "
+        f"44-31 ({c1.base:.2f} + {c1.bonus:.2f}); "
+        f"26-26 ({c2.base:.2f} + {c2.bonus:.2f})."
+    )
+
+
+def test_record_without_a_tie_stays_w_l() -> None:
+    """Ties == 0 keeps the pre-#83 "(W-L)" string, so no CFB copy changes."""
+    games = [(30, 10), (10, 30), (21, 14)]
+    assert explain_credit(games).startswith("Played them 3 times (2-1) — ")
+    assert "-0)" not in explain_credit(games).split(" — ")[0]
+
+
 def test_three_games_falls_back_to_mechanical_listing() -> None:
     games = [(30, 10), (20, 21), (14, 7)]
     creds = [single_game_credit(*g) for g in games]

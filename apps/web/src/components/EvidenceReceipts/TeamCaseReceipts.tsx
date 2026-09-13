@@ -1,7 +1,19 @@
 import { useId } from 'react'
-import type { OpponentResultOut, TeamCaseOut } from '../../lib/api/types'
+import type {
+  GameResult,
+  OpponentResultOut,
+  TeamCaseOut,
+} from '../../lib/api/types'
+import { formatRecord } from '../../lib/formatRecord'
+import { resultLabel } from '../../lib/resultLabel'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
 import styles from './TeamCaseReceipts.module.css'
+
+const TAG_CLASS: Record<GameResult, string | undefined> = {
+  W: styles.gamelineTagW,
+  L: styles.gamelineTagL,
+  T: styles.gamelineTagT,
+}
 
 export interface TeamCaseReceiptsProps {
   evidence: TeamCaseOut
@@ -26,11 +38,17 @@ function GameLine({
   game: OpponentResultOut
   highlight?: Highlight
 }) {
-  const tagClass =
-    game.result === 'W' ? styles.gamelineTagW : styles.gamelineTagL
   return (
     <li className={styles.gameline}>
-      <span className={`${styles.gamelineTag} ${tagClass}`}>{game.result}</span>
+      {/* Visible letter is hidden from assistive tech; the spoken word
+          ("Win"/"Loss"/"Tie") is visually hidden -- so a tie never reads as
+          the bare letter "T" and never relies on colour alone. */}
+      <span className={`${styles.gamelineTag} ${TAG_CLASS[game.result]}`}>
+        <span aria-hidden="true">{game.result}</span>
+        <span className={styles.visuallyHidden}>
+          {resultLabel(game.result)}
+        </span>
+      </span>
       <span className={styles.gamelineScore}>
         {game.team_score}-{game.opponent_score}
       </span>
@@ -100,8 +118,8 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
       className={styles.receipts}
     >
       <div className={styles.stats}>
-        Record: {evidence.wins}-{evidence.losses} &middot; Rank #{evidence.rank}{' '}
-        &middot; Rating{' '}
+        Record: {formatRecord(evidence.wins, evidence.losses, evidence.ties)}{' '}
+        &middot; Rank #{evidence.rank} &middot; Rating{' '}
         <RatingBreakdownDisclosure
           teamName={evidence.team_name}
           rating={evidence.rating}

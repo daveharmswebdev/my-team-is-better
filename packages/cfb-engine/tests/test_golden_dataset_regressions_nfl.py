@@ -51,7 +51,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from cfb_strength.evidence.proof import build_team_case
+import pytest
+
+from cfb_strength.evidence.proof import build_comparison, build_team_case
 from cfb_strength.ratings.compute_ratings import compute_and_store
 
 
@@ -199,3 +201,233 @@ def test_2022_chiefs_case_cites_the_super_bowl_win_over_eagles(
     assert len(eagles_wins) == 1
     super_bowl = eagles_wins[0]
     assert (super_bowl.team_score, super_bowl.opponent_score) == (38, 35)
+
+
+# ---------------------------------------------------------------------------
+# Issue #83: real NFL ties are part of the stored record.
+#
+# Before #83 every rating method counted an equal-score game as neither a win
+# nor a loss and `ratings` had no column for a tie, so the tie vanished from
+# every displayed record.
+# ---------------------------------------------------------------------------
+
+
+def _stored_record(
+    conn: sqlite3.Connection, year: int, method: str, school: str
+) -> tuple[int, int, int]:
+    row = conn.execute(
+        """
+        SELECT r.wins AS wins, r.losses AS losses, r.ties AS ties
+        FROM ratings r JOIN teams t ON t.id = r.team_id
+        WHERE r.year = ? AND r.method = ? AND r.sport = 'nfl' AND t.school = ?
+        """,
+        (year, method, school),
+    ).fetchone()
+    assert row is not None, f"no {method} rating row for {school} {year}"
+    return (row["wins"], row["losses"], row["ties"])
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+def test_2013_packers_vikings_tie_is_in_both_stored_records(
+    nfl_regression_conn: sqlite3.Connection, method: str
+) -> None:
+    """2013 week 12: Green Bay 26, Minnesota 26 (OT), a real tie.
+
+    The stored record counts every completed game loaded for the season,
+    postseason included. Green Bay also lost its wild-card game, so it is
+    8-8-1 here, not its 8-7-1 regular-season record; Minnesota is 5-10-1.
+    """
+    compute_and_store(nfl_regression_conn, 2013, method, sport="nfl")
+    assert _stored_record(nfl_regression_conn, 2013, method, "Green Bay Packers") == (8, 8, 1)
+    assert _stored_record(nfl_regression_conn, 2013, method, "Minnesota Vikings") == (5, 10, 1)
+
+
+def _loaded_games_per_team(conn: sqlite3.Connection, year: int, sport: str) -> dict[int, int]:
+    """Completed games per team, with exactly `_load_games`' predicates."""
+    rows = conn.execute(
+        """
+        SELECT team_id, COUNT(*) AS n FROM (
+            SELECT home_team_id AS team_id FROM games
+            WHERE season = ? AND sport = ? AND completed = 1
+              AND home_points IS NOT NULL AND away_points IS NOT NULL
+            UNION ALL
+            SELECT away_team_id AS team_id FROM games
+            WHERE season = ? AND sport = ? AND completed = 1
+              AND home_points IS NOT NULL AND away_points IS NOT NULL
+        ) GROUP BY team_id
+        """,
+        (year, sport, year, sport),
+    ).fetchall()
+    return {row["team_id"]: row["n"] for row in rows}
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+@pytest.mark.parametrize("year", [1999, 2004, 2013, 2022])
+def test_record_sums_to_completed_games_for_every_nfl_team(
+    nfl_regression_conn: sqlite3.Connection, year: int, method: str
+) -> None:
+    """`TeamRating`'s invariant: `wins + losses + ties` equals the team's
+    completed games in the season, for every stored team."""
+    compute_and_store(nfl_regression_conn, year, method, sport="nfl")
+    expected = _loaded_games_per_team(nfl_regression_conn, year, "nfl")
+    rows = nfl_regression_conn.execute(
+        "SELECT team_id, wins, losses, ties FROM ratings "
+        "WHERE year = ? AND method = ? AND sport = 'nfl'",
+        (year, method),
+    ).fetchall()
+    assert rows
+    actual = {r["team_id"]: r["wins"] + r["losses"] + r["ties"] for r in rows}
+    assert actual == {team_id: expected[team_id] for team_id in actual}
+
+
+# ---------------------------------------------------------------------------
+# Issue #83, evidence layer: the same real tie in the receipts.
+#
+# Before #83 `evidence/proof.py:_opponent_result` returned None for any equal
+# score, so the 2013 Packers-Vikings 26-26 tie was missing from the Packers'
+# `games`, from every common-opponent pairing, from the per-opponent credit
+# explanation, and from the verdict prose -- while `head_to_head` alone
+# reported it (winner=None).
+#
+# Verified directly from the fixture's `games` table before writing these:
+#   week  8  Minnesota Vikings 31, Green Bay Packers 44
+#   week  9  Green Bay Packers 20, Chicago Bears 27
+#   week  2  Chicago Bears 31, Minnesota Vikings 30
+#   week 12  Green Bay Packers 26, Minnesota Vikings 26   <- the tie
+#   week 13  Minnesota Vikings 23, Chicago Bears 20
+#   week 17  Chicago Bears 28, Green Bay Packers 33
+# It is the fixture's only 2013 tie.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+def test_2013_packers_case_lists_the_vikings_tie(
+    nfl_regression_conn: sqlite3.Connection, method: str
+) -> None:
+    compute_and_store(nfl_regression_conn, 2013, method, sport="nfl")
+
+    case = build_team_case(
+        nfl_regression_conn, 2013, "Green Bay Packers", method=method, sport="nfl"
+    )
+
+    assert (case.wins, case.losses, case.ties) == (8, 8, 1)
+    assert len(case.games) == 17
+    assert len(case.games) == case.wins + case.losses + case.ties
+
+    ties = [g for g in case.games if g.result == "T"]
+    assert len(ties) == 1
+    tie = ties[0]
+    assert tie.opponent_name == "Minnesota Vikings"
+    assert (tie.team_score, tie.opponent_score) == (26, 26)
+    assert tie.week == 12
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+def test_2013_vikings_tie_is_never_a_quality_win_or_worst_loss(
+    nfl_regression_conn: sqlite3.Connection, method: str
+) -> None:
+    compute_and_store(nfl_regression_conn, 2013, method, sport="nfl")
+
+    for school in ("Green Bay Packers", "Minnesota Vikings"):
+        case = build_team_case(nfl_regression_conn, 2013, school, method=method, sport="nfl")
+        assert any(g.result == "T" for g in case.games), school
+        assert all(g.result == "W" for g in case.quality_wins), school
+        assert case.worst_loss is not None
+        assert case.worst_loss.result == "L", school
+
+
+@pytest.mark.parametrize("method", ["keener", "elo"])
+def test_2013_vikings_case_record_includes_the_tie(
+    nfl_regression_conn: sqlite3.Connection, method: str
+) -> None:
+    compute_and_store(nfl_regression_conn, 2013, method, sport="nfl")
+
+    case = build_team_case(
+        nfl_regression_conn, 2013, "Minnesota Vikings", method=method, sport="nfl"
+    )
+
+    assert (case.wins, case.losses, case.ties) == (5, 10, 1)
+    assert len(case.games) == 16
+    assert [g.opponent_name for g in case.games if g.result == "T"] == ["Green Bay Packers"]
+
+
+@pytest.mark.parametrize(
+    ("team_a", "team_b", "common_opponent", "a_result", "a_score", "b_result", "b_score"),
+    [
+        # Green Bay as the common opponent. Each side's pairing keeps the
+        # existing choice rule (the last game against that opponent), which
+        # for Minnesota is the week-12 tie, not the week-8 loss.
+        ("Minnesota Vikings", "Chicago Bears", "Green Bay Packers", "T", (26, 26), "L", (28, 33)),
+        # Minnesota as the common opponent.
+        ("Green Bay Packers", "Chicago Bears", "Minnesota Vikings", "T", (26, 26), "L", (20, 23)),
+    ],
+)
+def test_2013_common_opponent_reports_the_tie(
+    nfl_regression_conn: sqlite3.Connection,
+    team_a: str,
+    team_b: str,
+    common_opponent: str,
+    a_result: str,
+    a_score: tuple[int, int],
+    b_result: str,
+    b_score: tuple[int, int],
+) -> None:
+    compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
+
+    comparison = build_comparison(
+        nfl_regression_conn, 2013, team_a, team_b, method="keener", sport="nfl"
+    )
+
+    matches = [c for c in comparison.common_opponents if c.opponent_name == common_opponent]
+    assert len(matches) == 1
+    shared = matches[0]
+    assert shared.team_a_result == a_result
+    assert (shared.team_a_score, shared.team_a_opponent_score) == a_score
+    assert shared.team_b_result == b_result
+    assert (shared.team_b_score, shared.team_b_opponent_score) == b_score
+
+    assert comparison.team_a.ties == 1
+    assert comparison.team_b.ties == 0
+
+
+def test_2013_packers_vikings_comparison_verdict_names_the_tie(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    """`head_to_head` already reported the tie (winner=None), but the verdict
+    prose only had sentences for a winner, so the tied meeting was silent."""
+    compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
+
+    comparison = build_comparison(
+        nfl_regression_conn, 2013, "Green Bay Packers", "Minnesota Vikings",
+        method="keener", sport="nfl",
+    )
+
+    assert [m.winner for m in comparison.head_to_head.meetings] == ["Green Bay Packers", None]
+    assert (comparison.team_a.wins, comparison.team_a.losses, comparison.team_a.ties) == (8, 8, 1)
+    assert (comparison.team_b.wins, comparison.team_b.losses, comparison.team_b.ties) == (5, 10, 1)
+    assert (
+        "Green Bay Packers beat Minnesota Vikings head-to-head 31-44 "
+        "(Minnesota Vikings vs Green Bay Packers, week 8)."
+    ) in comparison.verdict
+    assert (
+        "Green Bay Packers and Minnesota Vikings tied head-to-head 26-26 "
+        "(Green Bay Packers vs Minnesota Vikings, week 12)."
+    ) in comparison.verdict
+
+
+def test_2013_packers_credit_explanation_counts_the_vikings_tie(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    """The persisted breakdown row already counted both meetings
+    (games_played=2), but the explanation was built from the win alone and
+    read as a single 44-31 win."""
+    compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
+
+    case = build_team_case(
+        nfl_regression_conn, 2013, "Green Bay Packers", method="keener", sport="nfl"
+    )
+
+    entry = next(e for e in case.rating_breakdown.entries if e.opponent_name == "Minnesota Vikings")
+    assert entry.games_played == 2
+    assert entry.explanation.startswith("Played them 2 times (1-0-1) — 44-31 (0.60 + ")
+    assert entry.explanation.endswith("; 26-26 (0.50 + 0.00).")

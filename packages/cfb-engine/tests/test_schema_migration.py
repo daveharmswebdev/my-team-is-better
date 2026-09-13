@@ -352,6 +352,50 @@ def test_fresh_db_has_alias_columns_from_the_ddl(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Issue #83: ratings.ties. A real NFL tie (2016 CIN-WAS 27-27) was dropped
+# from every displayed record -- the Bengals read 6-9, not 6-9-1 -- because
+# `ratings` could only store wins and losses. Same in-place migration concern
+# as the blocks above: `CREATE TABLE IF NOT EXISTS ratings` is a no-op
+# against a pre-existing db, so the column has to be added in connection.py.
+# Existing rows backfill to 0, which is honest only until the next `cfb rate`
+# (production always builds from an empty db, so it never sees that window).
+# ---------------------------------------------------------------------------
+
+
+def test_migration_adds_ties_column_defaulting_existing_ratings_to_zero(pre_51_db: Path) -> None:
+    conn = get_conn(pre_51_db)
+    ensure_schema(conn)
+
+    row = conn.execute("SELECT wins, losses, ties FROM ratings WHERE team_id = 333").fetchone()
+    assert (row["wins"], row["losses"], row["ties"]) == (12, 1, 0)
+
+    conn.close()
+
+
+def test_ties_migration_is_idempotent_when_run_twice(pre_51_db: Path) -> None:
+    conn = get_conn(pre_51_db)
+    ensure_schema(conn)
+    ensure_schema(conn)  # must not raise "duplicate column name: ties"
+
+    assert conn.execute("SELECT COUNT(*) AS c FROM ratings").fetchone()["c"] == 1
+    conn.close()
+
+
+def test_fresh_db_has_ties_column_from_the_ddl(tmp_path: Path) -> None:
+    """CI and a clean Render deploy must get `ties` from schema.sql itself,
+    not depend on the migration branch."""
+    dest = tmp_path / "fresh_ties.sqlite3"
+    conn = get_conn(dest)
+    conn.executescript(SCHEMA_PATH.read_text())  # DDL only -- no migration
+
+    cols = {row["name"]: row for row in conn.execute("PRAGMA table_info(ratings)")}
+    assert "ties" in cols
+    assert cols["ties"]["notnull"] == 1
+
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
 # `check_same_thread` (issue #44). sqlite3 refuses to let a Connection be used
 # from a thread other than the one that created it. That is the right default
 # for the CLI, which is single-threaded and wants to hear about a mistake

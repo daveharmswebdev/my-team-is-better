@@ -145,10 +145,33 @@ def test_build_comparison_team_summaries_and_common_opponents_are_typed(
 
     # Texas and USC both played common opponents in the 2005 season
     # (e.g. conference/OOC overlap) -- assert the shape, not specific teams.
+    assert comparison.team_a.ties >= 0
+    assert comparison.team_b.ties >= 0
     for opponent in comparison.common_opponents:
-        assert opponent.team_a_result in ("W", "L")
-        assert opponent.team_b_result in ("W", "L")
+        assert opponent.team_a_result in ("W", "L", "T")
+        assert opponent.team_b_result in ("W", "L", "T")
         assert isinstance(opponent.opponent_name, str)
+
+
+def test_build_team_case_record_matches_its_listed_games(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Issue #83: `TeamCase` reads wins/losses/ties from the `ratings` row,
+    and `games` lists every completed game, ties included -- so the record
+    and the receipts can never disagree about how many games were played.
+    Checked for every team rated in 2005, not just Texas."""
+    teams = [
+        r["school"]
+        for r in rated_conn.execute(
+            "SELECT t.school FROM ratings r JOIN teams t ON t.id = r.team_id "
+            "WHERE r.year = 2005 AND r.method = 'keener' AND r.sport = 'cfb'"
+        ).fetchall()
+    ]
+    assert teams
+    for school in teams:
+        case = build_team_case(rated_conn, 2005, school, method="keener")
+        assert len(case.games) == case.wins + case.losses + case.ties, school
+        assert case.ties == sum(1 for g in case.games if g.result == "T"), school
 
 
 def test_build_team_case_rating_breakdown_has_entries_for_real_opponents(

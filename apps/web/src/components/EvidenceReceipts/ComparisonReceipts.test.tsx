@@ -13,6 +13,7 @@ const evidence: ComparisonResultOut = {
     rating: 0.00877,
     wins: 7,
     losses: 1,
+    ties: 0,
     // Each entry carries its own `opponent_name` straight from the API now
     // (issue #31 follow-up) -- no more resolving names from elsewhere in the
     // evidence. Contributions + residual sum exactly to `rating` (0.002 +
@@ -78,6 +79,7 @@ const evidence: ComparisonResultOut = {
     rating: 0.00602,
     wins: 2,
     losses: 4,
+    ties: 0,
     // Contribution + residual sum exactly to `rating` (0.00102 + 0.005 =
     // 0.00602).
     rating_breakdown: {
@@ -181,6 +183,62 @@ describe('ComparisonReceipts', () => {
 
     expect(screen.getByText(/Indiana/)).toBeInTheDocument()
     expect(screen.getByText(/#21/)).toBeInTheDocument()
+  })
+
+  it('renders a W-L-T record for a team with ties, and plain W-L for a team without', () => {
+    render(
+      <ComparisonReceipts
+        evidence={{
+          ...evidence,
+          team_a: { ...evidence.team_a, wins: 6, losses: 9, ties: 1 },
+          team_b: { ...evidence.team_b, ties: 0 },
+        }}
+      />,
+    )
+
+    expect(screen.getByText('6-9-1')).toBeInTheDocument()
+    expect(screen.getByText('2-4')).toBeInTheDocument()
+  })
+
+  it('renders a tied common-opponent result with its own tie tag (visible "T", read as "Tie"), not loss styling', () => {
+    render(
+      <ComparisonReceipts
+        evidence={{
+          ...evidence,
+          team_a: { ...evidence.team_a, ties: 1 },
+          common_opponents: [
+            {
+              opponent_team_id: 84,
+              opponent_name: 'Indiana',
+              opponent_rank: 21,
+              team_a_result: 'T',
+              team_a_score: 26,
+              team_a_opponent_score: 26,
+              team_b_result: 'L',
+              team_b_score: 21,
+              team_b_opponent_score: 38,
+            },
+          ],
+        }}
+      />,
+    )
+
+    const row = screen.getByText(/Indiana/).closest('li') as HTMLElement
+    const [tagA, tagB] = Array.from(
+      row.querySelectorAll<HTMLElement>('[class*="gamelineTag"]'),
+    )
+    if (tagA === undefined || tagB === undefined) {
+      throw new Error('expected one result tag per team in the row')
+    }
+
+    expect(tagA.className).toMatch(/gamelineTagT/)
+    expect(tagA.className).not.toMatch(/gamelineTagL/)
+    expect(within(tagA).getByText('T')).toHaveAttribute('aria-hidden', 'true')
+    expect(within(tagA).getByText('Tie')).toBeInTheDocument()
+
+    // Team B's side of the same opponent is still an ordinary loss.
+    expect(tagB.className).toMatch(/gamelineTagL/)
+    expect(within(tagB).getByText('Loss')).toBeInTheDocument()
   })
 
   it('renders "No common opponents" when there are none', () => {

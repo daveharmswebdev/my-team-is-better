@@ -78,6 +78,7 @@ const undefeated: TeamCaseOut = {
   rating: 0.01234,
   wins: 13,
   losses: 0,
+  ties: 0,
   // Real entries, not just a residual-only placeholder -- lets the rating
   // breakdown disclosure (hover/tap the rating value) show real per-opponent
   // credit. Contribution + residual sum exactly to `rating`
@@ -143,6 +144,36 @@ export const WithALoss: Story = {
       // real API response has, same as `qualityWin`/Michigan above.
       games: [...undefeated.games, worstLoss],
       worst_loss: worstLoss,
+    },
+  },
+}
+
+const tiedGame = {
+  opponent_team_id: 16,
+  opponent_name: 'Minnesota Vikings',
+  opponent_rank: null,
+  opponent_rating: 5.4,
+  result: 'T' as const,
+  team_score: 26,
+  opponent_score: 26,
+  week: 7,
+  season_type: 'regular',
+  neutral_site: false,
+}
+
+/**
+ * A season with a tie (issue #83): the record reads W-L-T ("8-8-1") and the
+ * tied game carries its own neutral "T" tag, announced as "Tie" -- never the
+ * loss styling. A tie is never a quality win or the worst loss.
+ */
+export const WithATie: Story = {
+  args: {
+    evidence: {
+      ...undefeated,
+      wins: 8,
+      losses: 8,
+      ties: 1,
+      games: [...undefeated.games, tiedGame],
     },
   },
 }

@@ -102,13 +102,16 @@ def _insert_rating(
     wins: int,
     losses: int,
     sport: str = "cfb",
+    ties: int = 0,
 ) -> None:
     conn.execute(
         """
-        INSERT INTO ratings (year, method, team_id, rating, rank, wins, losses, computed_at, sport)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'test', ?)
+        INSERT INTO ratings (
+            year, method, team_id, rating, rank, wins, losses, ties, computed_at, sport
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'test', ?)
         """,
-        (year, method, team_id, rating, rank, wins, losses, sport),
+        (year, method, team_id, rating, rank, wins, losses, ties, sport),
     )
 
 
@@ -198,6 +201,93 @@ def build_sport_fixture(conn: sqlite3.Connection) -> None:
     _insert_breakdown(
         conn, YEAR, METHOD, NFL_COLLISION_TEAM_ID, None, None, None, None, None, 0.1, sport="nfl"
     )
+
+    build_tie_cluster(conn)
+
+
+# Issue #83: a synthetic NFL tie. No committed apps/api fixture had a single
+# equal-score game (the CFB fixture's real 2001/2005/2013 data and the win
+# cycles above are all decisive), so nothing could prove a tie survives the
+# HTTP layer. Kept disjoint from the win cycle above -- separate ids, ranks
+# below every existing NFL row -- so no pre-existing assertion moves.
+#
+#   Lima Lions   20-13 Kilo Kings      (Kilo's only loss, to rank 5)
+#   Kilo Kings   17-17 Mike Mustangs   (the tie, against rank 8)
+#   Kilo Kings   24-7  November Nomads (Kilo's only win, over rank 9)
+#   Lima Lions   27-10 Mike Mustangs   (so Mike is a common opponent)
+#
+# The ranks are chosen so a tie mistaken for a loss would *become*
+# `worst_loss` (rank 8 is worse than rank 5), and a tie mistaken for a win
+# would join `quality_wins` (rank 8 is inside the top-25 threshold).
+TIE_TEAM_ID = 106
+TIE_TEAM = "Kilo Kings"
+TIE_RIVAL_ID = 107
+TIE_RIVAL = "Lima Lions"
+TIE_OPPONENT_ID = 108
+TIE_OPPONENT = "Mike Mustangs"
+TIE_WIN_OPPONENT_ID = 109
+TIE_WIN_OPPONENT = "November Nomads"
+
+
+def build_tie_cluster(conn: sqlite3.Connection) -> None:
+    names = {
+        TIE_TEAM_ID: TIE_TEAM,
+        TIE_RIVAL_ID: TIE_RIVAL,
+        TIE_OPPONENT_ID: TIE_OPPONENT,
+        TIE_WIN_OPPONENT_ID: TIE_WIN_OPPONENT,
+    }
+    for tid, name in names.items():
+        _insert_team(conn, tid, name, classification=None, sport="nfl")
+
+    _insert_game(
+        conn, 104, YEAR, TIE_RIVAL_ID, TIE_TEAM_ID, TIE_RIVAL, TIE_TEAM, 20, 13, sport="nfl"
+    )
+    _insert_game(
+        conn,
+        105,
+        YEAR,
+        TIE_TEAM_ID,
+        TIE_OPPONENT_ID,
+        TIE_TEAM,
+        TIE_OPPONENT,
+        17,
+        17,
+        week=2,
+        sport="nfl",
+    )
+    _insert_game(
+        conn,
+        106,
+        YEAR,
+        TIE_TEAM_ID,
+        TIE_WIN_OPPONENT_ID,
+        TIE_TEAM,
+        TIE_WIN_OPPONENT,
+        24,
+        7,
+        week=3,
+        sport="nfl",
+    )
+    _insert_game(
+        conn,
+        107,
+        YEAR,
+        TIE_RIVAL_ID,
+        TIE_OPPONENT_ID,
+        TIE_RIVAL,
+        TIE_OPPONENT,
+        27,
+        10,
+        week=2,
+        sport="nfl",
+    )
+
+    _insert_rating(conn, YEAR, METHOD, TIE_RIVAL_ID, 0.35, 5, 2, 0, sport="nfl")
+    _insert_rating(conn, YEAR, METHOD, TIE_TEAM_ID, 0.25, 6, 1, 1, sport="nfl", ties=1)
+    _insert_rating(conn, YEAR, METHOD, TIE_OPPONENT_ID, 0.15, 8, 0, 1, sport="nfl", ties=1)
+    _insert_rating(conn, YEAR, METHOD, TIE_WIN_OPPONENT_ID, 0.05, 9, 0, 1, sport="nfl")
+    for tid in names:
+        _insert_breakdown(conn, YEAR, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
 
 
 def make_sport_fixture_db(tmp_path: Path) -> Path:

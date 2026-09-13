@@ -318,6 +318,35 @@ def test_get_rankings_nfl_returns_only_nfl_teams(both_leagues_db: Path) -> None:
     assert names[0] == "Seattle Seahawks"
 
 
+def test_get_rankings_nfl_reports_ties_matching_get_team_season(both_leagues_db: Path) -> None:
+    """Issue #83: the 2013 Packers-Vikings 26-26 tie. get_team_season (a
+    dataclasses.asdict of TeamCase) already carries `ties`, but get_rankings
+    hand-builds its entries and used to drop it, so the same Packers read
+    8-8 on the leaderboard and 8-8-1 on their own resume. `.get("ties")` so
+    the unfixed server fails on the value, not a KeyError."""
+    from cfb_strength.mcp_server.server import get_rankings, get_team_season
+
+    result = get_rankings(year=BOTH_LEAGUES_YEAR, top_n=32, sport="nfl")
+    assert "error" not in result, result
+    by_name = {r["team_name"]: r for r in result["rankings"]}
+
+    def record(name: str) -> tuple[object, object, object]:
+        entry = by_name[name]
+        return (entry["wins"], entry["losses"], entry.get("ties"))
+
+    assert record("Green Bay Packers") == (8, 8, 1)
+    assert record("Minnesota Vikings") == (5, 10, 1)
+
+    for entry in result["rankings"]:
+        case = get_team_season(year=BOTH_LEAGUES_YEAR, team=entry["team_name"], sport="nfl")
+        assert "error" not in case, case
+        assert (entry["wins"], entry["losses"], entry.get("ties")) == (
+            case["wins"],
+            case["losses"],
+            case["ties"],
+        ), entry["team_name"]
+
+
 def test_get_team_season_nfl_returns_nfl_case(both_leagues_db: Path) -> None:
     from cfb_strength.mcp_server.server import get_team_season
 
