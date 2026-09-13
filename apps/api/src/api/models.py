@@ -34,66 +34,47 @@ from cfb_strength.contracts import (
     RatingBreakdown,
     TeamCase,
 )
+
+# Explicit `X as X` re-exports -- see "shared field types" below.
+from cfb_strength.contracts import Method as Method
+from cfb_strength.contracts import Sport as Sport
 from pydantic import BaseModel, ConfigDict, Field
 
 # ---------------------------------------------------------------------------
 # shared field types
 # ---------------------------------------------------------------------------
-
-
-Method = Literal["keener", "elo", "elo_career"]
-"""The rating methods the engine actually implements.
-
-`method` used to be a bare `str` here and on `api.catalog`'s query params,
-which meant a typo did not fail -- it succeeded and returned nothing.
-`GET /api/years?method=nonsense` answered `200 {"years": []}`, identical to
-the answer for a real method whose seasons are not ingested yet, and
-`/api/years` is what fills the web year picker. A misspelling was therefore
-indistinguishable from missing data, for the user and for us.
-
-Deliberately a hand-written literal rather than one derived from
-`cfb_strength.ratings.compute_ratings.METHODS`: `apps/api` may not import
-`cfb_strength.ratings` at all (docs/ARCHITECTURE.md §2's layering rule --
-this app may import `cfb_strength.evidence`, `cfb_strength.db`,
-`cfb_strength.contracts` and `cfb_strength.config`, and nothing else from
-the engine; `apps/api/.importlinter` checks it, issue #54). The duplication
-is the price of the boundary; `tests/test_method_validation.py` is what
-catches it drifting when a method is added or removed.
-
-`elo_career` is admitted here regardless of whether anything has been
-computed under it in a given database -- it is a registered method, and
-"registered but not computed" must stay a 200 with empty results, since that
-is exactly the state a typo may no longer impersonate.
-"""
-
-
-Sport = Literal["cfb", "nfl"]
-"""The leagues the engine actually has rated data for.
-
-Constrained for the same reason as `Method` above, with a second symptom on
-top. Inbound, `sport` was a bare `str`, so `GET /api/years?sport=basketball`
-answered `200 {"years": []}` -- indistinguishable from a real league whose
-seasons are not ingested yet. Outbound, `UnknownTeamErrorBody` echoes the
-requested `sport` straight back, and `apps/web` types that field as a
-`Sport` union whose `isVerdictErrorBody` guard rejects the **whole body**
-when the value is outside it: an unrecognised sport turned a mapped 404 into
-a generic network error, reintroducing the dead end issue #100 removed.
-Constraining the request boundary fixes both ends at once -- a value that
-cannot get in cannot be echoed back out.
-
-Hand-written for a narrower reason than `Method` above: the engine simply
-exposes no shared sport alias to import. It inlines the same
-`Literal["cfb", "nfl"]` on `GameRow.sport`/`TeamRow.sport` in
-`cfb_strength.contracts`, which this app *is* permitted to import (and does,
-just below) under docs/ARCHITECTURE.md §2's layering rule. Defining that
-alias is an engine-side change, not one `apps/api` may make. The duplication
-is the price until then, and it is only half-checked (see #112): since #102,
-mypy fails if this literal admits a league the engine's `resolve_team` /
-`build_team_case` / `build_comparison` signatures don't, but nothing yet
-fails if the *engine* gains a league this literal lacks.
-`tests/test_sport_validation.py` pins the request boundary to these two
-values; it does not detect that engine-ahead drift either.
-"""
+#
+# `Method` and `Sport` are the engine's contract aliases, re-exported rather
+# than redeclared (issue #112). The redundant `X as X` form is what marks them
+# as deliberate re-exports: apps/api runs `mypy --strict`, whose
+# `no_implicit_reexport` would otherwise reject `from api.models import Sport`
+# in `api.catalog` and elsewhere.
+#
+# Why these are closed vocabularies at all: `method` and `sport` were once
+# bare `str`s, so a typo did not fail, it succeeded emptily.
+# `GET /api/years?method=nonsense` (or `?sport=basketball`) answered
+# `200 {"years": []}`, which is identical to a real method or league whose
+# seasons are not ingested yet, and `/api/years` fills the web year picker.
+# `sport` had a second, outbound symptom: `UnknownTeamErrorBody` echoes it
+# back, and `apps/web`'s `isVerdictErrorBody` guard rejects the whole body
+# when the value is outside its `Sport` union, which collapsed a mapped 404
+# into a generic network error (#100). Constraining the request boundary
+# fixes both ends, since a value that cannot get in cannot be echoed out.
+# A registered-but-uncomputed method (`elo_career` in the test fixture) is
+# still a 200 with empty results; that is the state a typo can no longer
+# impersonate.
+#
+# What checks what:
+# - packages/cfb-engine's tests/test_contract_vocabularies.py ties both
+#   aliases to what the engine runs (`compute_ratings.METHODS`, `ELO_CONFIGS`,
+#   the CLI dispatch, argparse's `--sport` choices).
+# - tests/test_openapi_vocabularies.py fails if apps/api redeclares either
+#   vocabulary, if any `sport`/`method` published in /openapi.json lacks the
+#   enum (except the allowlisted `TeamCaseOut.method`, #139) or disagrees with
+#   the alias, or if the committed
+#   `openapi-vocabularies.json` (what apps/web is checked against) is stale.
+# - tests/test_sport_validation.py and tests/test_method_validation.py check
+#   at runtime that every alias value is accepted and anything else is a 422.
 
 
 # ---------------------------------------------------------------------------

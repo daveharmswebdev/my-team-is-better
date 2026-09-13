@@ -1,5 +1,6 @@
-"""Failing-first tests pinning `sport` to the two leagues that actually
-exist (`cfb`, `nfl`) on every surface that accepts one.
+"""Runtime tests pinning `sport` to `cfb_strength.contracts.Sport` on every
+surface that accepts one: each value the alias lists is accepted, and
+anything else is a 422 located at `sport`.
 
 This is `test_method_validation.py`'s argument applied to the other
 free-text discriminator, and it has a second, sharper symptom of its own.
@@ -19,15 +20,22 @@ collapsed into a generic network error, which is exactly the dead end issue
 nothing but `cfb`/`nfl` can get in, nothing but `cfb`/`nfl` can be echoed
 back out, since the error body echoes the request's sport.
 
-The Literal is written out by hand because the engine exposes no shared
-sport alias to import -- it inlines the same `Literal["cfb", "nfl"]` on
-`cfb_strength.contracts`' row dataclasses, and defining a reusable alias
-there is an engine-side change `apps/api` may not make. (Unlike `Method`,
-this is *not* a layering restriction: `cfb_strength.contracts` is on this
-app's permitted-import list -- see `api.models`.) These tests pin the
-request boundary to the two values; they do *not* catch the duplication
-drifting when the engine gains a third league -- see `api.models.Sport` and
-#112 for what is and isn't checked.
+**Where the valid values come from (#112).** `REGISTERED_SPORTS` is
+`typing.get_args(cfb_strength.contracts.Sport)`, the same alias `api.models`
+re-exports, so adding a league to the contract makes these tests require it
+on every surface with no edit here. What is checked where:
+
+- here: runtime behavior. Every alias value gets past validation on all
+  five surfaces, and an unknown value is a 422 at `sport`;
+- `tests/test_openapi_vocabularies.py`: that apps/api does not redeclare
+  the vocabulary, that every `sport` published in /openapi.json carries
+  exactly the alias's enum, and that the committed
+  `openapi-vocabularies.json` apps/web checks against is current;
+- packages/cfb-engine's `tests/test_contract_vocabularies.py`: that the
+  alias matches the leagues the engine actually ingests and rates.
+
+Because the values are derived, nothing here would notice the alias itself
+being narrowed (dropping `nfl`, say). That is the engine test's job.
 
 422-shape note: as in `test_method_validation.py`, FastAPI's
 request-validation 422 carries `detail` as a **list** of error objects
@@ -39,13 +47,14 @@ some unrelated reason" -- `ambiguous_team` is also a 422.
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
+from cfb_strength.contracts import Sport
 from fastapi.testclient import TestClient
 
-# Every value the `sport` Literal admits. Hand-maintained mirror of the
-# engine's sport column values -- see this module's docstring for why it is
-# not imported.
-REGISTERED_SPORTS = ("cfb", "nfl")
+# Every value the contract's `Sport` alias admits -- derived, not mirrored.
+REGISTERED_SPORTS: tuple[str, ...] = get_args(Sport)
 
 BAD_SPORT = "basketball"
 

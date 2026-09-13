@@ -1,5 +1,6 @@
-"""Failing-first tests pinning `method` to the set of methods that actually
-exist (`keener`, `elo`, `elo_career`) on every surface that accepts one.
+"""Runtime tests pinning `method` to `cfb_strength.contracts.Method` on every
+surface that accepts one: each value the alias lists is accepted, and
+anything else is a 422 located at `method`.
 
 Why this is a bug worth a test file rather than input hygiene: `method` was
 an unvalidated `str`, so a typo did not fail -- it succeeded, emptily.
@@ -16,19 +17,30 @@ Both directions are pinned deliberately:
   two catalog routes). Constraining only the verdict models would be worse
   than constraining neither, since the catalog routes are the ones feeding
   the picker.
-- `elo` is *accepted* on all five. The Literal promotes `elo` from
-  "silently tolerated garbage" to "supported method", and that must stay
-  pinned so nobody narrows the Literal back to keener-only while Elo is a
-  shipped, credited method (see `/api/credits`).
+- Every registered method is *accepted* on all five, `elo_career` included,
+  even though the fixture has no rows computed under it.
 
-The Literal is written out by hand rather than derived from
-`cfb_strength.ratings.compute_ratings.METHODS`, because `apps/api` may not
-import `cfb_strength.ratings` at all (docs/ARCHITECTURE.md §2's layering
-rule -- this app may import `cfb_strength.evidence`, `cfb_strength.db`,
-`cfb_strength.contracts` and `cfb_strength.config`, and nothing else from
-the engine; `apps/api/.importlinter` checks it, issue #54). That duplication
-is the deliberate cost of the boundary; these tests are what catch it
-drifting.
+**Where the valid values come from (#112).** `REGISTERED_METHODS` is
+`typing.get_args(cfb_strength.contracts.Method)`, the same alias `api.models`
+re-exports. apps/api still may not import `cfb_strength.ratings`
+(docs/ARCHITECTURE.md §2, checked by `apps/api/.importlinter`), so it never
+reads `compute_ratings.METHODS` itself. The contract alias is what makes
+that boundary free. What is checked where:
+
+- here: runtime behavior. Every alias value gets past validation on all
+  five surfaces, and an unknown value is a 422 at `method`;
+- `tests/test_openapi_vocabularies.py`: that apps/api does not redeclare
+  the vocabulary, that every `method` published in /openapi.json as an
+  input carries exactly the alias's enum, and that the committed
+  `openapi-vocabularies.json` is current. The response field
+  `TeamCaseOut.method` is still a plain `str`, on an explicit allowlist
+  there;
+- packages/cfb-engine's `tests/test_contract_vocabularies.py`: that the
+  alias equals `compute_ratings.METHODS` (and the Elo configs).
+
+Because the values are derived, nothing here would notice the alias itself
+losing a method (narrowing to keener-only, say, while Elo is a shipped,
+credited method). That is the engine test's job.
 
 422-shape note: `AmbiguousTeamError` also maps to 422 (see `api.errors`), so
 these tests assert on the *shape* of the body rather than the status alone.
@@ -41,13 +53,14 @@ some unrelated reason".
 
 from __future__ import annotations
 
+from typing import get_args
+
 import pytest
+from cfb_strength.contracts import Method
 from fastapi.testclient import TestClient
 
-# Every value the `method` Literal admits. Hand-maintained mirror of
-# `cfb_strength.ratings.compute_ratings.METHODS`' keys -- see this module's
-# docstring for why it is not imported.
-REGISTERED_METHODS = ("keener", "elo", "elo_career")
+# Every value the contract's `Method` alias admits -- derived, not mirrored.
+REGISTERED_METHODS: tuple[str, ...] = get_args(Method)
 
 BAD_METHOD = "nonsense"
 
@@ -120,25 +133,28 @@ def test_years_typo_is_no_longer_indistinguishable_from_an_uningested_season(
 
 
 # ---------------------------------------------------------------------------
-# every registered method is accepted -- `elo` above all, since the whole
-# point of the Literal is that it admits it
+# every registered method is accepted on every surface
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("method", REGISTERED_METHODS)
 @pytest.mark.parametrize("path,payload", VERDICT_ROUTES, ids=lambda v: str(v))
-def test_verdict_route_accepts_elo(
-    client: TestClient, path: str, payload: dict[str, object]
+def test_verdict_route_accepts_every_registered_method(
+    client: TestClient, path: str, payload: dict[str, object], method: str
 ) -> None:
-    response = client.post(path, json={**payload, "method": "elo"})
+    response = client.post(path, json={**payload, "method": method})
 
     assert response.status_code != 422, response.json()
 
 
+@pytest.mark.parametrize("method", REGISTERED_METHODS)
 @pytest.mark.parametrize("path,params", CATALOG_ROUTES, ids=lambda v: str(v))
-def test_catalog_route_accepts_elo(client: TestClient, path: str, params: dict[str, int]) -> None:
-    response = client.get(path, params={**params, "method": "elo"})
+def test_catalog_route_accepts_every_registered_method(
+    client: TestClient, path: str, params: dict[str, int], method: str
+) -> None:
+    response = client.get(path, params={**params, "method": method})
 
-    assert response.status_code != 422, response.json()
+    assert response.status_code == 200, response.json()
 
 
 @pytest.mark.parametrize("method", REGISTERED_METHODS)

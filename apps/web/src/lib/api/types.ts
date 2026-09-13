@@ -195,13 +195,27 @@ export interface TeamDetail {
 }
 
 // ---------------------------------------------------------------------------
-// sport -- mirrors `apps/api/src/api/models.py`'s `sport: str = "cfb"` field
-// (issue #59) on the catalog and verdict request models. `QuestionForm`'s
-// College/NFL toggle (issue #60) is the only producer of a non-default
-// value today.
+// sport -- mirrors the API's `Sport` Literal (re-exported by
+// `apps/api/src/api/models.py` from the engine's `cfb_strength.contracts`),
+// used on the catalog and verdict request models and on `unknown_team`.
+// `QuestionForm`'s College/NFL toggle (issue #60) is the only producer of a
+// non-default value today.
 // ---------------------------------------------------------------------------
 
-export type Sport = 'cfb' | 'nfl'
+/**
+ * The source list for `Sport` and for the runtime guard behind
+ * `isVerdictErrorBody`, which both derive from it. Two per-league spots are not
+ * derived from it: the `Record<Sport, string>` label maps (tsc requires an
+ * entry per league) and `QuestionForm`'s two league radios (unchecked, #143).
+ * Checked against the API's
+ * published `apps/api/openapi-vocabularies.json` (`sport`, order included) by
+ * `vocabularies.test.ts` (issue #112), so a league the API gains without
+ * apps/web following it fails CI rather than silently degrading a mapped 404
+ * into a generic error.
+ */
+export const SPORTS = ['cfb', 'nfl'] as const
+
+export type Sport = (typeof SPORTS)[number]
 
 /** True when `evidence` is a `TeamCaseOut` (champion/team-case routes) rather than a `ComparisonResultOut` (compare route). */
 export function isTeamCaseEnvelope(
@@ -283,7 +297,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isSport(value: unknown): value is Sport {
-  return value === 'cfb' || value === 'nfl'
+  // Widened to `readonly unknown[]` so `includes` accepts an unvalidated value.
+  return (SPORTS as readonly unknown[]).includes(value)
 }
 
 export function isVerdictErrorBody(value: unknown): value is VerdictErrorBody {

@@ -24,6 +24,7 @@ from cfb_strength.contracts import (
     OpponentResult,
     RatingBreakdown,
     SameTeamComparisonError,
+    Sport,
     TeamCase,
     UnknownTeamError,
     UnknownYearError,
@@ -181,7 +182,7 @@ def _rating_breakdown(
     return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
-def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: str) -> None:
+def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: Sport) -> None:
     years = list_available_years(conn, method, sport)
     if year not in years:
         raise UnknownYearError(year, years)
@@ -193,7 +194,7 @@ def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: str) 
 
 
 def list_available_years(
-    conn: sqlite3.Connection, method: str = "keener", sport: str = "cfb"
+    conn: sqlite3.Connection, method: str = "keener", sport: Sport = "cfb"
 ) -> list[int]:
     """Distinct years for which ratings exist under `method`/`sport`, ascending."""
     rows = conn.execute(
@@ -208,7 +209,7 @@ def resolve_team(
     year: int,
     query: str,
     method: str = "keener",
-    sport: Literal["cfb", "nfl"] = "cfb",
+    sport: Sport = "cfb",
 ) -> int:
     """Resolve a team name query to a team_id, scoped to teams that have a
     rating row for `year`/`method`/`sport` (a team without a rating can't have
@@ -327,7 +328,7 @@ def build_team_case(
     year: int,
     team: str,
     method: str = "keener",
-    sport: Literal["cfb", "nfl"] = "cfb",
+    sport: Sport = "cfb",
 ) -> TeamCase:
     team_id = resolve_team(conn, year, team, method=method, sport=sport)
 
@@ -409,7 +410,7 @@ def build_comparison(
     team_a: str,
     team_b: str,
     method: str = "keener",
-    sport: Literal["cfb", "nfl"] = "cfb",
+    sport: Sport = "cfb",
 ) -> ComparisonResult:
     team_a_id = resolve_team(conn, year, team_a, method=method, sport=sport)
     team_b_id = resolve_team(conn, year, team_b, method=method, sport=sport)
