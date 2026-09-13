@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS ratings (
     rank INTEGER NOT NULL,
     wins INTEGER NOT NULL,
     losses INTEGER NOT NULL,
+    -- issue #83: completed games with equal scores (see contracts.TeamRating).
+    -- Added to a pre-existing db by connection.py's migration.
+    ties INTEGER NOT NULL DEFAULT 0,
     computed_at TEXT NOT NULL,
     sport TEXT NOT NULL DEFAULT 'cfb',
     UNIQUE(year, method, team_id)

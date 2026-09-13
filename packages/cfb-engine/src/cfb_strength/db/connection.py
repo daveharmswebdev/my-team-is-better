@@ -130,8 +130,22 @@ def _migrate_team_alias_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE teams ADD COLUMN {column} {column_type}")
 
 
+def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> None:
+    """Add `ratings.ties` (issue #83) to a pre-existing db.
+
+    Existing rows backfill to 0 via the column default. That is honest for
+    every CFB row and wrong only for an NFL season containing a real tie,
+    and only until that season is re-rated -- `compute_and_store` rewrites
+    its (year, method, sport) rows wholesale. Production always builds from
+    an empty db, so it never sees the stale window.
+    """
+    if not _has_column(conn, "ratings", "ties"):
+        conn.execute("ALTER TABLE ratings ADD COLUMN ties INTEGER NOT NULL DEFAULT 0")
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text())
     _migrate_sport_columns(conn)
     _migrate_team_alias_columns(conn)
+    _migrate_ratings_ties_column(conn)
     conn.commit()
