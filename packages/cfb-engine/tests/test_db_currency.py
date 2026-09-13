@@ -8,10 +8,15 @@ missing columns into it -- producing a current-*schema* db whose data is
 still stale. Nothing distinguished it from a fresh build.
 
 Every defect test below starts from a tiny db that is current in every
-respect (`_build_current_db`, paired with a tiny fake raw cache from
-`_build_raw_dir`), applies exactly one defect, and asserts the doctor reports
-exactly that one problem -- so disabling any single check turns at least one
-test red rather than hiding behind another check that also fires.
+respect (`_build_current_db`: a regular AND a postseason game plus every
+method's ratings for each season of each league), paired with a tiny fake raw
+cache holding exactly those (season, season_type) pairs (`_build_raw_dir`).
+It applies one defect and asserts the doctor reports exactly the problems
+that defect implies -- so disabling any single check turns at least one test
+red rather than hiding behind another check that also fires.
+
+Ingest windows come from the ingest modules themselves, so the boundary tests
+follow a MIN_YEAR/MAX_YEAR bump instead of pinning today's numbers.
 
 Hermetic: every db and raw dir lives in `tmp_path`; the real 43MB cache and
 the real local db are never read.
@@ -28,18 +33,34 @@ from typing import get_args
 import pytest
 
 from cfb_strength import cli
+from cfb_strength.config import SEASON_TYPES
 from cfb_strength.contracts import Method, Sport
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest import currency
+from cfb_strength.ingest import ingest_season as cfbd_ingest
+from cfb_strength.ingest.nflverse import ingest_season as nflverse_ingest
 
 SPORTS: tuple[str, ...] = get_args(Sport)
 METHODS: tuple[str, ...] = get_args(Method)
 
-# Seasons each league's fixture db holds games and every method's ratings
-# for, and that its fake raw cache holds. All inside both ingest windows
-# (CFB 1998-2025, NFL 1999-2025).
+# Seasons each league's fixture db holds games (both season types) and every
+# method's ratings for, and that its fake raw cache holds. Deliberately in
+# the middle of both ingest windows, so boundary seasons can be added.
 SEASONS: dict[str, tuple[int, ...]] = {"cfb": (2001, 2002), "nfl": (2001, 2002)}
 EXTRA_SEASON = 2003
+
+WINDOWS: dict[str, tuple[int, int]] = {
+    "cfb": (cfbd_ingest.MIN_YEAR, cfbd_ingest.MAX_YEAR),
+    "nfl": (nflverse_ingest.MIN_YEAR, nflverse_ingest.MAX_YEAR),
+}
+
+Pair = tuple[int, str]
+
+OK_LINE = "OK: the db's data is current."
+
+
+def _pairs(*seasons: int) -> list[Pair]:
+    return [(season, season_type) for season in seasons for season_type in SEASON_TYPES]
 
 
 def _team_ids(sport: str) -> tuple[int, int]:
@@ -53,22 +74,34 @@ def _build_current_db(path: Path) -> Path:
     for sport, seasons in SEASONS.items():
         home, away = _team_ids(sport)
         for team_id, school in ((home, f"{sport} Home"), (away, f"{sport} Away")):
-            mascot = "Mascots" if sport == "cfb" and team_id == home else None
+            # One mascot per league, NFL included: the mascot check must be
+            # scoped to CFB, and an NFL mascot is what proves it is.
+            mascot = "Mascots" if team_id == home else None
             conn.execute(
                 "INSERT INTO teams (id, school, classification, sport, mascot) VALUES (?, ?, ?, ?, ?)",
                 (team_id, school, "fbs" if sport == "cfb" else None, sport, mascot),
             )
         for season in seasons:
-            conn.execute(
-                """
-                INSERT INTO games (
-                    id, season, week, season_type, neutral_site, completed,
-                    home_team_id, away_team_id, home_team, away_team,
-                    home_points, away_points, raw_json, sport
-                ) VALUES (?, ?, 1, 'regular', 0, 1, ?, ?, ?, ?, 21, 14, '{}', ?)
-                """,
-                (home + season * 10, season, home, away, f"{sport} Home", f"{sport} Away", sport),
-            )
+            for offset, season_type in enumerate(SEASON_TYPES):
+                conn.execute(
+                    """
+                    INSERT INTO games (
+                        id, season, week, season_type, neutral_site, completed,
+                        home_team_id, away_team_id, home_team, away_team,
+                        home_points, away_points, raw_json, sport
+                    ) VALUES (?, ?, 1, ?, 0, 1, ?, ?, ?, ?, 21, 14, '{}', ?)
+                    """,
+                    (
+                        home + season * 10 + offset,
+                        season,
+                        season_type,
+                        home,
+                        away,
+                        f"{sport} Home",
+                        f"{sport} Away",
+                        sport,
+                    ),
+                )
             for method in METHODS:
                 for rank, team_id in enumerate((home, away), start=1):
                     conn.execute(
@@ -82,28 +115,31 @@ def _build_current_db(path: Path) -> Path:
     return path
 
 
-def _write_cfb_cache(raw_dir: Path, seasons: tuple[int, ...]) -> None:
-    for season in seasons:
-        for season_type in ("regular", "postseason"):
-            (raw_dir / f"{season}_{season_type}.json").write_text("[]")
-    # Outside the CFB ingest window (1998-2025): `cfb ingest` would never
-    # write it, so a db lacking it is not behind the cache.
-    (raw_dir / "1997_regular.json").write_text("[]")
+_ONE_GAME_JSON = '[{"id": 1}]'
+
+
+def _write_cfb_cache(raw_dir: Path, pairs: list[Pair]) -> None:
+    for season, season_type in pairs:
+        (raw_dir / f"{season}_{season_type}.json").write_text(_ONE_GAME_JSON)
+    # Below the CFB ingest window: `cfb ingest` would never write it, so a db
+    # lacking it is not behind the cache.
+    (raw_dir / f"{WINDOWS['cfb'][0] - 1}_regular.json").write_text(_ONE_GAME_JSON)
     (raw_dir / "teams.json").write_text("[]")
 
 
-def _write_nfl_cache(raw_dir: Path, seasons: tuple[int, ...]) -> None:
+_NFL_GAME_TYPE = {"regular": "REG", "postseason": "SB"}
+_NFL_HEADER = ["game_id", "season", "game_type", "week", "away_team", "home_team"]
+
+
+def _write_nfl_cache(raw_dir: Path, pairs: list[Pair]) -> None:
     nfl = raw_dir / "nfl"
     nfl.mkdir(parents=True, exist_ok=True)
     with (nfl / "games.csv").open("w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["game_id", "season", "game_type", "week", "away_team", "home_team"])
-        for season in seasons:
-            writer.writerow([f"{season}_01_BUF_NE", season, "REG", 1, "BUF", "NE"])
-        # The in-progress season nflverse already publishes rows for, outside
-        # the NFL ingest window (1999-2025) -- exactly what the real
-        # committed games.csv carries, and what Render's build never ingests.
-        writer.writerow(["2026_01_BUF_NE", 2026, "REG", 1, "BUF", "NE"])
+        writer.writerow(_NFL_HEADER)
+        for season, season_type in pairs:
+            game_type = _NFL_GAME_TYPE[season_type]
+            writer.writerow([f"{season}_{game_type}_BUF_NE", season, game_type, 1, "BUF", "NE"])
 
 
 CACHE_WRITERS = {"cfb": _write_cfb_cache, "nfl": _write_nfl_cache}
@@ -112,15 +148,13 @@ CACHE_WRITERS = {"cfb": _write_cfb_cache, "nfl": _write_nfl_cache}
 def _build_raw_dir(
     tmp_path: Path,
     *,
-    skip: tuple[str, ...] = (),
-    extra: dict[str, tuple[int, ...]] | None = None,
+    extra: dict[str, list[Pair]] | None = None,
+    name: str = "raw",
 ) -> Path:
-    raw_dir = tmp_path / "raw"
+    raw_dir = tmp_path / name
     raw_dir.mkdir()
     for sport, seasons in SEASONS.items():
-        if sport in skip:
-            continue
-        CACHE_WRITERS[sport](raw_dir, seasons + (extra or {}).get(sport, ()))
+        CACHE_WRITERS[sport](raw_dir, _pairs(*seasons) + (extra or {}).get(sport, []))
     return raw_dir
 
 
@@ -134,6 +168,18 @@ def _mutate(db: Path, *statements: str) -> None:
         conn.execute(statement)
     conn.commit()
     conn.close()
+
+
+def _drop_season(db: Path, sport: str, season: int) -> None:
+    _mutate(
+        db,
+        f"DELETE FROM ratings WHERE sport = '{sport}' AND year = {season}",
+        f"DELETE FROM games WHERE sport = '{sport}' AND season = {season}",
+    )
+
+
+def _run(db: Path, raw_dir: Path) -> int:
+    return currency.main(["--db-path", str(db), "--raw-dir", str(raw_dir)])
 
 
 def _sha256(path: Path) -> str:
@@ -151,10 +197,16 @@ def raw_dir(tmp_path: Path) -> Path:
 
 
 def test_fixtures_cover_every_league_in_the_alias() -> None:
-    # A league added to `Sport` must get a fixture db and a fake cache here,
-    # or the "fully current" test below would stop covering it.
+    # A league added to `Sport` must get a fixture db, a fake cache and an
+    # ingest window here, or the tests below would stop covering it.
     assert set(SEASONS) == set(SPORTS)
     assert set(CACHE_WRITERS) == set(SPORTS)
+    assert set(WINDOWS) == set(SPORTS)
+
+
+def test_every_league_has_a_raw_cache_reader() -> None:
+    # A league without one would never be checked against its cache (c).
+    assert set(currency.CACHED_SEASON_READERS) == set(SPORTS)
 
 
 # ---------------------------------------------------------------------------
@@ -169,44 +221,120 @@ def test_fully_current_db_reports_no_problems_and_exits_zero(
     assert report.problems == ()
     assert report.is_current
 
-    assert currency.main(["--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 0
+    assert _run(current_db, raw_dir) == 0
     out = capsys.readouterr().out
+    assert OK_LINE in out
+    assert "NOT CURRENT" not in out
     for sport in SPORTS:
         assert sport in out
     for method in METHODS:
         assert method in out
+    for season_type in SEASON_TYPES:
+        assert season_type in out
     assert "mascot" in out
 
 
-def test_expected_leagues_and_methods_come_from_the_contract_aliases(
+def test_expected_leagues_methods_and_season_types_come_from_the_contract(
     current_db: Path, raw_dir: Path
 ) -> None:
     report = currency.check_currency(current_db, raw_dir)
 
     assert tuple(league.sport for league in report.leagues) == SPORTS
     for league in report.leagues:
+        seasons = SEASONS[league.sport]
+        assert league.game_seasons == seasons
+        assert dict(league.game_seasons_by_type) == {t: seasons for t in SEASON_TYPES}
+        assert dict(league.cached_seasons_by_type) == {t: seasons for t in SEASON_TYPES}
         assert tuple(league.rated_seasons) == METHODS
-        assert league.game_seasons == SEASONS[league.sport]
         for method in METHODS:
-            assert league.rated_seasons[method] == SEASONS[league.sport]
-
-
-def test_every_league_has_a_raw_cache_reader() -> None:
-    # A league without one would never be checked against its cache (c).
-    assert set(currency.CACHED_SEASON_READERS) == set(SPORTS)
-
-
-def test_a_missing_raw_dir_is_a_problem_not_a_silent_skip(
-    tmp_path: Path, current_db: Path
-) -> None:
-    report = currency.check_currency(current_db, tmp_path / "no-such-raw-dir")
-
-    assert _problems(report) == {("raw_cache_missing", None)}
+            assert league.rated_seasons[method] == seasons
 
 
 def test_cli_dispatches_doctor(current_db: Path, raw_dir: Path) -> None:
     assert "doctor" in cli.USAGE
     assert cli.main(["doctor", "--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 0
+
+
+# ---------------------------------------------------------------------------
+# A --raw-dir that is not the committed cache must never produce a green
+# ---------------------------------------------------------------------------
+
+
+def test_a_missing_raw_dir_is_a_problem_not_a_silent_skip(tmp_path: Path, current_db: Path) -> None:
+    report = currency.check_currency(current_db, tmp_path / "no-such-raw-dir")
+
+    assert _problems(report) == {("raw_cache_missing", None)}
+
+
+@pytest.mark.parametrize("which", ["empty_dir", "parent_of_raw_dir"])
+def test_an_existing_dir_that_is_not_the_raw_cache_is_not_green(
+    tmp_path: Path, current_db: Path, which: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    raw_dir = _build_raw_dir(tmp_path)
+    for sport in SPORTS:
+        _drop_season(current_db, sport, SEASONS[sport][-1])
+    wrong = tmp_path / "empty" if which == "empty_dir" else raw_dir.parent
+    wrong.mkdir(exist_ok=True)
+
+    report = currency.check_currency(current_db, wrong)
+
+    assert _problems(report) == {("raw_cache_unrecognized", sport) for sport in SPORTS}
+    assert _run(current_db, wrong) == 1
+    out = capsys.readouterr().out
+    assert OK_LINE not in out
+    assert "NOT CURRENT" in out
+
+
+@pytest.mark.parametrize(
+    "rewrite",
+    [
+        pytest.param("id,year\n1,2001\n2,2002\n", id="no_season_column"),
+        pytest.param("game_id,season\n2001_REG,2001\n", id="no_game_type_column"),
+        pytest.param(
+            "game_id,season,game_type\n2001_PRE,2001,PRE\n", id="unrecognized_game_type"
+        ),
+        pytest.param("game_id,season,game_type\n", id="no_rows"),
+    ],
+)
+def test_an_unreadable_nfl_games_csv_is_not_green(
+    current_db: Path, raw_dir: Path, rewrite: str
+) -> None:
+    _drop_season(current_db, "nfl", SEASONS["nfl"][-1])
+    (raw_dir / "nfl" / "games.csv").write_text(rewrite)
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("raw_cache_unrecognized", "nfl")}
+    assert _run(current_db, raw_dir) == 1
+
+
+def test_a_missing_nfl_games_csv_is_not_green(current_db: Path, raw_dir: Path) -> None:
+    (raw_dir / "nfl" / "games.csv").unlink()
+
+    assert _problems(currency.check_currency(current_db, raw_dir)) == {
+        ("raw_cache_unrecognized", "nfl")
+    }
+
+
+def test_a_cfb_cache_without_season_files_is_not_green(current_db: Path, raw_dir: Path) -> None:
+    _drop_season(current_db, "cfb", SEASONS["cfb"][-1])
+    for path in raw_dir.glob("*_*.json"):
+        path.unlink()
+
+    assert _problems(currency.check_currency(current_db, raw_dir)) == {
+        ("raw_cache_unrecognized", "cfb")
+    }
+
+
+def test_a_cfb_cache_without_teams_json_is_not_green(current_db: Path, raw_dir: Path) -> None:
+    # Also the only way the mascot check (e) can be skipped, so the missing
+    # mascots below must surface as the unrecognized cache, not as silence.
+    _mutate(current_db, "UPDATE teams SET mascot = NULL WHERE sport = 'cfb'")
+    (raw_dir / "teams.json").unlink()
+
+    assert _problems(currency.check_currency(current_db, raw_dir)) == {
+        ("raw_cache_unrecognized", "cfb")
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +352,11 @@ def test_cli_dispatches_doctor(current_db: Path, raw_dir: Path) -> None:
     ],
 )
 def test_schema_behind_ensure_schema_is_reported(
-    current_db: Path, raw_dir: Path, statement: str, missing: str
+    current_db: Path,
+    raw_dir: Path,
+    statement: str,
+    missing: str,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _mutate(current_db, statement)
 
@@ -232,7 +364,10 @@ def test_schema_behind_ensure_schema_is_reported(
 
     assert _problems(report) == {("schema_not_current", None)}
     assert missing in report.problems[0].message
-    assert currency.main(["--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 1
+    assert _run(current_db, raw_dir) == 1
+    out = capsys.readouterr().out
+    assert OK_LINE not in out
+    assert "NOT CURRENT" in out
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +376,7 @@ def test_schema_behind_ensure_schema_is_reported(
 
 
 @pytest.mark.parametrize("sport", SPORTS)
-def test_league_with_no_games_is_reported(tmp_path: Path, current_db: Path, sport: str) -> None:
-    # No cache for that league either, so this is the one defect: the
-    # behind-cache check (c) has nothing to compare against.
-    raw_dir = _build_raw_dir(tmp_path, skip=(sport,))
+def test_league_with_no_games_is_reported(current_db: Path, raw_dir: Path, sport: str) -> None:
     _mutate(
         current_db,
         f"DELETE FROM ratings WHERE sport = '{sport}'",
@@ -253,38 +385,148 @@ def test_league_with_no_games_is_reported(tmp_path: Path, current_db: Path, spor
 
     report = currency.check_currency(current_db, raw_dir)
 
-    assert _problems(report) == {("league_has_no_games", sport)}
-    assert currency.main(["--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 1
+    # Necessarily behind the cache too; (b) is the sharper diagnosis.
+    assert _problems(report) == {("league_has_no_games", sport), ("season_behind_cache", sport)}
+    assert _run(current_db, raw_dir) == 1
 
 
 # ---------------------------------------------------------------------------
-# (c) a season in the committed cache that the db lacks
+# (c) a (season, season_type) in the committed cache that the db lacks
 # ---------------------------------------------------------------------------
+
+
+def _behind(report: currency.CurrencyReport, sport: str) -> currency.Problem:
+    assert _problems(report) == {("season_behind_cache", sport)}
+    return report.problems[0]
 
 
 @pytest.mark.parametrize("sport", SPORTS)
 def test_cached_season_missing_from_games_is_reported(
     tmp_path: Path, current_db: Path, sport: str
 ) -> None:
-    raw_dir = _build_raw_dir(tmp_path, extra={sport: (EXTRA_SEASON,)})
+    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(EXTRA_SEASON)})
 
-    report = currency.check_currency(current_db, raw_dir)
+    problem = _behind(currency.check_currency(current_db, raw_dir), sport)
 
-    assert _problems(report) == {("season_behind_cache", sport)}
-    assert report.problems[0].seasons == (EXTRA_SEASON,)
-    assert str(EXTRA_SEASON) in report.problems[0].message
-    assert currency.main(["--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 1
+    assert problem.seasons == (EXTRA_SEASON,)
+    assert problem.pairs == tuple(_pairs(EXTRA_SEASON))
+    assert str(EXTRA_SEASON) in problem.message
+    assert _run(current_db, raw_dir) == 1
 
 
-def test_a_postseason_only_cfb_cache_file_still_counts_as_a_cached_season(
+@pytest.mark.parametrize("season_type", SEASON_TYPES)
+@pytest.mark.parametrize("sport", SPORTS)
+def test_a_missing_season_type_is_reported_even_when_the_season_has_games(
+    current_db: Path, raw_dir: Path, sport: str, season_type: str
+) -> None:
+    # The likeliest stale latest season: built mid-season, before the
+    # postseason existed -- which changes who ranks first.
+    season = SEASONS[sport][-1]
+    _mutate(
+        current_db,
+        f"DELETE FROM games WHERE sport = '{sport}' AND season = {season} "
+        f"AND season_type = '{season_type}'",
+    )
+
+    problem = _behind(currency.check_currency(current_db, raw_dir), sport)
+
+    assert problem.pairs == ((season, season_type),)
+    assert problem.seasons == (season,)
+    assert season_type in problem.message
+    assert _run(current_db, raw_dir) == 1
+
+
+def test_a_postseason_only_cfb_cache_file_counts_as_a_cached_pair(
     current_db: Path, raw_dir: Path
 ) -> None:
+    (raw_dir / f"{EXTRA_SEASON}_postseason.json").write_text(_ONE_GAME_JSON)
+
+    problem = _behind(currency.check_currency(current_db, raw_dir), "cfb")
+
+    assert problem.pairs == ((EXTRA_SEASON, "postseason"),)
+
+
+def test_an_empty_cfb_cache_file_is_not_a_cached_pair(current_db: Path, raw_dir: Path) -> None:
+    # `cfb ingest` writes zero games from `[]`, so a db without them is not
+    # behind that file.
     (raw_dir / f"{EXTRA_SEASON}_postseason.json").write_text("[]")
+
+    assert currency.check_currency(current_db, raw_dir).problems == ()
+
+
+@pytest.mark.parametrize("edge", ["min_year", "max_year"])
+@pytest.mark.parametrize("sport", SPORTS)
+def test_the_ingest_window_boundaries_are_checked(
+    tmp_path: Path, current_db: Path, sport: str, edge: str
+) -> None:
+    min_year, max_year = WINDOWS[sport]
+    season = min_year if edge == "min_year" else max_year
+    assert season not in SEASONS[sport], "fixture seasons must sit strictly inside the window"
+    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(season)})
+
+    problem = _behind(currency.check_currency(current_db, raw_dir), sport)
+
+    assert problem.seasons == (season,)
+
+
+@pytest.mark.parametrize("sport", SPORTS)
+def test_seasons_just_outside_the_ingest_window_are_not_flagged(
+    tmp_path: Path, current_db: Path, sport: str
+) -> None:
+    min_year, max_year = WINDOWS[sport]
+    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(min_year - 1, max_year + 1)})
 
     report = currency.check_currency(current_db, raw_dir)
 
-    assert _problems(report) == {("season_behind_cache", "cfb")}
-    assert report.problems[0].seasons == (EXTRA_SEASON,)
+    assert report.problems == ()
+    assert _run(current_db, raw_dir) == 0
+
+
+@pytest.mark.parametrize("sport", SPORTS)
+def test_a_missing_middle_season_is_flagged(tmp_path: Path, current_db: Path, sport: str) -> None:
+    first, middle = SEASONS[sport]
+    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(EXTRA_SEASON)})
+    # The db has the first and the last cached season, but not the one
+    # between them.
+    _mutate(
+        current_db,
+        f"UPDATE games SET season = {EXTRA_SEASON} WHERE sport = '{sport}' AND season = {middle}",
+        f"UPDATE ratings SET year = {EXTRA_SEASON} WHERE sport = '{sport}' AND year = {middle}",
+    )
+
+    problem = _behind(currency.check_currency(current_db, raw_dir), sport)
+
+    assert problem.seasons == (middle,)
+
+
+# ---------------------------------------------------------------------------
+# Note (not a failure): the cache holds seasons past an ingest's MAX_YEAR
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("sport", SPORTS)
+def test_cache_seasons_past_max_year_produce_a_note_but_stay_green(
+    tmp_path: Path, current_db: Path, sport: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    beyond = WINDOWS[sport][1] + 1
+    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(beyond)})
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    notes = [n for n in report.notes if n.startswith(f"{sport}:")]
+    assert len(notes) == 1
+    assert str(beyond) in notes[0]
+    assert "MAX_YEAR" in notes[0]
+
+    assert _run(current_db, raw_dir) == 0
+    out = capsys.readouterr().out
+    assert notes[0] in out
+    assert OK_LINE in out
+
+
+def test_no_note_without_cache_seasons_past_max_year(current_db: Path, raw_dir: Path) -> None:
+    assert currency.check_currency(current_db, raw_dir).notes == ()
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +551,7 @@ def test_season_missing_ratings_for_a_method_is_reported(
     problem = report.problems[0]
     assert problem.seasons == (season,)
     assert method in problem.message
-    assert currency.main(["--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 1
+    assert _run(current_db, raw_dir) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -317,22 +559,19 @@ def test_season_missing_ratings_for_a_method_is_reported(
 # ---------------------------------------------------------------------------
 
 
-def test_cfb_teams_with_no_mascots_are_reported_when_the_teams_cache_exists(
+def test_cfb_teams_with_no_mascots_are_reported_even_when_nfl_teams_have_one(
     current_db: Path, raw_dir: Path
 ) -> None:
     _mutate(current_db, "UPDATE teams SET mascot = NULL WHERE sport = 'cfb'")
+    conn = sqlite3.connect(current_db)
+    nfl_mascots = conn.execute("SELECT COUNT(mascot) FROM teams WHERE sport = 'nfl'").fetchone()[0]
+    conn.close()
+    assert nfl_mascots > 0, "fixture must give an NFL team a mascot, or the CFB scoping is untested"
 
     report = currency.check_currency(current_db, raw_dir)
 
     assert _problems(report) == {("no_cfb_mascots", "cfb")}
-    assert currency.main(["--db-path", str(current_db), "--raw-dir", str(raw_dir)]) == 1
-
-
-def test_no_mascots_is_not_a_problem_without_a_teams_cache(current_db: Path, raw_dir: Path) -> None:
-    _mutate(current_db, "UPDATE teams SET mascot = NULL WHERE sport = 'cfb'")
-    (raw_dir / "teams.json").unlink()
-
-    assert currency.check_currency(current_db, raw_dir).problems == ()
+    assert _run(current_db, raw_dir) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -401,17 +640,19 @@ def test_pre_51_db_is_reported_as_stale_rather_than_crashing(
     assert cfb.game_seasons == SEASONS["cfb"]
     assert cfb.rated_seasons["keener"] == SEASONS["cfb"]
 
-    assert currency.main(["--db-path", str(pre_51_db), "--raw-dir", str(raw_dir)]) == 1
+    assert _run(pre_51_db, raw_dir) == 1
     out = capsys.readouterr().out
     assert "teams.mascot" in out
     assert "nfl" in out
+    assert "NOT CURRENT" in out
+    assert OK_LINE not in out
 
 
 def test_doctor_leaves_a_stale_db_byte_identical(pre_51_db: Path, raw_dir: Path) -> None:
     before = _sha256(pre_51_db)
     siblings_before = sorted(p.name for p in pre_51_db.parent.iterdir())
 
-    assert currency.main(["--db-path", str(pre_51_db), "--raw-dir", str(raw_dir)]) == 1
+    assert _run(pre_51_db, raw_dir) == 1
 
     assert _sha256(pre_51_db) == before, "cfb doctor modified the database it was checking"
     # No journal/WAL/shm left behind either.
@@ -423,7 +664,7 @@ def test_missing_db_file_exits_nonzero_with_a_clear_message(
 ) -> None:
     missing = tmp_path / "nope.sqlite3"
 
-    assert currency.main(["--db-path", str(missing), "--raw-dir", str(raw_dir)]) == 1
+    assert _run(missing, raw_dir) == 1
 
     err = capsys.readouterr().err
     assert str(missing) in err
@@ -438,8 +679,28 @@ def test_a_file_that_is_not_a_sqlite_db_exits_nonzero_with_a_clear_message(
     bogus = tmp_path / "bogus.sqlite3"
     bogus.write_text("this is not a database, just some text " * 20)
 
-    assert currency.main(["--db-path", str(bogus), "--raw-dir", str(raw_dir)]) == 1
+    assert _run(bogus, raw_dir) == 1
 
     err = capsys.readouterr().err
     assert str(bogus) in err
     assert "Traceback" not in err
+
+
+def test_a_wal_mode_db_without_its_wal_files_gets_an_honest_message(
+    current_db: Path, raw_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    conn = sqlite3.connect(current_db)
+    assert conn.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+    conn.close()
+    for suffix in ("-wal", "-shm"):
+        Path(f"{current_db}{suffix}").unlink(missing_ok=True)
+    before = _sha256(current_db)
+
+    assert _run(current_db, raw_dir) == 1
+
+    err = capsys.readouterr().err
+    assert str(current_db) in err
+    assert "WAL" in err
+    assert "could not be read as a sqlite database" not in err
+    assert "Traceback" not in err
+    assert _sha256(current_db) == before

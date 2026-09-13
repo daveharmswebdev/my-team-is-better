@@ -11,15 +11,29 @@ check that tells the two apart. It reports, per league:
      add is missing. Reported, never fixed.
   b. `league_has_no_games` -- a league in `contracts.Sport` with zero `games`
      rows.
-  c. `season_behind_cache` -- a season present in the committed raw cache
-     that the db's `games` lacks for that league.
+  c. `season_behind_cache` -- a (season, season_type) pair the league's
+     ingest would write from the committed raw cache, but that the db's
+     `games` lacks. Pairs, not bare seasons: a db built mid-season without
+     the postseason has the season but not its champion.
   d. `season_missing_ratings` -- a season with games but no `ratings` rows
      for some method in `contracts.Method`.
-  e. `no_cfb_mascots` -- zero CFB teams with a mascot although the CFBD
-     `/teams` cache is committed (the #77 enrichment never ran).
+  e. `no_cfb_mascots` -- not a single CFB team has a mascot although the
+     CFBD `/teams` cache is committed (the #77 enrichment never ran). This is
+     deliberately a zero rule, not a coverage threshold: CFBD has no mascot
+     for some real teams.
 
-plus `raw_cache_missing` when `--raw-dir` does not exist, so a typo'd path
-fails loudly instead of silently skipping (c) and (e).
+plus two problems about `--raw-dir` itself, because a check that silently
+skips is a false green:
+
+  * `raw_cache_missing` -- the directory does not exist.
+  * `raw_cache_unrecognized` -- it exists, but is not this league's committed
+    cache: CFB has no in-window `{year}_{season_type}.json` or no
+    `teams.json`; NFL has no `nfl/games.csv`, no `season`/`game_type`
+    columns, a `game_type` its ingest would reject, or no in-window games.
+
+and one non-failing note: cache seasons past a league's ingest `MAX_YEAR`
+(expected for an in-progress season, otherwise a missed MAX_YEAR bump -- the
+#9 class of problem). Notes never change the exit code.
 
 Guarantees:
 
@@ -34,16 +48,18 @@ Guarantees:
   column counts as CFB (the column's schema default), and a missing
   `teams.mascot` counts as NULL. So the report describes the data the db
   really holds rather than crashing on the schema gap (a).
-* **Leagues and methods come from the contract aliases** (`get_args(Sport)`,
-  `get_args(Method)`), never from a hand-written tuple.
+* **Leagues, methods and season types come from their single definitions**
+  (`get_args(Sport)`, `get_args(Method)`, `config.SEASON_TYPES`), never from
+  a hand-written tuple.
 
-"Present in the cache" (c) means a season the league's own ingest would write
-from that cache: a season inside that ingest's `MIN_YEAR`..`MAX_YEAR`. This
-matters because nflverse's whole-history `games.csv` already carries the
-in-progress 2026 season, which `cfb ingest --sport nfl` deliberately skips.
-Without the window, every correctly built db (including Render's) would be
-reported as behind. For CFB, a season counts when either its regular or its
-postseason cache file exists, using the CFBD client's own `cache_path`.
+"Would write from the cache" (c) is read the way each ingest reads it. A
+season counts only inside that ingest's `MIN_YEAR`..`MAX_YEAR`, because
+nflverse's whole-history `games.csv` already carries the in-progress 2026
+season, which `cfb ingest --sport nfl` deliberately skips. CFB pairs come
+from the files the CFBD client's own `cache_path` names; a file holding `[]`
+writes no games and is not a pair. NFL pairs map each row's `game_type`
+through the nflverse normalizer's own `_season_type`, so this module cannot
+disagree with ingest about which rows are postseason.
 
 This lives in `ingest` because ingest owns the cache-path conventions. It may
 import both the CFBD and nflverse ingest paths. The forbidden contracts in
@@ -55,6 +71,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sqlite3
 import sys
 from collections.abc import Callable, Mapping
@@ -71,17 +88,25 @@ from cfb_strength.ingest.client import teams_cache_path as cfbd_teams_cache_path
 from cfb_strength.ingest.nflverse import ingest_season as nflverse_ingest
 from cfb_strength.ingest.nflverse.client import games_cache_path as nflverse_games_cache_path
 
+# Private on purpose, imported anyway: this is the exact game_type ->
+# season_type mapping nflverse ingest writes `games.season_type` with, and a
+# copy here is precisely the second definition that drifts.
+from cfb_strength.ingest.nflverse.normalize import _season_type as nflverse_season_type
+
 EXPECTED_SPORTS: tuple[Sport, ...] = get_args(Sport)
 EXPECTED_METHODS: tuple[Method, ...] = get_args(Method)
 
 ProblemCode = Literal[
     "schema_not_current",
     "raw_cache_missing",
+    "raw_cache_unrecognized",
     "league_has_no_games",
     "season_behind_cache",
     "season_missing_ratings",
     "no_cfb_mascots",
 ]
+
+Pair = tuple[int, str]
 
 
 class DatabaseUnavailableError(RuntimeError):
@@ -94,15 +119,23 @@ class Problem:
     sport: Sport | None
     message: str
     seasons: tuple[int, ...] = ()
+    # (season, season_type) pairs, for `season_behind_cache`.
+    pairs: tuple[Pair, ...] = ()
 
 
 @dataclass(frozen=True)
 class LeagueReport:
     sport: Sport
     game_seasons: tuple[int, ...]
-    cached_seasons: tuple[int, ...]
+    # season_type -> seasons, keyed in `config.SEASON_TYPES` order.
+    game_seasons_by_type: Mapping[str, tuple[int, ...]]
+    cached_seasons_by_type: Mapping[str, tuple[int, ...]]
     # method -> seasons with at least one ratings row, keyed in `Method` order.
-    rated_seasons: Mapping[str, tuple[int, ...]]
+    rated_seasons: Mapping[Method, tuple[int, ...]]
+    cache_beyond_max_year: tuple[int, ...] = ()
+    cache_max_year: int | None = None
+    # Why `--raw-dir` is not this league's cache, when it isn't.
+    cache_unrecognized: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,6 +153,7 @@ class CurrencyReport:
     leagues: tuple[LeagueReport, ...]
     cfb_aliases: AliasCoverage
     problems: tuple[Problem, ...]
+    notes: tuple[str, ...] = ()
 
     @property
     def is_current(self) -> bool:
@@ -127,34 +161,97 @@ class CurrencyReport:
 
 
 # ---------------------------------------------------------------------------
-# committed raw cache: which seasons would each league's ingest write?
+# committed raw cache: which (season, season_type) pairs would ingest write?
 # ---------------------------------------------------------------------------
 
 
-def _cfbd_cached_seasons(raw_dir: Path) -> frozenset[int]:
-    return frozenset(
-        year
-        for year in range(cfbd_ingest.MIN_YEAR, cfbd_ingest.MAX_YEAR + 1)
-        if any(cfbd_games_cache_path(year, st, raw_dir).exists() for st in SEASON_TYPES)
+@dataclass(frozen=True)
+class CacheScan:
+    pairs: frozenset[Pair]
+    beyond_max_year: tuple[int, ...]
+    max_year: int
+    unrecognized: str | None = None
+
+
+def _holds_no_games(path: Path) -> bool:
+    if path.stat().st_size > 64:
+        return False
+    try:
+        return bool(json.loads(path.read_text()) == [])
+    except ValueError:
+        return False
+
+
+def _cfbd_cache_scan(raw_dir: Path) -> CacheScan:
+    min_year, max_year = cfbd_ingest.MIN_YEAR, cfbd_ingest.MAX_YEAR
+    pairs: set[Pair] = set()
+    beyond: set[int] = set()
+    for path in raw_dir.glob("*_*.json"):
+        year_text, _, season_type = path.stem.partition("_")
+        if not year_text.isdigit() or season_type not in SEASON_TYPES:
+            continue
+        year = int(year_text)
+        if cfbd_games_cache_path(year, season_type, raw_dir) != path:
+            continue
+        if year > max_year:
+            beyond.add(year)
+        elif year >= min_year and not _holds_no_games(path):
+            pairs.add((year, season_type))
+
+    reasons: list[str] = []
+    if not pairs:
+        reasons.append(f"no {{year}}_{{season_type}}.json game files for {min_year}-{max_year}")
+    teams = cfbd_teams_cache_path(raw_dir)
+    if not teams.is_file():
+        reasons.append(f"no {teams.name}")
+    return CacheScan(
+        pairs=frozenset(pairs),
+        beyond_max_year=tuple(sorted(beyond)),
+        max_year=max_year,
+        unrecognized="; ".join(reasons) or None,
     )
 
 
-def _nflverse_cached_seasons(raw_dir: Path) -> frozenset[int]:
+def _nflverse_cache_scan(raw_dir: Path) -> CacheScan:
+    min_year, max_year = nflverse_ingest.MIN_YEAR, nflverse_ingest.MAX_YEAR
     path = nflverse_games_cache_path(raw_dir)
-    if not path.exists():
-        return frozenset()
+    name = path.relative_to(raw_dir)
+
+    def unrecognized(reason: str) -> CacheScan:
+        return CacheScan(frozenset(), (), max_year, reason)
+
+    if not path.is_file():
+        return unrecognized(f"no {name}")
+
+    pairs: set[Pair] = set()
+    beyond: set[int] = set()
     with path.open(newline="") as f:
-        seasons = {int(row["season"]) for row in csv.DictReader(f) if row.get("season")}
-    return frozenset(
-        s for s in seasons if nflverse_ingest.MIN_YEAR <= s <= nflverse_ingest.MAX_YEAR
-    )
+        reader = csv.DictReader(f)
+        missing = [c for c in ("season", "game_type") if c not in (reader.fieldnames or [])]
+        if missing:
+            return unrecognized(f"{name} has no {' / '.join(missing)} column")
+        try:
+            for row in reader:
+                season = int(row["season"])
+                season_type = nflverse_season_type(row["game_type"])
+                if season > max_year:
+                    beyond.add(season)
+                elif season >= min_year:
+                    pairs.add((season, season_type))
+        except (TypeError, ValueError) as e:
+            return unrecognized(f"{name} is not readable the way nflverse ingest reads it: {e}")
+
+    if not pairs:
+        return unrecognized(f"{name} has no games for {min_year}-{max_year}")
+    return CacheScan(frozenset(pairs), tuple(sorted(beyond)), max_year)
 
 
 # One reader per league's cache layout. tests/test_db_currency.py fails if
-# its keys and `Sport` disagree.
-CACHED_SEASON_READERS: Mapping[str, Callable[[Path], frozenset[int]]] = {
-    "cfb": _cfbd_cached_seasons,
-    "nfl": _nflverse_cached_seasons,
+# its keys and `Sport` disagree, and a league without one is reported as an
+# unrecognized cache rather than silently skipped.
+CACHED_SEASON_READERS: Mapping[Sport, Callable[[Path], CacheScan]] = {
+    "cfb": _cfbd_cache_scan,
+    "nfl": _nflverse_cache_scan,
 }
 
 
@@ -232,21 +329,29 @@ def _column_expr(actual: _Schema, reference: _Schema, table: str, column: str) -
 # ---------------------------------------------------------------------------
 
 
+def _by_type(pairs: set[Pair] | frozenset[Pair]) -> dict[str, tuple[int, ...]]:
+    return {
+        season_type: tuple(sorted(s for s, t in pairs if t == season_type))
+        for season_type in SEASON_TYPES
+    }
+
+
 def _league_report(
     conn: sqlite3.Connection, actual: _Schema, reference: _Schema, sport: Sport, raw_dir: Path
 ) -> LeagueReport:
-    game_seasons: tuple[int, ...] = ()
+    game_pairs: set[Pair] = set()
     if "games" in actual.columns:
         sport_expr = _column_expr(actual, reference, "games", "sport")
-        game_seasons = tuple(
-            int(row[0])
+        type_expr = _column_expr(actual, reference, "games", "season_type")
+        game_pairs = {
+            (int(row[0]), str(row[1]))
             for row in conn.execute(
-                f"SELECT DISTINCT season FROM games WHERE {sport_expr} = ? ORDER BY season",
+                f"SELECT DISTINCT season, {type_expr} FROM games WHERE {sport_expr} = ?",
                 (sport,),
             )
-        )
+        }
 
-    rated_seasons: dict[str, tuple[int, ...]] = {}
+    rated_seasons: dict[Method, tuple[int, ...]] = {}
     for method in EXPECTED_METHODS:
         if "ratings" not in actual.columns:
             rated_seasons[method] = ()
@@ -262,21 +367,32 @@ def _league_report(
             )
         )
 
-    reader = CACHED_SEASON_READERS.get(sport)
-    cached = reader(raw_dir) if reader is not None and raw_dir.is_dir() else frozenset()
+    scan: CacheScan | None = None
+    unrecognized: str | None = None
+    if raw_dir.is_dir():
+        reader = CACHED_SEASON_READERS.get(sport)
+        if reader is None:
+            unrecognized = "no raw cache reader is registered for this league"
+        else:
+            scan = reader(raw_dir)
+            unrecognized = scan.unrecognized
 
     return LeagueReport(
         sport=sport,
-        game_seasons=game_seasons,
-        cached_seasons=tuple(sorted(cached)),
+        game_seasons=tuple(sorted({season for season, _ in game_pairs})),
+        game_seasons_by_type=_by_type(game_pairs),
+        cached_seasons_by_type=_by_type(scan.pairs if scan else frozenset()),
         rated_seasons=rated_seasons,
+        cache_beyond_max_year=scan.beyond_max_year if scan else (),
+        cache_max_year=scan.max_year if scan else None,
+        cache_unrecognized=unrecognized,
     )
 
 
 def _cfb_alias_coverage(
     conn: sqlite3.Connection, actual: _Schema, reference: _Schema, raw_dir: Path
 ) -> AliasCoverage:
-    cache_present = cfbd_teams_cache_path(raw_dir).exists()
+    cache_present = cfbd_teams_cache_path(raw_dir).is_file()
     if "teams" not in actual.columns:
         return AliasCoverage(teams=0, with_mascot=0, teams_cache_present=cache_present)
     sport_expr = _column_expr(actual, reference, "teams", "sport")
@@ -304,6 +420,10 @@ def format_seasons(seasons: tuple[int, ...] | list[int]) -> str:
         start = prev = season
     runs.append((start, prev))
     return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+
+
+def _pairs_of(by_type: Mapping[str, tuple[int, ...]]) -> set[Pair]:
+    return {(season, season_type) for season_type, seasons in by_type.items() for season in seasons}
 
 
 def _find_problems(
@@ -338,6 +458,18 @@ def _find_problems(
 
     for league in leagues:
         sport = league.sport
+        if league.cache_unrecognized is not None:
+            problems.append(
+                Problem(
+                    "raw_cache_unrecognized",
+                    sport,
+                    f"{sport}: {raw_dir} is not this league's committed raw cache "
+                    f"({league.cache_unrecognized}), so the behind-the-cache check"
+                    + (" and the mascot check" if sport == "cfb" else "")
+                    + " could not run (pass the right --raw-dir)",
+                )
+            )
+
         if not league.game_seasons:
             problems.append(
                 Problem(
@@ -348,17 +480,27 @@ def _find_problems(
                 )
             )
 
-        have_games = set(league.game_seasons)
-        behind = tuple(s for s in league.cached_seasons if s not in have_games)
-        if behind:
+        missing_pairs = tuple(
+            sorted(
+                _pairs_of(league.cached_seasons_by_type) - _pairs_of(league.game_seasons_by_type),
+                key=lambda pair: (pair[0], SEASON_TYPES.index(pair[1])),
+            )
+        )
+        if missing_pairs:
+            per_type = "; ".join(
+                f"{season_type} {format_seasons([s for s, t in missing_pairs if t == season_type])}"
+                for season_type in SEASON_TYPES
+                if any(t == season_type for _, t in missing_pairs)
+            )
             problems.append(
                 Problem(
                     "season_behind_cache",
                     sport,
-                    f"{sport}: {len(behind)} season(s) in the committed raw cache have no "
-                    f"games in the db: {format_seasons(behind)}; the db is behind the cache "
-                    f"(`cfb ingest --sport {sport} --years ...`)",
-                    behind,
+                    f"{sport}: {len(missing_pairs)} season/season-type batch(es) in the committed "
+                    f"raw cache have no games in the db ({per_type}); the db is behind the "
+                    f"cache (`cfb ingest --sport {sport} --years ...`)",
+                    seasons=tuple(sorted({season for season, _ in missing_pairs})),
+                    pairs=missing_pairs,
                 )
             )
 
@@ -391,6 +533,37 @@ def _find_problems(
     return tuple(problems)
 
 
+def _notes(leagues: tuple[LeagueReport, ...]) -> tuple[str, ...]:
+    return tuple(
+        f"{league.sport}: the raw cache holds season(s) {format_seasons(league.cache_beyond_max_year)} "
+        f"past this league's ingest MAX_YEAR ({league.cache_max_year}), which `cfb ingest` skips. "
+        "Expected for a season still in progress; otherwise MAX_YEAR needs a bump (see #9)."
+        for league in leagues
+        if league.cache_beyond_max_year
+    )
+
+
+def _is_wal_mode(db_path: Path) -> bool:
+    """Header bytes 18/19 (file format write/read version) are 2 in WAL mode."""
+    try:
+        with db_path.open("rb") as f:
+            header = f.read(20)
+    except OSError:
+        return False
+    return len(header) == 20 and header.startswith(b"SQLite format 3\x00") and header[18:20] == b"\x02\x02"
+
+
+def _unreadable(db_path: Path, error: sqlite3.Error) -> DatabaseUnavailableError:
+    if _is_wal_mode(db_path):
+        return DatabaseUnavailableError(
+            f"{db_path} is a WAL-mode sqlite database, and a read-only open could not use its "
+            f"-wal/-shm files ({error}): they are missing or not writable here, and the doctor "
+            "will not create them. Run it where those files are accessible, or check a copy "
+            "switched out of WAL mode (`PRAGMA journal_mode = DELETE`)."
+        )
+    return DatabaseUnavailableError(f"{db_path} could not be read as a sqlite database: {error}")
+
+
 def check_currency(db_path: Path | str = DB_PATH, raw_dir: Path | str = RAW_DIR) -> CurrencyReport:
     """Inspect `db_path` read-only against the raw cache in `raw_dir`.
 
@@ -408,7 +581,7 @@ def check_currency(db_path: Path | str = DB_PATH, raw_dir: Path | str = RAW_DIR)
     try:
         conn = get_conn(db_path, read_only=True)
     except sqlite3.Error as e:
-        raise DatabaseUnavailableError(f"could not open {db_path} read-only: {e}") from e
+        raise _unreadable(db_path, e) from e
     try:
         actual = _read_schema(conn)
         leagues = tuple(
@@ -416,9 +589,7 @@ def check_currency(db_path: Path | str = DB_PATH, raw_dir: Path | str = RAW_DIR)
         )
         aliases = _cfb_alias_coverage(conn, actual, reference, raw_dir)
     except sqlite3.DatabaseError as e:
-        raise DatabaseUnavailableError(
-            f"{db_path} could not be read as a sqlite database: {e}"
-        ) from e
+        raise _unreadable(db_path, e) from e
     finally:
         conn.close()
 
@@ -430,6 +601,7 @@ def check_currency(db_path: Path | str = DB_PATH, raw_dir: Path | str = RAW_DIR)
         leagues=leagues,
         cfb_aliases=aliases,
         problems=_find_problems(missing_schema, raw_dir, leagues, aliases),
+        notes=_notes(leagues),
     )
 
 
@@ -445,12 +617,14 @@ def format_report(report: CurrencyReport) -> str:
         + ")",
     ]
     for league in report.leagues:
-        lines += [
-            "",
-            f"[{league.sport}]",
-            f"  games:   {format_seasons(league.game_seasons)} ({len(league.game_seasons)} seasons)",
-            f"  cache:   {format_seasons(league.cached_seasons)}",
-        ]
+        lines += ["", f"[{league.sport}]"]
+        for season_type, seasons in league.game_seasons_by_type.items():
+            lines.append(f"  games {season_type:<11} {format_seasons(seasons)}")
+        if league.cache_unrecognized is not None:
+            lines.append(f"  cache       UNRECOGNIZED ({league.cache_unrecognized})")
+        else:
+            for season_type, seasons in league.cached_seasons_by_type.items():
+                lines.append(f"  cache {season_type:<11} {format_seasons(seasons)}")
         for method, seasons in league.rated_seasons.items():
             lines.append(f"  rated {method:<11} {format_seasons(seasons)}")
         if league.sport == "cfb":
@@ -460,6 +634,10 @@ def format_report(report: CurrencyReport) -> str:
                 f"  mascots: {aliases.with_mascot} of {aliases.teams} CFB teams "
                 f"(CFBD teams cache {cache})"
             )
+
+    if report.notes:
+        lines += ["", "notes (do not affect the exit code):"]
+        lines += [f"  - {note}" for note in report.notes]
 
     lines.append("")
     if report.is_current:
@@ -475,8 +653,8 @@ def main(argv: list[str] | None = None) -> int:
         prog="cfb doctor",
         description=(
             "Read-only check that a cfb-strength sqlite db's data is current: schema, "
-            "every league ingested, no season behind the committed raw cache, every "
-            "method rated, CFB mascots enriched. Exits 0 only when it is."
+            "every league ingested, no season/season-type batch behind the committed raw "
+            "cache, every method rated, at least one CFB mascot. Exits 0 only when it is."
         ),
     )
     parser.add_argument(

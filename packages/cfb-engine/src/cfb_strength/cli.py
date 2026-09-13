@@ -83,9 +83,10 @@ commands:
 
   doctor [--db-path PATH] [--raw-dir PATH]
       Read-only check that the db's data is current: schema, every league
-      ({_SPORT_CHOICES}) ingested, no season behind the committed raw cache,
-      every method ({_METHOD_CHOICES}) rated, CFB mascots enriched. Exits 0
-      only when it is; never migrates or writes the db.
+      ({_SPORT_CHOICES}) ingested, no season/season-type batch behind the
+      committed raw cache, every method ({_METHOD_CHOICES}) rated, at least
+      one CFB team with a mascot. A --raw-dir that isn't the committed cache
+      fails too. Exits 0 only when current; never migrates or writes the db.
 
 Run 'cfb <command> --help' for command-specific options.
 """

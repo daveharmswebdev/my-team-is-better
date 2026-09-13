@@ -22,8 +22,15 @@ every one — `cfb rate` has no `--db-path` flag — zero live API calls). Befor
 `packages/cfb-engine`: a non-zero exit means the verification can't be trusted — stop
 and report that as your gap, never as a pass. Never run `ensure_schema` on a db to make
 it readable; migrating a stale db's columns in disguises that its data is stale too.
-Committed test fixtures are the exception: they hold deliberate season slices, so the
-doctor's full-coverage check doesn't apply to them.
+Committed test fixtures hold deliberate season slices, but they aren't exempt: still run
+the doctor. Only its findings for seasons the fixture deliberately omits (behind the
+cache, missing ratings) may be waived. A schema or missing-league finding still means
+that fixture can't verify that league.
+
+Never run `apps/api`'s test suite from a checkout that has `apps/api/.env`. Its persona
+integration test is gated only on those credentials being present, so it makes a real
+Claude call and deletes and rewrites a row in whatever Postgres `DATABASE_URL` points at.
+Run it from a worktree with no `.env`, and report the skipped test as skipped.
 
 Once `apps/api`'s persona layer exists, also run its smoke eval (Architecture Brief
 §8): the same golden years, asserting the persona names the correct #1, never states a

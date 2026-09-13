@@ -43,13 +43,21 @@ build has no NFL rows and no mascots). `cfb doctor [--db-path PATH] [--raw-dir P
 opens the db read-only and exits 0 only when:
 - its schema matches what `ensure_schema` would produce
 - every league has games
-- no season in the committed raw cache is missing from `games`
+- no (season, season type) batch in the committed raw cache is missing from
+  `games`, counting only seasons inside each league's ingest window. A
+  regular season ingested without its postseason counts as behind.
 - every season with games is rated by every method
-- CFB teams have mascots
+- at least one CFB team has a mascot. This is a zero rule, not a coverage
+  target, because CFBD has no mascot for some real teams.
+- `--raw-dir` really is the committed cache. An empty or wrong directory
+  fails rather than skipping the cache checks.
 
-Otherwise it exits 1 and names each problem. It never migrates or writes
-the file. When `ensure_schema` does migrate a db that already holds games, it
-emits a `StaleDatabaseWarning` pointing here. The usual fix is to rebuild from
+Otherwise it exits 1 and names each problem. Cache seasons past a league's
+`MAX_YEAR` get a note that doesn't change the exit code: expected for an
+in-progress season, a missed `MAX_YEAR` bump otherwise. The doctor never
+migrates or writes the file. When `ensure_schema` does add a column, table or
+index to a db that already holds games, it emits a `StaleDatabaseWarning`
+pointing here. The usual fix is to rebuild from
 the committed cache with render.yaml's ingest/rate commands. `rate` has no
 `--db-path` flag, so pin every step with `CFB_DB_PATH=...`.
 

@@ -456,6 +456,9 @@ def test_stale_warning_fires_when_migrating_a_populated_pre_51_db(pre_51_db: Pat
     assert str(pre_51_db) in message
     assert "predates the current schema" in message
     assert "cfb doctor" in message
+    # Every migration family must report what it added, not just one of them.
+    for added in ("games.sport", "teams.source_id", "teams.mascot", "ratings.ties"):
+        assert added in message
 
 
 @pytest.mark.parametrize(
@@ -487,6 +490,46 @@ def test_stale_warning_fires_when_migrating_a_populated_post_51_db(
     assert "predates the current schema" in message
     for table, column in dropped:
         assert f"{table}.{column}" in message
+
+
+@pytest.mark.parametrize(
+    ("statement", "created"),
+    [
+        pytest.param("DROP TABLE rating_breakdowns", "rating_breakdowns", id="table"),
+        pytest.param("DROP INDEX idx_games_season", "idx_games_season", id="index"),
+        pytest.param("DROP INDEX idx_teams_source_id", "idx_teams_source_id", id="migration_index"),
+    ],
+)
+def test_stale_warning_fires_when_a_populated_db_gains_a_table_or_index(
+    tmp_path: Path, statement: str, created: str
+) -> None:
+    """Not only ALTER TABLE: a whole table or index that `CREATE ... IF NOT
+    EXISTS` has to add to a db already holding games is the same signal."""
+    db = tmp_path / "missing_object.sqlite3"
+    conn = get_conn(db)
+    ensure_schema(conn)
+    _insert_one_team_and_game(conn)
+    conn.execute(statement)
+    conn.commit()
+    conn.close()
+
+    stale = _stale_warnings_from_ensure_schema(db)
+
+    assert len(stale) == 1
+    assert created in str(stale[0].message)
+
+
+def test_stale_warning_does_not_fire_for_populated_teams_with_empty_games(tmp_path: Path) -> None:
+    """The signal is games, not any table: a pre-existing db with teams but
+    no games holds nothing a season-level check could call stale."""
+    db = tmp_path / "teams_only_pre_51.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(_PRE_51_SCHEMA)
+    conn.execute("INSERT INTO teams (id, school, classification) VALUES (251, 'Texas', 'fbs')")
+    conn.commit()
+    conn.close()
+
+    assert _stale_warnings_from_ensure_schema(db) == []
 
 
 def test_stale_warning_does_not_fire_for_a_fresh_db(tmp_path: Path) -> None:

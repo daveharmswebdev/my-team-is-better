@@ -169,13 +169,29 @@ def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> list[str]:
     return []
 
 
+def _schema_objects(conn: sqlite3.Connection) -> set[str]:
+    return {
+        f"{row[0]} {row[1]}"
+        for row in conn.execute(
+            "SELECT type, name FROM sqlite_master "
+            "WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
+    before = _schema_objects(conn)
     conn.executescript(SCHEMA_PATH.read_text())
     added = [
         *_migrate_sport_columns(conn),
         *_migrate_team_alias_columns(conn),
         *_migrate_ratings_ties_column(conn),
     ]
+    # Whole tables/indexes too, not only ALTER TABLE columns: schema.sql's
+    # `CREATE ... IF NOT EXISTS` and the migration's indexes also only add
+    # something to a db that predates them. (ingestion_log's drop-and-rebuild
+    # exists before and after, so it is reported by the column list above.)
+    added += sorted(_schema_objects(conn) - before)
     conn.commit()
 
     # Issue #97. Only a migration that actually fired on a db already holding
