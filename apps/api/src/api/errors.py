@@ -48,12 +48,16 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(UnknownTeamError)
     def _unknown_team(request: Request, exc: UnknownTeamError) -> JSONResponse:
-        # `exc.sport` is re-validated here rather than passed through: the
-        # body's `sport` is a `Sport` literal, and `apps/web`'s
-        # `isVerdictErrorBody` guard drops the whole body if that field
-        # falls outside its union. The request models admit only `cfb`/`nfl`
-        # in the first place, so this never rejects in practice -- it is the
-        # assertion that keeps the two ends in step.
+        # `exc.sport` is checked against the body's `Sport` literal in two
+        # ways, and they are not symmetric. Statically since #102: this app
+        # now sees the engine's real types, so if `UnknownTeamError.sport` is
+        # widened back to `str` (or gains a league `Sport` lacks), mypy fails
+        # on this line. The reverse is NOT caught statically: widening
+        # `UnknownTeamErrorBody.sport` on this side still type-checks, so that
+        # direction rests on pydantic validating the literal at construction.
+        # That matters downstream: `apps/web`'s `isVerdictErrorBody` guard
+        # drops the *whole body* if this field falls outside its union,
+        # collapsing a mapped 404 into a generic one.
         body = UnknownTeamErrorBody(query=exc.query, year=exc.year, sport=exc.sport)
         return JSONResponse(status_code=404, content={"detail": body.model_dump()})
 

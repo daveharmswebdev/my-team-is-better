@@ -59,6 +59,20 @@ uv run cfb serve                            # run the MCP server (stdio)
 
 ```bash
 uv run pytest
-uv run mypy --strict src/cfb_strength/contracts.py
+uv run mypy --strict src/cfb_strength
 uv run lint-imports
 ```
+
+`mypy --strict` covers the whole package, not just `contracts.py` — widened in
+PR #93 so that the modules *implementing* `RatingMethod` are checked for
+conformance, not only the Protocol declaring it. `.github/workflows/ci.yml`
+runs exactly these three commands.
+
+### `src/cfb_strength/py.typed`
+
+That zero-byte file is a [PEP 561](https://peps.python.org/pep-0561/) marker
+and is load-bearing — do not delete it as stray. Without it, every consumer
+(today: `apps/api`) sees this package's every symbol as `Any`, so a misspelled
+keyword argument or a typo'd attribute on a `contracts.py` exception type-checks
+clean at the call site (issue #102). It is included in the wheel automatically
+by `uv_build`; `apps/api`'s CI `mypy --strict` job goes red if it goes missing.
