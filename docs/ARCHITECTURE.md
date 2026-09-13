@@ -74,16 +74,49 @@ and — critically — when the "levers" feature lands later, engine and API
 change together in one PR instead of a cross-repo version bump dance.
 
 **Layering stays enforced, just extended.** `apps/api` is a new top-layer
-consumer exactly like `cli.py` and `mcp_server/` are today — it may only
-import `cfb_strength.evidence` and `cfb_strength.db.connection`, never
-`ratings/` or `ingest/` directly. Add a line to `.importlinter` reflecting
-this the same way the existing layers contract already separates
-`cli`/`mcp_server` from `evidence | ratings | ingest`. `apps/api` living
-outside `src/cfb_strength/` means it isn't part of the `import-linter` root
-package by default — enforce the boundary by convention (api only imports
-from `cfb_strength.evidence.proof` and `cfb_strength.db.connection`, nothing
-else) and call it out in code review, since import-linter can't reach across
-package boundaries as configured today.
+consumer exactly like `cli.py` and `mcp_server/` are today. It **may** import
+`cfb_strength.evidence`, `cfb_strength.db`, `cfb_strength.contracts` and
+`cfb_strength.config`, and **no other** top-level engine module (today:
+`ratings`, `ingest`, `mcp_server`, `cli`, and `credit_math` — the last
+forbidden only as a *direct* import, since the permitted evidence layer uses
+it internally).
+(`contracts` is the shared contract by design — `api.models` and `api.errors`
+both depend on it; `config` supplies `DB_PATH`. An earlier version of this
+paragraph named only `evidence` and `db.connection`, which was never what the
+app actually did.)
+
+This is a checked rule, not a review convention (issue #54), and it takes two
+pieces. import-linter has no contract type meaning "may import only these", so
+`apps/api/.importlinter` declares `root_packages = api, cfb_strength` and
+expresses the allow list as `forbidden` contracts over every other top-level
+engine module; `uv run lint-imports` from `apps/api` runs them, in CI and in
+pre-commit. A deny list alone goes stale the moment the engine grows a module
+nobody adds to it — that is how `credit_math` sat unforbidden while the docs
+said nothing else was permitted (caught in review of PR #118) — so
+`apps/api/tests/test_import_layering_classification.py` fails CI on any
+top-level engine module that is neither permitted nor forbidden.
+
+The claim this paragraph used to make — that
+import-linter "can't reach across package boundaries as configured today" —
+is wrong, and was the reason the rule went unchecked for so long: listing
+`cfb_strength` alongside `api` in `root_packages` builds both halves of the
+graph, and a `forbidden` contract can then name engine submodules directly.
+`packages/cfb-engine/.importlinter` (`root_package = cfb_strength`) is a
+separate config covering the engine's own internal layering and is untouched
+by this.
+
+One sanctioned exception: `apps/api/tests/fixtures/build_fixture.py`, the
+one-off generator for the committed test-fixture db, imports
+`cfb_strength.ratings.compute_ratings`. That is deliberate, and it is a
+*structural* exception rather than a suppressed one — `source_modules = api`
+covers the installed `api` package (`src/api/`), and the fixture builder is
+neither part of that package nor collected by pytest, so it falls outside the
+contract's graph and needs no ignore rule. A future violation must never be
+"fixed" by adding an ignore directive: a generator script that needs
+`ratings` or `ingest` belongs in `tests/fixtures/`, never under `src/api/`.
+The corollary is that the checked boundary is the running app only — the test
+suite's own convention of not importing `ratings`/`ingest` is documented in
+`tests/conftest.py` but is not machine-checked.
 
 ## 3. Data: two stores, two lifecycles
 

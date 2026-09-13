@@ -50,7 +50,7 @@ jobs:
         run: uv run lint-imports
 
   apps-api:
-    name: apps/api (pytest, mypy --strict, ruff)
+    name: apps/api (pytest, mypy --strict, ruff, import-linter)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -80,6 +80,14 @@ jobs:
 
       - name: ruff format --check
         run: uv run ruff format --check .
+
+      # The engine-layering rule from ARCHITECTURE §2 (issue #54). `apps/api`
+      # has its own `.importlinter`, separate from `packages/cfb-engine`'s --
+      # it declares `root_packages = api, cfb_strength` so a forbidden
+      # contract can name engine submodules across the package boundary,
+      # which the Architecture Brief previously (wrongly) said was impossible.
+      - name: import-linter (engine layering rule)
+        run: uv run lint-imports
 
   apps-web:
     name: apps-web (eslint, tsc, vitest, dependency-cruiser, storybook build)

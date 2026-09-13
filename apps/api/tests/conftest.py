@@ -8,6 +8,12 @@ real keener ratings computed for 2001/2005/2013 (see
 only place in `apps/api` allowed to import `cfb_strength.ratings`, and is
 not itself part of this pytest suite).
 
+That "never imports ratings/ingest" is a convention here, not a checked
+rule: `apps/api/.importlinter` (issue #54) has `source_modules = api`, so it
+covers the installed `api` package -- i.e. `src/api/` -- and `tests/` is
+outside its graph entirely. The checked boundary is the running app; keeping
+the suite to the same discipline is on whoever writes the test.
+
 `client` also wires safe, CI-friendly defaults for issue #4's persona-layer
 dependencies (`get_narration_cache` -> an `InMemoryNarrationCache`,
 `get_narrator` -> a stub that always returns a short, fact-block-agnostic

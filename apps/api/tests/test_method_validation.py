@@ -23,9 +23,12 @@ Both directions are pinned deliberately:
 
 The Literal is written out by hand rather than derived from
 `cfb_strength.ratings.compute_ratings.METHODS`, because `apps/api` may not
-import `cfb_strength.ratings` at all (CLAUDE.md's layering rule). That
-duplication is the deliberate cost of the boundary; these tests are what
-catch it drifting.
+import `cfb_strength.ratings` at all (docs/ARCHITECTURE.md §2's layering
+rule -- this app may import `cfb_strength.evidence`, `cfb_strength.db`,
+`cfb_strength.contracts` and `cfb_strength.config`, and nothing else from
+the engine; `apps/api/.importlinter` checks it, issue #54). That duplication
+is the deliberate cost of the boundary; these tests are what catch it
+drifting.
 
 422-shape note: `AmbiguousTeamError` also maps to 422 (see `api.errors`), so
 these tests assert on the *shape* of the body rather than the status alone.

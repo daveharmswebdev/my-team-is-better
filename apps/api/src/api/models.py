@@ -53,11 +53,12 @@ indistinguishable from missing data, for the user and for us.
 
 Deliberately a hand-written literal rather than one derived from
 `cfb_strength.ratings.compute_ratings.METHODS`: `apps/api` may not import
-`cfb_strength.ratings` at all (CLAUDE.md's layering rule -- this app reaches
-the engine only through `cfb_strength.evidence` and `cfb_strength.db`, and
-`.importlinter` guards the equivalent seam inside the engine). The
-duplication is the price of the boundary; `tests/test_method_validation.py`
-is what catches it drifting when a method is added or removed.
+`cfb_strength.ratings` at all (docs/ARCHITECTURE.md §2's layering rule --
+this app may import `cfb_strength.evidence`, `cfb_strength.db`,
+`cfb_strength.contracts` and `cfb_strength.config`, and nothing else from
+the engine; `apps/api/.importlinter` checks it, issue #54). The duplication
+is the price of the boundary; `tests/test_method_validation.py` is what
+catches it drifting when a method is added or removed.
 
 `elo_career` is admitted here regardless of whether anything has been
 computed under it in a given database -- it is a registered method, and
@@ -80,12 +81,18 @@ a generic network error, reintroducing the dead end issue #100 removed.
 Constraining the request boundary fixes both ends at once -- a value that
 cannot get in cannot be echoed back out.
 
-Hand-written rather than derived from the engine, for the same layering
-reason `Method` is: `apps/api` reaches the engine only through
-`cfb_strength.evidence` and `cfb_strength.db` (CLAUDE.md), so a shared sport
-enum is not importable from here. The duplication is the price of the
-boundary; `tests/test_sport_validation.py` is what catches it drifting when
-a third league is added.
+Hand-written for a narrower reason than `Method` above: the engine simply
+exposes no shared sport alias to import. It inlines the same
+`Literal["cfb", "nfl"]` on `GameRow.sport`/`TeamRow.sport` in
+`cfb_strength.contracts`, which this app *is* permitted to import (and does,
+just below) under docs/ARCHITECTURE.md §2's layering rule. Defining that
+alias is an engine-side change, not one `apps/api` may make. The duplication
+is the price until then, and it is only half-checked (see #112): since #102,
+mypy fails if this literal admits a league the engine's `resolve_team` /
+`build_team_case` / `build_comparison` signatures don't, but nothing yet
+fails if the *engine* gains a league this literal lacks.
+`tests/test_sport_validation.py` pins the request boundary to these two
+values; it does not detect that engine-ahead drift either.
 """
 
 
