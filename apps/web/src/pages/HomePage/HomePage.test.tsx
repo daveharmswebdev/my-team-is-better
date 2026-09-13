@@ -67,9 +67,21 @@ function envelopeFor(teamName: string, narration: string): TeamCaseEnvelope {
 
 const UNKNOWN_YEAR_ERROR = new VerdictApiError(404, {
   error: 'unknown_year',
-  year: new Date().getFullYear(),
+  // Fixed, not the calendar year: nothing in these tests may depend on today.
+  year: 2019,
   available_years: [2004, 2005, 2018],
 })
+
+/**
+ * `QuestionForm` defaults Year to the newest season `/api/years` reports
+ * (issue #136) -- 2018 under this file's catalog -- once that request lands.
+ * Tests that clear and retype the Year wait for it first: otherwise the
+ * default can arrive between the clear and the typing, and the typed digits
+ * append to it.
+ */
+async function waitForDefaultYear() {
+  await waitFor(() => expect(screen.getByLabelText(/year/i)).toHaveValue(2018))
+}
 
 describe('HomePage', () => {
   beforeEach(() => {
@@ -105,6 +117,7 @@ describe('HomePage', () => {
     })
 
     render(<HomePage />)
+    await waitForDefaultYear()
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
     await user.click(screen.getByRole('button', { name: /get the verdict/i }))
@@ -155,6 +168,7 @@ describe('HomePage', () => {
       screen.getByLabelText(/what do you want to know/i),
       'team_case',
     )
+    await waitForDefaultYear()
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
     await user.type(screen.getByLabelText(/^team$/i), 'Texas St')
@@ -183,6 +197,7 @@ describe('HomePage', () => {
     )
 
     render(<HomePage />)
+    await waitForDefaultYear()
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
     await user.click(screen.getByRole('button', { name: /get the verdict/i }))
@@ -208,6 +223,7 @@ describe('HomePage', () => {
       screen.getByLabelText(/what do you want to know/i),
       'team_case',
     )
+    await waitForDefaultYear()
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
     await user.type(screen.getByLabelText(/^team$/i), 'Abilene Christian')
@@ -232,7 +248,11 @@ describe('HomePage', () => {
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
 
       render(<HomePage />)
-      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+      // The Year field defaults to the newest catalog season (issue #136),
+      // so the submit button only enables once `/api/years` has landed.
+      const submit = screen.getByRole('button', { name: /get the verdict/i })
+      await waitFor(() => expect(submit).not.toBeDisabled())
+      await user.click(submit)
 
       await user.click(await screen.findByRole('button', { name: '2018' }))
 
@@ -265,6 +285,7 @@ describe('HomePage', () => {
         screen.getByLabelText(/what do you want to know/i),
         'team_case',
       )
+      await waitForDefaultYear()
       await user.clear(screen.getByLabelText(/year/i))
       await user.type(screen.getByLabelText(/year/i), '2005')
       await user.type(screen.getByLabelText(/^team$/i), 'Texas St')
@@ -303,6 +324,7 @@ describe('HomePage', () => {
         screen.getByLabelText(/what do you want to know/i),
         'compare',
       )
+      await waitForDefaultYear()
       await user.clear(screen.getByLabelText(/year/i))
       await user.type(screen.getByLabelText(/year/i), '2005')
       await user.type(screen.getByLabelText(/team a/i), 'USC')
@@ -334,7 +356,11 @@ describe('HomePage', () => {
 
       render(<HomePage />)
       await user.click(screen.getByRole('radio', { name: /nfl/i }))
-      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+      // Wait for the NFL catalog's newest season to fill the Year field
+      // (issue #136) -- until then the submit button is disabled.
+      const submit = screen.getByRole('button', { name: /get the verdict/i })
+      await waitFor(() => expect(submit).not.toBeDisabled())
+      await user.click(submit)
 
       // Typed after the failed submission, so it was never part of it.
       await user.type(screen.getByLabelText(/your team/i), 'Bengals')

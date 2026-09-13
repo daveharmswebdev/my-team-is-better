@@ -64,6 +64,24 @@
   border-color: var(--leather);
 }
 
+/*
+ * Invalid Year (issue #136) -- unlike the team flag below, this one is a real
+ * error: it comes with a disabled submit button, so it reads in brick rather
+ * than in muted ink. Declared after the `:focus` rule it ties with on
+ * specificity, so a focused invalid field still shows as invalid.
+ */
+.qfield input[aria-invalid='true'] {
+  border-color: var(--brick);
+}
+
+.fieldError {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--brick);
+}
+
 .catalogHint {
   margin: 0;
   font-family: var(--font-body);
