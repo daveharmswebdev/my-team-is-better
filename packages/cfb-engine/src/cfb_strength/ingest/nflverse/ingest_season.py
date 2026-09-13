@@ -58,8 +58,12 @@ from cfb_strength.ingest.nflverse.normalize import (
 MIN_YEAR = 1999
 MAX_YEAR = 2025
 
-_REGULAR_GAME_TYPES = {"REG"}
-_POSTSEASON_GAME_TYPES = {"WC", "DIV", "CON", "SB"}
+# The only game types ingest keeps: `_filter_raw_games` drops every other row
+# silently. Public since #97, because `ingest.currency` (`cfb doctor`) must
+# read the cache with exactly this filter; frozensets, so no importer can
+# change what ingest keeps.
+REGULAR_GAME_TYPES = frozenset({"REG"})
+POSTSEASON_GAME_TYPES = frozenset({"WC", "DIV", "CON", "SB"})
 
 
 @dataclass(frozen=True)
@@ -97,7 +101,7 @@ def parse_years(spec: str) -> list[int]:
 def _filter_raw_games(
     all_games_raw: list[dict[str, str]], year: int, season_type: str
 ) -> list[dict[str, str]]:
-    wanted_types = _REGULAR_GAME_TYPES if season_type == "regular" else _POSTSEASON_GAME_TYPES
+    wanted_types = REGULAR_GAME_TYPES if season_type == "regular" else POSTSEASON_GAME_TYPES
     return [
         g for g in all_games_raw if g["season"] == str(year) and g["game_type"] in wanted_types
     ]

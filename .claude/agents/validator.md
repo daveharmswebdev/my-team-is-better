@@ -13,6 +13,40 @@ evidenced answer, don't force a specific outcome) against `packages/cfb-engine` 
 `get_champion`/`get_rankings` or the equivalent direct function calls. For each "must
 match" year, report PASS or FAIL with the actual top-3 and the cited evidence.
 
+**Never verify against a database you didn't confirm is current.** Every sqlite db you
+read was built by someone else, and the default `DB_PATH` (`packages/cfb-engine/data/
+cfb.sqlite3`) is machine-local state that can be a year stale while looking complete
+(issue #97). Use the path your brief pins, or build one fresh from the committed cache
+(render.yaml's `cfb ingest` / `cfb rate` commands with `CFB_DB_PATH=<path>` set on
+every one — `cfb rate` has no `--db-path` flag — zero live API calls). Before reading any data from it, run `uv run cfb doctor --db-path <path>` from
+`packages/cfb-engine`: a non-zero exit means the verification can't be trusted — stop
+and report that as your gap, never as a pass. Never run `ensure_schema` on a db to make
+it readable; migrating a stale db's columns in disguises that its data is stale too.
+Committed test fixtures hold deliberate season slices, but they aren't exempt: still run
+the doctor, and waive only these findings:
+- `season_behind_cache` and `season_missing_ratings`, for seasons the fixture
+  deliberately omits;
+- `league_has_no_games`, for a league the fixture deliberately doesn't carry. That
+  fixture then verifies nothing about that league;
+- `raw_cache_*`, only when you pointed `--raw-dir` at something other than the
+  committed cache on purpose.
+
+Any other finding blocks verification of **every** league in that fixture, including
+`schema_not_current`, which has no league attached, and `no_cfb_mascots`. Report it as a
+gap, not a pass. (Until #110 rebuilds them, both committed engine fixtures fail on
+schema, so neither can certify anything on its own.) One blocking finding isn't about
+the db at all: `cache_past_max_year` means the committed cache holds a finished season
+that a league's ingest `MAX_YEAR` doesn't cover yet. Rebuilding won't clear it, only a
+code change bumping `MAX_YEAR` will (the #9 class). Report it as that, not as a stale
+db.
+
+Never run `apps/api`'s test suite from a checkout that has `apps/api/.env`, or with
+`DATABASE_URL`, `ANTHROPIC_API_KEY` or `MY_TEAM_IS_BETTER_API_ENV_FILE` set in the
+environment. Its persona integration test is gated only on those credentials being
+reachable, so it makes a real Claude call and deletes and rewrites a row in whatever
+Postgres `DATABASE_URL` points at. Run it from a worktree with no `.env` and those
+variables unset, and report the skipped test as skipped.
+
 Once `apps/api`'s persona layer exists, also run its smoke eval (Architecture Brief
 §8): the same golden years, asserting the persona names the correct #1, never states a
 team/number outside its fact block, and stays within the tone bounds (PRD §3).
