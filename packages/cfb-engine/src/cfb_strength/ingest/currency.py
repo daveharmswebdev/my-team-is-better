@@ -17,32 +17,36 @@ check that tells the two apart. It reports, per league:
      the postseason has the season but not its champion.
   d. `season_missing_ratings` -- a season with games but no `ratings` rows
      for some method in `contracts.Method`.
-  e. `no_cfb_mascots` -- not a single CFB team has a mascot although the
-     CFBD `/teams` cache is committed (the #77 enrichment never ran). This is
-     deliberately a zero rule, not a coverage threshold: CFBD has no mascot
-     for some real teams.
+  e. `no_cfb_mascots` -- the db has CFB teams, but not one has a mascot,
+     although the CFBD `/teams` cache is committed (the #77 enrichment never
+     ran). Deliberately a zero rule, not a coverage threshold: CFBD has no
+     mascot for some real teams. A db with no CFB teams at all is (b)'s
+     problem, not this one's.
+  f. `cache_past_max_year` -- the cache holds a *finished* season past the
+     league's ingest `MAX_YEAR` (NFL: a Super Bowl row with a score; CFB: a
+     non-empty postseason file whose games are all completed). `cfb ingest`
+     skips it, so no db can ever be current with it: MAX_YEAR needs a bump
+     (the #9 class of bug). An unfinished season past MAX_YEAR -- the season
+     in progress -- is only a note, which never changes the exit code.
 
 plus two problems about `--raw-dir` itself, because a check that silently
 skips is a false green:
 
   * `raw_cache_missing` -- the directory does not exist.
-  * `raw_cache_unrecognized` -- it exists, but is not this league's committed
-    cache: CFB has no in-window `{year}_{season_type}.json` or no
+  * `raw_cache_unrecognized` -- it exists but doesn't look like this league's
+    committed cache: CFB has no in-window `{year}_{season_type}.json` or no
     `teams.json`; NFL has no `nfl/games.csv`, no `season`/`game_type`
-    columns, a `game_type` its ingest would reject, or no in-window games.
-
-and one non-failing note: cache seasons past a league's ingest `MAX_YEAR`
-(expected for an in-progress season, otherwise a missed MAX_YEAR bump -- the
-#9 class of problem). Notes never change the exit code.
+    columns, or no in-window game that nflverse ingest would keep.
 
 Guarantees:
 
-* **Read-only.** The db is opened with `get_conn(path, read_only=True)` and
-  is never handed to `ensure_schema`. The "what would `ensure_schema`
-  produce?" reference for (a) comes from running `ensure_schema` against a
-  throwaway in-memory db instead, so a column added to schema.sql or a new
-  `_migrate_*` step is expected here automatically, with no second
-  hand-maintained column list to drift.
+* **Read-only.** The db is opened read-only through `get_conn` and is never
+  handed to `ensure_schema`. The "what would `ensure_schema` produce?"
+  reference for (a) comes from running `ensure_schema` against a throwaway
+  in-memory db instead, so a column added to schema.sql or a new `_migrate_*`
+  step is expected here automatically, with no second hand-maintained column
+  list to drift. A WAL-mode db with no -wal/-shm files is opened `immutable`
+  so that no platform's SQLite creates them (see `_open_read_only`).
 * **Tolerant of old shapes.** Tables or columns a stale db lacks are read as
   the migration would backfill them. A pre-#51 `games` row with no `sport`
   column counts as CFB (the column's schema default), and a missing
@@ -57,9 +61,10 @@ season counts only inside that ingest's `MIN_YEAR`..`MAX_YEAR`, because
 nflverse's whole-history `games.csv` already carries the in-progress 2026
 season, which `cfb ingest --sport nfl` deliberately skips. CFB pairs come
 from the files the CFBD client's own `cache_path` names; a file holding `[]`
-writes no games and is not a pair. NFL pairs map each row's `game_type`
-through the nflverse normalizer's own `_season_type`, so this module cannot
-disagree with ingest about which rows are postseason.
+writes no games and is not a pair. NFL rows get the window first, then
+nflverse ingest's own `REGULAR_GAME_TYPES` / `POSTSEASON_GAME_TYPES` filter:
+a row of any other game type is skipped exactly as ingest skips it, never
+treated as an unreadable cache.
 
 This lives in `ingest` because ingest owns the cache-path conventions. It may
 import both the CFBD and nflverse ingest paths. The forbidden contracts in
@@ -88,11 +93,6 @@ from cfb_strength.ingest.client import teams_cache_path as cfbd_teams_cache_path
 from cfb_strength.ingest.nflverse import ingest_season as nflverse_ingest
 from cfb_strength.ingest.nflverse.client import games_cache_path as nflverse_games_cache_path
 
-# Private on purpose, imported anyway: this is the exact game_type ->
-# season_type mapping nflverse ingest writes `games.season_type` with, and a
-# copy here is precisely the second definition that drifts.
-from cfb_strength.ingest.nflverse.normalize import _season_type as nflverse_season_type
-
 EXPECTED_SPORTS: tuple[Sport, ...] = get_args(Sport)
 EXPECTED_METHODS: tuple[Method, ...] = get_args(Method)
 
@@ -104,6 +104,7 @@ ProblemCode = Literal[
     "season_behind_cache",
     "season_missing_ratings",
     "no_cfb_mascots",
+    "cache_past_max_year",
 ]
 
 Pair = tuple[int, str]
@@ -133,8 +134,10 @@ class LeagueReport:
     # method -> seasons with at least one ratings row, keyed in `Method` order.
     rated_seasons: Mapping[Method, tuple[int, ...]]
     cache_beyond_max_year: tuple[int, ...] = ()
+    # The subset of `cache_beyond_max_year` that is already finished.
+    cache_finished_beyond_max_year: tuple[int, ...] = ()
     cache_max_year: int | None = None
-    # Why `--raw-dir` is not this league's cache, when it isn't.
+    # Why `--raw-dir` doesn't look like this league's cache, when it doesn't.
     cache_unrecognized: str | None = None
 
 
@@ -171,6 +174,7 @@ class CacheScan:
     beyond_max_year: tuple[int, ...]
     max_year: int
     unrecognized: str | None = None
+    finished_beyond_max_year: tuple[int, ...] = ()
 
 
 def _holds_no_games(path: Path) -> bool:
@@ -182,10 +186,25 @@ def _holds_no_games(path: Path) -> bool:
         return False
 
 
+def _postseason_finished(path: Path) -> bool:
+    """A CFBD postseason file whose games have all been played. Only read for
+    seasons past MAX_YEAR, so it is small."""
+    try:
+        games = json.loads(path.read_text())
+    except ValueError:
+        return False
+    return (
+        isinstance(games, list)
+        and bool(games)
+        and all(isinstance(g, dict) and g.get("completed") is True for g in games)
+    )
+
+
 def _cfbd_cache_scan(raw_dir: Path) -> CacheScan:
     min_year, max_year = cfbd_ingest.MIN_YEAR, cfbd_ingest.MAX_YEAR
     pairs: set[Pair] = set()
     beyond: set[int] = set()
+    finished: set[int] = set()
     for path in raw_dir.glob("*_*.json"):
         year_text, _, season_type = path.stem.partition("_")
         if not year_text.isdigit() or season_type not in SEASON_TYPES:
@@ -195,6 +214,8 @@ def _cfbd_cache_scan(raw_dir: Path) -> CacheScan:
             continue
         if year > max_year:
             beyond.add(year)
+            if season_type == "postseason" and _postseason_finished(path):
+                finished.add(year)
         elif year >= min_year and not _holds_no_games(path):
             pairs.add((year, season_type))
 
@@ -209,7 +230,19 @@ def _cfbd_cache_scan(raw_dir: Path) -> CacheScan:
         beyond_max_year=tuple(sorted(beyond)),
         max_year=max_year,
         unrecognized="; ".join(reasons) or None,
+        finished_beyond_max_year=tuple(sorted(finished)),
     )
+
+
+# nflverse ingest's own row filter (ingest/nflverse/ingest_season.py
+# `_filter_raw_games`): `regular` batches keep REGULAR_GAME_TYPES, every other
+# batch keeps POSTSEASON_GAME_TYPES, and a row of any other type is dropped.
+_NFL_SEASON_TYPE_BY_GAME_TYPE: Mapping[str, str] = {
+    **{game_type: "regular" for game_type in nflverse_ingest.REGULAR_GAME_TYPES},
+    **{game_type: "postseason" for game_type in nflverse_ingest.POSTSEASON_GAME_TYPES},
+}
+# The last playoff round: a season whose Super Bowl has a score is over.
+_NFL_FINAL_GAME_TYPE = "SB"
 
 
 def _nflverse_cache_scan(raw_dir: Path) -> CacheScan:
@@ -225,25 +258,44 @@ def _nflverse_cache_scan(raw_dir: Path) -> CacheScan:
 
     pairs: set[Pair] = set()
     beyond: set[int] = set()
+    finished: set[int] = set()
     with path.open(newline="") as f:
         reader = csv.DictReader(f)
-        missing = [c for c in ("season", "game_type") if c not in (reader.fieldnames or [])]
+        columns = reader.fieldnames or []
+        missing = [c for c in ("season", "game_type") if c not in columns]
         if missing:
             return unrecognized(f"{name} has no {' / '.join(missing)} column")
-        try:
-            for row in reader:
+        has_scores = "home_score" in columns and "away_score" in columns
+        for row in reader:
+            try:
                 season = int(row["season"])
-                season_type = nflverse_season_type(row["game_type"])
-                if season > max_year:
-                    beyond.add(season)
-                elif season >= min_year:
-                    pairs.add((season, season_type))
-        except (TypeError, ValueError) as e:
-            return unrecognized(f"{name} is not readable the way nflverse ingest reads it: {e}")
+            except (TypeError, ValueError):
+                # ingest matches `season` as the string of a requested year,
+                # so a row like this is never ingested either.
+                continue
+            game_type = row["game_type"]
+            # The window first: a season past MAX_YEAR is noted (or, once
+            # finished, reported) whatever its rows' game types are.
+            if season > max_year:
+                beyond.add(season)
+                played = not has_scores or bool(row["home_score"] and row["away_score"])
+                if game_type == _NFL_FINAL_GAME_TYPE and played:
+                    finished.add(season)
+                continue
+            if season < min_year:
+                continue
+            season_type = _NFL_SEASON_TYPE_BY_GAME_TYPE.get(game_type)
+            if season_type is not None:
+                pairs.add((season, season_type))
 
     if not pairs:
-        return unrecognized(f"{name} has no games for {min_year}-{max_year}")
-    return CacheScan(frozenset(pairs), tuple(sorted(beyond)), max_year)
+        return unrecognized(f"{name} has no games nflverse ingest would keep for {min_year}-{max_year}")
+    return CacheScan(
+        pairs=frozenset(pairs),
+        beyond_max_year=tuple(sorted(beyond)),
+        max_year=max_year,
+        finished_beyond_max_year=tuple(sorted(finished)),
+    )
 
 
 # One reader per league's cache layout. tests/test_db_currency.py fails if
@@ -384,6 +436,7 @@ def _league_report(
         cached_seasons_by_type=_by_type(scan.pairs if scan else frozenset()),
         rated_seasons=rated_seasons,
         cache_beyond_max_year=scan.beyond_max_year if scan else (),
+        cache_finished_beyond_max_year=scan.finished_beyond_max_year if scan else (),
         cache_max_year=scan.max_year if scan else None,
         cache_unrecognized=unrecognized,
     )
@@ -463,7 +516,7 @@ def _find_problems(
                 Problem(
                     "raw_cache_unrecognized",
                     sport,
-                    f"{sport}: {raw_dir} is not this league's committed raw cache "
+                    f"{sport}: {raw_dir} doesn't look like this league's committed raw cache "
                     f"({league.cache_unrecognized}), so the behind-the-cache check"
                     + (" and the mascot check" if sport == "cfb" else "")
                     + " could not run (pass the right --raw-dir)",
@@ -504,6 +557,19 @@ def _find_problems(
                 )
             )
 
+        if league.cache_finished_beyond_max_year:
+            problems.append(
+                Problem(
+                    "cache_past_max_year",
+                    sport,
+                    f"{sport}: the raw cache holds finished season(s) "
+                    f"{format_seasons(league.cache_finished_beyond_max_year)} past this league's "
+                    f"ingest MAX_YEAR ({league.cache_max_year}), which `cfb ingest` skips, so no "
+                    "db can include them: bump MAX_YEAR (see #9)",
+                    seasons=league.cache_finished_beyond_max_year,
+                )
+            )
+
         for method, rated in league.rated_seasons.items():
             rated_set = set(rated)
             unrated = tuple(s for s in league.game_seasons if s not in rated_set)
@@ -519,7 +585,7 @@ def _find_problems(
                     )
                 )
 
-    if aliases.teams_cache_present and aliases.with_mascot == 0:
+    if aliases.teams > 0 and aliases.teams_cache_present and aliases.with_mascot == 0:
         problems.append(
             Problem(
                 "no_cfb_mascots",
@@ -534,13 +600,18 @@ def _find_problems(
 
 
 def _notes(leagues: tuple[LeagueReport, ...]) -> tuple[str, ...]:
-    return tuple(
-        f"{league.sport}: the raw cache holds season(s) {format_seasons(league.cache_beyond_max_year)} "
-        f"past this league's ingest MAX_YEAR ({league.cache_max_year}), which `cfb ingest` skips. "
-        "Expected for a season still in progress; otherwise MAX_YEAR needs a bump (see #9)."
-        for league in leagues
-        if league.cache_beyond_max_year
-    )
+    notes: list[str] = []
+    for league in leagues:
+        finished = set(league.cache_finished_beyond_max_year)
+        unfinished = [s for s in league.cache_beyond_max_year if s not in finished]
+        if unfinished:
+            notes.append(
+                f"{league.sport}: the raw cache holds season(s) {format_seasons(unfinished)} past "
+                f"this league's ingest MAX_YEAR ({league.cache_max_year}), which `cfb ingest` "
+                "skips. Not finished in the cache yet, so this is expected for the season in "
+                "progress; once it finishes, MAX_YEAR needs a bump (see #9)."
+            )
+    return tuple(notes)
 
 
 def _is_wal_mode(db_path: Path) -> bool:
@@ -553,13 +624,36 @@ def _is_wal_mode(db_path: Path) -> bool:
     return len(header) == 20 and header.startswith(b"SQLite format 3\x00") and header[18:20] == b"\x02\x02"
 
 
+def _wal_sidecars(db_path: Path) -> tuple[Path, ...]:
+    return tuple(p for p in (Path(f"{db_path}-wal"), Path(f"{db_path}-shm")) if p.exists())
+
+
+def _open_read_only(db_path: Path) -> sqlite3.Connection:
+    """Open `db_path` read-only, choosing `immutable` only when it is safe.
+
+    A WAL-mode db with neither a -wal nor a -shm file (a copied db, or one
+    whose last connection closed cleanly) has every committed page in the
+    main file. A plain `mode=ro` open of it is platform-dependent: macOS's
+    SQLite refuses it (SQLITE_CANTOPEN), while Linux's may succeed by
+    creating the -wal/-shm files next to the db. `immutable=1` reads the main
+    file as-is and creates nothing, on every platform.
+
+    It is never used while a -wal file exists: immutable ignores -wal, so a
+    live db's un-checkpointed commits would be silently missed.
+    """
+    immutable = _is_wal_mode(db_path) and not _wal_sidecars(db_path)
+    return get_conn(db_path, read_only=True, immutable=immutable)
+
+
 def _unreadable(db_path: Path, error: sqlite3.Error) -> DatabaseUnavailableError:
-    if _is_wal_mode(db_path):
+    # The WAL hint only when WAL sidecar files really exist and could be the
+    # cause: a WAL-looking header alone may just be a corrupt file.
+    if _is_wal_mode(db_path) and _wal_sidecars(db_path):
         return DatabaseUnavailableError(
             f"{db_path} is a WAL-mode sqlite database, and a read-only open could not use its "
-            f"-wal/-shm files ({error}): they are missing or not writable here, and the doctor "
-            "will not create them. Run it where those files are accessible, or check a copy "
-            "switched out of WAL mode (`PRAGMA journal_mode = DELETE`)."
+            f"-wal/-shm files ({error}): they are not usable from here, and the doctor will not "
+            "change them. Run it where those files are accessible, or check a copy switched out "
+            "of WAL mode (`PRAGMA journal_mode = DELETE`)."
         )
     return DatabaseUnavailableError(f"{db_path} could not be read as a sqlite database: {error}")
 
@@ -579,7 +673,7 @@ def check_currency(db_path: Path | str = DB_PATH, raw_dir: Path | str = RAW_DIR)
 
     reference = _reference_schema()
     try:
-        conn = get_conn(db_path, read_only=True)
+        conn = _open_read_only(db_path)
     except sqlite3.Error as e:
         raise _unreadable(db_path, e) from e
     try:
@@ -654,7 +748,8 @@ def main(argv: list[str] | None = None) -> int:
         description=(
             "Read-only check that a cfb-strength sqlite db's data is current: schema, "
             "every league ingested, no season/season-type batch behind the committed raw "
-            "cache, every method rated, at least one CFB mascot. Exits 0 only when it is."
+            "cache, every method rated, at least one CFB mascot, no finished season past "
+            "an ingest's MAX_YEAR. Exits 0 only when it is."
         ),
     )
     parser.add_argument(

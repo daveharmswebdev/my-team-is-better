@@ -23,14 +23,25 @@ every one — `cfb rate` has no `--db-path` flag — zero live API calls). Befor
 and report that as your gap, never as a pass. Never run `ensure_schema` on a db to make
 it readable; migrating a stale db's columns in disguises that its data is stale too.
 Committed test fixtures hold deliberate season slices, but they aren't exempt: still run
-the doctor. Only its findings for seasons the fixture deliberately omits (behind the
-cache, missing ratings) may be waived. A schema or missing-league finding still means
-that fixture can't verify that league.
+the doctor, and waive only these findings:
+- `season_behind_cache` and `season_missing_ratings`, for seasons the fixture
+  deliberately omits;
+- `league_has_no_games`, for a league the fixture deliberately doesn't carry. That
+  fixture then verifies nothing about that league;
+- `raw_cache_*`, only when you pointed `--raw-dir` at something other than the
+  committed cache on purpose.
 
-Never run `apps/api`'s test suite from a checkout that has `apps/api/.env`. Its persona
-integration test is gated only on those credentials being present, so it makes a real
-Claude call and deletes and rewrites a row in whatever Postgres `DATABASE_URL` points at.
-Run it from a worktree with no `.env`, and report the skipped test as skipped.
+Any other finding blocks verification of **every** league in that fixture, including
+`schema_not_current`, which has no league attached, and `no_cfb_mascots`. Report it as a
+gap, not a pass. (Until #110 rebuilds them, both committed engine fixtures fail on
+schema, so neither can certify anything on its own.)
+
+Never run `apps/api`'s test suite from a checkout that has `apps/api/.env`, or with
+`DATABASE_URL`, `ANTHROPIC_API_KEY` or `MY_TEAM_IS_BETTER_API_ENV_FILE` set in the
+environment. Its persona integration test is gated only on those credentials being
+reachable, so it makes a real Claude call and deletes and rewrites a row in whatever
+Postgres `DATABASE_URL` points at. Run it from a worktree with no `.env` and those
+variables unset, and report the skipped test as skipped.
 
 Once `apps/api`'s persona layer exists, also run its smoke eval (Architecture Brief
 §8): the same golden years, asserting the persona names the correct #1, never states a

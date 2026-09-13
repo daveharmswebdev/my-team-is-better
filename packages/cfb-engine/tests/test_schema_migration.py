@@ -474,6 +474,8 @@ def test_stale_warning_fires_when_migrating_a_populated_pre_51_db(pre_51_db: Pat
 def test_stale_warning_fires_when_migrating_a_populated_post_51_db(
     tmp_path: Path, dropped: tuple[tuple[str, str], ...]
 ) -> None:
+    # `ALTER TABLE ... DROP COLUMN` needs SQLite >= 3.35 (2021). CI's
+    # python-build-standalone interpreter bundles a far newer SQLite.
     db = tmp_path / "post_51.sqlite3"
     conn = sqlite3.connect(db)
     conn.executescript(SCHEMA_PATH.read_text())
@@ -653,3 +655,45 @@ def test_read_only_conn_also_honors_check_same_thread(tmp_path: Path) -> None:
     assert errors == []
     assert results == [0]
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# `immutable` (issue #97). `cfb doctor` must read a WAL-mode db that arrives
+# without its -wal/-shm files (a copied db, or one closed cleanly on Linux)
+# without creating those files. A plain read-only open is platform-dependent
+# there: macOS's SQLite refuses it, Linux's may succeed by creating them.
+# `immutable=1` reads the main file as-is and writes nothing; it is only
+# correct when no -wal file exists, and choosing when is the caller's job.
+# ---------------------------------------------------------------------------
+
+
+def test_get_conn_rejects_immutable_without_read_only(tmp_path: Path) -> None:
+    dest = tmp_path / "never_created.sqlite3"
+
+    with pytest.raises(ValueError, match="read_only"):
+        get_conn(dest, immutable=True)
+
+    assert not dest.exists()
+
+
+def test_immutable_read_only_conn_reads_a_wal_db_without_creating_sidecar_files(
+    tmp_path: Path,
+) -> None:
+    dest = tmp_path / "wal.sqlite3"
+    seed = get_conn(dest)
+    ensure_schema(seed)
+    _insert_one_team_and_game(seed)
+    seed.commit()
+    assert seed.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+    seed.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    seed.close()
+    for suffix in ("-wal", "-shm"):
+        Path(f"{dest}{suffix}").unlink(missing_ok=True)
+
+    conn = get_conn(dest, read_only=True, immutable=True)
+    try:
+        assert conn.execute("SELECT COUNT(*) AS c FROM games").fetchone()["c"] == 1
+    finally:
+        conn.close()
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["wal.sqlite3"]

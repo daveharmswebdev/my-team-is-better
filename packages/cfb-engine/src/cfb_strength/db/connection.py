@@ -44,8 +44,18 @@ def get_conn(
     *,
     read_only: bool = False,
     check_same_thread: bool = True,
+    immutable: bool = False,
 ) -> sqlite3.Connection:
     """Open a connection to the project sqlite db.
+
+    `immutable` (issue #97, read-only only; default False, so every existing
+    caller is unchanged) adds SQLite's `immutable=1` URI flag: the file is
+    read as-is, with no locking and no -wal/-shm files created or consulted.
+    `cfb doctor` needs it to read a WAL-mode db that has no -wal/-shm files
+    without writing any next to it; see `ingest.currency._open_read_only`
+    for when that is safe. It lives here, rather than as a second
+    `sqlite3.connect` in the doctor, so there is still exactly one place that
+    builds this project's connection URIs and pragmas.
 
     `check_same_thread` (issue #44) forwards straight to `sqlite3.connect`.
     It defaults to True -- sqlite's own strict behavior -- because that is
@@ -66,11 +76,12 @@ def get_conn(
     connection across concurrent work would still be unsafe, and passing
     this flag would be hiding the problem instead of fixing it.
     """
+    if immutable and not read_only:
+        raise ValueError("immutable=True requires read_only=True")
     db_path = Path(db_path)
     if read_only:
-        conn = sqlite3.connect(
-            f"file:{db_path}?mode=ro", uri=True, check_same_thread=check_same_thread
-        )
+        uri = f"file:{db_path}?mode=ro" + ("&immutable=1" if immutable else "")
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=check_same_thread)
     else:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(db_path, check_same_thread=check_same_thread)

@@ -47,15 +47,21 @@ opens the db read-only and exits 0 only when:
   `games`, counting only seasons inside each league's ingest window. A
   regular season ingested without its postseason counts as behind.
 - every season with games is rated by every method
-- at least one CFB team has a mascot. This is a zero rule, not a coverage
-  target, because CFBD has no mascot for some real teams.
-- `--raw-dir` really is the committed cache. An empty or wrong directory
-  fails rather than skipping the cache checks.
+- at least one CFB team has a mascot, if the db has CFB teams at all. This is
+  a zero rule, not a coverage target, because CFBD has no mascot for some
+  real teams.
+- `--raw-dir` looks like the committed cache. An empty or wrong directory
+  fails rather than skipping the cache checks. A partial but recognizable
+  directory still passes when the db matches it.
+- the cache holds no *finished* season past a league's ingest `MAX_YEAR`.
+  For NFL that means a Super Bowl with a score; for CFB, a postseason file
+  whose games are all completed. `cfb ingest` skips such a season, so no db
+  can be current until `MAX_YEAR` is bumped.
 
-Otherwise it exits 1 and names each problem. Cache seasons past a league's
-`MAX_YEAR` get a note that doesn't change the exit code: expected for an
-in-progress season, a missed `MAX_YEAR` bump otherwise. The doctor never
-migrates or writes the file. When `ensure_schema` does add a column, table or
+Otherwise it exits 1 and names each problem. An unfinished season past
+`MAX_YEAR`, like the season in progress, gets a note that doesn't change the
+exit code. The doctor never migrates or writes the file. It reads a WAL-mode
+db that has no `-wal`/`-shm` files without creating them. When `ensure_schema` does add a column, table or
 index to a db that already holds games, it emits a `StaleDatabaseWarning`
 pointing here. The usual fix is to rebuild from
 the committed cache with render.yaml's ingest/rate commands. `rate` has no

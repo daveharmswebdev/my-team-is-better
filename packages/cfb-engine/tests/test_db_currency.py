@@ -18,6 +18,13 @@ red rather than hiding behind another check that also fires.
 Ingest windows come from the ingest modules themselves, so the boundary tests
 follow a MIN_YEAR/MAX_YEAR bump instead of pinning today's numbers.
 
+Platform independence (CI runs ubuntu-latest, development happens on macOS):
+nothing here depends on how a given SQLite build treats a read-only open of a
+WAL db. The WAL tests assert only outcomes the doctor controls -- it opens a
+sidecar-less WAL db `immutable`, never a live one -- and the error-message
+tests force the failure with a monkeypatched `currency.get_conn` rather than
+hoping the platform produces one.
+
 Hermetic: every db and raw dir lives in `tmp_path`; the real 43MB cache and
 the real local db are never read.
 """
@@ -57,6 +64,7 @@ WINDOWS: dict[str, tuple[int, int]] = {
 Pair = tuple[int, str]
 
 OK_LINE = "OK: the db's data is current."
+GENERIC_UNREADABLE = "could not be read as a sqlite database"
 
 
 def _pairs(*seasons: int) -> list[Pair]:
@@ -116,6 +124,7 @@ def _build_current_db(path: Path) -> Path:
 
 
 _ONE_GAME_JSON = '[{"id": 1}]'
+_FINISHED_POSTSEASON_JSON = '[{"id": 1, "completed": true}, {"id": 2, "completed": true}]'
 
 
 def _write_cfb_cache(raw_dir: Path, pairs: list[Pair]) -> None:
@@ -127,19 +136,40 @@ def _write_cfb_cache(raw_dir: Path, pairs: list[Pair]) -> None:
     (raw_dir / "teams.json").write_text("[]")
 
 
-_NFL_GAME_TYPE = {"regular": "REG", "postseason": "SB"}
-_NFL_HEADER = ["game_id", "season", "game_type", "week", "away_team", "home_team"]
+# Every playoff round nflverse publishes (see ingest/nflverse/normalize.py's
+# docstring). Written out here rather than imported from ingest on purpose:
+# the tests must fail if ingest's own sets ever stop matching the real data.
+NFL_POSTSEASON_GAME_TYPES = ("WC", "DIV", "CON", "SB")
+_NFL_HEADER = [
+    "game_id", "season", "game_type", "week", "away_team", "home_team", "away_score", "home_score",
+]
 
 
-def _write_nfl_cache(raw_dir: Path, pairs: list[Pair]) -> None:
+def _nfl_row(season: int, game_type: str, *, scored: bool = True) -> list[object]:
+    scores = ["17", "24"] if scored else ["", ""]
+    return [f"{season}_{game_type}_BUF_NE", season, game_type, 1, "BUF", "NE", *scores]
+
+
+def _write_nfl_rows(raw_dir: Path, rows: list[list[object]]) -> None:
     nfl = raw_dir / "nfl"
     nfl.mkdir(parents=True, exist_ok=True)
     with (nfl / "games.csv").open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(_NFL_HEADER)
-        for season, season_type in pairs:
-            game_type = _NFL_GAME_TYPE[season_type]
-            writer.writerow([f"{season}_{game_type}_BUF_NE", season, game_type, 1, "BUF", "NE"])
+        writer.writerows(rows)
+
+
+def _append_nfl_rows(raw_dir: Path, rows: list[list[object]]) -> None:
+    with (raw_dir / "nfl" / "games.csv").open("a", newline="") as f:
+        csv.writer(f).writerows(rows)
+
+
+def _write_nfl_cache(raw_dir: Path, pairs: list[Pair]) -> None:
+    rows: list[list[object]] = []
+    for season, season_type in pairs:
+        game_types = ("REG",) if season_type == "regular" else NFL_POSTSEASON_GAME_TYPES
+        rows += [_nfl_row(season, game_type) for game_type in game_types]
+    _write_nfl_rows(raw_dir, rows)
 
 
 CACHE_WRITERS = {"cfb": _write_cfb_cache, "nfl": _write_nfl_cache}
@@ -186,6 +216,10 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _siblings(path: Path) -> list[str]:
+    return sorted(p.name for p in path.parent.iterdir())
+
+
 @pytest.fixture
 def current_db(tmp_path: Path) -> Path:
     return _build_current_db(tmp_path / "current.sqlite3")
@@ -219,6 +253,7 @@ def test_fully_current_db_reports_no_problems_and_exits_zero(
 ) -> None:
     report = currency.check_currency(current_db, raw_dir)
     assert report.problems == ()
+    assert report.notes == ()
     assert report.is_current
 
     assert _run(current_db, raw_dir) == 0
@@ -256,7 +291,7 @@ def test_cli_dispatches_doctor(current_db: Path, raw_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# A --raw-dir that is not the committed cache must never produce a green
+# A --raw-dir that doesn't look like the committed cache must never be green
 # ---------------------------------------------------------------------------
 
 
@@ -290,9 +325,8 @@ def test_an_existing_dir_that_is_not_the_raw_cache_is_not_green(
     [
         pytest.param("id,year\n1,2001\n2,2002\n", id="no_season_column"),
         pytest.param("game_id,season\n2001_REG,2001\n", id="no_game_type_column"),
-        pytest.param(
-            "game_id,season,game_type\n2001_PRE,2001,PRE\n", id="unrecognized_game_type"
-        ),
+        pytest.param("game_id,season,game_type\n2001_PRE,2001,PRE\n", id="only_skipped_game_types"),
+        pytest.param("game_id,season,game_type\nx,not-a-year,REG\n", id="no_parseable_season"),
         pytest.param("game_id,season,game_type\n", id="no_rows"),
     ],
 )
@@ -338,10 +372,62 @@ def test_a_cfb_cache_without_teams_json_is_not_green(current_db: Path, raw_dir: 
 
 
 # ---------------------------------------------------------------------------
+# NFL rows are read exactly the way nflverse ingest filters them
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("game_type", NFL_POSTSEASON_GAME_TYPES)
+def test_every_nfl_playoff_round_counts_as_postseason(
+    current_db: Path, raw_dir: Path, game_type: str
+) -> None:
+    first, last = SEASONS["nfl"]
+    # `last`'s postseason is represented in the cache by this one round only,
+    # and the db lacks it: flagged only if this round counts as postseason.
+    _write_nfl_rows(
+        raw_dir,
+        [_nfl_row(season, "REG") for season in (first, last)]
+        + [_nfl_row(first, t) for t in NFL_POSTSEASON_GAME_TYPES]
+        + [_nfl_row(last, game_type)],
+    )
+    _mutate(
+        current_db,
+        f"DELETE FROM games WHERE sport = 'nfl' AND season = {last} AND season_type = 'postseason'",
+    )
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("season_behind_cache", "nfl")}
+    assert report.problems[0].pairs == ((last, "postseason"),)
+
+
+@pytest.mark.parametrize("where", ["in_window", "past_max_year"])
+def test_game_types_nflverse_ingest_skips_are_skipped_not_fatal(
+    current_db: Path, raw_dir: Path, where: str
+) -> None:
+    # nflverse ingest keeps only REG/WC/DIV/CON/SB rows and silently drops
+    # anything else (a preseason row, say). One such row must neither make
+    # the whole cache unrecognized nor invent a season the db should have.
+    season = EXTRA_SEASON if where == "in_window" else WINDOWS["nfl"][1] + 1
+    _append_nfl_rows(raw_dir, [_nfl_row(season, "PRE")])
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    if where == "past_max_year":
+        # The window is applied before the game-type filter: a season past
+        # MAX_YEAR is noted whatever its rows are.
+        assert len(report.notes) == 1 and str(season) in report.notes[0]
+    else:
+        assert report.notes == ()
+
+
+# ---------------------------------------------------------------------------
 # (a) schema not current -- reported, never fixed
 # ---------------------------------------------------------------------------
 
 
+# `ALTER TABLE ... DROP COLUMN` needs SQLite >= 3.35 (2021). CI's
+# python-build-standalone interpreter bundles a far newer SQLite.
 @pytest.mark.parametrize(
     ("statement", "missing"),
     [
@@ -474,7 +560,11 @@ def test_seasons_just_outside_the_ingest_window_are_not_flagged(
     tmp_path: Path, current_db: Path, sport: str
 ) -> None:
     min_year, max_year = WINDOWS[sport]
-    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(min_year - 1, max_year + 1)})
+    # MAX_YEAR+1 as an unfinished (regular-only) season: a finished one past
+    # MAX_YEAR is its own problem, tested below.
+    raw_dir = _build_raw_dir(
+        tmp_path, extra={sport: _pairs(min_year - 1) + [(max_year + 1, "regular")]}
+    )
 
     report = currency.check_currency(current_db, raw_dir)
 
@@ -500,16 +590,17 @@ def test_a_missing_middle_season_is_flagged(tmp_path: Path, current_db: Path, sp
 
 
 # ---------------------------------------------------------------------------
-# Note (not a failure): the cache holds seasons past an ingest's MAX_YEAR
+# Cache seasons past an ingest's MAX_YEAR: a note while that season is still
+# in progress, a failing problem once it has finished (the #9 class of bug)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("sport", SPORTS)
-def test_cache_seasons_past_max_year_produce_a_note_but_stay_green(
+def test_an_unfinished_season_past_max_year_is_a_note_that_stays_green(
     tmp_path: Path, current_db: Path, sport: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
     beyond = WINDOWS[sport][1] + 1
-    raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(beyond)})
+    raw_dir = _build_raw_dir(tmp_path, extra={sport: [(beyond, "regular")]})
 
     report = currency.check_currency(current_db, raw_dir)
 
@@ -527,6 +618,81 @@ def test_cache_seasons_past_max_year_produce_a_note_but_stay_green(
 
 def test_no_note_without_cache_seasons_past_max_year(current_db: Path, raw_dir: Path) -> None:
     assert currency.check_currency(current_db, raw_dir).notes == ()
+
+
+def _past_max_year(report: currency.CurrencyReport, sport: str, season: int) -> None:
+    assert _problems(report) == {("cache_past_max_year", sport)}
+    problem = report.problems[0]
+    assert problem.seasons == (season,)
+    assert "MAX_YEAR" in problem.message
+    assert not [n for n in report.notes if n.startswith(f"{sport}:")]
+
+
+def test_a_finished_nfl_season_past_max_year_fails(
+    current_db: Path, raw_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    beyond = WINDOWS["nfl"][1] + 1
+    _append_nfl_rows(raw_dir, [_nfl_row(beyond, "REG"), _nfl_row(beyond, "SB")])
+
+    _past_max_year(currency.check_currency(current_db, raw_dir), "nfl", beyond)
+    assert _run(current_db, raw_dir) == 1
+    assert OK_LINE not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        pytest.param([("REG", True)], id="regular_season_only"),
+        pytest.param([("REG", True), ("WC", True), ("DIV", True), ("CON", True)], id="no_super_bowl"),
+        pytest.param([("REG", True), ("SB", False)], id="super_bowl_scheduled_not_played"),
+    ],
+)
+def test_an_unfinished_nfl_season_past_max_year_is_only_a_note(
+    current_db: Path, raw_dir: Path, rows: list[tuple[str, bool]]
+) -> None:
+    beyond = WINDOWS["nfl"][1] + 1
+    _append_nfl_rows(raw_dir, [_nfl_row(beyond, t, scored=scored) for t, scored in rows])
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    assert len(report.notes) == 1 and str(beyond) in report.notes[0]
+    assert _run(current_db, raw_dir) == 0
+
+
+def test_a_finished_cfb_season_past_max_year_fails(current_db: Path, raw_dir: Path) -> None:
+    beyond = WINDOWS["cfb"][1] + 1
+    (raw_dir / f"{beyond}_regular.json").write_text(_ONE_GAME_JSON)
+    (raw_dir / f"{beyond}_postseason.json").write_text(_FINISHED_POSTSEASON_JSON)
+
+    _past_max_year(currency.check_currency(current_db, raw_dir), "cfb", beyond)
+    assert _run(current_db, raw_dir) == 1
+
+
+@pytest.mark.parametrize(
+    "postseason",
+    [
+        pytest.param(None, id="no_postseason_file"),
+        pytest.param("[]", id="empty_postseason_file"),
+        pytest.param(
+            '[{"id": 1, "completed": true}, {"id": 2, "completed": false}]',
+            id="bowls_still_to_play",
+        ),
+    ],
+)
+def test_an_unfinished_cfb_season_past_max_year_is_only_a_note(
+    current_db: Path, raw_dir: Path, postseason: str | None
+) -> None:
+    beyond = WINDOWS["cfb"][1] + 1
+    (raw_dir / f"{beyond}_regular.json").write_text(_ONE_GAME_JSON)
+    if postseason is not None:
+        (raw_dir / f"{beyond}_postseason.json").write_text(postseason)
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    assert len(report.notes) == 1 and str(beyond) in report.notes[0]
+    assert _run(current_db, raw_dir) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -572,6 +738,20 @@ def test_cfb_teams_with_no_mascots_are_reported_even_when_nfl_teams_have_one(
 
     assert _problems(report) == {("no_cfb_mascots", "cfb")}
     assert _run(current_db, raw_dir) == 1
+
+
+def test_no_mascot_problem_for_a_db_with_no_cfb_teams(current_db: Path, raw_dir: Path) -> None:
+    # "none of the 0 CFB teams has a mascot" would only repeat (b).
+    _mutate(
+        current_db,
+        "DELETE FROM ratings WHERE sport = 'cfb'",
+        "DELETE FROM games WHERE sport = 'cfb'",
+        "DELETE FROM teams WHERE sport = 'cfb'",
+    )
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("league_has_no_games", "cfb"), ("season_behind_cache", "cfb")}
 
 
 # ---------------------------------------------------------------------------
@@ -650,13 +830,13 @@ def test_pre_51_db_is_reported_as_stale_rather_than_crashing(
 
 def test_doctor_leaves_a_stale_db_byte_identical(pre_51_db: Path, raw_dir: Path) -> None:
     before = _sha256(pre_51_db)
-    siblings_before = sorted(p.name for p in pre_51_db.parent.iterdir())
+    siblings_before = _siblings(pre_51_db)
 
     assert _run(pre_51_db, raw_dir) == 1
 
     assert _sha256(pre_51_db) == before, "cfb doctor modified the database it was checking"
     # No journal/WAL/shm left behind either.
-    assert sorted(p.name for p in pre_51_db.parent.iterdir()) == siblings_before
+    assert _siblings(pre_51_db) == siblings_before
 
 
 def test_missing_db_file_exits_nonzero_with_a_clear_message(
@@ -683,24 +863,158 @@ def test_a_file_that_is_not_a_sqlite_db_exits_nonzero_with_a_clear_message(
 
     err = capsys.readouterr().err
     assert str(bogus) in err
+    assert GENERIC_UNREADABLE in err
     assert "Traceback" not in err
 
 
-def test_a_wal_mode_db_without_its_wal_files_gets_an_honest_message(
+# ---------------------------------------------------------------------------
+# WAL-mode databases. Each test's outcome is fixed by what the doctor does,
+# not by the platform's SQLite build: see the module docstring.
+# ---------------------------------------------------------------------------
+
+
+def _header(write_read_versions: bytes) -> bytes:
+    """The first 100 bytes of a sqlite file: magic, page size, then the file
+    format write/read versions at offsets 18/19 (1 = rollback, 2 = WAL)."""
+    return b"SQLite format 3\x00" + b"\x10\x00" + write_read_versions + b"\x00" * 80
+
+
+WAL_HEADER = _header(b"\x02\x02")
+ROLLBACK_HEADER = _header(b"\x01\x01")
+
+
+def _to_wal_without_sidecars(db: Path) -> None:
+    conn = sqlite3.connect(db)
+    assert conn.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    conn.close()
+    # Every committed page is in the main file after the checkpoint, so these
+    # are safe to remove -- which is exactly the state of a WAL db copied
+    # without its sidecars, or closed cleanly on Linux.
+    for suffix in ("-wal", "-shm"):
+        Path(f"{db}{suffix}").unlink(missing_ok=True)
+    assert currency._is_wal_mode(db)
+
+
+def test_a_wal_db_without_its_sidecar_files_is_checked_normally_and_left_untouched(
     current_db: Path, raw_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    conn = sqlite3.connect(current_db)
-    assert conn.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
-    conn.close()
-    for suffix in ("-wal", "-shm"):
-        Path(f"{current_db}{suffix}").unlink(missing_ok=True)
+    _to_wal_without_sidecars(current_db)
     before = _sha256(current_db)
+    siblings_before = _siblings(current_db)
 
+    assert _run(current_db, raw_dir) == 0
+
+    assert OK_LINE in capsys.readouterr().out
+    assert _sha256(current_db) == before
+    # A read-only open that isn't immutable may create -wal/-shm next to the
+    # db on some platforms; the doctor must not.
+    assert _siblings(current_db) == siblings_before
+
+
+def test_a_wal_db_without_its_sidecar_files_still_reports_its_defects(
+    current_db: Path, raw_dir: Path
+) -> None:
+    _drop_season(current_db, "nfl", SEASONS["nfl"][-1])
+    _to_wal_without_sidecars(current_db)
+    siblings_before = _siblings(current_db)
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("season_behind_cache", "nfl")}
+    assert report.problems[0].seasons == (SEASONS["nfl"][-1],)
     assert _run(current_db, raw_dir) == 1
+    assert _siblings(current_db) == siblings_before
+
+
+def test_a_live_wal_db_is_read_through_its_wal_file_never_around_it(
+    current_db: Path, raw_dir: Path
+) -> None:
+    # A writer still holds the db, and its last commit lives only in -wal.
+    # `immutable` would ignore -wal and report the stale main file instead.
+    holder = sqlite3.connect(current_db)
+    try:
+        assert holder.execute("PRAGMA journal_mode = WAL").fetchone()[0] == "wal"
+        holder.execute("PRAGMA wal_autocheckpoint = 0")
+        holder.execute("DELETE FROM ratings WHERE sport = 'nfl'")
+        holder.execute("DELETE FROM games WHERE sport = 'nfl'")
+        holder.commit()
+        assert Path(f"{current_db}-wal").stat().st_size > 0
+
+        report = currency.check_currency(current_db, raw_dir)
+    finally:
+        holder.close()
+
+    assert _problems(report) == {("league_has_no_games", "nfl"), ("season_behind_cache", "nfl")}
+
+
+@pytest.mark.parametrize(
+    ("header", "sidecar", "expect_wal_hint"),
+    [
+        pytest.param(WAL_HEADER, "-wal", True, id="wal_header_with_wal_file"),
+        pytest.param(WAL_HEADER, "-shm", True, id="wal_header_with_shm_file"),
+        pytest.param(WAL_HEADER, None, False, id="wal_looking_header_no_sidecars"),
+        pytest.param(ROLLBACK_HEADER, "-wal", False, id="rollback_header"),
+    ],
+)
+def test_the_wal_hint_is_shown_only_when_wal_sidecar_files_exist(
+    tmp_path: Path,
+    raw_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    header: bytes,
+    sidecar: str | None,
+    expect_wal_hint: bool,
+) -> None:
+    db = tmp_path / "unopenable.sqlite3"
+    db.write_bytes(header)
+    if sidecar is not None:
+        Path(f"{db}{sidecar}").write_bytes(b"")
+
+    def refuse_to_open(*args: object, **kwargs: object) -> sqlite3.Connection:
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(currency, "get_conn", refuse_to_open)
+
+    assert _run(db, raw_dir) == 1
 
     err = capsys.readouterr().err
-    assert str(current_db) in err
-    assert "WAL" in err
-    assert "could not be read as a sqlite database" not in err
+    assert str(db) in err
     assert "Traceback" not in err
-    assert _sha256(current_db) == before
+    if expect_wal_hint:
+        assert "WAL-mode" in err
+        assert GENERIC_UNREADABLE not in err
+    else:
+        assert "WAL-mode" not in err
+        assert GENERIC_UNREADABLE in err
+
+
+def test_a_corrupt_file_with_a_wal_looking_header_gets_the_generic_message(
+    tmp_path: Path, raw_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    bogus = tmp_path / "corrupt.sqlite3"
+    bogus.write_bytes(WAL_HEADER + b"\xff" * 4000)
+
+    assert _run(bogus, raw_dir) == 1
+
+    err = capsys.readouterr().err
+    assert GENERIC_UNREADABLE in err
+    assert "WAL-mode" not in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param(WAL_HEADER, True, id="wal"),
+        pytest.param(ROLLBACK_HEADER, False, id="rollback"),
+        pytest.param(WAL_HEADER[:19], False, id="truncated_header"),
+        pytest.param(b"not a sqlite file, although long enough", False, id="not_sqlite"),
+        pytest.param(b"Not SQLite form" + b"\x00\x10\x00\x02\x02" + b"\x00" * 80, False, id="bad_magic"),
+    ],
+)
+def test_is_wal_mode_reads_the_header_bytes(tmp_path: Path, content: bytes, expected: bool) -> None:
+    path = tmp_path / "header.bin"
+    path.write_bytes(content)
+
+    assert currency._is_wal_mode(path) is expected
