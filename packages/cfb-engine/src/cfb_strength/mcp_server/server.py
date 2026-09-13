@@ -214,8 +214,9 @@ def get_rankings(
     teams ("show me the top 10 of 2005", "who's ranked around #15"). For
     deep evidence on a SINGLE named team's full resume (schedule, quality
     wins, worst loss) use get_team_season instead -- this tool returns only
-    rank/rating/record, no game-by-game detail. For the #1 team specifically
-    with full evidence, use get_champion.
+    rank, rating and the win-loss-tie record (`wins`, `losses`, `ties`; a
+    tie is a completed game with equal scores), no game-by-game detail. For
+    the #1 team specifically with full evidence, use get_champion.
     """
     try:
         conn = _get_conn()
@@ -230,7 +231,8 @@ def get_rankings(
             rows = conn.execute(
                 """
                 SELECT r.rank AS rank, r.rating AS rating, r.wins AS wins,
-                       r.losses AS losses, r.team_id AS team_id, t.school AS school
+                       r.losses AS losses, r.ties AS ties,
+                       r.team_id AS team_id, t.school AS school
                 FROM ratings r
                 JOIN teams t ON t.id = r.team_id
                 WHERE r.year = ? AND r.method = ? AND r.sport = ?
@@ -255,6 +257,7 @@ def get_rankings(
                     "rating": float(row["rating"]),
                     "wins": int(row["wins"]),
                     "losses": int(row["losses"]),
+                    "ties": int(row["ties"]),
                 }
                 for row in rows
             ],
@@ -270,7 +273,7 @@ def get_team_season(
     year: int, team: str, method: str = "keener", sport: Sport = "cfb"
 ) -> dict[str, Any]:
     """Return ONE team's full evidentiary case for a season: its rank,
-    rating, win-loss record, every completed game (with the opponent's rank
+    rating, win-loss-tie record, every completed game (with the opponent's rank
     at that snapshot), its quality wins (vs top-25 opponents), and its worst
     loss. `sport` selects the league the team is looked up in: "cfb"
     (college football, the default) or "nfl" -- pass sport="nfl" for an NFL
