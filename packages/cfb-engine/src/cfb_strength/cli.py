@@ -17,15 +17,15 @@ mains have their own, unrelated argparse parsers and know nothing about
 `cfb ingest --years 2005` (no `--sport`) behaves identically to before this
 change.
 
-The league and method lists in `USAGE` and the dispatch table's keys come
-from `cfb_strength.contracts`' `Sport`/`Method` aliases (issue #112).
-tests/test_contract_vocabularies.py fails if the table and the alias
-disagree.
+The league and method lists in `USAGE` are built from
+`cfb_strength.contracts`' `Sport`/`Method` aliases (issue #112).
+`INGEST_ENTRY_POINTS`' keys are written out by hand, one per league with its
+own ingest stack, and tests/test_contract_vocabularies.py fails if they and
+the alias disagree.
 """
 
 from __future__ import annotations
 
-import importlib
 import sys
 from collections.abc import Callable
 from typing import get_args
@@ -35,12 +35,30 @@ from cfb_strength.contracts import Method, Sport
 _SPORT_CHOICES = ",".join(get_args(Sport))
 _METHOD_CHOICES = ",".join(get_args(Method))
 
-# League -> (module, entry point) for `ingest --sport`. A table of names rather
-# than imported functions, so each league's ingest stack is only imported when
-# it is actually selected (see the module docstring).
-INGEST_ENTRY_POINTS: dict[str, tuple[str, str]] = {
-    "cfb": ("cfb_strength.ingest.ingest_season", "main"),
-    "nfl": ("cfb_strength.ingest.nflverse.ingest_season", "main"),
+IngestMain = Callable[[list[str]], int]
+
+
+def _cfb_ingest_main() -> IngestMain:
+    from cfb_strength.ingest.ingest_season import main
+
+    return main
+
+
+def _nfl_ingest_main() -> IngestMain:
+    from cfb_strength.ingest.nflverse.ingest_season import main
+
+    return main
+
+
+# League -> loader for that league's ingest entry point. Loaders rather than
+# the imported functions themselves, so each league's ingest stack is only
+# imported when it is selected (see the module docstring). They are typed
+# imports rather than importlib lookups on purpose: mypy --strict checks each
+# target `main`'s signature against `IngestMain`, so a `main` that grows a
+# required argument fails type-checking here instead of crashing at runtime.
+INGEST_ENTRY_POINTS: dict[str, Callable[[], IngestMain]] = {
+    "cfb": _cfb_ingest_main,
+    "nfl": _nfl_ingest_main,
 }
 
 USAGE = f"""\
@@ -112,17 +130,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 2
 
-        entry_point = INGEST_ENTRY_POINTS.get(sport)
-        if entry_point is None:
+        load_ingest_main = INGEST_ENTRY_POINTS.get(sport)
+        if load_ingest_main is None:
             expected = " or ".join(repr(s) for s in INGEST_ENTRY_POINTS)
             print(f"error: unknown --sport {sport!r}, expected {expected}\n", file=sys.stderr)
             return 2
 
-        module_name, attr = entry_point
-        ingest_main: Callable[[list[str]], int] = getattr(
-            importlib.import_module(module_name), attr
-        )
-        return ingest_main(ingest_args)
+        return load_ingest_main()(ingest_args)
 
     if command == "rate":
         from cfb_strength.ratings.compute_ratings import main as rate_main

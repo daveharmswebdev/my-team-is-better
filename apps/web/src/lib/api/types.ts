@@ -203,8 +203,11 @@ export interface TeamDetail {
 // ---------------------------------------------------------------------------
 
 /**
- * The one hand-written sport list in apps/web: `Sport` and the runtime guard
- * behind `isVerdictErrorBody` both derive from it. Checked against the API's
+ * The source list for `Sport` and for the runtime guard behind
+ * `isVerdictErrorBody`, which both derive from it. Two per-league spots are not
+ * derived from it: the `Record<Sport, string>` label maps (tsc requires an
+ * entry per league) and `QuestionForm`'s two league radios (unchecked, #143).
+ * Checked against the API's
  * published `apps/api/openapi-vocabularies.json` (`sport`, order included) by
  * `vocabularies.test.ts` (issue #112), so a league the API gains without
  * apps/web following it fails CI rather than silently degrading a mapped 404

@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import sqlite3
-from typing import Any, Literal
+from typing import Any
 
 from cfb_strength.config import DB_PATH
 from cfb_strength.contracts import (

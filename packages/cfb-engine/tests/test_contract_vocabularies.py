@@ -53,10 +53,12 @@ def test_aliases_are_non_empty_literals_of_distinct_strings() -> None:
 
 
 def test_method_alias_matches_the_registered_rating_methods() -> None:
-    assert set(METHODS) == set(compute_ratings.METHODS), (
-        "contracts.Method and compute_ratings.METHODS disagree. A rating method "
-        "is registered in one and not the other; add it to both (apps/api and "
-        "apps/web follow the alias)."
+    # Order included: the alias's docstring promises display order, and the
+    # API and web publish and mirror the alias in that order.
+    assert METHODS == tuple(compute_ratings.METHODS), (
+        "contracts.Method and compute_ratings.METHODS disagree, in membership or "
+        "order. Register a rating method in both, in the same position (apps/api "
+        "and apps/web follow the alias)."
     )
 
 
@@ -73,20 +75,30 @@ def test_sport_alias_matches_the_elo_config_registry() -> None:
 
 
 def test_cli_ingest_dispatches_exactly_the_sport_alias(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every league in the alias reaches a real ingest entry point, and the
-    dispatch table has no league the alias lacks."""
+    """Every league in the alias reaches its own real ingest entry point, and
+    the dispatch table has no league the alias lacks. (The entry points'
+    signatures are checked by mypy --strict through `cli.IngestMain`.)"""
     assert set(cli.INGEST_ENTRY_POINTS) == set(SPORTS)
 
+    targets = {sport: load() for sport, load in cli.INGEST_ENTRY_POINTS.items()}
+    for sport, target in targets.items():
+        assert callable(target), f"{sport}'s ingest entry point is not callable"
+        assert target.__module__.startswith("cfb_strength.ingest"), (sport, target.__module__)
+    assert len({t.__module__ for t in targets.values()}) == len(targets), (
+        "two leagues dispatch to the same ingest module"
+    )
+
     called: list[tuple[str, list[str]]] = []
-    for sport, (module_name, attr) in cli.INGEST_ENTRY_POINTS.items():
-        module = __import__(module_name, fromlist=[attr])
-        assert callable(getattr(module, attr)), f"{module_name}.{attr} is not callable"
+    for sport in SPORTS:
 
-        def fake_main(argv: list[str], _sport: str = sport) -> int:
-            called.append((_sport, argv))
-            return 0
+        def load_fake(_sport: str = sport) -> cli.IngestMain:
+            def fake_main(argv: list[str]) -> int:
+                called.append((_sport, argv))
+                return 0
 
-        monkeypatch.setattr(module, attr, fake_main)
+            return fake_main
+
+        monkeypatch.setitem(cli.INGEST_ENTRY_POINTS, sport, load_fake)
 
     for sport in SPORTS:
         assert cli.main(["ingest", "--sport", sport, "--years", "2005"]) == 0

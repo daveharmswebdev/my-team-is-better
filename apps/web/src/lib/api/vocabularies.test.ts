@@ -8,8 +8,8 @@ import { SPORTS, isVerdictErrorBody } from './types'
  * what the API actually publishes, not against a second hand-written copy.
  *
  * `apps/api/openapi-vocabularies.json` is generated from the API's live
- * `/openapi.json` by apps/api's own test suite (a stale file fails apps/api
- * CI), so it is the API's published contract. It belongs to apps/api: read
+ * `/openapi.json` by `python -m api.openapi_vocabularies`, and apps/api's test
+ * suite fails when it is stale, so it is the API's published contract. It belongs to apps/api: read
  * it, never edit it. A league the API gains without apps/web following it
  * turns this file red.
  *
@@ -141,6 +141,11 @@ describe('published API vocabularies (issue #112)', () => {
     })
 
     it('rejects an unknown_team body whose sport is outside the list', () => {
+      // Plausible future leagues are rejected only while the API doesn't
+      // publish them: a league added correctly (to the API and to SPORTS)
+      // drops out of this list instead of failing it, while a guard that
+      // silently accepts an unpublished 'nba' still fails here.
+      const published: readonly unknown[] = vocabularies['sport'] ?? []
       const outside = [
         'nba',
         'mlb',
@@ -151,11 +156,13 @@ describe('published API vocabularies (issue #112)', () => {
         'CFB',
         'NFL',
         ' cfb',
+        'nfl ',
         '',
         null,
         undefined,
         0,
-      ]
+      ].filter((value) => !published.includes(value))
+      expect(outside.length).toBeGreaterThan(0)
       for (const sport of outside) {
         expect(SPORTS as readonly unknown[]).not.toContain(sport)
         expect({

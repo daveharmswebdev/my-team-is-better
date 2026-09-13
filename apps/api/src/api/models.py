@@ -70,7 +70,8 @@ from pydantic import BaseModel, ConfigDict, Field
 #   the CLI dispatch, argparse's `--sport` choices).
 # - tests/test_openapi_vocabularies.py fails if apps/api redeclares either
 #   vocabulary, if any `sport`/`method` published in /openapi.json lacks the
-#   enum or disagrees with the alias, or if the committed
+#   enum (except the allowlisted `TeamCaseOut.method`, #139) or disagrees with
+#   the alias, or if the committed
 #   `openapi-vocabularies.json` (what apps/web is checked against) is stale.
 # - tests/test_sport_validation.py and tests/test_method_validation.py check
 #   at runtime that every alias value is accepted and anything else is a 422.
