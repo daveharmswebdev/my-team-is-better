@@ -29,6 +29,22 @@ some real games twice under two different game ids:
   * 2008: `282430099` / `400361387`, LSU 41 - App State 13.
   * 2025: `401833370` / `401806686`, Augsburg 43 - Hamline 3.
 
+A third fixture, `tests/fixtures/raw_games_unreported_results_sample.json`
+(issue #128), holds seven real records extracted verbatim, in cache order,
+from `data/raw/{2022,2024,2025}_regular.json`. CFBD marks some small-school
+games `completed: true` with `0-0` and no line scores. Those are results that
+were never reported, not scoreless ties:
+
+  * Unreported (`0-0`, no line scores on either side): 2022 `401430717`
+    Allen - Johnson C. Smith; 2024 `401655664` Drake - Quincy; 2024
+    `401637161` Portland State - South Dakota.
+  * Negative controls that must keep their scores: 2024 `401675587` Florida
+    Memorial 28 - Clark Atlanta 28 (a real tie, with line scores); 2025
+    `401777266` Rowan 17 - Case Western Reserve 17 (a real tie, *without*
+    line scores); 2024 `401674665` Lyon 0 - Texas Lutheran 49 (a real
+    shutout, no line scores); 2024 `401675597` Morehouse 11 - Edward Waters
+    28 (an ordinary scored game, no line scores).
+
 These tests never touch the live `data/cfb.sqlite3` and never call the live
 CFBD API (the raw JSON here is a committed fixture, not a live cache read).
 """
@@ -36,6 +52,7 @@ CFBD API (the raw JSON here is a committed fixture, not a live cache read).
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import sqlite3
 from pathlib import Path
@@ -45,12 +62,21 @@ import pytest
 
 from cfb_strength.contracts import GameRow, TeamRow
 from cfb_strength.db.connection import get_conn
-from cfb_strength.ingest.ingest_season import _write_games, _write_teams, ingest_one
+from cfb_strength.ingest import normalize
+from cfb_strength.ingest.ingest_season import (
+    IngestResult,
+    _write_games,
+    _write_teams,
+    ingest_one,
+)
 from cfb_strength.ingest.normalize import normalize_game, team_rows_from_game
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "raw_games_sample.json"
 DUPLICATES_FIXTURE_PATH = (
     Path(__file__).parent / "fixtures" / "raw_games_duplicate_records_sample.json"
+)
+UNREPORTED_FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "raw_games_unreported_results_sample.json"
 )
 
 
@@ -342,5 +368,245 @@ def test_same_teams_same_date_with_a_different_score_are_not_duplicates(
     conn = _ingest_records(empty_schema_db, monkeypatch, 2004, [real, other])
     try:
         assert _game_ids(conn, "Texas State", "Florida Atlantic") == [242830326, 999_000_001]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# issue #128: completed 0-0 records with no line scores are unreported results
+# ---------------------------------------------------------------------------
+
+UNREPORTED_IDS = (401430717, 401655664, 401637161)
+REAL_TIE_WITH_LINE_SCORES_ID = 401675587  # Florida Memorial 28 - Clark Atlanta 28
+REAL_TIE_WITHOUT_LINE_SCORES_ID = 401777266  # Rowan 17 - Case Western Reserve 17
+SHUTOUT_WITHOUT_LINE_SCORES_ID = 401674665  # Lyon 0 - Texas Lutheran 49
+SCORED_WITHOUT_LINE_SCORES_ID = 401675597  # Morehouse 11 - Edward Waters 28
+NEGATIVE_CONTROL_IDS = (
+    REAL_TIE_WITH_LINE_SCORES_ID,
+    REAL_TIE_WITHOUT_LINE_SCORES_ID,
+    SHUTOUT_WITHOUT_LINE_SCORES_ID,
+    SCORED_WITHOUT_LINE_SCORES_ID,
+)
+
+
+def _unreported_fixture() -> dict[int, dict[str, Any]]:
+    records: list[dict[str, Any]] = json.loads(UNREPORTED_FIXTURE_PATH.read_text())
+    return {r["id"]: r for r in records}
+
+
+def _unreported_fixture_season(season: int) -> list[dict[str, Any]]:
+    return [r for r in _unreported_fixture().values() if r["season"] == season]
+
+
+def test_unreported_fixture_really_has_the_expected_properties() -> None:
+    """Guards the fixture itself, so the tests below test what they claim."""
+    by_id = _unreported_fixture()
+    assert set(by_id) == {*UNREPORTED_IDS, *NEGATIVE_CONTROL_IDS}
+    assert all(r["completed"] is True for r in by_id.values())
+
+    for game_id in UNREPORTED_IDS:
+        r = by_id[game_id]
+        assert (r["homePoints"], r["awayPoints"]) == (0, 0)
+        assert not r["homeLineScores"] and not r["awayLineScores"]
+        assert "fbs" not in (r["homeClassification"], r["awayClassification"])
+
+    florida_memorial = by_id[REAL_TIE_WITH_LINE_SCORES_ID]
+    assert (florida_memorial["homePoints"], florida_memorial["awayPoints"]) == (28, 28)
+    assert florida_memorial["homeLineScores"] and florida_memorial["awayLineScores"]
+
+    rowan = by_id[REAL_TIE_WITHOUT_LINE_SCORES_ID]
+    assert (rowan["homeTeam"], rowan["homePoints"], rowan["awayPoints"]) == ("Rowan", 17, 17)
+    assert not rowan["homeLineScores"] and not rowan["awayLineScores"]
+
+    shutout = by_id[SHUTOUT_WITHOUT_LINE_SCORES_ID]
+    assert 0 in (shutout["homePoints"], shutout["awayPoints"])
+    assert (shutout["homePoints"], shutout["awayPoints"]) != (0, 0)
+    assert not shutout["homeLineScores"] and not shutout["awayLineScores"]
+
+    scored = by_id[SCORED_WITHOUT_LINE_SCORES_ID]
+    assert scored["homePoints"] > 0 and scored["awayPoints"] > 0
+    assert scored["homePoints"] != scored["awayPoints"]
+    assert not scored["homeLineScores"] and not scored["awayLineScores"]
+
+
+@pytest.mark.parametrize("game_id", UNREPORTED_IDS)
+def test_is_unreported_result_flags_completed_0_0_without_line_scores(game_id: int) -> None:
+    assert normalize.is_unreported_result(_unreported_fixture()[game_id]) is True
+
+
+@pytest.mark.parametrize("game_id", NEGATIVE_CONTROL_IDS)
+def test_is_unreported_result_leaves_real_results_alone(game_id: int) -> None:
+    assert normalize.is_unreported_result(_unreported_fixture()[game_id]) is False
+
+
+def test_is_unreported_result_needs_completed_and_missing_line_scores() -> None:
+    """Each clause is necessary: a 0-0 that isn't completed is just an
+    unplayed game, and a 0-0 carrying line scores is a reported result."""
+    raw = _unreported_fixture()[401655664]
+    not_completed = {**raw, "completed": False}
+    null_line_scores = {**raw, "homeLineScores": None, "awayLineScores": None}
+    missing_line_scores = {
+        k: v for k, v in raw.items() if k not in ("homeLineScores", "awayLineScores")
+    }
+    with_line_scores = {**raw, "homeLineScores": [0, 0, 0, 0], "awayLineScores": [0, 0, 0, 0]}
+
+    assert normalize.is_unreported_result(not_completed) is False
+    assert normalize.is_unreported_result(null_line_scores) is True
+    assert normalize.is_unreported_result(missing_line_scores) is True
+    assert normalize.is_unreported_result(with_line_scores) is False
+
+
+@pytest.mark.parametrize("game_id", UNREPORTED_IDS)
+def test_normalize_game_writes_no_score_for_an_unreported_result(game_id: int) -> None:
+    raw = _unreported_fixture()[game_id]
+
+    row = normalize_game(raw, season=raw["season"], season_type="regular")
+
+    assert row.home_points is None
+    assert row.away_points is None
+    assert row.completed is True
+    # Provenance: the original CFBD record, 0-0 included, is still stored.
+    stored = json.loads(row.raw_json)
+    assert (stored["homePoints"], stored["awayPoints"]) == (0, 0)
+
+
+@pytest.mark.parametrize(
+    ("game_id", "home_points", "away_points"),
+    [
+        (REAL_TIE_WITH_LINE_SCORES_ID, 28, 28),
+        (REAL_TIE_WITHOUT_LINE_SCORES_ID, 17, 17),
+        (SHUTOUT_WITHOUT_LINE_SCORES_ID, 0, 49),
+        (SCORED_WITHOUT_LINE_SCORES_ID, 11, 28),
+    ],
+)
+def test_normalize_game_keeps_the_score_of_a_real_result(
+    game_id: int, home_points: int, away_points: int
+) -> None:
+    raw = _unreported_fixture()[game_id]
+
+    row = normalize_game(raw, season=raw["season"], season_type="regular")
+
+    assert (row.home_points, row.away_points) == (home_points, away_points)
+    assert row.completed is True
+
+
+def _ingest_batch(
+    db_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    season: int,
+    records: list[dict[str, Any]],
+) -> tuple[sqlite3.Connection, IngestResult]:
+    def _fake_get_games(
+        year: int, season_type: str, *, force: bool = False
+    ) -> tuple[list[dict[str, Any]], bool]:
+        assert (year, season_type) == (season, "regular")
+        return records, False
+
+    monkeypatch.setattr("cfb_strength.ingest.ingest_season.get_games", _fake_get_games)
+    conn = get_conn(db_path)
+    return conn, ingest_one(conn, season, "regular")
+
+
+def _points(conn: sqlite3.Connection, game_id: int) -> tuple[object, object, object]:
+    row = conn.execute(
+        "SELECT home_points, away_points, completed FROM games WHERE id = ?", (game_id,)
+    ).fetchone()
+    assert row is not None, f"game {game_id} was not written"
+    return (row["home_points"], row["away_points"], row["completed"])
+
+
+def test_ingest_writes_unreported_results_with_null_points_and_still_mints_teams(
+    empty_schema_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conn, result = _ingest_batch(
+        empty_schema_db, monkeypatch, 2024, _unreported_fixture_season(2024)
+    )
+    try:
+        assert result.unreported_results == 2
+        assert result.game_count == 5
+        assert result.duplicates_dropped == 0
+
+        assert _points(conn, 401655664) == (None, None, 1)  # Drake - Quincy
+        assert _points(conn, 401637161) == (None, None, 1)  # Portland State - South Dakota
+        assert _points(conn, REAL_TIE_WITH_LINE_SCORES_ID) == (28, 28, 1)
+        assert _points(conn, SHUTOUT_WITHOUT_LINE_SCORES_ID) == (0, 49, 1)
+        assert _points(conn, SCORED_WITHOUT_LINE_SCORES_ID) == (11, 28, 1)
+
+        # The row is kept, raw_json still holds CFBD's 0-0 ...
+        raw_json = conn.execute(
+            "SELECT raw_json FROM games WHERE id = 401655664"
+        ).fetchone()["raw_json"]
+        assert (json.loads(raw_json)["homePoints"], json.loads(raw_json)["awayPoints"]) == (0, 0)
+
+        # ... and both sides still get `teams` / `team_season` rows.
+        for school in ("Drake", "Quincy", "Portland State", "South Dakota"):
+            team = conn.execute("SELECT id FROM teams WHERE school = ?", (school,)).fetchone()
+            assert team is not None, school
+            season_row = conn.execute(
+                "SELECT 1 FROM team_season WHERE team_id = ? AND year = 2024", (team["id"],)
+            ).fetchone()
+            assert season_row is not None, school
+    finally:
+        conn.close()
+
+
+def test_ingest_keeps_rowan_case_western_as_a_real_tie(
+    empty_schema_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Equal score and no line scores, but not 0-0: a real tie the NCAA
+    counts, so it must not be treated as unreported."""
+    conn, result = _ingest_batch(
+        empty_schema_db, monkeypatch, 2025, _unreported_fixture_season(2025)
+    )
+    try:
+        assert result.unreported_results == 0
+        assert _points(conn, REAL_TIE_WITHOUT_LINE_SCORES_ID) == (17, 17, 1)
+    finally:
+        conn.close()
+
+
+def test_unreported_results_are_counted_after_duplicates_are_dropped(
+    empty_schema_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second copy of an unreported game under another id is dropped by
+    dedupe first, so it is written once and counted once."""
+    records = _unreported_fixture_season(2024)
+    drake = next(r for r in records if r["id"] == 401655664)
+    copy_of_drake = {**copy.deepcopy(drake), "id": 999_000_002}
+
+    conn, result = _ingest_batch(empty_schema_db, monkeypatch, 2024, [*records, copy_of_drake])
+    try:
+        assert result.duplicates_dropped == 1
+        assert result.unreported_results == 2
+        assert _game_ids(conn, "Drake", "Quincy") == [401655664]
+    finally:
+        conn.close()
+
+
+def test_reingest_nulls_a_previously_stored_0_0_row(
+    empty_schema_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A db built before #128 holds these games as 0-0 ties. Re-ingesting
+    must overwrite the scores with NULL, not keep the old values."""
+    records = _unreported_fixture_season(2024)
+    drake = next(r for r in records if r["id"] == 401655664)
+
+    conn = get_conn(empty_schema_db)
+    team_rows = {tr.id: tr for tr in team_rows_from_game(drake)}
+    _write_teams(conn, team_rows, 2024)
+    old_row = dataclasses.replace(
+        normalize_game(drake, season=2024, season_type="regular"), home_points=0, away_points=0
+    )
+    _write_games(conn, [old_row])
+    conn.commit()
+    assert _points(conn, 401655664) == (0, 0, 1)
+    conn.close()
+
+    conn, _ = _ingest_batch(empty_schema_db, monkeypatch, 2024, records)
+    try:
+        assert _points(conn, 401655664) == (None, None, 1)
+        assert conn.execute(
+            "SELECT COUNT(*) AS c FROM games WHERE id = 401655664"
+        ).fetchone()["c"] == 1
     finally:
         conn.close()

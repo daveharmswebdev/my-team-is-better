@@ -51,6 +51,51 @@ from typing import Any
 from cfb_strength.contracts import GameRow, TeamRow
 
 
+def is_unreported_result(raw: dict[str, Any]) -> bool:
+    """True when CFBD marks a game completed but never reported its score (issue #128).
+
+    Such a record is `completed`, `0-0`, and has empty or missing
+    `homeLineScores` and `awayLineScores`. It is not a scoreless tie. NCAA
+    football has had no ties since overtime arrived in 1996, and every
+    reader downstream would otherwise rate and list it as one.
+
+    The rule, and the cached-data evidence for each clause. Checked against
+    every record in `data/raw/*_{regular,postseason}.json` for 1998-2025,
+    after `dedupe_game_records`:
+
+      * `0-0`. There are 31 completed `0-0` records, all regular season:
+        6 in 2022, 8 in 2023, 12 in 2024 and 5 in 2025. Every one is an
+        FCS/II/III (or unclassified) game, and none involves an FBS team.
+      * No line scores. All 31 have empty line scores on both sides. No
+        completed `0-0` record has line scores, so a `0-0` that did carry
+        them would be a reported result and is left alone.
+      * Line scores alone are NOT the signal. About 2,500 completed games
+        with real scores have no line scores. 168 of those are real shutouts
+        (Lyon 0 - Texas Lutheran 49, `401674665`), and they keep their
+        scores.
+      * `0-0` specifically, not any equal score. Only two completed records
+        have an equal nonzero score, and both are real ties that stay ties.
+        `401675587`, Florida Memorial 28 - Clark Atlanta 28 (2024-09-14),
+        was suspended at halftime for weather and recorded 28-28, and it has
+        line scores. `401777266`, Rowan 17 - Case Western Reserve 17
+        (2025-09-06), ended by mutual agreement after lightning delays and
+        the NCAA counts it as a tie. It has NO line scores, so an equal
+        score with no line scores is not enough on its own.
+      * `completed`. A `0-0` game that isn't completed is simply unplayed,
+        which `completed` already says.
+
+    No classification or sport exception applies. The clauses above are
+    the whole rule.
+    """
+    return (
+        bool(raw.get("completed"))
+        and raw.get("homePoints") == 0
+        and raw.get("awayPoints") == 0
+        and not raw.get("homeLineScores")
+        and not raw.get("awayLineScores")
+    )
+
+
 def normalize_game(raw: dict[str, Any], *, season: int, season_type: str) -> GameRow:
     """Convert one raw CFBD `/games` record into a `GameRow`.
 
@@ -58,7 +103,14 @@ def normalize_game(raw: dict[str, Any], *, season: int, season_type: str) -> Gam
     the batch was fetched for) and used as a fallback if the raw record is
     somehow missing them, but the raw record's own values are preferred when
     present.
+
+    An unreported result (see `is_unreported_result`) gets `None` for both
+    scores. `completed` stays exactly as CFBD reports it, and `raw_json`
+    still holds the original `0-0` record. Every reader skips a completed
+    game with null scores, so ratings, W-L-T records and evidence receipts
+    all drop it together.
     """
+    unreported = is_unreported_result(raw)
     return GameRow(
         id=raw["id"],
         season=raw.get("season", season),
@@ -71,8 +123,8 @@ def normalize_game(raw: dict[str, Any], *, season: int, season_type: str) -> Gam
         away_team_id=raw["awayId"],
         home_team=raw["homeTeam"],
         away_team=raw["awayTeam"],
-        home_points=raw.get("homePoints"),
-        away_points=raw.get("awayPoints"),
+        home_points=None if unreported else raw.get("homePoints"),
+        away_points=None if unreported else raw.get("awayPoints"),
         home_conference=raw.get("homeConference"),
         away_conference=raw.get("awayConference"),
         home_classification=raw.get("homeClassification"),

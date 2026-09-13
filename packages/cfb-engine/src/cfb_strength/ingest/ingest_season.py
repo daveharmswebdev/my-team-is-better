@@ -51,6 +51,7 @@ from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest.client import CFBDClientError, get_games, get_teams
 from cfb_strength.ingest.normalize import (
     dedupe_game_records,
+    is_unreported_result,
     normalize_game,
     team_rows_from_cfbd_teams,
     team_rows_from_game,
@@ -84,6 +85,10 @@ class IngestResult:
     # Raw records collapsed into another record for the same real game
     # (issue #125). `game_count` is the number of games actually written.
     duplicates_dropped: int = 0
+    # Games written with NULL scores because CFBD marks them completed 0-0
+    # with no line scores (issue #128), counted after dedupe. They are still
+    # included in `game_count`.
+    unreported_results: int = 0
 
 
 @dataclass(frozen=True)
@@ -312,6 +317,13 @@ def ingest_one(
     # (Edward Waters `1000899`, #91). See `dedupe_game_records`.
     games = dedupe_game_records(games_raw)
 
+    # Issue #128: a completed 0-0 with no line scores is an unreported result,
+    # and `normalize_game` writes it with NULL scores. This is counted after
+    # dedupe on purpose. The dedupe key includes both raw scores, so it has
+    # to see CFBD's original 0-0 values, and a duplicated unreported game
+    # counts once.
+    unreported_results = sum(1 for g in games if is_unreported_result(g))
+
     game_rows = [normalize_game(g, season=year, season_type=season_type) for g in games]
 
     team_rows: dict[int, TeamRow] = {}
@@ -337,6 +349,7 @@ def ingest_one(
         status=status,
         fetched_live=fetched_live,
         duplicates_dropped=len(games_raw) - len(games),
+        unreported_results=unreported_results,
     )
 
 
@@ -416,10 +429,15 @@ def main(argv: list[str] | None = None) -> int:
                     if result.duplicates_dropped
                     else ""
                 )
+                unreported = (
+                    f"  unreported_results={result.unreported_results}"
+                    if result.unreported_results
+                    else ""
+                )
                 print(
                     f"{result.year} {result.season_type:<10} "
                     f"games={result.game_count:<5} fbs_games={result.fbs_game_count:<4} "
-                    f"status={result.status}{flag}{dupes}"
+                    f"status={result.status}{flag}{dupes}{unreported}"
                 )
 
         # Once per run, not once per batch -- the /teams payload is

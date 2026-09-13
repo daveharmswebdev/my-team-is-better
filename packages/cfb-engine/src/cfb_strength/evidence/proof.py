@@ -301,9 +301,8 @@ def _opponent_result(
     # every sport -- the same definition the ratings layer uses to count
     # `ratings.ties`, so the listed games and the record always agree. CFB's
     # completed 0-0 rows for small-school games CFBD never reported are bad
-    # data, not ties, but they are a known ingest problem tracked in #128 and
-    # get fixed there, for every layer at once -- not with a sport exception
-    # here.
+    # data, not ties; ingest stores them with NULL scores (#128), so they are
+    # skipped just above -- no sport exception here.
     result: Literal["W", "L", "T"] = (
         "W" if team_score > opp_score else "L" if team_score < opp_score else "T"
     )

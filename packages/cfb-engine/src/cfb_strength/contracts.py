@@ -237,17 +237,17 @@ class TeamRating:
     place and 6-9-1 in another. It is required (no default) on purpose: a
     method that forgets to tally ties fails `mypy --strict` rather than
     silently reporting zero. `wins + losses + ties` equals the team's
-    completed games in the season.
+    completed games with both scores in the season.
 
     This is the *reported record* only. It does not change how any method
     scores a tie -- Keener's credit math and Elo's `result == 0.5` already
     see every equal-score game.
 
     The definition is deliberately not sport-specific. CFB's completed
-    0-0 rows for unreported small-school games are bad data, not ties, but
-    Elo and Keener's credit math already treat them as ties today, so the
-    fix for those belongs at ingest (where they can be excluded for every
-    layer at once), not as a per-sport exception here -- tracked as #128.
+    0-0 rows for unreported small-school games are bad data, not ties; ingest
+    writes those with NULL scores (issue #128,
+    `ingest.normalize.is_unreported_result`), so no layer ever sees them as
+    equal-score games and no per-sport exception is needed here.
     """
 
     team_id: int
