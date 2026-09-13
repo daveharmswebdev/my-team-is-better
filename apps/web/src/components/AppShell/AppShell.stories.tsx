@@ -14,7 +14,9 @@ const meta = {
             <Route
               path="/"
               element={
-                <p style={{ padding: '2rem' }}>Page content goes here.</p>
+                <p style={{ padding: '2rem' }}>
+                  Page content goes here. <button type="button" />
+                </p>
               }
             />
           </Route>
