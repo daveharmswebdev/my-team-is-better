@@ -34,6 +34,12 @@ dev = [
     # `.importlinter`, but that is a different environment -- `lint-imports`
     # has to be runnable from `apps/api` to see this app's import graph.
     "import-linter>=2.0",
+    # tests/test_openapi_error_responses.py (issue #111) validates real
+    # error responses against the schemas /openapi.json publishes. Declared
+    # here rather than borrowed as a transitive dependency (see #120).
+    # jsonschema ships no `py.typed`, so its stubs are needed for mypy --strict.
+    "jsonschema>=4.26.0",
+    "types-jsonschema>=4.26.0.20260518",
 ]
 
 [tool.mypy]

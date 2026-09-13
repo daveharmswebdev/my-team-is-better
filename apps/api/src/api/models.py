@@ -553,3 +553,30 @@ class UnknownTeamErrorBody(BaseModel):
 class SameTeamComparisonErrorBody(BaseModel):
     error: Literal["same_team_comparison"] = "same_team_comparison"
     team_name: str
+
+
+# ---------------------------------------------------------------------------
+# `{"detail": <Body>}` envelopes (issue #111) -- the error bodies as they
+# actually go over the wire. `api.errors`' handlers send
+# `{"detail": body.model_dump()}`, so the bare `*ErrorBody` models above are
+# NOT a response's schema. These are what `/openapi.json` declares, via
+# `api.errors.ENGINE_ERROR_RESPONSES`. tests/test_openapi_error_responses.py
+# validates real responses against the published schema, so declaring a bare
+# body in their place fails CI.
+# ---------------------------------------------------------------------------
+
+
+class UnknownYearErrorResponse(BaseModel):
+    detail: UnknownYearErrorBody
+
+
+class AmbiguousTeamErrorResponse(BaseModel):
+    detail: AmbiguousTeamErrorBody
+
+
+class UnknownTeamErrorResponse(BaseModel):
+    detail: UnknownTeamErrorBody
+
+
+class SameTeamComparisonErrorResponse(BaseModel):
+    detail: SameTeamComparisonErrorBody
