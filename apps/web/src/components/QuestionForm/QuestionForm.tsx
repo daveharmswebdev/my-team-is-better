@@ -48,7 +48,8 @@ export interface QuestionFormProps {
    * so typing is never fought by a parent re-render. A parent applying a
    * correction (e.g. `HomePage`'s year/candidate pills) therefore remounts
    * this form with a changed `key` rather than pushing new props into a
-   * mounted one. Omitting them all preserves the pre-#38 defaults.
+   * mounted one. Omitting them all preserves the defaults: College, the
+   * champion question, and the newest season with data (issue #136).
    */
   initialQuestionType?: QuestionType
   initialSport?: Sport
@@ -58,25 +59,33 @@ export interface QuestionFormProps {
   initialTeamB?: string
 }
 
-const CURRENT_YEAR = new Date().getFullYear()
-
 /**
- * How long the Year input sits still before its team-list refetch fires.
- * Year is a free-typed `<input type="number">`, so an undebounced refetch
- * would issue one request per keystroke ("2010" -> four requests, three of
- * them for the meaningless years 2, 20 and 201). Exported so the tests
- * assert against the real value instead of a copied magic number.
+ * How long the Year input sits still before its team-list refetch fires --
+ * and before an invalid year's inline error appears. Year is a free-typed
+ * `<input type="number">`, so an undebounced refetch would issue one request
+ * per keystroke ("2010" -> four requests, three of them for the meaningless
+ * years 2, 20 and 201), and an undebounced error would flash "no data for 2"
+ * on the way to a perfectly good year. Exported so the tests assert against
+ * the real value instead of a copied magic number.
  */
 export const YEAR_DEBOUNCE_MS = 300
 
 /**
- * `/api/years` results, backing the Year input's `<datalist>` and its
- * "seasons with data" hint. Not year-scoped, so this refetches on a league
- * change only. `error` degrades to a plain typed year, never a block.
+ * `/api/years` results, backing the Year input's default, its validation,
+ * its `<datalist>` and its "seasons with data" hint. Not year-scoped, so
+ * this refetches on a league change only. `error` degrades to a plain typed
+ * year, never a block.
  */
 interface YearCatalogState {
   status: 'loading' | 'ready' | 'error'
   years: number[]
+  /**
+   * The league these years describe, or `null` before any response. A
+   * catalog for a league other than the selected one is treated as still
+   * `loading`, so a league switch can never validate against -- or default
+   * to -- the previous league's seasons while the new ones are in flight.
+   */
+  sport: Sport | null
 }
 
 /**
@@ -104,7 +113,11 @@ interface TeamCatalogState {
   sport: Sport
 }
 
-const EMPTY_YEAR_CATALOG: YearCatalogState = { status: 'loading', years: [] }
+const EMPTY_YEAR_CATALOG: YearCatalogState = {
+  status: 'loading',
+  years: [],
+  sport: null,
+}
 // `year`/`sport` are only ever read in the `ready`/`empty` states, so the
 // pre-first-response placeholder does not describe any real scope.
 const EMPTY_TEAM_CATALOG: TeamCatalogState = {
@@ -144,9 +157,71 @@ function parseYear(raw: string): number | undefined {
 }
 
 /**
+ * The Year field's verdict (issue #136). `message` is the inline error copy,
+ * and is `undefined` for an empty field -- the disabled submit button is
+ * explanation enough for a blank, and an error on an untouched-looking
+ * field reads as the form scolding the user for not having started yet.
+ */
+type YearValidity = { valid: true } | { valid: false; message?: string }
+
+/**
+ * Checks `raw` against the selected league's year catalog.
+ *
+ * Only a `ready` catalog with at least one season range-checks, and it
+ * checks *membership*, not min/max: `formatSeasonsHint` already admits
+ * catalogs can have gaps, and a year inside a gap has no data either. Every
+ * other state has nothing to check against, so any number goes: a catalog
+ * still `loading`, one that `error`ed, and a `ready` but empty one -- a
+ * league with nothing ingested yet, which the team hint likewise answers
+ * with "you can still type a name". Neither a failed `/api/years` nor an
+ * empty league may hard-block the form; `apps/api`'s `unknown_year`
+ * response remains the backstop for those cases.
+ */
+function validateYear(
+  raw: string,
+  catalog: YearCatalogState,
+  sport: Sport,
+): YearValidity {
+  if (raw.trim() === '') {
+    return { valid: false }
+  }
+  const parsed = parseYear(raw)
+  if (parsed === undefined) {
+    return { valid: false, message: 'Enter the season as a year, e.g. 2025.' }
+  }
+  if (
+    catalog.status !== 'ready' ||
+    catalog.years.length === 0 ||
+    catalog.years.includes(parsed)
+  ) {
+    return { valid: true }
+  }
+  return {
+    valid: false,
+    message: `No ${LEAGUE_LABEL[sport]} data for ${parsed} -- ${seasonsToPickFrom(catalog.years)}`,
+  }
+}
+
+/**
+ * The "what to pick instead" half of the invalid-year message. Only ever
+ * called with a non-empty catalog -- `validateYear` accepts any year against
+ * an empty one.
+ */
+function seasonsToPickFrom(years: number[]): string {
+  const min = Math.min(...years)
+  const max = Math.max(...years)
+  if (min === max) {
+    return `the only season with data is ${min}.`
+  }
+  return years.length === max - min + 1
+    ? `pick a season from ${min}-${max}.`
+    : `pick a season from ${min}-${max} (with gaps: not every season in that range has data).`
+}
+
+/**
  * Returns `value` only once it has stopped changing for `delayMs`. Deliberately
  * hand-rolled (no new runtime dependency) and initialised *to* `value`, so the
- * first render fetches immediately and only subsequent edits pay the delay.
+ * first render sees it immediately and only subsequent edits pay the delay.
  */
 function useDebouncedValue<T>(value: T, delayMs: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -238,22 +313,32 @@ function formatSeasonsHint(years: number[]): string | undefined {
  * are short, exact numbers with no secondary display text, which is the one
  * case `<datalist>` actually handles well.
  *
- * Suggestions never gate submission, in any of the catalog's states: a
+ * Team suggestions never gate submission, in any of the catalog's states: a
  * failed fetch, a year with nothing ingested, and a still-in-flight request
  * all leave plain typed inputs plus a hint that says which of those it is.
  * `apps/api`'s mapped error responses (see `VerdictError`) remain the
- * correction mechanism for a genuinely mistyped team or an un-ingested
- * year, and `HomePage` feeds an accepted correction back in through this
- * form's `initial*` props so the visible fields agree with what was asked
- * (issue #38).
+ * correction mechanism for a genuinely mistyped team, and `HomePage` feeds
+ * an accepted correction back in through this form's `initial*` props so the
+ * visible fields agree with what was asked (issue #38).
  *
- * Changing the league or the year refetches that catalog but deliberately
- * does **not** clear or revalidate the four team values (issue #100). A team
- * picked for College and left behind by a switch to NFL is *flagged* --
- * named, scoped and one click from being cleared -- and stays submittable.
- * Silently discarding typed input is its own annoyance, and a freely-typed
- * name has to stay submittable for the same reason the degraded catalog
- * states above do.
+ * The Year is the one field that does gate submission (issue #136). It
+ * defaults to the newest season `/api/years` reports for the selected league
+ * -- never the calendar year, which is routinely a season nothing has been
+ * ingested for -- and an untouched default follows a league switch to the
+ * new league's newest season, while a typed or parent-seeded year is never
+ * overwritten. See `validateYear` for what counts as valid in each of the
+ * year catalog's states; a failed catalog fetch never blocks.
+ *
+ * Changing the **league** clears all four team values, "your team" and its
+ * stored preference included (issue #137): a team name means nothing in the
+ * other league, so a College pick carried into an NFL question is only
+ * something to notice and delete by hand. Changing the **year** deliberately
+ * does *not* clear or revalidate them (issue #100): a team is usually still
+ * a team a season over, so a value the new season's catalog lacks is
+ * *flagged* -- named, scoped and one click from being cleared -- and stays
+ * submittable. Silently discarding typed input is its own annoyance, and a
+ * freely-typed name has to stay submittable for the same reason the degraded
+ * catalog states above do.
  */
 export function QuestionForm({
   onSubmit,
@@ -269,25 +354,55 @@ export function QuestionForm({
   const sportName = useId()
   const yearId = useId()
   const yearListId = useId()
+  const yearErrorId = useId()
 
   const [questionType, setQuestionType] = useState<QuestionType>(
     initialQuestionType ?? 'champion',
   )
   const [sport, setSport] = useState<Sport>(initialSport ?? 'cfb')
-  const [year, setYear] = useState(String(initialYear ?? CURRENT_YEAR))
+  /**
+   * The Year the user (or the parent, via `initialYear`) actually chose, or
+   * `null` while the field is still showing the catalog-derived default.
+   * Keeping "untouched" as `null` rather than a copied-in number is what lets
+   * the default follow the catalog without ever overwriting a real choice --
+   * and an emptied field is a choice too (`''`), not a request to refill it.
+   */
+  const [typedYear, setTypedYear] = useState<string | null>(
+    initialYear === undefined ? null : String(initialYear),
+  )
   const [team, setTeam] = useState(initialTeam ?? '')
   const [teamA, setTeamA] = useState(initialTeamA ?? '')
   const [teamB, setTeamB] = useState(initialTeamB ?? '')
   const [userTeam, setUserTeam] = useState(() => getStoredUserTeam())
-  const [yearCatalog, setYearCatalog] =
+  const [loadedYearCatalog, setYearCatalog] =
     useState<YearCatalogState>(EMPTY_YEAR_CATALOG)
   const [teamCatalog, setTeamCatalog] =
     useState<TeamCatalogState>(EMPTY_TEAM_CATALOG)
 
+  // See `YearCatalogState.sport`: another league's years are no years at all.
+  const yearCatalog =
+    loadedYearCatalog.sport === sport ? loadedYearCatalog : EMPTY_YEAR_CATALOG
+  const newestYear =
+    yearCatalog.status === 'ready' && yearCatalog.years.length > 0
+      ? Math.max(...yearCatalog.years)
+      : undefined
+  const defaultYear = newestYear === undefined ? '' : String(newestYear)
+  const year = typedYear ?? defaultYear
+  const yearValidity = validateYear(year, yearCatalog, sport)
+
   // Only the *team* list is year-scoped, and only the year is free-typed, so
-  // the debounce sits here and not on the league toggle: switching to NFL
-  // still refetches immediately.
-  const debouncedYear = useDebouncedValue(year, YEAR_DEBOUNCE_MS)
+  // the debounce sits on the typed value and not on the league toggle or the
+  // catalog-derived default: switching to NFL, or the default arriving,
+  // refetches immediately. Until a fresh edit has settled, the team fetch
+  // keeps the year the field showed before typing began.
+  const debouncedTypedYear = useDebouncedValue(typedYear, YEAR_DEBOUNCE_MS)
+  const teamScopeYear =
+    typedYear === null || debouncedTypedYear === null
+      ? defaultYear
+      : debouncedTypedYear
+  const yearHasSettled = typedYear === null || debouncedTypedYear === typedYear
+  const yearError =
+    !yearValidity.valid && yearHasSettled ? yearValidity.message : undefined
 
   useEffect(() => {
     let cancelled = false
@@ -296,11 +411,11 @@ export function QuestionForm({
       try {
         const yearsOut = await fetchYears(sport)
         if (!cancelled) {
-          setYearCatalog({ status: 'ready', years: yearsOut.years })
+          setYearCatalog({ status: 'ready', years: yearsOut.years, sport })
         }
       } catch {
         if (!cancelled) {
-          setYearCatalog({ status: 'error', years: [] })
+          setYearCatalog({ status: 'error', years: [], sport })
         }
       }
     }
@@ -313,7 +428,7 @@ export function QuestionForm({
 
   useEffect(() => {
     let cancelled = false
-    const scopedYear = parseYear(debouncedYear)
+    const scopedYear = parseYear(teamScopeYear)
 
     async function loadTeams() {
       try {
@@ -350,17 +465,32 @@ export function QuestionForm({
     return () => {
       cancelled = true
     }
-  }, [sport, debouncedYear])
+  }, [sport, teamScopeYear])
 
   function handleUserTeamChange(value: string) {
     setUserTeam(value)
     setStoredUserTeam(value)
   }
 
+  /** Issue #137: a real league change empties every team field. Re-selecting
+   * the current league is not a change and leaves them alone. */
+  function handleSportChange(next: Sport) {
+    if (next === sport) {
+      return
+    }
+    setSport(next)
+    setTeam('')
+    setTeamA('')
+    setTeamB('')
+    handleUserTeamChange('')
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const parsedYear = parseYear(year)
-    if (parsedYear === undefined) {
+    // Backstop for the disabled button: Enter in a field, or a programmatic
+    // submit, must not slip an invalid year past it.
+    if (parsedYear === undefined || !yearValidity.valid) {
       return
     }
     const trimmedUserTeam = userTeam.trim()
@@ -447,7 +577,7 @@ export function QuestionForm({
             name={sportName}
             value="cfb"
             checked={sport === 'cfb'}
-            onChange={() => setSport('cfb')}
+            onChange={() => handleSportChange('cfb')}
           />
           College
         </label>
@@ -457,7 +587,7 @@ export function QuestionForm({
             name={sportName}
             value="nfl"
             checked={sport === 'nfl'}
-            onChange={() => setSport('nfl')}
+            onChange={() => handleSportChange('nfl')}
           />
           NFL
         </label>
@@ -485,14 +615,19 @@ export function QuestionForm({
           type="number"
           list={yearCatalog.years.length > 0 ? yearListId : undefined}
           value={year}
-          onChange={(event) => setYear(event.target.value)}
+          onChange={(event) => setTypedYear(event.target.value)}
           placeholder={
-            yearCatalog.years.length > 0
-              ? String(Math.max(...yearCatalog.years))
-              : undefined
+            newestYear === undefined ? undefined : String(newestYear)
           }
+          aria-invalid={yearError === undefined ? undefined : true}
+          aria-describedby={yearError === undefined ? undefined : yearErrorId}
           required
         />
+        {yearError !== undefined && (
+          <p id={yearErrorId} className={styles.fieldError}>
+            {yearError}
+          </p>
+        )}
         {yearHint !== undefined && (
           <p className={styles.catalogHint}>{yearHint}</p>
         )}
@@ -593,7 +728,9 @@ export function QuestionForm({
       <button
         className={`${styles.btn} ${styles.btnPrimary}`}
         type="submit"
-        disabled={isSubmitting}
+        // The live year, not the debounced one: the button must never be
+        // clickable on a year the error has simply not caught up with yet.
+        disabled={isSubmitting || !yearValidity.valid}
       >
         {isSubmitting ? 'Getting the verdict…' : 'Get the verdict'}
       </button>

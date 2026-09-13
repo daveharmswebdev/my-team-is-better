@@ -105,8 +105,11 @@ export const Default: Story = {
     const canvas = within(canvasElement)
     await expect(canvas.getByRole('radio', { name: /college/i })).toBeChecked()
     await expect(
-      canvas.getByText(/seasons with data: 2003-2007/i),
+      await canvas.findByText(/seasons with data: 2003-2007/i),
     ).toBeVisible()
+    // Issue #136: the Year defaults to the newest season with data, not the
+    // calendar year.
+    await expect(await canvas.findByDisplayValue('2007')).toBeVisible()
     await expect(canvas.getByText(/stays on this device only/i)).toBeVisible()
   },
 }
@@ -186,25 +189,53 @@ export const SeededByACorrection: Story = {
 }
 
 /**
- * Issue #100(b): a team picked for College, then left behind by a switch to
- * NFL. The founder's call is to flag it, not clear it -- the typed value
- * survives, the submit button stays enabled, and the user gets a one-click
- * clear if they want one. Silently discarding typed input is its own
- * annoyance, and a freely-typed name has to stay submittable for the same
- * reason `CatalogError` below leaves a usable plain input.
+ * Issue #100(b): a team picked for one season, then left behind by a change
+ * to a season whose catalog doesn't have it. The founder's call is to flag
+ * it, not clear it -- the typed value survives, the submit button stays
+ * enabled, and the user gets a one-click clear if they want one. Silently
+ * discarding typed input is its own annoyance, and a freely-typed name has
+ * to stay submittable for the same reason `CatalogError` below leaves a
+ * usable plain input.
+ *
+ * Driven by a *year* change: a league change clears every team field
+ * outright (issue #137 -- see `LeagueSwitchClearsTeams`), so it no longer
+ * leaves anything behind to flag.
  */
-export const StaleTeamAfterLeagueSwitch: Story = {
+export const StaleTeamAfterYearChange: Story = {
   args: {
     initialQuestionType: 'team_case',
     initialYear: 2005,
     initialTeam: 'Texas',
   },
+  decorators: [
+    (Story) => {
+      // Year-scoped College teams: the 2003 catalog has no Texas.
+      installCatalogFetch((path, params) =>
+        jsonResponse(
+          path === '/api/years'
+            ? { years: mockYears }
+            : teamsBody(
+                params.get('year') === '2003'
+                  ? mockTeams.filter((detail) => detail.name !== 'Texas')
+                  : mockTeams,
+              ),
+        ),
+      )
+      return <Story />
+    },
+  ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(canvas.getByRole('radio', { name: /nfl/i }))
+    const yearInput = canvas.getByLabelText(/year/i)
+    await userEvent.clear(yearInput)
+    await userEvent.type(yearInput, '2003')
 
     await expect(
-      await canvas.findByText(/isn't in the 2005 NFL team list/i),
+      await canvas.findByText(
+        /isn't in the 2003 college football team list/i,
+        {},
+        { timeout: 3000 },
+      ),
     ).toBeVisible()
     await expect(canvas.getByLabelText(/^team$/i)).toHaveValue('Texas')
     await expect(
@@ -213,6 +244,57 @@ export const StaleTeamAfterLeagueSwitch: Story = {
     await expect(
       canvas.getByRole('button', { name: /get the verdict/i }),
     ).not.toBeDisabled()
+  },
+}
+
+/**
+ * Issue #137: switching the league empties every team field, "your team"
+ * included -- a College pick means nothing to an NFL question -- and leaves
+ * no stale-team flag behind, because there is no longer anything to flag.
+ */
+export const LeagueSwitchClearsTeams: Story = {
+  args: {
+    initialQuestionType: 'compare',
+    initialYear: 2005,
+    initialTeamA: 'Texas',
+    initialTeamB: 'USC',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByLabelText(/team a/i)).toHaveValue('Texas')
+
+    await userEvent.click(canvas.getByRole('radio', { name: /nfl/i }))
+
+    await expect(canvas.getByLabelText(/team a/i)).toHaveValue('')
+    await expect(canvas.getByLabelText(/team b/i)).toHaveValue('')
+    await expect(canvas.getByLabelText(/your team/i)).toHaveValue('')
+    await expect(
+      canvas.queryByText(/isn't in the .* team list/i),
+    ).not.toBeInTheDocument()
+  },
+}
+
+/**
+ * Issue #136: a year the selected league has no data for. The field is
+ * marked invalid (`aria-invalid`, described by the inline error), the error
+ * names the league and the seasons to pick from, and "Get the verdict" stays
+ * disabled until the year is one the league actually has.
+ */
+export const InvalidYear: Story = {
+  args: {
+    initialYear: 2010,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const error = await canvas.findByText(/no college football data for 2010/i)
+    await expect(error).toBeVisible()
+    await expect(error).toHaveTextContent(/2003-2007/)
+    const yearInput = canvas.getByLabelText(/year/i)
+    await expect(yearInput).toHaveAttribute('aria-invalid', 'true')
+    await expect(yearInput).toHaveAttribute('aria-describedby', error.id)
+    await expect(
+      canvas.getByRole('button', { name: /get the verdict/i }),
+    ).toBeDisabled()
   },
 }
 
@@ -243,7 +325,9 @@ export const Submitting: Story = {
 }
 
 /** Catalog fetch still in flight -- the form renders immediately with
- * plain, unvalidated inputs rather than waiting on the suggestions. */
+ * plain inputs rather than waiting on the suggestions. With no catalog there
+ * is no default year yet, so the button waits for one to be typed; any
+ * number will do until the catalog can range-check it (issue #136). */
 export const CatalogLoading: Story = {
   decorators: [
     (Story) => {
@@ -254,7 +338,8 @@ export const CatalogLoading: Story = {
 }
 
 /** Catalog fetch fails -- the comboboxes degrade to plain typed inputs and
- * surface a small inline hint rather than blocking submission. */
+ * surface a small inline hint rather than blocking submission: any typed
+ * year is accepted, since there is no range to check it against. */
 export const CatalogError: Story = {
   decorators: [
     (Story) => {

@@ -28,8 +28,14 @@ import { fetchTeams, fetchYears } from '../../lib/api/client'
 const mockedFetchYears = vi.mocked(fetchYears)
 const mockedFetchTeams = vi.mocked(fetchTeams)
 
-/** The year the form defaults to -- mirrors `QuestionForm`'s own `CURRENT_YEAR`. */
-const CURRENT_YEAR = new Date().getFullYear()
+/**
+ * The year the form defaults to under the `beforeEach` catalog: the newest
+ * season `/api/years` reports (issue #136), never the calendar year.
+ */
+const NEWEST_DEFAULT_YEAR = 2006
+
+/** Newest season in `stubSportScopedTeams`' NFL catalog. */
+const NEWEST_NFL_YEAR = 2022
 
 const CFB_DETAILS: TeamDetail[] = [
   { name: 'Texas', mascot: 'Longhorns', aliases: ['TEX'] },
@@ -45,17 +51,25 @@ function teamsOut(details: TeamDetail[]): TeamsOut {
   return { teams: details.map((detail) => detail.name), team_details: details }
 }
 
+/** Inclusive integer range -- catalogs read like the real `/api/years`. */
+function range(from: number, to: number): number[] {
+  return Array.from({ length: to - from + 1 }, (_, index) => from + index)
+}
+
+/** Serves a different `/api/years` catalog per league. */
+function stubLeagueYears(cfbYears: number[], nflYears: number[]) {
+  mockedFetchYears.mockImplementation((sport?: Sport) =>
+    Promise.resolve({ years: sport === 'nfl' ? nflYears : cfbYears }),
+  )
+}
+
 /** Serves sport-scoped team details, so a league-scoping assertion has
  * something to actually scope against. */
 function stubSportScopedTeams() {
   mockedFetchTeams.mockImplementation((sport?: Sport) =>
     Promise.resolve(teamsOut(sport === 'nfl' ? NFL_DETAILS : CFB_DETAILS)),
   )
-  mockedFetchYears.mockImplementation((sport?: Sport) =>
-    Promise.resolve({
-      years: sport === 'nfl' ? [2021, 2022] : [2004, 2005, 2006],
-    }),
-  )
+  stubLeagueYears([2004, 2005, 2006], [2021, NEWEST_NFL_YEAR])
 }
 
 /**
@@ -71,6 +85,26 @@ function suggestions() {
 async function waitForInitialCatalog() {
   await waitFor(() => expect(mockedFetchTeams).toHaveBeenCalled())
 }
+
+/**
+ * Waits for the untouched Year field to settle on the catalog's newest
+ * season *and* for the team refetch that settling triggers. Tests that count
+ * `fetchTeams` calls wait on this first, so a default landing mid-assertion
+ * can't be mistaken for a request the assertion caused.
+ */
+async function waitForDefaultYear(year = NEWEST_DEFAULT_YEAR) {
+  await waitFor(() => expect(screen.getByLabelText(/year/i)).toHaveValue(year))
+  await waitFor(() =>
+    expect(mockedFetchTeams).toHaveBeenCalledWith('cfb', year),
+  )
+}
+
+function submitButton() {
+  return screen.getByRole('button', { name: /get the verdict/i })
+}
+
+/** Any issue #100 stale-team flag, for any team, season or league. */
+const ANY_STALE_NOTICE = /isn't in the .* team list/i
 
 describe('QuestionForm', () => {
   beforeEach(() => {
@@ -124,6 +158,9 @@ describe('QuestionForm', () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
     render(<QuestionForm onSubmit={onSubmit} />)
+    // Let the catalog default land first -- otherwise it can arrive between
+    // the clear and the typing, and the typed digits append to it (#136).
+    await waitForDefaultYear()
 
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
@@ -141,6 +178,9 @@ describe('QuestionForm', () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
     render(<QuestionForm onSubmit={onSubmit} />)
+    // Let the catalog default land first -- otherwise it can arrive between
+    // the clear and the typing, and the typed digits append to it (#136).
+    await waitForDefaultYear()
 
     await user.selectOptions(
       screen.getByLabelText(/what do you want to know/i),
@@ -164,6 +204,9 @@ describe('QuestionForm', () => {
     const user = userEvent.setup()
     const onSubmit = vi.fn()
     render(<QuestionForm onSubmit={onSubmit} />)
+    // Let the catalog default land first -- otherwise it can arrive between
+    // the clear and the typing, and the typed digits append to it (#136).
+    await waitForDefaultYear()
 
     await user.selectOptions(
       screen.getByLabelText(/what do you want to know/i),
@@ -229,16 +272,382 @@ describe('QuestionForm', () => {
       )
     })
 
-    it('does not block initial render while the catalog fetch is still in flight', () => {
+    it('does not block a typed year while the catalog fetch is still in flight', () => {
       mockedFetchYears.mockReturnValue(new Promise(() => {}))
       mockedFetchTeams.mockReturnValue(new Promise(() => {}))
 
       render(<QuestionForm onSubmit={vi.fn()} />)
 
-      expect(screen.getByLabelText(/year/i)).toBeInTheDocument()
+      // No catalog, so no default to offer yet -- and never a calendar-year
+      // guess in its place (issue #136).
+      const yearInput = screen.getByLabelText(/year/i)
+      expect(yearInput).toHaveValue(null)
+      expect(submitButton()).toBeDisabled()
+
+      fireEvent.change(yearInput, { target: { value: '2005' } })
+
+      // With nothing to range-check against, a numeric year is enough.
+      expect(submitButton()).not.toBeDisabled()
+    })
+  })
+
+  describe('year default and validation (issue #136)', () => {
+    it('defaults the year to the newest season in the College catalog, not the calendar year', async () => {
+      mockedFetchYears.mockReturnValue(new Promise(() => {}))
+      const { unmount } = render(<QuestionForm onSubmit={vi.fn()} />)
+      // Before the catalog lands the field is empty, never a guess.
+      expect(screen.getByLabelText(/year/i)).toHaveValue(null)
+      unmount()
+
+      mockedFetchYears.mockResolvedValue({ years: [2004, 2005, 2006] })
+      render(<QuestionForm onSubmit={vi.fn()} />)
+
+      await waitFor(() =>
+        expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_DEFAULT_YEAR),
+      )
+      expect(submitButton()).not.toBeDisabled()
+    })
+
+    it('defaults the year to the newest season in the NFL catalog', async () => {
+      stubLeagueYears(range(1998, 2025), range(1999, 2019))
+      render(<QuestionForm onSubmit={vi.fn()} initialSport="nfl" />)
+
+      await waitFor(() =>
+        expect(screen.getByLabelText(/year/i)).toHaveValue(2019),
+      )
+      expect(mockedFetchYears).toHaveBeenCalledWith('nfl')
+    })
+
+    it('keeps an explicit initialYear even when the catalog has newer seasons', async () => {
+      render(<QuestionForm onSubmit={vi.fn()} initialYear={2004} />)
+
+      // The catalog has landed (it backs the datalist)...
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText(/year/i).getAttribute('list'),
+        ).toBeTruthy(),
+      )
+      // ...and still did not overwrite the parent's year.
+      expect(screen.getByLabelText(/year/i)).toHaveValue(2004)
+    })
+
+    it("moves an untouched default to the new league's newest season on a league switch", async () => {
+      stubLeagueYears([2004, 2005, 2006], [2021, NEWEST_NFL_YEAR])
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      await waitFor(() =>
+        expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_DEFAULT_YEAR),
+      )
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+      await waitFor(() =>
+        expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_NFL_YEAR),
+      )
+    })
+
+    it('keeps a year the user typed across a league switch', async () => {
+      stubLeagueYears([2004, 2005, 2006], [2005, 2021, NEWEST_NFL_YEAR])
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      await waitForDefaultYear()
+
+      await user.clear(screen.getByLabelText(/year/i))
+      await user.type(screen.getByLabelText(/year/i), '2005')
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+      // The NFL catalog has landed...
       expect(
-        screen.getByRole('button', { name: /get the verdict/i }),
-      ).not.toBeDisabled()
+        await screen.findByText(/seasons with data: 2005-2022/i),
+      ).toBeInTheDocument()
+      // ...and the typed year is untouched.
+      expect(screen.getByLabelText(/year/i)).toHaveValue(2005)
+    })
+
+    it.each([
+      {
+        case: 'a year outside the catalog',
+        catalog: [2004, 2005, 2006],
+        typed: '2010',
+        errorCopy: /no college football data for 2010/i,
+        details: [/2004-2006/],
+        validYear: '2005',
+      },
+      {
+        case: 'a year inside a gap in the catalog',
+        catalog: [2001, 2003],
+        typed: '2002',
+        errorCopy: /no college football data for 2002/i,
+        details: [/2001-2003/, /gaps/i],
+        validYear: '2001',
+      },
+    ])(
+      'rejects $case: disabled submit, inline error, aria-invalid -- until a valid year clears it',
+      async ({ catalog, typed, errorCopy, details, validYear }) => {
+        mockedFetchYears.mockResolvedValue({ years: catalog })
+        render(<QuestionForm onSubmit={vi.fn()} />)
+        const yearInput = screen.getByLabelText(/year/i)
+        await waitFor(() => expect(yearInput).toHaveValue(Math.max(...catalog)))
+
+        fireEvent.change(yearInput, { target: { value: typed } })
+
+        // The button reacts to the live value at once...
+        expect(submitButton()).toBeDisabled()
+        // ...but the message waits for typing to pause, so "2010" never
+        // flashes an error at "2".
+        expect(screen.queryByText(errorCopy)).not.toBeInTheDocument()
+
+        const error = await screen.findByText(
+          errorCopy,
+          {},
+          { timeout: YEAR_DEBOUNCE_MS * 5 },
+        )
+        for (const pattern of [errorCopy, ...details]) {
+          expect(error).toHaveTextContent(pattern)
+        }
+        expect(yearInput).toHaveAttribute('aria-invalid', 'true')
+        expect(error.id).not.toBe('')
+        expect(yearInput.getAttribute('aria-describedby') ?? '').toContain(
+          error.id,
+        )
+        expect(submitButton()).toBeDisabled()
+
+        fireEvent.change(yearInput, { target: { value: validYear } })
+
+        expect(screen.queryByText(errorCopy)).not.toBeInTheDocument()
+        expect(yearInput).not.toHaveAttribute('aria-invalid', 'true')
+        expect(submitButton()).not.toBeDisabled()
+      },
+    )
+
+    it('disables submit for an empty year, without an error message', async () => {
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      const yearInput = screen.getByLabelText(/year/i)
+      await waitForDefaultYear()
+
+      fireEvent.change(yearInput, { target: { value: '' } })
+
+      expect(submitButton()).toBeDisabled()
+      // Past the debounce: an empty field is explained by the disabled
+      // button alone, not by an error.
+      await new Promise((resolveWait) =>
+        setTimeout(resolveWait, YEAR_DEBOUNCE_MS * 2),
+      )
+      expect(screen.queryByText(/no .* data for/i)).not.toBeInTheDocument()
+      expect(yearInput).not.toHaveAttribute('aria-invalid', 'true')
+      expect(submitButton()).toBeDisabled()
+    })
+
+    it('refuses to submit an invalid year even if the form is submitted directly', async () => {
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+      await waitForDefaultYear()
+
+      fireEvent.change(screen.getByLabelText(/year/i), {
+        target: { value: '2010' },
+      })
+      const form = submitButton().closest('form')
+      expect(form).not.toBeNull()
+      fireEvent.submit(form as HTMLFormElement)
+
+      expect(onSubmit).not.toHaveBeenCalled()
+    })
+
+    it('revalidates on a league switch: 1998 is valid for College and not for the NFL', async () => {
+      stubLeagueYears(range(1998, 2025), range(1999, 2025))
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} initialYear={1998} />)
+
+      expect(
+        await screen.findByText(/seasons with data: 1998-2025/i),
+      ).toBeInTheDocument()
+      expect(submitButton()).not.toBeDisabled()
+      expect(screen.queryByText(/no .* data for/i)).not.toBeInTheDocument()
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+      const error = await screen.findByText(
+        /no NFL data for 1998/i,
+        {},
+        { timeout: YEAR_DEBOUNCE_MS * 5 },
+      )
+      expect(error).toHaveTextContent(/1999-2025/)
+      expect(screen.getByLabelText(/year/i)).toHaveValue(1998)
+      expect(screen.getByLabelText(/year/i)).toHaveAttribute(
+        'aria-invalid',
+        'true',
+      )
+      expect(submitButton()).toBeDisabled()
+    })
+
+    it('never lets a failed years fetch block a typed year', async () => {
+      mockedFetchYears.mockRejectedValue(new Error('network down'))
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+
+      expect(
+        await screen.findByText(/couldn't load the list of available years/i),
+      ).toBeInTheDocument()
+
+      // Any finite year goes: there is no range to check it against.
+      await user.type(screen.getByLabelText(/year/i), '1850')
+      expect(submitButton()).not.toBeDisabled()
+      await new Promise((resolveWait) =>
+        setTimeout(resolveWait, YEAR_DEBOUNCE_MS * 2),
+      )
+      expect(screen.queryByText(/no .* data for/i)).not.toBeInTheDocument()
+
+      await user.click(submitButton())
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'champion',
+        year: 1850,
+        userTeam: null,
+        sport: 'cfb',
+      })
+    })
+
+    it('never lets a league with no seasons ingested yet block a typed year', async () => {
+      mockedFetchYears.mockResolvedValue({ years: [] })
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      await waitFor(() => expect(mockedFetchYears).toHaveBeenCalledWith('cfb'))
+      // Let the resolved (empty) catalog land before typing against it.
+      await new Promise((resolveWait) =>
+        setTimeout(resolveWait, YEAR_DEBOUNCE_MS),
+      )
+
+      const yearInput = screen.getByLabelText(/year/i)
+      // An empty catalog has no newest season to default to.
+      expect(yearInput).toHaveValue(null)
+
+      fireEvent.change(yearInput, { target: { value: '2005' } })
+
+      // Like a failed fetch, an empty catalog has nothing to range-check
+      // against, so any finite year goes and `unknown_year` is the backstop.
+      expect(submitButton()).not.toBeDisabled()
+      await new Promise((resolveWait) =>
+        setTimeout(resolveWait, YEAR_DEBOUNCE_MS * 2),
+      )
+      expect(screen.queryByText(/no .* data for/i)).not.toBeInTheDocument()
+      expect(yearInput).not.toHaveAttribute('aria-invalid', 'true')
+      expect(submitButton()).not.toBeDisabled()
+    })
+  })
+
+  describe('a league switch clears every team field (issue #137)', () => {
+    it('clears Team A, Team B and "your team" (and its stored value) on College -> NFL', async () => {
+      stubSportScopedTeams()
+      const user = userEvent.setup()
+      render(<QuestionForm onSubmit={vi.fn()} initialQuestionType="compare" />)
+      await waitForInitialCatalog()
+
+      await user.type(screen.getByLabelText(/team a/i), 'Texas')
+      await user.type(screen.getByLabelText(/team b/i), 'USC')
+      await user.type(screen.getByLabelText(/your team/i), 'Texas')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+        'Texas',
+      )
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+      expect(screen.getByLabelText(/team a/i)).toHaveValue('')
+      expect(screen.getByLabelText(/team b/i)).toHaveValue('')
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBeNull()
+
+      // Once the NFL catalog has landed there is nothing left to flag.
+      await waitFor(() =>
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith(
+          'nfl',
+          NEWEST_NFL_YEAR,
+        ),
+      )
+      await waitFor(() =>
+        expect(screen.getByLabelText(/your team/i)).toHaveAttribute(
+          'placeholder',
+          expect.stringMatching(/chiefs/i),
+        ),
+      )
+      expect(screen.queryByText(ANY_STALE_NOTICE)).not.toBeInTheDocument()
+    })
+
+    it('clears the single team field of a team-case question', async () => {
+      stubSportScopedTeams()
+      const user = userEvent.setup()
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialYear={2005}
+          initialTeam="Texas"
+        />,
+      )
+      await waitForInitialCatalog()
+
+      await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('')
+      await waitFor(() =>
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', 2005),
+      )
+      expect(screen.queryByText(ANY_STALE_NOTICE)).not.toBeInTheDocument()
+    })
+
+    it('clears the team fields on NFL -> College too', async () => {
+      stubSportScopedTeams()
+      window.localStorage.setItem(
+        'myTeamIsBetter.userTeam',
+        'Kansas City Chiefs',
+      )
+      const user = userEvent.setup()
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="compare"
+          initialSport="nfl"
+          initialTeamA="Kansas City Chiefs"
+          initialTeamB="New England Patriots"
+        />,
+      )
+      await waitForInitialCatalog()
+
+      await user.click(screen.getByRole('radio', { name: /college/i }))
+
+      expect(screen.getByLabelText(/team a/i)).toHaveValue('')
+      expect(screen.getByLabelText(/team b/i)).toHaveValue('')
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBeNull()
+      await waitFor(() =>
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith(
+          'cfb',
+          NEWEST_DEFAULT_YEAR,
+        ),
+      )
+      expect(screen.queryByText(ANY_STALE_NOTICE)).not.toBeInTheDocument()
+    })
+
+    it('keeps every team value when the already-selected league is clicked again', async () => {
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'Texas')
+      const user = userEvent.setup()
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="compare"
+          initialTeamA="Texas"
+          initialTeamB="USC"
+        />,
+      )
+      await waitForInitialCatalog()
+
+      await user.click(screen.getByRole('radio', { name: /college/i }))
+
+      expect(screen.getByLabelText(/team a/i)).toHaveValue('Texas')
+      expect(screen.getByLabelText(/team b/i)).toHaveValue('USC')
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+        'Texas',
+      )
+      expect(mockedFetchYears).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -307,9 +716,13 @@ describe('QuestionForm', () => {
 
       await user.click(screen.getByRole('radio', { name: /nfl/i }))
       await waitFor(() =>
-        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', CURRENT_YEAR),
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith(
+          'nfl',
+          NEWEST_NFL_YEAR,
+        ),
       )
-      await user.click(screen.getByLabelText(/your team/i))
+      // The switch cleared the field (issue #137), so ask again.
+      await user.type(screen.getByLabelText(/your team/i), 'Patriots')
 
       await waitFor(() => expect(screen.getByRole('listbox')).toBeVisible())
       expect(
@@ -364,11 +777,14 @@ describe('QuestionForm', () => {
   })
 
   describe('year-scoped team fetching (issue #80)', () => {
-    it('sends the current year with the initial team fetch', async () => {
+    it('scopes the team fetch to the default year once the catalog supplies it', async () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
 
       await waitFor(() =>
-        expect(mockedFetchTeams).toHaveBeenCalledWith('cfb', CURRENT_YEAR),
+        expect(mockedFetchTeams).toHaveBeenCalledWith(
+          'cfb',
+          NEWEST_DEFAULT_YEAR,
+        ),
       )
       // /api/years is not year-scoped -- its request shape is untouched.
       expect(mockedFetchYears).toHaveBeenCalledWith('cfb')
@@ -376,7 +792,7 @@ describe('QuestionForm', () => {
 
     it('refetches the team list when the year changes', async () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
-      await waitForInitialCatalog()
+      await waitForDefaultYear()
       mockedFetchTeams.mockClear()
 
       fireEvent.change(screen.getByLabelText(/year/i), {
@@ -390,7 +806,7 @@ describe('QuestionForm', () => {
 
     it('debounces the year-driven refetch: typing "2010" issues one request, not four', async () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
-      await waitForInitialCatalog()
+      await waitForDefaultYear()
       mockedFetchTeams.mockClear()
 
       // Synchronous `fireEvent`s, deliberately: this asserts on *how many*
@@ -411,7 +827,7 @@ describe('QuestionForm', () => {
 
     it('sends no year at all while the year input is empty', async () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
-      await waitForInitialCatalog()
+      await waitForDefaultYear()
       mockedFetchTeams.mockClear()
 
       fireEvent.change(screen.getByLabelText(/year/i), {
@@ -433,7 +849,10 @@ describe('QuestionForm', () => {
       await user.click(screen.getByRole('radio', { name: /nfl/i }))
 
       await waitFor(() =>
-        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', CURRENT_YEAR),
+        expect(mockedFetchTeams).toHaveBeenLastCalledWith(
+          'nfl',
+          NEWEST_NFL_YEAR,
+        ),
       )
       expect(mockedFetchYears).toHaveBeenLastCalledWith('nfl')
     })
@@ -481,7 +900,7 @@ describe('QuestionForm', () => {
       await waitForInitialCatalog()
 
       const emptyNote = await screen.findByText(
-        new RegExp(`no teams .*${CURRENT_YEAR}`, 'i'),
+        new RegExp(`no teams .*${NEWEST_DEFAULT_YEAR}`, 'i'),
       )
       expect(emptyNote).toBeInTheDocument()
       expect(
@@ -494,7 +913,7 @@ describe('QuestionForm', () => {
       const user = userEvent.setup()
       const onSubmit = vi.fn()
       render(<QuestionForm onSubmit={onSubmit} />)
-      await waitForInitialCatalog()
+      await waitForDefaultYear()
 
       await user.clear(screen.getByLabelText(/year/i))
       await user.type(screen.getByLabelText(/year/i), '2005')
@@ -542,59 +961,11 @@ describe('QuestionForm', () => {
       )
     }
 
-    it('flags -- but keeps, and still submits -- a team that the newly selected league does not have', async () => {
-      stubSportScopedTeams()
-      const user = userEvent.setup()
-      const onSubmit = vi.fn()
-      render(
-        <QuestionForm
-          onSubmit={onSubmit}
-          initialQuestionType="team_case"
-          initialYear={2005}
-        />,
-      )
-      await waitForInitialCatalog()
-
-      const teamField = screen.getByLabelText(/^team$/i)
-      await waitFor(() => expect(teamField).toHaveAttribute('role', 'combobox'))
-      await user.type(teamField, 'Longhorns')
-      await waitFor(() => expect(screen.getByRole('listbox')).toBeVisible())
-      await user.click(suggestions().getByRole('option', { name: /Texas/ }))
-      expect(screen.getByLabelText(/^team$/i)).toHaveValue('Texas')
-      // A team the current scope *does* have is never flagged.
-      expect(
-        screen.queryByText(staleNotice('Texas', '2005 college football')),
-      ).not.toBeInTheDocument()
-
-      await user.click(screen.getByRole('radio', { name: /nfl/i }))
-      await waitFor(() =>
-        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', 2005),
-      )
-
-      // (a) the warning names the team, the season and the league...
-      expect(
-        await screen.findByText(staleNotice('Texas', '2005 NFL')),
-      ).toBeInTheDocument()
-      // ...and offers a one-click clear.
-      expect(clearButtons()).toHaveLength(1)
-
-      // (b) the founder's call: flag it, don't clear it. The typed value
-      // survives and still submits -- the submit button is never disabled.
-      expect(screen.getByLabelText(/^team$/i)).toHaveValue('Texas')
-      const submit = screen.getByRole('button', { name: /get the verdict/i })
-      expect(submit).not.toBeDisabled()
-      await user.click(submit)
-      expect(onSubmit).toHaveBeenCalledWith({
-        questionType: 'team_case',
-        year: 2005,
-        team: 'Texas',
-        userTeam: null,
-        sport: 'nfl',
-      })
-    })
-
     it('flags -- but keeps, and still submits -- a team that the newly entered season does not have', async () => {
       stubYearScopedTeams()
+      // Both seasons have data, so the Year field itself is valid throughout
+      // (issue #136) and only the team flag is under test.
+      mockedFetchYears.mockResolvedValue({ years: [2005, 2018] })
       const user = userEvent.setup()
       const onSubmit = vi.fn()
       render(
@@ -705,8 +1076,12 @@ describe('QuestionForm', () => {
      * derived from the catalog the form actually holds, never from the
      * pending selection. This test pins that window, which the renamed
      * first-mount test above does not reach.
+     *
+     * Driven by a *year* change: a league change clears every team value
+     * (issue #137), so it no longer leaves a flag behind to re-scope.
      */
     it('keeps naming the loaded scope, not the requested one, while a refetch is in flight', async () => {
+      mockedFetchYears.mockResolvedValue({ years: [2018, 2019] })
       let releaseRefetch: (value: TeamsOut) => void = () => {}
       mockedFetchTeams
         .mockResolvedValueOnce(
@@ -714,11 +1089,10 @@ describe('QuestionForm', () => {
         )
         .mockImplementationOnce(
           () =>
-            new Promise<TeamsOut>((resolve) => {
-              releaseRefetch = resolve
+            new Promise<TeamsOut>((resolvePromise) => {
+              releaseRefetch = resolvePromise
             }),
         )
-      const user = userEvent.setup()
       render(
         <QuestionForm
           onSubmit={vi.fn()}
@@ -732,29 +1106,34 @@ describe('QuestionForm', () => {
         await screen.findByText(staleNotice('Texas', '2018 college football')),
       ).toBeInTheDocument()
 
-      // The NFL catalog request is now in flight and will not resolve until
+      // The 2019 catalog request is now in flight and will not resolve until
       // it is released below.
-      await user.click(screen.getByRole('radio', { name: /nfl/i }))
-      await waitFor(() =>
-        expect(mockedFetchTeams).toHaveBeenLastCalledWith('nfl', 2018),
+      fireEvent.change(screen.getByLabelText(/year/i), {
+        target: { value: '2019' },
+      })
+      await waitFor(
+        () => expect(mockedFetchTeams).toHaveBeenLastCalledWith('cfb', 2019),
+        { timeout: YEAR_DEBOUNCE_MS * 5 },
       )
 
       // Mid-flight: still the scope that actually rejected the value, and
-      // never a claim about the league nothing has been checked against yet.
+      // never a claim about the season nothing has been checked against yet.
       expect(
         screen.getByText(staleNotice('Texas', '2018 college football')),
       ).toBeInTheDocument()
       expect(
-        screen.queryByText(staleNotice('Texas', '2018 NFL')),
+        screen.queryByText(staleNotice('Texas', '2019 college football')),
       ).not.toBeInTheDocument()
       expect(clearButtons()).toHaveLength(1)
 
-      releaseRefetch(teamsOut(NFL_DETAILS))
+      releaseRefetch(
+        teamsOut([{ name: 'Alabama', mascot: 'Crimson Tide', aliases: [] }]),
+      )
 
-      // Once it lands, the same notice re-scopes to the league that now
+      // Once it lands, the same notice re-scopes to the season that now
       // rejects the value.
       expect(
-        await screen.findByText(staleNotice('Texas', '2018 NFL')),
+        await screen.findByText(staleNotice('Texas', '2019 college football')),
       ).toBeInTheDocument()
     })
 
@@ -954,13 +1333,15 @@ describe('QuestionForm', () => {
       )
     })
 
-    it('falls back to today defaults when the initial-value props are omitted', () => {
+    it('falls back to College, champion and the newest catalog season when the initial-value props are omitted', async () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
 
-      expect(screen.getByLabelText(/year/i)).toHaveValue(CURRENT_YEAR)
       expect(screen.getByRole('radio', { name: /college/i })).toBeChecked()
       expect(screen.getByLabelText(/what do you want to know/i)).toHaveValue(
         'champion',
+      )
+      await waitFor(() =>
+        expect(screen.getByLabelText(/year/i)).toHaveValue(NEWEST_DEFAULT_YEAR),
       )
     })
 
