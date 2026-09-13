@@ -7,29 +7,51 @@ ingestion, rating, or evidence logic of its own. Imports are deferred into
 each branch so that, e.g., `cfb ingest --years 2005` doesn't pay the cost of
 importing the MCP SDK.
 
-`ingest --sport {cfb,nfl}` (added for issue #51) dispatches to one of two
-independent orchestration modules -- see `.importlinter`'s
+`ingest --sport` (added for issue #51) dispatches through
+`INGEST_ENTRY_POINTS` to one of the independent per-league orchestration
+modules -- see `.importlinter`'s
 `no-nflverse-import-of-cfbd / no-cfbd-import-of-nflverse` contract, which forbids those two modules
 importing each other. `--sport` is stripped out of `rest` here (both target
 mains have their own, unrelated argparse parsers and know nothing about
 `--sport`) before the remaining args are passed through unchanged, so
 `cfb ingest --years 2005` (no `--sport`) behaves identically to before this
 change.
+
+The league and method lists in `USAGE` and the dispatch table's keys come
+from `cfb_strength.contracts`' `Sport`/`Method` aliases (issue #112).
+tests/test_contract_vocabularies.py fails if the table and the alias
+disagree.
 """
 
 from __future__ import annotations
 
+import importlib
 import sys
+from collections.abc import Callable
+from typing import get_args
 
-USAGE = """\
+from cfb_strength.contracts import Method, Sport
+
+_SPORT_CHOICES = ",".join(get_args(Sport))
+_METHOD_CHOICES = ",".join(get_args(Method))
+
+# League -> (module, entry point) for `ingest --sport`. A table of names rather
+# than imported functions, so each league's ingest stack is only imported when
+# it is actually selected (see the module docstring).
+INGEST_ENTRY_POINTS: dict[str, tuple[str, str]] = {
+    "cfb": ("cfb_strength.ingest.ingest_season", "main"),
+    "nfl": ("cfb_strength.ingest.nflverse.ingest_season", "main"),
+}
+
+USAGE = f"""\
 usage: cfb <command> [args]
 
 commands:
-  ingest --years YEARS [--sport {cfb,nfl}] [--force] [--season-types TYPES] [--db-path PATH]
+  ingest --years YEARS [--sport {{{_SPORT_CHOICES}}}] [--force] [--season-types TYPES] [--db-path PATH]
       Fetch and store game/team data for one or more seasons. --sport
       defaults to "cfb" (CFBD); "nfl" ingests nflverse data instead.
 
-  rate --years YEARS [--method {keener,elo,elo_career}] [--sport {cfb,nfl}]
+  rate --years YEARS [--method {{{_METHOD_CHOICES}}}] [--sport {{{_SPORT_CHOICES}}}]
       Compute and store team ratings for one or more seasons.
       --method defaults to "keener" (eigenvector strength-of-schedule; the
       golden-dataset-validated default). "elo" rates each season in
@@ -90,18 +112,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {e}", file=sys.stderr)
             return 2
 
-        if sport == "cfb":
-            from cfb_strength.ingest.ingest_season import main as ingest_main
+        entry_point = INGEST_ENTRY_POINTS.get(sport)
+        if entry_point is None:
+            expected = " or ".join(repr(s) for s in INGEST_ENTRY_POINTS)
+            print(f"error: unknown --sport {sport!r}, expected {expected}\n", file=sys.stderr)
+            return 2
 
-            return ingest_main(ingest_args)
-
-        if sport == "nfl":
-            from cfb_strength.ingest.nflverse.ingest_season import main as nfl_ingest_main
-
-            return nfl_ingest_main(ingest_args)
-
-        print(f"error: unknown --sport {sport!r}, expected 'cfb' or 'nfl'\n", file=sys.stderr)
-        return 2
+        module_name, attr = entry_point
+        ingest_main: Callable[[list[str]], int] = getattr(
+            importlib.import_module(module_name), attr
+        )
+        return ingest_main(ingest_args)
 
     if command == "rate":
         from cfb_strength.ratings.compute_ratings import main as rate_main

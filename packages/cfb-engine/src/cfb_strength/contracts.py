@@ -15,7 +15,46 @@ the `ratings` table via SQL rather than importing `cfb_strength.ratings`.
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, get_args, runtime_checkable
+
+
+# ---------------------------------------------------------------------------
+# closed vocabularies (issue #112)
+# ---------------------------------------------------------------------------
+
+Sport = Literal["cfb", "nfl"]
+"""Every league the engine ingests, rates and serves -- the one definition.
+
+Before #112 this Literal was written out inline in this file,
+evidence/proof.py and mcp_server/server.py, and apps/api and apps/web each
+kept their own copy, with nothing checking that any pair agreed. apps/api now
+imports this alias (contracts is on its permitted-import list), and apps/web's
+union is checked against the API's published schema.
+
+tests/test_contract_vocabularies.py ties it to what the engine actually runs:
+`ratings.elo.ELO_CONFIGS`, `cli.INGEST_ENTRY_POINTS` and compute_ratings'
+`--sport` choices must all equal it.
+"""
+
+Method = Literal["keener", "elo", "elo_career"]
+"""Every rating method registered in `ratings.compute_ratings.METHODS`, in
+display order (keener, the golden-dataset-validated default, first).
+
+Declared here rather than derived from METHODS because apps/api may not import
+`cfb_strength.ratings` (docs/ARCHITECTURE.md section 2). The boundary no longer
+costs an unchecked copy: tests/test_contract_vocabularies.py fails if this
+alias and METHODS disagree.
+"""
+
+
+def _require_known_sport(sport: str, row: str) -> None:
+    """Runtime half of `Sport` for rows headed into the database. The
+    annotation is static only, so an ingest path that hands an unlisted league
+    through as a plain `str` would otherwise write rows that every downstream
+    Literal silently disagrees with."""
+    if sport not in get_args(Sport):
+        valid = ", ".join(repr(s) for s in get_args(Sport))
+        raise ValueError(f"{row}.sport={sport!r} is not a known league; expected one of {valid}")
 
 
 # ---------------------------------------------------------------------------
@@ -51,8 +90,11 @@ class GameRow:
     # for teams, e.g. "KC"; composite game id, e.g. "2023_01_KC_DET", for games)
     # for traceability and idempotent re-ingest -- always None for CFB rows,
     # since CFBD ids are already the row's real integer primary key.
-    sport: Literal["cfb", "nfl"] = "cfb"
+    sport: Sport = "cfb"
     source_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_known_sport(self.sport, "GameRow")
 
 
 @dataclass(frozen=True)
@@ -62,7 +104,7 @@ class TeamRow:
     classification: str | None
     conference: str | None
     # See GameRow's sport/source_id note above -- same reasoning applies here.
-    sport: Literal["cfb", "nfl"] = "cfb"
+    sport: Sport = "cfb"
     source_id: str | None = None
     # mascot/alternate_names added for epic #76 (mascot- and city-searchable
     # team typeahead), populated by issue #77's CFBD `/teams` ingest path.
@@ -87,6 +129,9 @@ class TeamRow:
     # JSON array in `teams.alternate_names`.
     mascot: str | None = None
     alternate_names: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_known_sport(self.sport, "TeamRow")
 
 
 # ---------------------------------------------------------------------------
@@ -466,7 +511,7 @@ class UnknownTeamError(ValueError):
     against unscoped team data, not a string-similarity heuristic.
     """
 
-    def __init__(self, query: str, year: int, sport: Literal["cfb", "nfl"]):
+    def __init__(self, query: str, year: int, sport: Sport):
         super().__init__(f"no {sport} team matching {query!r} is rated for {year}")
         self.query = query
         self.year = year
@@ -541,23 +586,23 @@ class Credits:
 # shape:
 #
 #   def resolve_team(conn: sqlite3.Connection, year: int, query: str,
-#                     method: str = "keener", sport: Literal["cfb", "nfl"] = "cfb") -> int: ...
+#                     method: str = "keener", sport: Sport = "cfb") -> int: ...
 #       Exact match first, then fuzzy match. Raises AmbiguousTeamError with
 #       candidates on ambiguity, UnknownYearError if no ratings exist for
 #       that year/method/sport.
 #
 #   def build_team_case(conn: sqlite3.Connection, year: int, team: str,
-#                        method: str = "keener", sport: Literal["cfb", "nfl"] = "cfb") -> TeamCase: ...
+#                        method: str = "keener", sport: Sport = "cfb") -> TeamCase: ...
 #       `team` is resolved via resolve_team. Raises the same two errors.
 #
 #   def build_comparison(conn: sqlite3.Connection, year: int, team_a: str,
 #                         team_b: str, method: str = "keener",
-#                         sport: Literal["cfb", "nfl"] = "cfb") -> ComparisonResult: ...
+#                         sport: Sport = "cfb") -> ComparisonResult: ...
 #       Raises SameTeamComparisonError if team_a and team_b resolve to the same
 #       team_id (added in the Round 4 amendment below).
 #
 #   def list_available_years(conn: sqlite3.Connection, method: str = "keener",
-#                             sport: str = "cfb") -> list[int]: ...
+#                             sport: Sport = "cfb") -> list[int]: ...
 #       `SELECT DISTINCT year FROM ratings WHERE method = ? AND sport = ? ORDER
 #       BY year`. Added in the Round 4 amendment below: mcp-agent and
 #       evidence-agent had each independently implemented an identical private
@@ -597,6 +642,11 @@ class Credits:
 # py.typed, so apps/api's call sites are type-checked against it.
 # list_available_years keeps `str`: no #102 finding required narrowing it, and a
 # single named `Sport` alias replacing all of these inline copies is #112's call.
+#
+# #112 amendment (epic #113): that alias is `Sport`, defined at the top of this
+# file, and every signature above now uses it, list_available_years included.
+# `Method` is declared beside it. GameRow/TeamRow also reject an unlisted league
+# at construction, so ingested data cannot get ahead of the alias.
 #
 # mcp-agent imports these five names (plus AmbiguousTeamError/UnknownTeamError/
 # UnknownYearError/SameTeamComparisonError from this file) from cfb_strength.evidence and must

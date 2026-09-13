@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Literal
 
 import pytest
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     SameTeamComparisonError,
+    Sport,
     UnknownTeamError,
     UnknownYearError,
 )
@@ -519,7 +519,7 @@ def _build_tie_fixture(conn: sqlite3.Connection, sport: str) -> None:
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
 def test_build_team_case_lists_an_equal_score_game_as_a_tie(
-    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+    conn: sqlite3.Connection, sport: Sport
 ) -> None:
     _build_tie_fixture(conn, sport)
 
@@ -534,7 +534,7 @@ def test_build_team_case_lists_an_equal_score_game_as_a_tie(
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
 def test_tie_is_never_a_quality_win_or_worst_loss(
-    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+    conn: sqlite3.Connection, sport: Sport
 ) -> None:
     _build_tie_fixture(conn, sport)
 
@@ -582,7 +582,7 @@ def test_cfb_completed_zero_zero_row_is_reported_as_a_tie(conn: sqlite3.Connecti
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
 def test_build_comparison_common_opponent_reports_a_tie(
-    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+    conn: sqlite3.Connection, sport: Sport
 ) -> None:
     _build_tie_fixture(conn, sport)
 
@@ -605,7 +605,7 @@ def test_build_comparison_common_opponent_reports_a_tie(
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
 def test_verdict_describes_a_tied_head_to_head_meeting(
-    conn: sqlite3.Connection, sport: Literal["cfb", "nfl"]
+    conn: sqlite3.Connection, sport: Sport
 ) -> None:
     """`head_to_head` already modeled the tie (winner=None); the verdict only
     had a sentence for a winner, so it said nothing about the meeting."""

@@ -40,6 +40,10 @@ from cfb_strength.config import DB_PATH
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     SameTeamComparisonError,
+    # `Sport` is a Literal, so the generated MCP tool schema still advertises
+    # the valid leagues to the calling model -- now from the one contract
+    # alias instead of a local copy (#112).
+    Sport,
     UnknownTeamError,
     UnknownYearError,
 )
@@ -48,12 +52,6 @@ from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
 
 from mcp.server.mcpserver import MCPServer
-
-# Mirrors contracts.GameRow/TeamRow's inline `Literal["cfb", "nfl"]`.
-# contracts.py exports no named alias to import, so this is one more
-# unchecked copy (tracked by #112). Typed as a Literal so the generated MCP
-# tool schema advertises the valid values to the calling model.
-Sport = Literal["cfb", "nfl"]
 
 mcp: MCPServer = MCPServer(
     "cfb-strength",

@@ -32,11 +32,13 @@ import argparse
 import sqlite3
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import get_args
 
 from cfb_strength.contracts import (
     CareerRatingMethod,
     Game,
     RatingMethod,
+    Sport,
     TeamRating,
 )
 from cfb_strength.db.connection import ensure_schema, get_conn
@@ -474,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--sport",
         default="cfb",
-        choices=("cfb", "nfl"),
+        choices=get_args(Sport),
         help="Sport to compute ratings for (default: cfb). Mirrors "
         "`ingest --sport`; scopes both the win-graph read and the "
         "ratings/rating_breakdowns write so cfb and nfl rows for the same "
