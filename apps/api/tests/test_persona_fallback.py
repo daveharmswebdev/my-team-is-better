@@ -52,6 +52,7 @@ def test_team_case_fallback_uses_only_evidence_fields() -> None:
 def test_comparison_fallback_uses_only_evidence_fields() -> None:
     comparison = ComparisonResultOut(
         year=2005,
+        method="keener",
         team_a=ComparisonTeamSummaryOut(
             team_id=1,
             team_name="Texas",
@@ -117,6 +118,7 @@ def _comparison(
 ) -> ComparisonResultOut:
     return ComparisonResultOut(
         year=year,
+        method="keener",
         team_a=team_a,
         team_b=team_b,
         head_to_head=HeadToHeadOut(played=False, meetings=[]),

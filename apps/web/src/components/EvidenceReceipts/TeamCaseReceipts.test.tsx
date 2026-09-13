@@ -195,6 +195,22 @@ describe('TeamCaseReceipts', () => {
     expect(screen.getByText(/12\.34/)).toBeInTheDocument()
   })
 
+  it('renders an Elo rating on Elo’s own scale via evidence.method, not x1000', () => {
+    const { container } = render(
+      <TeamCaseReceipts
+        evidence={{
+          ...evidence,
+          method: 'elo',
+          rating: 1684.4,
+          rating_breakdown: { entries: [], residual_contribution: 1684.4 },
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '1,684' })).toBeInTheDocument()
+    expect(container.textContent).not.toContain('1684400.00')
+  })
+
   it('renders quality wins', () => {
     render(<TeamCaseReceipts evidence={evidence} />)
 

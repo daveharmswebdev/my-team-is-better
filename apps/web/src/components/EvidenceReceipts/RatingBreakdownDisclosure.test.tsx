@@ -63,6 +63,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,
@@ -84,6 +85,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,
@@ -105,6 +107,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,
@@ -125,6 +128,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,
@@ -146,6 +150,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,
@@ -169,6 +174,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,
@@ -202,6 +208,7 @@ describe('RatingBreakdownDisclosure', () => {
     render(
       <RatingBreakdownDisclosure
         teamName="Cincinnati Bengals"
+        method="keener"
         rating={0.00877}
         breakdown={{
           ...breakdown,
@@ -241,12 +248,35 @@ describe('RatingBreakdownDisclosure', () => {
     expect(within(dialog).getByText('1-0')).toBeInTheDocument()
   })
 
+  it('Elo: formats the trigger and the "matches the displayed rating" total on Elo’s own scale, never x1000', async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    render(
+      <RatingBreakdownDisclosure
+        teamName="Ohio State"
+        method="elo"
+        rating={1684.4}
+        breakdown={{ entries: [], residual_contribution: 1684.4 }}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: '1,684' })
+    await user.hover(trigger)
+    const dialog = screen.getByRole('dialog')
+
+    expect(
+      within(dialog).getByText('Matches the displayed rating: 1,684'),
+    ).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('1684400.00')
+  })
+
   it('renders each entry’s own deterministic explanation line', async () => {
     mockMatchMedia(false)
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
         teamName="Ohio State"
+        method="keener"
         rating={0.00877}
         breakdown={breakdown}
       />,

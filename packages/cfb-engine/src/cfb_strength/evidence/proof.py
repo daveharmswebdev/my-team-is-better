@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import difflib
 import sqlite3
-from typing import Literal
+from typing import Literal, cast
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
@@ -525,6 +525,8 @@ def build_comparison(
 
     return ComparisonResult(
         year=year,
+        # `method: str` on this signature is narrowed to `Method` by #139; until then, cast.
+        method=cast(Method, method),
         team_a=_case_summary(case_a),
         team_b=_case_summary(case_b),
         head_to_head=head_to_head,

@@ -65,6 +65,17 @@ def test_prompt_version_is_past_the_tie_less_fact_blocks() -> None:
     assert config.PROMPT_VERSION != "persona-v1"  # type: ignore[attr-defined]
 
 
+def test_prompt_version_is_past_the_method_less_compare_fact_blocks() -> None:
+    """Issue #152 changed what the compare narrator is given: its fact block
+    (`ComparisonResultOut.model_dump_json()`) now carries `method`. The cache
+    key doesn't cover the fact block itself (#145), so narrations cached under
+    `persona-v2` were written from method-less facts and would keep being
+    served unless the version moves on."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION not in {"persona-v1", "persona-v2"}  # type: ignore[attr-defined]
+
+
 def test_config_exposes_contested_years() -> None:
     config = _reimport_config()
 

@@ -70,6 +70,8 @@ REQUIRED_LOCATIONS: dict[str, tuple[str, ...]] = {
     ),
     "method": (
         *(f"#/components/schemas/{model}/properties/method" for model in _VERDICT_REQUESTS),
+        # Issue #152: the compare verdict's evidence names the method that answered it.
+        "#/components/schemas/ComparisonResultOut/properties/method",
         "GET /api/years query parameter 'method'",
         "GET /api/teams query parameter 'method'",
     ),

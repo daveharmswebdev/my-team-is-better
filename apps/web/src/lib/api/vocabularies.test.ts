@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { SPORTS, isVerdictErrorBody } from './types'
+import { METHODS, SPORTS, isVerdictErrorBody } from './types'
 
 /**
  * Issue #112 (epic #113): apps/web's closed vocabularies are checked against
@@ -62,15 +62,11 @@ const WEB_VOCABULARY_DECISIONS: Record<
   string,
   readonly string[] | NotMirrored
 > = {
-  // Not mirrored: apps/web never enumerates or sends a rating method -- it
-  // only renders whatever `TeamCaseOut.method` the API returns, and the API
-  // itself publishes that field without an enum (allowlisted on its side),
-  // so `TeamCaseOut.method` correctly stays `string` in types.ts.
-  method: {
-    mirrored: false,
-    reason:
-      'web never enumerates or sends methods; TeamCaseOut.method stays string',
-  },
+  // Mirrored (epic #147 / issue #82): apps/web formats ratings per method --
+  // `formatRating`'s exhaustive `Record<Method, ...>` table picks each
+  // method's display scale -- and `TeamCaseOut.method`/
+  // `ComparisonResultOut.method` are typed as `Method`.
+  method: METHODS,
   // Mirrored: `QuestionForm`'s league toggle sends it, and
   // `isVerdictErrorBody` validates `unknown_team.sport` against it.
   sport: SPORTS,
@@ -122,6 +118,12 @@ describe('published API vocabularies (issue #112)', () => {
 
   it("mirrors the API's sport list exactly, order included", () => {
     expect([...SPORTS]).toEqual(vocabularies['sport'])
+  })
+
+  it("mirrors the API's method list exactly, order included", () => {
+    const method = vocabularies['method']
+    expect(method?.length).toBeGreaterThan(0)
+    expect([...METHODS]).toEqual(method)
   })
 
   describe('isVerdictErrorBody follows the sport list', () => {

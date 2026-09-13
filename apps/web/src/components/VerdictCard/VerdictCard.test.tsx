@@ -29,6 +29,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
 const comparisonEnvelope: ComparisonEnvelope = {
   evidence: {
     year: 2005,
+    method: 'keener',
     team_a: {
       team_id: 1,
       team_name: 'Texas',
@@ -87,7 +88,14 @@ describe('VerdictCard', () => {
     )
 
     expect(screen.getByText('Texas edges USC.')).toBeInTheDocument()
-    expect(screen.getByText(/Texas was better\./)).toBeInTheDocument()
+    // apps/web renders its own formatted verdict line, never the engine's
+    // raw `verdict` sentence (issue #24).
+    expect(
+      screen.getByText(
+        'Rating diff: 0.87 · Texas rates higher overall (12.34 vs 11.47, rank 1 vs 2).',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Texas was better\./)).not.toBeInTheDocument()
   })
 
   it('renders the unknown_year error state', () => {

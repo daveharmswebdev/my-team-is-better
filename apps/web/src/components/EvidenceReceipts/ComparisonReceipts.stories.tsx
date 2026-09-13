@@ -4,6 +4,7 @@ import { ComparisonReceipts } from './ComparisonReceipts'
 
 const evidence: ComparisonResultOut = {
   year: 2020,
+  method: 'keener',
   team_a: {
     team_id: 194,
     team_name: 'Ohio State',
@@ -98,6 +99,8 @@ const evidence: ComparisonResultOut = {
     },
   ],
   rating_diff: 0.00275,
+  // The engine's raw sentence, as the API sends it -- apps/web deliberately
+  // doesn't render it (issue #24); the bottom line is built from the summaries.
   verdict:
     'Ohio State rates higher overall (0.008771 vs 0.006022, rank 2 vs 95).',
 }
@@ -187,5 +190,65 @@ export const CommonOpponentTie: Story = {
 export const RatingBreakdown: Story = {
   args: {
     evidence,
+  },
+}
+
+/**
+ * An Elo comparison (epic #147 / issue #82): ratings, the rating diff and the
+ * bottom line all print on Elo's own whole-point scale ("1,684 vs 1,650"),
+ * never Keener's x1000 transform.
+ */
+export const EloLeader: Story = {
+  args: {
+    evidence: {
+      ...evidence,
+      method: 'elo',
+      team_a: {
+        ...evidence.team_a,
+        rank: 3,
+        rating: 1684.4,
+        rating_breakdown: { entries: [], residual_contribution: 1684.4 },
+      },
+      team_b: {
+        ...evidence.team_b,
+        rank: 9,
+        rating: 1650.2,
+        rating_breakdown: { entries: [], residual_contribution: 1650.2 },
+      },
+      rating_diff: 1684.4 - 1650.2,
+      verdict:
+        'Ohio State rates higher overall (1684.4 vs 1650.2, rank 3 vs 9).',
+    },
+  },
+}
+
+/**
+ * Two Elo ratings under a point apart both print "1,531", so the bottom line
+ * says they rate the same at display precision instead of naming a leader
+ * beside two identical numbers (#149's web half).
+ */
+export const EloEqualAtDisplayPrecision: Story = {
+  args: {
+    evidence: {
+      ...evidence,
+      method: 'elo',
+      team_a: {
+        ...evidence.team_a,
+        team_name: 'UNLV',
+        rank: 60,
+        rating: 1531.24,
+        rating_breakdown: { entries: [], residual_contribution: 1531.24 },
+      },
+      team_b: {
+        ...evidence.team_b,
+        team_name: 'Nevada',
+        rank: 61,
+        rating: 1530.9,
+        rating_breakdown: { entries: [], residual_contribution: 1530.9 },
+      },
+      common_opponents: [],
+      rating_diff: 1531.24 - 1530.9,
+      verdict: 'UNLV rates higher overall (1531.24 vs 1530.9, rank 60 vs 61).',
+    },
   },
 }

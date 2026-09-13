@@ -63,7 +63,8 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # persona-v2 (issue #83): the prompt text is unchanged, but the fact block
 # is not -- it now carries `ties`, and a tied game appears as `result: "T"`
 # instead of being dropped. v1 narrations were written from tie-less facts.
-PROMPT_VERSION = "persona-v2"
+# persona-v3 (issue #152): prompt unchanged; compare fact blocks now carry `method`.
+PROMPT_VERSION = "persona-v3"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
 

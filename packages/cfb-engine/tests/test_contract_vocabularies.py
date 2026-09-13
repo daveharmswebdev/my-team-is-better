@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 
 from cfb_strength import cli
-from cfb_strength.contracts import GameRow, Method, Sport, TeamRow
+from cfb_strength.contracts import ComparisonResult, GameRow, Method, Sport, TeamRow
 from cfb_strength.evidence import proof
 from cfb_strength.mcp_server import server
 from cfb_strength.ratings import compute_ratings
@@ -163,6 +163,15 @@ def test_evidence_public_api_takes_the_contract_sport(fn: Any) -> None:
 @pytest.mark.parametrize("row_type", [GameRow, TeamRow], ids=lambda t: t.__name__)
 def test_row_contracts_declare_the_contract_sport(row_type: type) -> None:
     assert typing.get_type_hints(row_type)["sport"] == Sport
+
+
+# `TeamCase` joins this list once its `method` is narrowed from `str` (#139).
+@pytest.mark.parametrize("result_type", [ComparisonResult], ids=lambda t: t.__name__)
+def test_result_contracts_declare_the_contract_method(result_type: type) -> None:
+    """Issue #152: the method a verdict echoes is the closed `Method`
+    vocabulary, so apps/api can publish it as an enum rather than a free
+    string."""
+    assert typing.get_type_hints(result_type)["method"] == Method
 
 
 # ---------------------------------------------------------------------------
