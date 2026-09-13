@@ -14,21 +14,27 @@ JSON-serializable `{"error": ...}` dict rather than raising across the MCP
 boundary, so a malformed request (bad year, ambiguous team name) surfaces as
 data the calling LLM can read and react to, not a protocol-level failure.
 
+The database holds BOTH leagues (college football and the NFL) in the same
+tables, and `ratings`' UNIQUE(year, method, team_id) deliberately excludes
+`sport`. So every tool takes a `sport` argument (default "cfb", so pre-NFL
+clients are unchanged), every direct query against `ratings` is scoped by
+it, and it is threaded into every evidence call. An unscoped query here does
+not fail -- it silently blends the leagues (issue #86).
+
 Static, parameter-free catalog data (which seasons/methods exist, the full
 team list, methodology/data-source attribution) is exposed as MCP
 **resources**, not tools -- a client can read these once and hold them as
 context instead of the model spending a tool call to "discover" data that
 never changes per-request. `list_seasons`/`get_rankings` stay as tools too
-(unchanged, for backward compatibility with existing callers); the
-`seasons` resource shares the exact same query helper so there is one
-source of truth, not two.
+(for clients that only support tool calls); the `seasons` resource shares
+the exact same query helper so there is one source of truth, not two.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import sqlite3
-from typing import Any
+from typing import Any, Literal
 
 from cfb_strength.config import DB_PATH
 from cfb_strength.contracts import (
@@ -43,18 +49,29 @@ from cfb_strength.evidence.proof import build_comparison, build_team_case, list_
 
 from mcp.server.mcpserver import MCPServer
 
+# Mirrors contracts.GameRow/TeamRow's inline `Literal["cfb", "nfl"]`.
+# contracts.py exports no named alias to import, so this is one more
+# unchecked copy (tracked by #112). Typed as a Literal so the generated MCP
+# tool schema advertises the valid values to the calling model.
+Sport = Literal["cfb", "nfl"]
+
 mcp: MCPServer = MCPServer(
     "cfb-strength",
     instructions=(
-        "Recursive strength-of-schedule college football rankings (1998-2025). "
-        "Read resource://cfb-strength/seasons and resource://cfb-strength/teams "
-        "for the season/team catalog instead of guessing valid inputs, and "
-        "resource://cfb-strength/credits for the methodology citation and data "
-        "source -- cite both whenever you present a ranking as fact. Use "
-        "get_rankings for a top-N leaderboard, get_team_season for one team's "
-        "full resume, compare_teams for head-to-head evidence between two "
-        "named teams, and get_champion as a shortcut for 'who was #1' with "
-        "the same evidence shape as get_team_season."
+        "Recursive strength-of-schedule rankings for TWO leagues: college "
+        "football (sport='cfb') and the NFL (sport='nfl'). Every ranking tool "
+        "takes a `sport` argument that selects the league; it defaults to "
+        "'cfb', so pass sport='nfl' for any NFL question. Years and team "
+        "names are per league -- a year loaded for one sport may be missing "
+        "for the other. Read resource://cfb-strength/seasons (one entry per "
+        "sport and year) and resource://cfb-strength/teams (each team tagged "
+        "with its sport) for the catalog instead of guessing valid inputs, "
+        "and resource://cfb-strength/credits for the methodology citation and "
+        "per-sport data source -- cite both whenever you present a ranking as "
+        "fact. Use get_rankings for a top-N leaderboard, get_team_season for "
+        "one team's full resume, compare_teams for head-to-head evidence "
+        "between two named teams, and get_champion as a shortcut for 'who was "
+        "#1' with the same evidence shape as get_team_season."
     ),
 )
 
@@ -64,35 +81,48 @@ def _get_conn() -> sqlite3.Connection:
     return get_conn(DB_PATH, read_only=True)
 
 
+def _unknown_year(e: UnknownYearError, sport: str) -> dict[str, Any]:
+    return {
+        "error": "unknown_year",
+        "year": e.year,
+        "sport": sport,
+        "available_years": e.available_years,
+    }
+
+
 def _season_catalog(conn: sqlite3.Connection) -> dict[str, Any]:
-    """Every (year, method) combination that has computed ratings. Shared by
-    the `list_seasons` tool and the `seasons` resource so there's exactly one
+    """Every (sport, year, method) combination that has computed ratings,
+    one entry per (sport, year), ordered by sport then year. Shared by the
+    `list_seasons` tool and the `seasons` resource so there's exactly one
     query for this, not two drifting copies.
     """
     rows = conn.execute(
-        "SELECT DISTINCT year, method FROM ratings ORDER BY year, method"
+        "SELECT DISTINCT sport, year, method FROM ratings ORDER BY sport, year, method"
     ).fetchall()
 
-    seasons: dict[int, list[str]] = {}
+    seasons: dict[tuple[str, int], list[str]] = {}
     for row in rows:
-        seasons.setdefault(int(row["year"]), []).append(str(row["method"]))
+        seasons.setdefault((str(row["sport"]), int(row["year"])), []).append(str(row["method"]))
 
     return {
         "seasons": [
-            {"year": year, "methods": methods} for year, methods in sorted(seasons.items())
+            {"sport": sport, "year": year, "methods": sorted(methods)}
+            for (sport, year), methods in sorted(seasons.items())
         ]
     }
 
 
 @mcp.tool()
 def list_seasons() -> dict[str, Any]:
-    """List every (year, method) combination that has computed ratings in the
-    database. Call this FIRST when you're unsure which seasons/methods are
-    actually loaded -- it tells you what valid inputs to get_rankings,
-    get_team_season, compare_teams, and get_champion look like. It returns no
-    team-level data itself. Prefer reading resource://cfb-strength/seasons
-    directly if your client supports resources; this tool exists for clients
-    that only support tool calls.
+    """List every season that has computed ratings, one entry per
+    (sport, year): `{"sport": "cfb" | "nfl", "year": ..., "methods": [...]}`.
+    Call this FIRST when you're unsure which seasons/methods are actually
+    loaded for a league -- it tells you what valid `year`/`method`/`sport`
+    inputs to get_rankings, get_team_season, compare_teams, and get_champion
+    look like. A year present for one sport may be absent for the other. It
+    returns no team-level data itself. Prefer reading
+    resource://cfb-strength/seasons directly if your client supports
+    resources; this tool exists for clients that only support tool calls.
     """
     try:
         conn = _get_conn()
@@ -108,9 +138,10 @@ def list_seasons() -> dict[str, Any]:
     "resource://cfb-strength/seasons",
     name="seasons",
     description=(
-        "Catalog of every (year, method) combination with computed ratings -- "
-        "read this once to know what years/methods are valid elsewhere, "
-        "instead of spending a tool call to discover it."
+        "Catalog of every season with computed ratings, one entry per "
+        "(sport, year) with its methods -- sport is 'cfb' (college football) "
+        "or 'nfl'. Read this once to know what sport/year/method inputs are "
+        "valid elsewhere, instead of spending a tool call to discover it."
     ),
     mime_type="application/json",
 )
@@ -126,9 +157,11 @@ def seasons_resource() -> dict[str, Any]:
     "resource://cfb-strength/teams",
     name="teams",
     description=(
-        "Full catalog of every team in the database (id, school name, "
-        "classification). Static reference data -- read this to resolve or "
-        "spell-check a team name before calling a tool, instead of guessing."
+        "Full catalog of every team in the database, across both leagues "
+        "(id, school/team name, classification, sport -- 'cfb' or 'nfl'). "
+        "Static reference data -- read this to resolve or spell-check a team "
+        "name, and to see which league it belongs to, before calling a tool "
+        "instead of guessing."
     ),
     mime_type="application/json",
 )
@@ -136,7 +169,7 @@ def teams_resource() -> dict[str, Any]:
     conn = _get_conn()
     try:
         rows = conn.execute(
-            "SELECT id, school, classification FROM teams ORDER BY school"
+            "SELECT id, school, classification, sport FROM teams ORDER BY school"
         ).fetchall()
     finally:
         conn.close()
@@ -147,6 +180,7 @@ def teams_resource() -> dict[str, Any]:
                 "team_id": int(row["id"]),
                 "school": row["school"],
                 "classification": row["classification"],
+                "sport": row["sport"],
             }
             for row in rows
         ],
@@ -171,24 +205,27 @@ def credits_resource() -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_rankings(year: int, top_n: int = 25, method: str = "keener") -> dict[str, Any]:
-    """Return the top-N ranked teams for a season, ordered by rank ascending.
-    Use this for leaderboard-style requests spanning MANY teams ("show me the
-    top 10 of 2005", "who's ranked around #15"). For deep evidence on a
-    SINGLE named team's full resume (schedule, quality wins, worst loss) use
-    get_team_season instead -- this tool returns only rank/rating/record, no
-    game-by-game detail. For the #1 team specifically with full evidence, use
-    get_champion.
+def get_rankings(
+    year: int, top_n: int = 25, method: str = "keener", sport: Sport = "cfb"
+) -> dict[str, Any]:
+    """Return the top-N ranked teams for one league's season, ordered by
+    rank ascending. `sport` selects the league: "cfb" (college football, the
+    default) or "nfl". Use this for leaderboard-style requests spanning MANY
+    teams ("show me the top 10 of 2005", "who's ranked around #15"). For
+    deep evidence on a SINGLE named team's full resume (schedule, quality
+    wins, worst loss) use get_team_season instead -- this tool returns only
+    rank/rating/record, no game-by-game detail. For the #1 team specifically
+    with full evidence, use get_champion.
     """
     try:
         conn = _get_conn()
         try:
             exists = conn.execute(
-                "SELECT 1 FROM ratings WHERE year = ? AND method = ? LIMIT 1",
-                (year, method),
+                "SELECT 1 FROM ratings WHERE year = ? AND method = ? AND sport = ? LIMIT 1",
+                (year, method, sport),
             ).fetchone()
             if exists is None:
-                raise UnknownYearError(year, list_available_years(conn, method))
+                raise UnknownYearError(year, list_available_years(conn, method, sport=sport))
 
             rows = conn.execute(
                 """
@@ -196,11 +233,11 @@ def get_rankings(year: int, top_n: int = 25, method: str = "keener") -> dict[str
                        r.losses AS losses, r.team_id AS team_id, t.school AS school
                 FROM ratings r
                 JOIN teams t ON t.id = r.team_id
-                WHERE r.year = ? AND r.method = ?
+                WHERE r.year = ? AND r.method = ? AND r.sport = ?
                 ORDER BY r.rank ASC
                 LIMIT ?
                 """,
-                (year, method, top_n),
+                (year, method, sport, top_n),
             ).fetchall()
         finally:
             conn.close()
@@ -208,6 +245,7 @@ def get_rankings(year: int, top_n: int = 25, method: str = "keener") -> dict[str
         return {
             "year": year,
             "method": method,
+            "sport": sport,
             "count": len(rows),
             "rankings": [
                 {
@@ -222,25 +260,30 @@ def get_rankings(year: int, top_n: int = 25, method: str = "keener") -> dict[str
             ],
         }
     except UnknownYearError as e:
-        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+        return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 
 
 @mcp.tool()
-def get_team_season(year: int, team: str, method: str = "keener") -> dict[str, Any]:
+def get_team_season(
+    year: int, team: str, method: str = "keener", sport: Sport = "cfb"
+) -> dict[str, Any]:
     """Return ONE team's full evidentiary case for a season: its rank,
     rating, win-loss record, every completed game (with the opponent's rank
     at that snapshot), its quality wins (vs top-25 opponents), and its worst
-    loss. Use this when the request names a SINGLE team ("how good was Texas
-    in 2005?", "what's Ohio State's resume?"). If the request instead
-    compares TWO named teams head-to-head, use compare_teams. If the request
-    is "who is #1" rather than a named team, use get_champion.
+    loss. `sport` selects the league the team is looked up in: "cfb"
+    (college football, the default) or "nfl" -- pass sport="nfl" for an NFL
+    team, or it will come back as unknown_team. Use this when the request
+    names a SINGLE team ("how good was Texas in 2005?", "what's Ohio State's
+    resume?"). If the request instead compares TWO named teams head-to-head,
+    use compare_teams. If the request is "who is #1" rather than a named
+    team, use get_champion.
     """
     try:
         conn = _get_conn()
         try:
-            case = build_team_case(conn, year, team, method=method)
+            case = build_team_case(conn, year, team, method=method, sport=sport)
         finally:
             conn.close()
         return dataclasses.asdict(case)
@@ -252,25 +295,28 @@ def get_team_season(year: int, team: str, method: str = "keener") -> dict[str, A
         # list -- see contracts.UnknownTeamError for why a fuzzy one cannot work.
         return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
-        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+        return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 
 
 @mcp.tool()
-def compare_teams(year: int, team_a: str, team_b: str, method: str = "keener") -> dict[str, Any]:
-    """Compare exactly TWO named teams for a season: whether they played
-    head-to-head (and who won), every opponent they both played (common
-    opponents) with each side's result, the rating gap between them, and a
-    plain-language verdict citing that evidence. Use this for "who's better,
-    X or Y?" or "did X deserve to be ranked above Y?" questions naming two
-    teams. For a single team's own resume (no comparison), use
-    get_team_season instead.
+def compare_teams(
+    year: int, team_a: str, team_b: str, method: str = "keener", sport: Sport = "cfb"
+) -> dict[str, Any]:
+    """Compare exactly TWO named teams from the same league for a season:
+    whether they played head-to-head (and who won), every opponent they both
+    played (common opponents) with each side's result, the rating gap
+    between them, and a plain-language verdict citing that evidence. `sport`
+    selects the league: "cfb" (college football, the default) or "nfl";
+    both teams must be in it. Use this for "who's better, X or Y?" or "did X
+    deserve to be ranked above Y?" questions naming two teams. For a single
+    team's own resume (no comparison), use get_team_season instead.
     """
     try:
         conn = _get_conn()
         try:
-            comparison = build_comparison(conn, year, team_a, team_b, method=method)
+            comparison = build_comparison(conn, year, team_a, team_b, method=method, sport=sport)
         finally:
             conn.close()
         return dataclasses.asdict(comparison)
@@ -284,19 +330,21 @@ def compare_teams(year: int, team_a: str, team_b: str, method: str = "keener") -
         # list -- see contracts.UnknownTeamError for why a fuzzy one cannot work.
         return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
-        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+        return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 
 
 @mcp.tool()
-def get_champion(year: int, method: str = "keener") -> dict[str, Any]:
+def get_champion(year: int, method: str = "keener", sport: Sport = "cfb") -> dict[str, Any]:
     """Convenience lookup for "who was the best/greatest team in <year>?":
-    resolves the #1-ranked team for the season and returns its FULL
+    resolves the #1-ranked team for one league's season and returns its FULL
     evidentiary case (same shape as get_team_season -- schedule, quality
     wins, worst loss) in one call, instead of requiring get_rankings followed
-    by a separate get_team_season lookup. If you already know which team you
-    care about, use get_team_season directly; for a two-team question use
+    by a separate get_team_season lookup. `sport` selects the league: "cfb"
+    (college football, the default) or "nfl" -- the two leagues each have
+    their own #1 for the same year. If you already know which team you care
+    about, use get_team_season directly; for a two-team question use
     compare_teams.
     """
     try:
@@ -307,13 +355,13 @@ def get_champion(year: int, method: str = "keener") -> dict[str, Any]:
                 SELECT t.school AS school
                 FROM ratings r
                 JOIN teams t ON t.id = r.team_id
-                WHERE r.year = ? AND r.method = ? AND r.rank = 1
+                WHERE r.year = ? AND r.method = ? AND r.sport = ? AND r.rank = 1
                 """,
-                (year, method),
+                (year, method, sport),
             ).fetchone()
             if row is None:
-                raise UnknownYearError(year, list_available_years(conn, method))
-            case = build_team_case(conn, year, str(row["school"]), method=method)
+                raise UnknownYearError(year, list_available_years(conn, method, sport=sport))
+            case = build_team_case(conn, year, str(row["school"]), method=method, sport=sport)
         finally:
             conn.close()
         return dataclasses.asdict(case)
@@ -325,7 +373,7 @@ def get_champion(year: int, method: str = "keener") -> dict[str, Any]:
         # list -- see contracts.UnknownTeamError for why a fuzzy one cannot work.
         return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
-        return {"error": "unknown_year", "year": e.year, "available_years": e.available_years}
+        return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 

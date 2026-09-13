@@ -99,9 +99,11 @@ preemptively.
 | `reviewer` | nothing (read-only) | everything — cross-cutting seams + standards compliance |
 
 `packages/cfb-engine`'s existing ownership map (ingest/ratings/evidence/mcp-agent,
-`contracts.py`/`schema.sql` coordinator-owned) is unchanged — see its own `README.md`
-and the agent definitions in `.claude/agents/` for that layer; this table only covers
-the two new apps.
+`contracts.py`/`schema.sql` coordinator-owned) is unchanged — see the agent
+definitions in `.claude/agents/` (`ingest-agent.md`, `ratings-agent.md`,
+`evidence-agent.md`, `mcp-agent.md`) for that layer; this table only covers the two
+new apps. Every engine spoke named here must have a definition file there, and vice
+versa (#105 was the one that didn't).
 
 ---
 

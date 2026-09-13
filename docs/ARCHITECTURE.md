@@ -276,7 +276,7 @@ job.
 
 | Resource | Content | Why a resource, not a tool |
 |---|---|---|
-| `resource://cfb-strength/seasons` | Every `(year, method)` with computed ratings | Parameter-free catalog data that never changes per-request — a client reads it once instead of spending a tool call on "discovery" every time. Shares its query with the existing `list_seasons` tool (`_season_catalog()`) so there's one source of truth, not two drifting copies. |
+| `resource://cfb-strength/seasons` | One entry per `(sport, year)` with computed ratings, listing its methods (`{"sport", "year", "methods"}`, #86) | Parameter-free catalog data that never changes per-request — a client reads it once instead of spending a tool call on "discovery" every time. Shares its query with the existing `list_seasons` tool (`_season_catalog()`) so there's one source of truth, not two drifting copies. |
 | `resource://cfb-strength/teams` | Full team catalog (id, school, classification) | Same reasoning — lets a client resolve/spell-check a team name from static context instead of guessing or round-tripping. |
 | `resource://cfb-strength/credits` | Methodology citation (Keener 1993) + data source (CollegeFootballData.com) | Static by nature, and putting it on the resource surface means **any** MCP client that connects — not just this product's own backend — sees the attribution as part of the data contract, not as page copy it can ignore. See PRD §5.6. |
 
