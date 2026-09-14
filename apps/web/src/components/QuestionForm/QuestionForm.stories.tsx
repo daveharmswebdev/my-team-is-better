@@ -123,7 +123,15 @@ export const Default: Story = {
 export const UserTeamSuggestionsOpen: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.type(canvas.getByLabelText(/your team/i), 'Longhorns')
+    // Wait for the catalog-backed combobox before typing. Until `/api/teams`
+    // lands, `TeamCombobox` renders a plain fallback `<input>` and then
+    // swaps in a *different* input node, so keystrokes sent to the first one
+    // are lost (found when #90 started running play functions in CI -- a
+    // real component defect tracked as #156, not fixed by this wait).
+    const userTeamInput = await canvas.findByRole('combobox', {
+      name: /your team/i,
+    })
+    await userEvent.type(userTeamInput, 'Longhorns')
     const listbox = await canvas.findByRole('listbox')
     await expect(
       within(listbox).getByRole('option', { name: /Texas · Longhorns/ }),
