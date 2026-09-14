@@ -83,23 +83,47 @@ const evidence: ComparisonResultOut = {
       opponent_team_id: 84,
       opponent_name: 'Indiana',
       opponent_rank: 21,
-      team_a_result: 'W',
-      team_a_score: 42,
-      team_a_opponent_score: 35,
-      team_b_result: 'L',
-      team_b_score: 21,
-      team_b_opponent_score: 38,
+      team_a_meetings: [
+        {
+          result: 'W',
+          team_score: 42,
+          opponent_score: 35,
+          week: 12,
+          season_type: 'regular',
+        },
+      ],
+      team_b_meetings: [
+        {
+          result: 'L',
+          team_score: 21,
+          opponent_score: 38,
+          week: 10,
+          season_type: 'regular',
+        },
+      ],
     },
     {
       opponent_team_id: 127,
       opponent_name: 'Michigan State',
       opponent_rank: 101,
-      team_a_result: 'W',
-      team_a_score: 52,
-      team_a_opponent_score: 12,
-      team_b_result: 'L',
-      team_b_score: 24,
-      team_b_opponent_score: 27,
+      team_a_meetings: [
+        {
+          result: 'W',
+          team_score: 52,
+          opponent_score: 12,
+          week: 15,
+          season_type: 'regular',
+        },
+      ],
+      team_b_meetings: [
+        {
+          result: 'L',
+          team_score: 24,
+          opponent_score: 27,
+          week: 9,
+          season_type: 'regular',
+        },
+      ],
     },
   ],
   rating_diff: 0.00275,
@@ -172,16 +196,145 @@ export const CommonOpponentTie: Story = {
           opponent_team_id: 84,
           opponent_name: 'Indiana',
           opponent_rank: 21,
-          team_a_result: 'T',
-          team_a_score: 26,
-          team_a_opponent_score: 26,
-          team_b_result: 'L',
-          team_b_score: 21,
-          team_b_opponent_score: 38,
+          team_a_meetings: [
+            {
+              result: 'T',
+              team_score: 26,
+              opponent_score: 26,
+              week: 12,
+              season_type: 'regular',
+            },
+          ],
+          team_b_meetings: [
+            {
+              result: 'L',
+              team_score: 21,
+              opponent_score: 38,
+              week: 10,
+              season_type: 'regular',
+            },
+          ],
         },
         ...evidence.common_opponents.slice(1),
       ],
     },
+  },
+}
+
+/**
+ * Issue #130: a side that met the shared opponent more than once shows every
+ * meeting, in order, under its team name -- not just the last one. Real 2013
+ * NFL data: Minnesota lost to Green Bay in week 8 and tied them in week 12;
+ * Chicago beat them in week 9 and lost in week 17 (`opponent_rank` is
+ * illustrative). Each meeting carries its own W/L/T tag.
+ */
+export const TwoMeetingsPerSide: Story = {
+  args: {
+    evidence: {
+      ...evidence,
+      year: 2013,
+      team_a: {
+        ...evidence.team_a,
+        team_id: 16,
+        team_name: 'Minnesota Vikings',
+        rank: 20,
+        rating: 0.00512,
+        wins: 5,
+        losses: 10,
+        ties: 1,
+        rating_breakdown: { entries: [], residual_contribution: 0.00512 },
+      },
+      team_b: {
+        ...evidence.team_b,
+        team_id: 3,
+        team_name: 'Chicago Bears',
+        rank: 14,
+        rating: 0.00598,
+        wins: 8,
+        losses: 8,
+        ties: 0,
+        rating_breakdown: { entries: [], residual_contribution: 0.00598 },
+      },
+      head_to_head: {
+        played: true,
+        meetings: [
+          {
+            week: 13,
+            season_type: 'regular',
+            neutral_site: false,
+            home_team: 'Minnesota Vikings',
+            away_team: 'Chicago Bears',
+            home_points: 23,
+            away_points: 20,
+            winner: 'Minnesota Vikings',
+          },
+          {
+            week: 2,
+            season_type: 'regular',
+            neutral_site: false,
+            home_team: 'Chicago Bears',
+            away_team: 'Minnesota Vikings',
+            home_points: 31,
+            away_points: 30,
+            winner: 'Chicago Bears',
+          },
+        ],
+      },
+      common_opponents: [
+        {
+          opponent_team_id: 12,
+          opponent_name: 'Green Bay',
+          opponent_rank: 8,
+          team_a_meetings: [
+            {
+              result: 'L',
+              team_score: 31,
+              opponent_score: 44,
+              week: 8,
+              season_type: 'regular',
+            },
+            {
+              result: 'T',
+              team_score: 26,
+              opponent_score: 26,
+              week: 12,
+              season_type: 'regular',
+            },
+          ],
+          team_b_meetings: [
+            {
+              result: 'W',
+              team_score: 27,
+              opponent_score: 20,
+              week: 9,
+              season_type: 'regular',
+            },
+            {
+              result: 'L',
+              team_score: 28,
+              opponent_score: 33,
+              week: 17,
+              season_type: 'regular',
+            },
+          ],
+        },
+      ],
+      rating_diff: 0.00512 - 0.00598,
+      verdict:
+        'Chicago Bears rates higher overall (0.00598 vs 0.00512, rank 14 vs 20).',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const row = canvas.getByText(/Green Bay/).closest('li') as HTMLElement
+    const minnesota = within(row).getByRole('group', {
+      name: 'Minnesota Vikings',
+    })
+    await expect(minnesota.textContent).toContain('31-44 (wk 8)')
+    await expect(minnesota.textContent).toContain('26-26 (wk 12)')
+    const chicago = within(row).getByRole('group', { name: 'Chicago Bears' })
+    await expect(chicago.textContent).toContain('27-20 (wk 9)')
+    await expect(chicago.textContent).toContain('28-33 (wk 17)')
   },
 }
 

@@ -154,7 +154,28 @@ def test_prompt_version_is_past_the_backwards_head_to_head_score() -> None:
     served."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v8"  # type: ignore[attr-defined]  # _reimport_config() -> object
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+        "persona-v4",
+        "persona-v5",
+        "persona-v6",
+        "persona-v7",
+    }
+
+
+def test_prompt_version_is_past_the_last_meeting_only_common_opponents() -> None:
+    """Issue #130 changed what the compare narrator is given: each
+    `common_opponents` row now carries every meeting per side
+    (`team_a_meetings` / `team_b_meetings`) instead of one result/score pair,
+    and the engine's verdict prose lists them. The cache key doesn't cover
+    the fact block (#145), so narrations cached under `persona-v8` were
+    grounded against facts that hid earlier meetings and would keep being
+    served unless the version moves."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v9"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:

@@ -17,6 +17,7 @@ from typing import Literal, cast
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     CommonOpponent,
+    CommonOpponentMeeting,
     ComparisonResult,
     ComparisonTeamSummary,
     EloGameStep,
@@ -607,26 +608,28 @@ def build_comparison(
     head_to_head = HeadToHead(played=bool(meetings), meetings=meetings)
 
     # Common opponents: any team both A and B played this season (excluding
-    # each other), with each side's result against that opponent.
-    a_by_opp = {o.opponent_team_id: o for o in case_a.games}
-    b_by_opp = {o.opponent_team_id: o for o in case_b.games}
+    # each other), with EVERY meeting each side had against that opponent
+    # (issue #130). `TeamCase.games` is already chronological (regular season
+    # by week, then postseason -- `_team_games`' ORDER BY), so appending per
+    # opponent id in that order keeps each list chronological. Before #130
+    # this was a dict overwrite that kept only the last meeting per side.
+    a_by_opp = _meetings_by_opponent(case_a.games)
+    b_by_opp = _meetings_by_opponent(case_b.games)
     common_ids = (set(a_by_opp) & set(b_by_opp)) - {case_a.team_id, case_b.team_id}
 
     common_opponents: list[CommonOpponent] = []
     for opp_id in common_ids:
-        oa = a_by_opp[opp_id]
-        ob = b_by_opp[opp_id]
+        # Name and rank come from the first meeting; every meeting against the
+        # same opponent id shares them (both are read from the opponent's own
+        # `teams`/`ratings` rows, not the game).
+        first = next(o for o in case_a.games if o.opponent_team_id == opp_id)
         common_opponents.append(
             CommonOpponent(
                 opponent_team_id=opp_id,
-                opponent_name=oa.opponent_name,
-                opponent_rank=oa.opponent_rank,
-                team_a_result=oa.result,
-                team_a_score=oa.team_score,
-                team_a_opponent_score=oa.opponent_score,
-                team_b_result=ob.result,
-                team_b_score=ob.team_score,
-                team_b_opponent_score=ob.opponent_score,
+                opponent_name=first.opponent_name,
+                opponent_rank=first.opponent_rank,
+                team_a_meetings=a_by_opp[opp_id],
+                team_b_meetings=b_by_opp[opp_id],
             )
         )
     common_opponents.sort(key=lambda c: (c.opponent_rank is None, c.opponent_rank or 0))
@@ -646,6 +649,45 @@ def build_comparison(
         rating_diff=rating_diff,
         verdict=verdict,
     )
+
+
+def _meetings_by_opponent(
+    games: list[OpponentResult],
+) -> dict[int, list[CommonOpponentMeeting]]:
+    """Every meeting per opponent id, in the order `games` lists them.
+
+    Each `OpponentResult` is already team-relative, so the meeting is a
+    straight projection: no re-deriving which side the team was on.
+    """
+    by_opp: dict[int, list[CommonOpponentMeeting]] = {}
+    for g in games:
+        by_opp.setdefault(g.opponent_team_id, []).append(
+            CommonOpponentMeeting(
+                result=g.result,
+                team_score=g.team_score,
+                opponent_score=g.opponent_score,
+                week=g.week,
+                season_type=g.season_type,
+            )
+        )
+    return by_opp
+
+
+def _describe_meeting(m: CommonOpponentMeeting) -> str:
+    """One meeting as the verdict states it: "L 31-44 (week 8)".
+
+    The score pair is team-perspective (team_score-opponent_score), the order
+    apps/api's persona grounding check accepts against the fact block. A
+    postseason meeting is labelled by its season type so it can't be read as
+    a regular-season week of the same number.
+    """
+    if m.season_type == "regular":
+        when = f"week {m.week}"
+    elif m.week is None:
+        when = m.season_type
+    else:
+        when = f"{m.season_type} week {m.week}"
+    return f"{m.result} {m.team_score}-{m.opponent_score} ({when})"
 
 
 def _verdict_rating_format(method: str) -> str:
@@ -709,10 +751,14 @@ def _build_verdict(
 
     if common_opponents:
         for c in common_opponents[:3]:
+            # Every meeting per side (issue #130), so a division opponent met
+            # twice no longer reads as a single result.
+            a_went = ", ".join(_describe_meeting(m) for m in c.team_a_meetings)
+            b_went = ", ".join(_describe_meeting(m) for m in c.team_b_meetings)
             parts.append(
                 f"vs common opponent {c.opponent_name} "
-                f"(rank {c.opponent_rank}): {case_a.team_name} went {c.team_a_result}, "
-                f"{case_b.team_name} went {c.team_b_result}."
+                f"(rank {c.opponent_rank}): {case_a.team_name} went {a_went}; "
+                f"{case_b.team_name} went {b_went}."
             )
 
     leader = case_a.team_name if rating_diff > 0 else case_b.team_name if rating_diff < 0 else None

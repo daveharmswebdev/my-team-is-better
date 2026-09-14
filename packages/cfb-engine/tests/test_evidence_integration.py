@@ -24,6 +24,8 @@ import pytest
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
+    CommonOpponent,
+    CommonOpponentMeeting,
     ComparisonResult,
     ComparisonTeamSummary,
     Method,
@@ -159,9 +161,19 @@ def test_build_comparison_team_summaries_and_common_opponents_are_typed(
     assert comparison.team_a.ties >= 0
     assert comparison.team_b.ties >= 0
     for opponent in comparison.common_opponents:
-        assert opponent.team_a_result in ("W", "L", "T")
-        assert opponent.team_b_result in ("W", "L", "T")
+        assert isinstance(opponent, CommonOpponent)
         assert isinstance(opponent.opponent_name, str)
+        # Issue #130: every meeting per side, never just the last one.
+        assert isinstance(opponent.team_a_meetings, list)
+        assert isinstance(opponent.team_b_meetings, list)
+        assert opponent.team_a_meetings and opponent.team_b_meetings
+        for meeting in opponent.team_a_meetings + opponent.team_b_meetings:
+            assert isinstance(meeting, CommonOpponentMeeting)
+            assert meeting.result in ("W", "L", "T")
+            assert isinstance(meeting.team_score, int)
+            assert isinstance(meeting.opponent_score, int)
+            assert meeting.week is None or isinstance(meeting.week, int)
+            assert isinstance(meeting.season_type, str)
 
 
 def test_build_team_case_record_matches_its_listed_games(

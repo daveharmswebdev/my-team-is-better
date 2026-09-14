@@ -599,16 +599,120 @@ def test_build_comparison_common_opponent_reports_a_tie(
         conn, TIE_YEAR, "Juliet Draws", "Kilo Beats", method=METHOD, sport=sport
     )
     assert [
-        (c.opponent_name, c.team_a_result, c.team_a_score, c.team_a_opponent_score,
-         c.team_b_result, c.team_b_score, c.team_b_opponent_score)
+        (
+            c.opponent_name,
+            [(m.result, m.team_score, m.opponent_score) for m in c.team_a_meetings],
+            [(m.result, m.team_score, m.opponent_score) for m in c.team_b_meetings],
+        )
         for c in comparison.common_opponents
-    ] == [("India Ties", "T", 17, 17, "W", 20, 10)]
+    ] == [("India Ties", [("T", 17, 17)], [("W", 20, 10)])]
     assert (comparison.team_a.wins, comparison.team_a.losses, comparison.team_a.ties) == (1, 0, 1)
     assert comparison.team_b.ties == 0
     assert (
-        "vs common opponent India Ties (rank 3): Juliet Draws went T, Kilo Beats went W."
+        "vs common opponent India Ties (rank 3): Juliet Draws went T 17-17 (week 1); "
+        "Kilo Beats went W 20-10 (week 2)."
         in comparison.verdict
     )
+
+
+# ---------------------------------------------------------------------------
+# (e2) issue #130 -- a common opponent carries EVERY meeting per side, in
+# chronological order, never just the last one
+# ---------------------------------------------------------------------------
+
+REMATCH_YEAR = 2018
+
+
+def _build_rematch_fixture(conn: sqlite3.Connection, sport: str) -> None:
+    """Three teams in their own year. Oscar meets the shared opponent
+    (Papa) three times -- twice in the regular season and once more in the
+    postseason -- while Quebec meets Papa once:
+
+      regular week 9   Oscar Twice 24, Papa Shared 27      (Oscar loses)
+      regular week 3   Papa Shared 10, Quebec Once 13      (Quebec wins)
+      regular week 2   Papa Shared 20, Oscar Twice 21      (Oscar wins)
+      postseason wk 1  Papa Shared 14, Oscar Twice 14      (tie)
+
+    Rows are inserted out of order on purpose, and the postseason meeting
+    has the lowest week number, so an implementation that keeps insertion
+    order or sorts by bare week gets the list wrong. Ids offset per sport.
+    """
+    base = 30 if sport == "cfb" else 130
+    oscar, papa, quebec = base + 1, base + 2, base + 3
+    for tid, name in ((oscar, "Oscar Twice"), (papa, "Papa Shared"), (quebec, "Quebec Once")):
+        _insert_team(conn, tid, name, sport=sport)
+    _insert_game(conn, base + 1, REMATCH_YEAR, oscar, papa, "Oscar Twice", "Papa Shared", 24, 27, week=9, sport=sport)
+    _insert_game(conn, base + 2, REMATCH_YEAR, papa, quebec, "Papa Shared", "Quebec Once", 10, 13, week=3, sport=sport)
+    _insert_game(conn, base + 3, REMATCH_YEAR, papa, oscar, "Papa Shared", "Oscar Twice", 20, 21, week=2, sport=sport)
+    _insert_game(
+        conn, base + 4, REMATCH_YEAR, papa, oscar, "Papa Shared", "Oscar Twice", 14, 14,
+        week=1, season_type="postseason", sport=sport,
+    )
+    _insert_rating(conn, REMATCH_YEAR, METHOD, quebec, 1.3, 1, 1, 0, sport=sport)
+    _insert_rating(conn, REMATCH_YEAR, METHOD, papa, 1.0, 2, 1, 2, sport=sport, ties=1)
+    _insert_rating(conn, REMATCH_YEAR, METHOD, oscar, 0.7, 3, 1, 1, sport=sport, ties=1)
+    conn.commit()
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_build_comparison_common_opponent_lists_every_meeting_chronologically(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    _build_rematch_fixture(conn, sport)
+
+    comparison = build_comparison(
+        conn, REMATCH_YEAR, "Oscar Twice", "Quebec Once", method=METHOD, sport=sport
+    )
+
+    assert [c.opponent_name for c in comparison.common_opponents] == ["Papa Shared"]
+    papa = comparison.common_opponents[0]
+    assert len(papa.team_a_meetings) == 3
+    assert len(papa.team_b_meetings) == 1
+    # Regular season by week, then postseason -- the postseason tie sorts
+    # last despite its week number being the smallest.
+    assert [
+        (m.result, m.team_score, m.opponent_score, m.week, m.season_type)
+        for m in papa.team_a_meetings
+    ] == [
+        ("W", 21, 20, 2, "regular"),
+        ("L", 24, 27, 9, "regular"),
+        ("T", 14, 14, 1, "postseason"),
+    ]
+    assert [
+        (m.result, m.team_score, m.opponent_score, m.week, m.season_type)
+        for m in papa.team_b_meetings
+    ] == [("W", 13, 10, 3, "regular")]
+
+    # Swapping the sides swaps the lists.
+    swapped = build_comparison(
+        conn, REMATCH_YEAR, "Quebec Once", "Oscar Twice", method=METHOD, sport=sport
+    )
+    assert swapped.common_opponents[0].team_a_meetings == papa.team_b_meetings
+    assert swapped.common_opponents[0].team_b_meetings == papa.team_a_meetings
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_verdict_states_every_meeting_against_a_common_opponent(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    """A two-meeting common opponent used to read as one result ("went L").
+    Each meeting's result letter and team-perspective score pair must appear."""
+    _build_rematch_fixture(conn, sport)
+
+    comparison = build_comparison(
+        conn, REMATCH_YEAR, "Oscar Twice", "Quebec Once", method=METHOD, sport=sport
+    )
+
+    assert (
+        "vs common opponent Papa Shared (rank 2): "
+        "Oscar Twice went W 21-20 (week 2), L 24-27 (week 9), T 14-14 (postseason week 1); "
+        "Quebec Once went W 13-10 (week 3)."
+    ) in comparison.verdict
+    for pair in ("21-20", "24-27", "14-14", "13-10"):
+        assert pair in comparison.verdict
+    # Never the opponent-perspective pair.
+    assert "20-21" not in comparison.verdict
+    assert "27-24" not in comparison.verdict
 
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
@@ -636,7 +740,8 @@ def test_verdict_for_a_decided_head_to_head_is_unchanged(conn: sqlite3.Connectio
     comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb")
     assert comparison.verdict.startswith(
         "Alpha State beat Bravo Tech head-to-head 30-10 (Alpha State vs Bravo Tech, week 1). "
-        "vs common opponent Charlie U (rank 3): Alpha State went W, Bravo Tech went W."
+        "vs common opponent Charlie U (rank 3): Alpha State went W 40-3 (week 1); "
+        "Bravo Tech went W 20-17 (week 1)."
     )
     assert "tied" not in comparison.verdict
 
@@ -741,7 +846,8 @@ def test_decided_head_to_head_states_the_winners_points_first(
 # "rates higher overall" sentence depends on the method.
 _ALPHA_BRAVO_PREFIX = (
     "Alpha State beat Bravo Tech head-to-head 30-10 (Alpha State vs Bravo Tech, week 1). "
-    "vs common opponent Charlie U (rank 3): Alpha State went W, Bravo Tech went W. "
+    "vs common opponent Charlie U (rank 3): Alpha State went W 40-3 (week 1); "
+    "Bravo Tech went W 20-17 (week 1). "
 )
 
 

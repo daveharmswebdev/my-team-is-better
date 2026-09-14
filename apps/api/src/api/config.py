@@ -88,7 +88,11 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # put the home score first after "X beat Y", so every away-team head-to-head
 # win read backwards ("Seattle Seahawks beat Denver Broncos head-to-head
 # 8-43"). v7 narrations were written, and grounded, against those scores.
-PROMPT_VERSION = "persona-v8"
+# persona-v9 (issue #130): prompt unchanged; the compare fact block's
+# `common_opponents` now carry every meeting per side (`team_a_meetings` /
+# `team_b_meetings`) and the engine's verdict prose lists them, so v8
+# comparison narrations were grounded against facts that hid earlier meetings.
+PROMPT_VERSION = "persona-v9"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

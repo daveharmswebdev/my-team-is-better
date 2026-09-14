@@ -542,16 +542,40 @@ class HeadToHead:
 
 
 @dataclass(frozen=True)
+class CommonOpponentMeeting:
+    """One game a compared side played against a shared opponent (issue #130).
+
+    Team-relative, like `OpponentResult`: `result` and the score pair are from
+    that side's perspective, so api/web never re-derive "which side am I".
+    Deliberately not `HeadToHeadMeeting`, which is home/away-oriented with a
+    `winner` name.
+    """
+
+    result: Literal["W", "L", "T"]
+    team_score: int
+    opponent_score: int
+    week: int | None
+    season_type: str
+
+
+@dataclass(frozen=True)
 class CommonOpponent:
+    """A team both compared sides played, with EVERY meeting per side.
+
+    Before #130 this held one result/score pair per side, so a side that met
+    the opponent twice (every NFL division opponent; CFB conference-title
+    rematches) silently showed only its last meeting. Each list is non-empty
+    and chronological: regular season by week, then postseason.
+
+    No per-side W-L-T aggregate: it is derivable from the list, and one more
+    thing that could disagree with it (founder decision on #130).
+    """
+
     opponent_team_id: int
     opponent_name: str
     opponent_rank: int | None
-    team_a_result: Literal["W", "L", "T"]
-    team_a_score: int
-    team_a_opponent_score: int
-    team_b_result: Literal["W", "L", "T"]
-    team_b_score: int
-    team_b_opponent_score: int
+    team_a_meetings: list[CommonOpponentMeeting]
+    team_b_meetings: list[CommonOpponentMeeting]
 
 
 @dataclass(frozen=True)

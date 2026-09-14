@@ -142,16 +142,33 @@ export interface HeadToHeadOut {
   meetings: HeadToHeadMeetingOut[]
 }
 
+/**
+ * One game a compared side played against a shared opponent (issue #130).
+ * Team-relative, like `OpponentResultOut`: `result` and the score pair are
+ * from that side's perspective, so apps/web never re-derives which side it is.
+ */
+export interface CommonOpponentMeetingOut {
+  /** From that side's perspective, like `OpponentResultOut`. */
+  result: GameResult
+  team_score: number
+  opponent_score: number
+  week: number | null
+  season_type: string
+}
+
+/**
+ * A team both compared sides played, with every meeting per side. There is
+ * deliberately no per-side W-L-T aggregate: it is derivable from the list and
+ * would be one more thing that could disagree with it (issue #130).
+ */
 export interface CommonOpponentOut {
   opponent_team_id: number
   opponent_name: string
   opponent_rank: number | null
-  team_a_result: GameResult
-  team_a_score: number
-  team_a_opponent_score: number
-  team_b_result: GameResult
-  team_b_score: number
-  team_b_opponent_score: number
+  /** Every meeting this season, chronological (regular season by week, then postseason); never empty (issue #130). */
+  team_a_meetings: CommonOpponentMeetingOut[]
+  /** Same, for team_b. */
+  team_b_meetings: CommonOpponentMeetingOut[]
 }
 
 export interface ComparisonResultOut {

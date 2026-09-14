@@ -1,7 +1,11 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { METHODS, type ComparisonResultOut } from '../../lib/api/types'
+import {
+  METHODS,
+  type CommonOpponentOut,
+  type ComparisonResultOut,
+} from '../../lib/api/types'
 import { formatRating } from '../../lib/formatRating'
 import { ComparisonReceipts } from './ComparisonReceipts'
 import { TEXAS_ELO, USC_ELO } from './eloLedgerFixture'
@@ -132,16 +136,80 @@ const evidence: ComparisonResultOut = {
       opponent_team_id: 84,
       opponent_name: 'Indiana',
       opponent_rank: 21,
-      team_a_result: 'W',
-      team_a_score: 42,
-      team_a_opponent_score: 35,
-      team_b_result: 'L',
-      team_b_score: 21,
-      team_b_opponent_score: 38,
+      team_a_meetings: [
+        {
+          result: 'W',
+          team_score: 42,
+          opponent_score: 35,
+          week: 12,
+          season_type: 'regular',
+        },
+      ],
+      team_b_meetings: [
+        {
+          result: 'L',
+          team_score: 21,
+          opponent_score: 38,
+          week: 10,
+          season_type: 'regular',
+        },
+      ],
     },
   ],
   rating_diff: 0.00275,
   verdict: VERDICT_SENTINEL,
+}
+
+/**
+ * Issue #130's motivating case, real 2013 NFL data: both Minnesota and Chicago
+ * met Green Bay twice (division rivals), and Minnesota's second meeting was a
+ * tie. `opponent_rank` is illustrative.
+ */
+const GREEN_BAY_TWICE: CommonOpponentOut = {
+  opponent_team_id: 12,
+  opponent_name: 'Green Bay',
+  opponent_rank: 8,
+  team_a_meetings: [
+    {
+      result: 'L',
+      team_score: 31,
+      opponent_score: 44,
+      week: 8,
+      season_type: 'regular',
+    },
+    {
+      result: 'T',
+      team_score: 26,
+      opponent_score: 26,
+      week: 12,
+      season_type: 'regular',
+    },
+  ],
+  team_b_meetings: [
+    {
+      result: 'W',
+      team_score: 27,
+      opponent_score: 20,
+      week: 9,
+      season_type: 'regular',
+    },
+    {
+      result: 'L',
+      team_score: 28,
+      opponent_score: 33,
+      week: 17,
+      season_type: 'regular',
+    },
+  ],
+}
+
+const vikingsVsBears: ComparisonResultOut = {
+  ...evidence,
+  year: 2013,
+  team_a: { ...evidence.team_a, team_name: 'Minnesota Vikings' },
+  team_b: { ...evidence.team_b, team_name: 'Chicago Bears' },
+  head_to_head: { played: false, meetings: [] },
+  common_opponents: [GREEN_BAY_TWICE],
 }
 
 /** Swaps in both teams' names, ranks and ratings, keeping `rating_diff` consistent with them. */
@@ -164,8 +232,14 @@ describe('ComparisonReceipts', () => {
   it('renders team_a and team_b names and formatted ratings', () => {
     render(<ComparisonReceipts evidence={evidence} />)
 
-    expect(screen.getByText('Ohio State')).toBeInTheDocument()
-    expect(screen.getByText('Michigan')).toBeInTheDocument()
+    // By heading: each name also labels that team's common-opponent meetings
+    // (issue #130).
+    expect(
+      screen.getByRole('heading', { name: 'Ohio State' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Michigan' }),
+    ).toBeInTheDocument()
     expect(screen.getByText('8.77')).toBeInTheDocument()
     expect(screen.getByText('6.02')).toBeInTheDocument()
   })
@@ -569,12 +643,24 @@ describe('ComparisonReceipts', () => {
               opponent_team_id: 84,
               opponent_name: 'Indiana',
               opponent_rank: 21,
-              team_a_result: 'T',
-              team_a_score: 26,
-              team_a_opponent_score: 26,
-              team_b_result: 'L',
-              team_b_score: 21,
-              team_b_opponent_score: 38,
+              team_a_meetings: [
+                {
+                  result: 'T',
+                  team_score: 26,
+                  opponent_score: 26,
+                  week: 12,
+                  season_type: 'regular',
+                },
+              ],
+              team_b_meetings: [
+                {
+                  result: 'L',
+                  team_score: 21,
+                  opponent_score: 38,
+                  week: 10,
+                  season_type: 'regular',
+                },
+              ],
             },
           ],
         }}
@@ -597,6 +683,90 @@ describe('ComparisonReceipts', () => {
     // Team B's side of the same opponent is still an ordinary loss.
     expect(tagB.className).toMatch(/gamelineTagL/)
     expect(within(tagB).getByText('Loss')).toBeInTheDocument()
+  })
+
+  /**
+   * Issue #130: a side that met the shared opponent more than once shows
+   * every meeting, in the API's (chronological) order, never just the last.
+   */
+  describe('common opponents met more than once (issue #130)', () => {
+    /** The rendered Green Bay row. */
+    function greenBayRow(): HTMLElement {
+      return screen.getByText(/Green Bay/).closest('li') as HTMLElement
+    }
+
+    it('renders both meetings of each side, in order, each with its own result tag and week', () => {
+      render(<ComparisonReceipts evidence={vikingsVsBears} />)
+      const row = greenBayRow()
+      const text = row.textContent ?? ''
+
+      expect(within(row).getByText(/#8/)).toBeInTheDocument()
+
+      // Every score pair, from that side's perspective, in the API's order:
+      // Minnesota's two meetings, then Chicago's two.
+      const positions = ['31-44', '26-26', '27-20', '28-33'].map((score) => {
+        const at = text.indexOf(score)
+        expect(at, `${score} in ${JSON.stringify(text)}`).toBeGreaterThan(-1)
+        return at
+      })
+      expect(positions).toEqual([...positions].sort((x, y) => x - y))
+
+      // One accessible Win/Loss/Tie label per meeting, in the same order.
+      expect(
+        within(row)
+          .getAllByText(/^(Win|Loss|Tie)$/)
+          .map((label) => label.textContent),
+      ).toEqual(['Loss', 'Tie', 'Win', 'Loss'])
+
+      for (const week of ['(wk 8)', '(wk 12)', '(wk 9)', '(wk 17)']) {
+        expect(
+          within(row).getByText((content) => content.includes(week)),
+        ).toBeInTheDocument()
+      }
+    })
+
+    it('labels each side’s group of meetings with its team, so a reader can tell whose meetings they are', () => {
+      render(<ComparisonReceipts evidence={vikingsVsBears} />)
+      const row = greenBayRow()
+
+      const minnesota = within(row).getByRole('group', {
+        name: 'Minnesota Vikings',
+      })
+      expect(minnesota.textContent).toContain('31-44')
+      expect(minnesota.textContent).toContain('26-26')
+      expect(minnesota.textContent).not.toContain('27-20')
+      expect(minnesota.textContent).not.toContain('28-33')
+
+      const chicago = within(row).getByRole('group', { name: 'Chicago Bears' })
+      expect(chicago.textContent).toContain('27-20')
+      expect(chicago.textContent).toContain('28-33')
+      expect(chicago.textContent).not.toContain('31-44')
+      expect(chicago.textContent).not.toContain('26-26')
+    })
+
+    it('shows no week parenthetical for a meeting whose week is null', () => {
+      const withoutWeeks: CommonOpponentOut = {
+        ...GREEN_BAY_TWICE,
+        team_a_meetings: GREEN_BAY_TWICE.team_a_meetings.map((meeting) => ({
+          ...meeting,
+          week: null,
+        })),
+        team_b_meetings: GREEN_BAY_TWICE.team_b_meetings.map((meeting) => ({
+          ...meeting,
+          week: null,
+        })),
+      }
+      render(
+        <ComparisonReceipts
+          evidence={{ ...vikingsVsBears, common_opponents: [withoutWeeks] }}
+        />,
+      )
+      const row = greenBayRow()
+
+      expect(row.textContent).not.toContain('(wk')
+      expect(row.textContent).toContain('31-44')
+      expect(row.textContent).toContain('28-33')
+    })
   })
 
   it('renders "No common opponents" when there are none', () => {

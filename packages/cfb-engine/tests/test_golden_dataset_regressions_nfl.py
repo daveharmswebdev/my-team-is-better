@@ -356,25 +356,36 @@ def test_2013_vikings_case_record_includes_the_tie(
 
 
 @pytest.mark.parametrize(
-    ("team_a", "team_b", "common_opponent", "a_result", "a_score", "b_result", "b_score"),
+    ("team_a", "team_b", "common_opponent", "a_meetings", "b_meetings"),
     [
-        # Green Bay as the common opponent. Each side's pairing keeps the
-        # existing choice rule (the last game against that opponent), which
-        # for Minnesota is the week-12 tie, not the week-8 loss.
-        ("Minnesota Vikings", "Chicago Bears", "Green Bay Packers", "T", (26, 26), "L", (28, 33)),
+        # Green Bay as the common opponent (issue #130): every NFL division
+        # opponent is met twice, and BOTH meetings must be listed per side, in
+        # order. Before #130 only the last one survived, so Minnesota's
+        # week-8 loss vanished behind its week-12 tie.
+        (
+            "Minnesota Vikings",
+            "Chicago Bears",
+            "Green Bay Packers",
+            [("L", 31, 44, 8), ("T", 26, 26, 12)],
+            [("W", 27, 20, 9), ("L", 28, 33, 17)],
+        ),
         # Minnesota as the common opponent.
-        ("Green Bay Packers", "Chicago Bears", "Minnesota Vikings", "T", (26, 26), "L", (20, 23)),
+        (
+            "Green Bay Packers",
+            "Chicago Bears",
+            "Minnesota Vikings",
+            [("W", 44, 31, 8), ("T", 26, 26, 12)],
+            [("W", 31, 30, 2), ("L", 20, 23, 13)],
+        ),
     ],
 )
-def test_2013_common_opponent_reports_the_tie(
+def test_2013_common_opponent_lists_every_meeting_including_the_tie(
     nfl_regression_conn: sqlite3.Connection,
     team_a: str,
     team_b: str,
     common_opponent: str,
-    a_result: str,
-    a_score: tuple[int, int],
-    b_result: str,
-    b_score: tuple[int, int],
+    a_meetings: list[tuple[str, int, int, int]],
+    b_meetings: list[tuple[str, int, int, int]],
 ) -> None:
     compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
 
@@ -385,13 +396,71 @@ def test_2013_common_opponent_reports_the_tie(
     matches = [c for c in comparison.common_opponents if c.opponent_name == common_opponent]
     assert len(matches) == 1
     shared = matches[0]
-    assert shared.team_a_result == a_result
-    assert (shared.team_a_score, shared.team_a_opponent_score) == a_score
-    assert shared.team_b_result == b_result
-    assert (shared.team_b_score, shared.team_b_opponent_score) == b_score
+    assert [
+        (m.result, m.team_score, m.opponent_score, m.week) for m in shared.team_a_meetings
+    ] == a_meetings
+    assert [
+        (m.result, m.team_score, m.opponent_score, m.week) for m in shared.team_b_meetings
+    ] == b_meetings
+    assert all(m.season_type == "regular" for m in shared.team_a_meetings + shared.team_b_meetings)
 
     assert comparison.team_a.ties == 1
     assert comparison.team_b.ties == 0
+
+    # Swapping the sides swaps the lists, nothing else.
+    swapped = build_comparison(
+        nfl_regression_conn, 2013, team_b, team_a, method="keener", sport="nfl"
+    )
+    swapped_shared = [c for c in swapped.common_opponents if c.opponent_name == common_opponent]
+    assert len(swapped_shared) == 1
+    assert swapped_shared[0].team_a_meetings == shared.team_b_meetings
+    assert swapped_shared[0].team_b_meetings == shared.team_a_meetings
+
+
+def test_2013_verdict_states_every_meeting_against_a_common_opponent(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    """Issue #130: a multi-meeting common opponent read as a single result in
+    the verdict prose. Every meeting's result letter and score pair (from
+    that side's perspective) must appear, and a postseason meeting is
+    labelled as such.
+
+    Seattle and Arizona share San Francisco, whom Seattle met three times
+    in 2013 (twice in the regular season, then the NFC championship, week
+    20 postseason) and Arizona twice. Under Keener San Francisco ranks 3rd,
+    so it is the first of the (at most three) common opponents the verdict
+    cites -- Green Bay ranks 18th in the Vikings/Bears comparison, outside
+    that cap, which is why this test uses the NFC West instead."""
+    compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
+
+    comparison = build_comparison(
+        nfl_regression_conn, 2013, "Seattle Seahawks", "Arizona Cardinals",
+        method="keener", sport="nfl",
+    )
+
+    niners = comparison.common_opponents[0]
+    assert niners.opponent_name == "San Francisco 49ers"
+    assert niners.opponent_rank == 3
+    assert [(m.result, m.team_score, m.opponent_score, m.week, m.season_type) for m in niners.team_a_meetings] == [
+        ("W", 29, 3, 2, "regular"),
+        ("L", 17, 19, 14, "regular"),
+        ("W", 23, 17, 20, "postseason"),
+    ]
+    assert [(m.result, m.team_score, m.opponent_score, m.week) for m in niners.team_b_meetings] == [
+        ("L", 20, 32, 6),
+        ("L", 20, 23, 17),
+    ]
+    assert (
+        "vs common opponent San Francisco 49ers (rank 3): "
+        "Seattle Seahawks went W 29-3 (week 2), L 17-19 (week 14), W 23-17 (postseason week 20); "
+        "Arizona Cardinals went L 20-32 (week 6), L 20-23 (week 17)."
+    ) in comparison.verdict
+
+    # The invariant behind the pinned sentence: every cited common opponent
+    # has every meeting's team-perspective score pair in the prose.
+    for cited in comparison.common_opponents[:3]:
+        for meeting in cited.team_a_meetings + cited.team_b_meetings:
+            assert f"{meeting.result} {meeting.team_score}-{meeting.opponent_score}" in comparison.verdict
 
 
 def test_2013_packers_vikings_comparison_verdict_names_the_tie(
