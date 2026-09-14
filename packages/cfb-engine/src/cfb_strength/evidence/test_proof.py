@@ -83,6 +83,7 @@ def _insert_game(
     season_type: str = "regular",
     completed: bool = True,
     sport: str = "cfb",
+    neutral_site: bool = False,
 ) -> None:
     conn.execute(
         """
@@ -90,13 +91,14 @@ def _insert_game(
             id, season, week, season_type, start_date, neutral_site, completed,
             home_team_id, away_team_id, home_team, away_team,
             home_points, away_points, home_conference, away_conference, venue, raw_json, sport
-        ) VALUES (?, ?, ?, ?, NULL, 0, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '{}', ?)
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '{}', ?)
         """,
         (
             game_id,
             year,
             week,
             season_type,
+            1 if neutral_site else 0,
             1 if completed else 0,
             home_id,
             away_id,
@@ -637,6 +639,98 @@ def test_verdict_for_a_decided_head_to_head_is_unchanged(conn: sqlite3.Connectio
         "vs common opponent Charlie U (rank 3): Alpha State went W, Bravo Tech went W."
     )
     assert "tied" not in comparison.verdict
+
+
+# ---------------------------------------------------------------------------
+# issue #122 -- a decided head-to-head sentence states the winner's points
+# first, whoever was home and whether or not the site was neutral
+# ---------------------------------------------------------------------------
+
+H2H_YEAR = 2021
+
+
+def _build_winner_first_fixture(conn: sqlite3.Connection, sport: str) -> None:
+    """Three separate pairs in their own year, so each comparison has exactly
+    one meeting and the shared fixture above is untouched:
+
+      week 5  Home Losers 17, Road Winners 24          (away team wins)
+      week 6  Home Winners 35, Visiting Losers 14      (home team wins)
+      week 7  Nominal Host 8, Nominal Visitor 43       (neutral site, nominal away wins)
+
+    Ids are offset per sport.
+    """
+    base = 40 if sport == "cfb" else 140
+    teams = (
+        (base, "Home Losers"),
+        (base + 1, "Road Winners"),
+        (base + 2, "Home Winners"),
+        (base + 3, "Visiting Losers"),
+        (base + 4, "Nominal Host"),
+        (base + 5, "Nominal Visitor"),
+    )
+    for rank, (tid, name) in enumerate(teams, start=1):
+        _insert_team(conn, tid, name, sport=sport)
+        _insert_rating(conn, H2H_YEAR, METHOD, tid, 1.0 - rank / 10, rank, 1, 1, sport=sport)
+    _insert_game(conn, base + 1, H2H_YEAR, base, base + 1, "Home Losers", "Road Winners", 17, 24, week=5, sport=sport)
+    _insert_game(
+        conn, base + 2, H2H_YEAR, base + 2, base + 3, "Home Winners", "Visiting Losers", 35, 14, week=6, sport=sport
+    )
+    _insert_game(
+        conn, base + 3, H2H_YEAR, base + 4, base + 5, "Nominal Host", "Nominal Visitor", 8, 43,
+        week=7, sport=sport, neutral_site=True,
+    )
+    conn.commit()
+
+
+_WINNER_FIRST_CASES = [
+    pytest.param(
+        "Road Winners",
+        "Home Losers",
+        "Road Winners beat Home Losers head-to-head 24-17 (Home Losers vs Road Winners, week 5).",
+        False,
+        id="away-winner",
+    ),
+    pytest.param(
+        "Home Winners",
+        "Visiting Losers",
+        "Home Winners beat Visiting Losers head-to-head 35-14 (Home Winners vs Visiting Losers, week 6).",
+        False,
+        id="home-winner",
+    ),
+    pytest.param(
+        "Nominal Visitor",
+        "Nominal Host",
+        "Nominal Visitor beat Nominal Host head-to-head 43-8 (Nominal Host vs Nominal Visitor, week 7).",
+        True,
+        id="neutral-site-nominal-away-winner",
+    ),
+]
+
+
+@pytest.mark.parametrize("winner_side", ["team_a", "team_b"])
+@pytest.mark.parametrize(("winner", "loser", "expected", "neutral_site"), _WINNER_FIRST_CASES)
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_decided_head_to_head_states_the_winners_points_first(
+    conn: sqlite3.Connection,
+    sport: Sport,
+    winner: str,
+    loser: str,
+    expected: str,
+    neutral_site: bool,
+    winner_side: str,
+) -> None:
+    """The score after "X beat Y" reads as X's points first. Before #122 it was
+    always home-away, so every road win read backwards ("beat ... 17-24").
+    Both decided branches are covered: the winner as team_a and as team_b."""
+    _build_winner_first_fixture(conn, sport)
+    team_a, team_b = (winner, loser) if winner_side == "team_a" else (loser, winner)
+
+    comparison = build_comparison(conn, H2H_YEAR, team_a, team_b, method=METHOD, sport=sport)
+
+    [meeting] = comparison.head_to_head.meetings
+    assert meeting.winner == winner
+    assert meeting.neutral_site is neutral_site
+    assert comparison.verdict.startswith(expected + " ")
 
 
 # ---------------------------------------------------------------------------
