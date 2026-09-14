@@ -25,7 +25,11 @@ vi.mock('../../lib/api/client', async () => {
   }
 })
 
-import { fetchTeams, fetchYears } from '../../lib/api/client'
+import {
+  CATALOG_TIMEOUT_MS,
+  fetchTeams,
+  fetchYears,
+} from '../../lib/api/client'
 
 const mockedFetchYears = vi.mocked(fetchYears)
 const mockedFetchTeams = vi.mocked(fetchTeams)
@@ -1141,6 +1145,123 @@ describe('QuestionForm', () => {
         questionType: 'champion',
         year: 2005,
         userTeam: null,
+        sport: 'cfb',
+        method: 'keener',
+      })
+    })
+  })
+
+  /**
+   * Issue #237, through the real client: only `fetch` and the clock are
+   * faked. A catalog request that never answers must end in the same
+   * degraded state as one that fails outright, once its timeout passes.
+   */
+  describe('hung catalog requests (issue #237)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    })
+
+    /** Moves the fake clock, then lets the rejection chain and React settle. */
+    async function advance(ms: number) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+        for (let i = 0; i < 20; i += 1) {
+          await Promise.resolve()
+        }
+      })
+    }
+
+    /**
+     * Routes the mocked catalog fetchers to the real client, over a `fetch`
+     * that never answers and gives up only when its request's signal aborts.
+     */
+    async function hangEveryCatalogRequest() {
+      const actual = await vi.importActual<
+        typeof import('../../lib/api/client')
+      >('../../lib/api/client')
+      mockedFetchYears.mockImplementation(actual.fetchYears)
+      mockedFetchTeams.mockImplementation(actual.fetchTeams)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          (_url: string, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => {
+                reject(new DOMException('aborted', 'AbortError'))
+              })
+            }),
+        ),
+      )
+    }
+
+    it('degrades a hung /api/years to the failed-years hint and an unvalidated year', async () => {
+      await hangEveryCatalogRequest()
+      vi.useFakeTimers()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+
+      await advance(CATALOG_TIMEOUT_MS - 1)
+      expect(
+        screen.queryByText(/couldn't load the list of available years/i),
+      ).not.toBeInTheDocument()
+
+      await advance(1)
+      expect(
+        screen.getByText(/couldn't load the list of available years/i),
+      ).toBeInTheDocument()
+      const yearInput = screen.getByLabelText(/year/i)
+      expect(yearInput.getAttribute('list')).toBeFalsy()
+
+      // Any whole four-digit year goes: there is no range to check it against.
+      fireEvent.change(yearInput, { target: { value: '1850' } })
+      expect(submitButton()).not.toBeDisabled()
+      fireEvent.click(submitButton())
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'champion',
+        year: 1850,
+        userTeam: null,
+        sport: 'cfb',
+        method: 'keener',
+      })
+    })
+
+    it('degrades a hung /api/teams to plain team inputs with the failed-list hint', async () => {
+      await hangEveryCatalogRequest()
+      vi.useFakeTimers()
+      const onSubmit = vi.fn()
+      render(
+        <QuestionForm
+          onSubmit={onSubmit}
+          initialQuestionType="compare"
+          initialYear={2005}
+        />,
+      )
+
+      await advance(CATALOG_TIMEOUT_MS - 1)
+      expect(screen.queryByText(TEAM_LIST_FAILED)).not.toBeInTheDocument()
+
+      await advance(1)
+      expect(screen.getAllByText(TEAM_LIST_FAILED)).not.toHaveLength(0)
+      // Plain inputs, not comboboxes: no suggestions to reconcile.
+      const userTeamField = screen.getByLabelText(/your team/i)
+      expect(userTeamField).not.toHaveAttribute('role', 'combobox')
+
+      fireEvent.change(screen.getByLabelText(/team a/i), {
+        target: { value: 'Texas' },
+      })
+      fireEvent.change(screen.getByLabelText(/team b/i), {
+        target: { value: 'USC' },
+      })
+      fireEvent.change(userTeamField, { target: { value: 'Whatever FC' } })
+      fireEvent.click(submitButton())
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'compare',
+        year: 2005,
+        teamA: 'Texas',
+        teamB: 'USC',
+        userTeam: 'Whatever FC',
         sport: 'cfb',
         method: 'keener',
       })
