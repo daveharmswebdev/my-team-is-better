@@ -83,6 +83,18 @@ from pydantic import BaseModel, ConfigDict, Field
 # requests
 # ---------------------------------------------------------------------------
 
+# Issue #188: `user_team` is interpolated into the persona system prompt, and
+# since share links (#184) a third party can set it. The request models accept
+# any string for it on purpose: the web's 'Your team' field and its saved value
+# have no length bound, so a 422 here would break every verdict for a user with
+# a long saved value. Instead `api.verdict.resolve_user_team` resolves the value
+# against the team catalog, so only a canonical team name ever reaches the
+# prompt or the cache key, and treats anything longer than this (after
+# stripping) as no team. 64 matches `apps/web`'s share-link bound
+# (`MAX_TEAM_NAME_LENGTH` in `HomePage/shareLink.ts`) and is more than double
+# the longest stored team name or alias (27 chars).
+USER_TEAM_MAX_LENGTH = 64
+
 
 class ChampionRequest(BaseModel):
     """'Who was the best team in <year>?' -- no team named."""
