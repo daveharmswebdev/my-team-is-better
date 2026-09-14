@@ -257,16 +257,24 @@ def test_claude_api_error_falls_back_safely_instead_of_500ing(client: TestClient
 def test_contested_is_true_for_2003() -> None:
     from api.persona.service import is_contested
 
-    assert is_contested(2003) is True
+    assert is_contested("cfb", 2003) is True
 
 
 def test_contested_is_true_for_2017() -> None:
     from api.persona.service import is_contested
 
-    assert is_contested(2017) is True
+    assert is_contested("cfb", 2017) is True
 
 
 def test_contested_is_false_for_a_must_match_year() -> None:
     from api.persona.service import is_contested
 
-    assert is_contested(2005) is False
+    assert is_contested("cfb", 2005) is False
+
+
+def test_contested_is_false_for_nfl_in_the_cfb_contested_years() -> None:
+    """Issue #151: 2003 and 2017 are disputed college seasons only."""
+    from api.persona.service import is_contested
+
+    assert is_contested("nfl", 2003) is False
+    assert is_contested("nfl", 2017) is False

@@ -92,9 +92,10 @@ EXPECTED_KEENER_NUMBER_ONE: dict[int, str] = {
     2019: "LSU",
 }
 
-# `api.config.CONTESTED_YEARS`, restated rather than imported so a change to
-# that set shows up here as a red eval instead of silently moving the target.
-# CFB-only on purpose: `is_contested` ignores sport (#151).
+# The CFB entry of `api.config.CONTESTED_YEARS`, restated rather than imported
+# so a change to that set shows up here as a red eval instead of silently
+# moving the target. This eval is CFB-only; contested years are per league
+# (#151), and the NFL entry is covered by test_verdict_contested_by_sport.py.
 EXPECTED_CONTESTED_YEARS = {2003, 2017}
 
 # The prompt asks for "Two or three sentences". 1-4 allows one either side

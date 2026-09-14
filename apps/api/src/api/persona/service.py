@@ -37,6 +37,19 @@ normally with `cached=False`. `PostgresNarrationCache` already degrades this
 way on its own; this guard makes the same promise for every
 `NarrationCacheStore`. Only database errors are caught -- a programming bug
 in a store still surfaces.
+
+**A cached row with the wrong `contested` flag is a miss (issue #151).**
+`contested` is computed per request from `api.config.CONTESTED_YEARS`, which
+is keyed by league. Before #151 it was a bare CFB year set, so NFL 2003/2017
+rows were cached with `contested=True`, and their text was narrated under
+that wrong flag. Both the flag and the text therefore have to be
+regenerated: a hit whose `cached.contested` differs from the freshly
+computed flag is treated like a legacy fallback row, narrated again, and
+overwritten through the cache's upsert. A hit whose flag matches is served
+unchanged. This was chosen over a PROMPT_VERSION bump, which would discard
+every cached narration in both leagues to fix a handful of NFL rows, and it
+heals any later change to the contested lists the same way without a global
+bust. The cache key and `CachedNarration` are unchanged.
 """
 
 from __future__ import annotations
@@ -48,7 +61,7 @@ import psycopg
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
 from api.deps import list_all_team_names
-from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
+from api.models import ComparisonResultOut, NarrationOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
@@ -84,11 +97,12 @@ def comparison_fact_block_json(comparison: ComparisonResultOut) -> str:
     return comparison.model_dump_json(exclude=COMPARISON_FACT_BLOCK_EXCLUDE)
 
 
-def is_contested(year: int) -> bool:
-    """§4.1's `contested` flag -- true for the years the human polls and
-    the computed ratings disagreed (`api.config.CONTESTED_YEARS`).
+def is_contested(sport: Sport, year: int) -> bool:
+    """§4.1's `contested` flag -- true for the seasons in `sport` where the
+    human polls and the computed ratings disagreed
+    (`api.config.CONTESTED_YEARS`, keyed by league since issue #151).
     """
-    return year in CONTESTED_YEARS
+    return year in CONTESTED_YEARS[sport]
 
 
 def narrate_team_case(
@@ -98,7 +112,7 @@ def narrate_team_case(
     user_team: str | None,
     question_type: str,
     method: str,
-    sport: str = "cfb",
+    sport: Sport = "cfb",
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
@@ -130,7 +144,7 @@ def narrate_comparison(
     *,
     user_team: str | None,
     method: str,
-    sport: str = "cfb",
+    sport: Sport = "cfb",
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
@@ -164,27 +178,29 @@ def _cached_narration(
     key: str,
     fallback_text: str,
     user_team: str | None,
-    sport: str,
+    sport: Sport,
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
     """Serve a real cached narration, or narrate and cache the result unless
-    it is the fallback. A cached entry whose text is this request's
-    `fallback_text` is a legacy fallback row and counts as a miss (see the
-    module docstring, issue #65).
+    it is the fallback. Two kinds of cached entry count as a miss (see the
+    module docstring): one whose text is this request's `fallback_text` (a
+    legacy fallback row, issue #65), and one whose `contested` flag differs
+    from the one computed now (narrated under a stale contested list, issue
+    #151).
 
     `fact_block_json` comes from `team_case_fact_block_json` /
     `comparison_fact_block_json`, never a bare `model_dump_json()`, so the
     #183 ledger exclusion cannot be bypassed here.
     """
-    contested = is_contested(year)
+    contested = is_contested(sport, year)
 
     try:
         cached = cache.get(key)
     except psycopg.Error as exc:
         logger.warning("Narration cache read failed, narrating uncached: %s", exc)
         cached = None
-    if cached is not None and cached.text != fallback_text:
+    if cached is not None and cached.text != fallback_text and cached.contested == contested:
         return NarrationOut(text=cached.text, contested=cached.contested, cached=True)
 
     result = narrate(

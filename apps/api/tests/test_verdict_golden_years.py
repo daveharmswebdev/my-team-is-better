@@ -24,9 +24,9 @@ Keener only. Nothing here asserts Elo's #1, or that Elo agrees or disagrees
 with Keener: the founder's neutrality rule. `build_fixture.py` reports the Elo
 #1 for each year and never asserts it.
 
-`contested` is asserted for CFB only. `api.persona.service.is_contested`
-currently ignores `sport` (issue #151), and changing that is out of scope
-here, so this file makes no claim about any other league.
+`contested` is asserted for CFB only, because these are CFB golden seasons.
+Contested years are per league (issue #151); the NFL side of that is
+covered by `test_verdict_contested_by_sport.py`, not here.
 """
 
 from __future__ import annotations

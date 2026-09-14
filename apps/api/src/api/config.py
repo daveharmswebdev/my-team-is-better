@@ -15,9 +15,16 @@ this app is scoped to. This module loads `apps/api/.env` (via
   meaning of the fact block (the evidence JSON) -- so the Postgres response
   cache (`api.persona.cache`) auto-busts instead of serving stale narration
   written under an old voice or from old facts.
-- `CONTESTED_YEARS`: the first place this constant is defined anywhere in
-  the project (checked -- no equivalent exists in `packages/cfb-engine`);
-  scoped to `apps/api` only, per issue #4's brief.
+- `CONTESTED_YEARS`: the seasons whose champion is disputed (the human polls
+  and the computed ratings disagreed), keyed by league (issue #151). It was
+  a bare CFB year set, so NFL 2003/2017 verdicts were flagged contested too.
+  Every `Sport` needs an entry, possibly empty, so a new league must state
+  its own contested years instead of inheriting another league's
+  (`tests/test_verdict_contested_by_sport.py` checks this). The first place
+  this constant is defined anywhere in the project (checked -- no equivalent
+  exists in `packages/cfb-engine`); scoped to `apps/api` only, per issue
+  #4's brief. Narrations cached under an old list heal themselves: see
+  `api.persona.service`.
 - `CORS_ALLOWED_ORIGINS`: comma-separated allowlist of browser origins
   permitted to call this API (issue #13). Defaults to
   `["http://localhost:5173"]` (the Vite dev server's default port) when
@@ -40,6 +47,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from cfb_strength.contracts import Sport
 from dotenv import load_dotenv
 
 APP_ROOT = Path(__file__).resolve().parents[2]  # apps/api/
@@ -78,6 +86,9 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # longer let a grounded narration argue against the ranking.
 PROMPT_VERSION = "persona-v7"
 
-CONTESTED_YEARS: set[int] = {2003, 2017}
+CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
+    "cfb": frozenset({2003, 2017}),
+    "nfl": frozenset(),
+}
 
 APP_TEST_MODE: bool = os.environ.get("APP_TEST_MODE") == "1"

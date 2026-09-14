@@ -12,8 +12,13 @@ what's ultimately a plumbing test (the engine layer's own real-ratings
 integration test already lives in `cfb_verdict_fixture.sqlite3` / this
 module's own `test_proof.py` counterpart).
 
+The season defaults to `YEAR` (2023). Issue #151 builds the same shape in
+other seasons (`year=2003` etc.) because no committed fixture has NFL rows in
+a contested CFB year, and `contested` has to be proven per league there.
+
 Not part of the pytest suite itself (doesn't match `test_*.py`) -- imported
-by `test_verdict_sport.py`, `test_catalog_sport.py`, and `test_deps.py`.
+by `test_verdict_sport.py`, `test_catalog_sport.py`, `test_deps.py` and
+`test_verdict_contested_by_sport.py`.
 """
 
 from __future__ import annotations
@@ -150,38 +155,39 @@ def _insert_breakdown(
     )
 
 
-def build_sport_fixture(conn: sqlite3.Connection) -> None:
+def build_sport_fixture(conn: sqlite3.Connection, year: int = YEAR) -> None:
     """Populate `conn` (an already-`ensure_schema`'d connection) with a CFB
-    win cycle, an NFL win cycle, and a cross-sport name collision."""
+    win cycle, an NFL win cycle, and a cross-sport name collision, all in
+    season `year`."""
     for tid, name in CFB_TEAM_NAMES.items():
         _insert_team(conn, tid, name, classification="fbs", sport="cfb")
-    _insert_game(conn, 1, YEAR, 1, 2, CFB_TEAM_NAMES[1], CFB_TEAM_NAMES[2], 30, 10, sport="cfb")
-    _insert_game(conn, 2, YEAR, 2, 3, CFB_TEAM_NAMES[2], CFB_TEAM_NAMES[3], 20, 17, sport="cfb")
-    _insert_game(conn, 3, YEAR, 3, 1, CFB_TEAM_NAMES[3], CFB_TEAM_NAMES[1], 3, 40, sport="cfb")
-    _insert_rating(conn, YEAR, METHOD, 1, 1.5, 1, 2, 0, sport="cfb")
-    _insert_rating(conn, YEAR, METHOD, 2, 1.0, 2, 1, 1, sport="cfb")
-    _insert_rating(conn, YEAR, METHOD, 3, 0.5, 3, 0, 2, sport="cfb")
+    _insert_game(conn, 1, year, 1, 2, CFB_TEAM_NAMES[1], CFB_TEAM_NAMES[2], 30, 10, sport="cfb")
+    _insert_game(conn, 2, year, 2, 3, CFB_TEAM_NAMES[2], CFB_TEAM_NAMES[3], 20, 17, sport="cfb")
+    _insert_game(conn, 3, year, 3, 1, CFB_TEAM_NAMES[3], CFB_TEAM_NAMES[1], 3, 40, sport="cfb")
+    _insert_rating(conn, year, METHOD, 1, 1.5, 1, 2, 0, sport="cfb")
+    _insert_rating(conn, year, METHOD, 2, 1.0, 2, 1, 1, sport="cfb")
+    _insert_rating(conn, year, METHOD, 3, 0.5, 3, 0, 2, sport="cfb")
     for tid in (1, 2, 3):
-        _insert_breakdown(conn, YEAR, METHOD, tid, None, None, None, None, None, 0.1, sport="cfb")
-    _insert_breakdown(conn, YEAR, METHOD, 1, 2, 1, 1, 0, 0.6, 0.9, sport="cfb")
-    _insert_breakdown(conn, YEAR, METHOD, 1, 3, 1, 1, 0, 0.6, 0.5, sport="cfb")
+        _insert_breakdown(conn, year, METHOD, tid, None, None, None, None, None, 0.1, sport="cfb")
+    _insert_breakdown(conn, year, METHOD, 1, 2, 1, 1, 0, 0.6, 0.9, sport="cfb")
+    _insert_breakdown(conn, year, METHOD, 1, 3, 1, 1, 0, 0.6, 0.5, sport="cfb")
 
     for tid, name in NFL_TEAM_NAMES.items():
         _insert_team(conn, tid, name, classification=None, sport="nfl")
     _insert_game(
-        conn, 101, YEAR, 101, 102, NFL_TEAM_NAMES[101], NFL_TEAM_NAMES[102], 24, 20, sport="nfl"
+        conn, 101, year, 101, 102, NFL_TEAM_NAMES[101], NFL_TEAM_NAMES[102], 24, 20, sport="nfl"
     )
     _insert_game(
-        conn, 102, YEAR, 102, 103, NFL_TEAM_NAMES[102], NFL_TEAM_NAMES[103], 27, 3, sport="nfl"
+        conn, 102, year, 102, 103, NFL_TEAM_NAMES[102], NFL_TEAM_NAMES[103], 27, 3, sport="nfl"
     )
     _insert_game(
-        conn, 103, YEAR, 103, 101, NFL_TEAM_NAMES[103], NFL_TEAM_NAMES[101], 14, 31, sport="nfl"
+        conn, 103, year, 103, 101, NFL_TEAM_NAMES[103], NFL_TEAM_NAMES[101], 14, 31, sport="nfl"
     )
-    _insert_rating(conn, YEAR, METHOD, 101, 1.4, 1, 2, 0, sport="nfl")
-    _insert_rating(conn, YEAR, METHOD, 102, 0.9, 2, 1, 1, sport="nfl")
-    _insert_rating(conn, YEAR, METHOD, 103, 0.4, 3, 0, 2, sport="nfl")
+    _insert_rating(conn, year, METHOD, 101, 1.4, 1, 2, 0, sport="nfl")
+    _insert_rating(conn, year, METHOD, 102, 0.9, 2, 1, 1, sport="nfl")
+    _insert_rating(conn, year, METHOD, 103, 0.4, 3, 0, 2, sport="nfl")
     for tid in (101, 102, 103):
-        _insert_breakdown(conn, YEAR, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
+        _insert_breakdown(conn, year, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
 
     # NFL-only rating for a year CFB has no rows for, so a sport-scoped
     # "unknown year" 404 for CFB never accidentally reports the NFL list.
@@ -191,18 +197,18 @@ def build_sport_fixture(conn: sqlite3.Connection) -> None:
     # Cross-sport name collision, same year/method, no games needed
     # (build_team_case only requires a ratings row to exist).
     _insert_team(conn, CFB_COLLISION_TEAM_ID, COLLISION_NAME, classification="fbs", sport="cfb")
-    _insert_rating(conn, YEAR, METHOD, CFB_COLLISION_TEAM_ID, 0.3, 4, 0, 0, sport="cfb")
+    _insert_rating(conn, year, METHOD, CFB_COLLISION_TEAM_ID, 0.3, 4, 0, 0, sport="cfb")
     _insert_breakdown(
-        conn, YEAR, METHOD, CFB_COLLISION_TEAM_ID, None, None, None, None, None, 0.1, sport="cfb"
+        conn, year, METHOD, CFB_COLLISION_TEAM_ID, None, None, None, None, None, 0.1, sport="cfb"
     )
 
     _insert_team(conn, NFL_COLLISION_TEAM_ID, COLLISION_NAME, classification=None, sport="nfl")
-    _insert_rating(conn, YEAR, METHOD, NFL_COLLISION_TEAM_ID, 0.3, 4, 0, 0, sport="nfl")
+    _insert_rating(conn, year, METHOD, NFL_COLLISION_TEAM_ID, 0.3, 4, 0, 0, sport="nfl")
     _insert_breakdown(
-        conn, YEAR, METHOD, NFL_COLLISION_TEAM_ID, None, None, None, None, None, 0.1, sport="nfl"
+        conn, year, METHOD, NFL_COLLISION_TEAM_ID, None, None, None, None, None, 0.1, sport="nfl"
     )
 
-    build_tie_cluster(conn)
+    build_tie_cluster(conn, year)
 
 
 # Issue #83: a synthetic NFL tie. No committed apps/api fixture had a single
@@ -229,7 +235,7 @@ TIE_WIN_OPPONENT_ID = 109
 TIE_WIN_OPPONENT = "November Nomads"
 
 
-def build_tie_cluster(conn: sqlite3.Connection) -> None:
+def build_tie_cluster(conn: sqlite3.Connection, year: int = YEAR) -> None:
     names = {
         TIE_TEAM_ID: TIE_TEAM,
         TIE_RIVAL_ID: TIE_RIVAL,
@@ -240,12 +246,12 @@ def build_tie_cluster(conn: sqlite3.Connection) -> None:
         _insert_team(conn, tid, name, classification=None, sport="nfl")
 
     _insert_game(
-        conn, 104, YEAR, TIE_RIVAL_ID, TIE_TEAM_ID, TIE_RIVAL, TIE_TEAM, 20, 13, sport="nfl"
+        conn, 104, year, TIE_RIVAL_ID, TIE_TEAM_ID, TIE_RIVAL, TIE_TEAM, 20, 13, sport="nfl"
     )
     _insert_game(
         conn,
         105,
-        YEAR,
+        year,
         TIE_TEAM_ID,
         TIE_OPPONENT_ID,
         TIE_TEAM,
@@ -258,7 +264,7 @@ def build_tie_cluster(conn: sqlite3.Connection) -> None:
     _insert_game(
         conn,
         106,
-        YEAR,
+        year,
         TIE_TEAM_ID,
         TIE_WIN_OPPONENT_ID,
         TIE_TEAM,
@@ -271,7 +277,7 @@ def build_tie_cluster(conn: sqlite3.Connection) -> None:
     _insert_game(
         conn,
         107,
-        YEAR,
+        year,
         TIE_RIVAL_ID,
         TIE_OPPONENT_ID,
         TIE_RIVAL,
@@ -282,21 +288,22 @@ def build_tie_cluster(conn: sqlite3.Connection) -> None:
         sport="nfl",
     )
 
-    _insert_rating(conn, YEAR, METHOD, TIE_RIVAL_ID, 0.35, 5, 2, 0, sport="nfl")
-    _insert_rating(conn, YEAR, METHOD, TIE_TEAM_ID, 0.25, 6, 1, 1, sport="nfl", ties=1)
-    _insert_rating(conn, YEAR, METHOD, TIE_OPPONENT_ID, 0.15, 8, 0, 1, sport="nfl", ties=1)
-    _insert_rating(conn, YEAR, METHOD, TIE_WIN_OPPONENT_ID, 0.05, 9, 0, 1, sport="nfl")
+    _insert_rating(conn, year, METHOD, TIE_RIVAL_ID, 0.35, 5, 2, 0, sport="nfl")
+    _insert_rating(conn, year, METHOD, TIE_TEAM_ID, 0.25, 6, 1, 1, sport="nfl", ties=1)
+    _insert_rating(conn, year, METHOD, TIE_OPPONENT_ID, 0.15, 8, 0, 1, sport="nfl", ties=1)
+    _insert_rating(conn, year, METHOD, TIE_WIN_OPPONENT_ID, 0.05, 9, 0, 1, sport="nfl")
     for tid in names:
-        _insert_breakdown(conn, YEAR, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
+        _insert_breakdown(conn, year, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
 
 
-def make_sport_fixture_db(tmp_path: Path) -> Path:
+def make_sport_fixture_db(tmp_path: Path, year: int = YEAR) -> Path:
     """Build a fresh schema-only db at `tmp_path / "sport_fixture.sqlite3"`,
-    populate it via `build_sport_fixture`, and return its path."""
+    populate it via `build_sport_fixture` for season `year`, and return its
+    path."""
     db_path = tmp_path / "sport_fixture.sqlite3"
     conn = get_conn(db_path)
     ensure_schema(conn)
-    build_sport_fixture(conn)
+    build_sport_fixture(conn, year)
     conn.commit()
     conn.close()
     return db_path
