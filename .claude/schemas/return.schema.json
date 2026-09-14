@@ -1,58 +1,99 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://my-team-is-better.lol/schemas/return.schema.json",
-  "title": "Spoke return (spoke -> coordinator)",
-  "description": "Every spoke's final message must be exactly one fenced ```json code block conforming to this schema, and nothing else outside the fence. The coordinator validates every return against this schema (via the jsonschema package, already a project dependency) before acting on it -- a return that fails validation is itself a failure (failure_type: malformed-return), not something to interpret charitably.",
+  "title": "Spoke return, v2 (spoke -> coordinator)",
+  "description": "A spoke's final message is exactly one fenced ```json block conforming to this schema, with nothing outside the fence. Enforced, not requested: the SubagentStop hook (.claude/hooks/delegation.py) validates it, plus the semantic rules a schema can't express, and sends the errors back to the spoke to fix. After MAX_RETURN_RETRIES failed attempts it lets the spoke stop, and the coordinator records the round as malformed-return. Worked examples: .claude/schemas/examples/return.*.json.",
   "type": "object",
-  "required": ["status"],
+  "additionalProperties": false,
+  "required": ["status", "agent", "base_sha", "findings"],
   "oneOf": [
     {
       "properties": { "status": { "const": "success" } },
-      "required": ["status", "summary", "files_changed", "tests_run", "contract_gaps"]
+      "required": ["summary", "files_changed", "tests_run", "contract_gaps", "brief_defects"]
     },
     {
       "properties": { "status": { "const": "failure" } },
-      "required": ["status", "failure_type", "attempted", "partial_results", "alternatives"]
+      "required": ["failure_type", "retryable", "attempted", "partial_results", "alternatives"]
     }
   ],
   "properties": {
     "status": {
       "type": "string",
-      "enum": ["success", "failure"]
+      "enum": ["success", "failure"],
+      "description": "success = the job you were given is done (for read-only agents: the checks ran, whatever they found). failure = you could not do the job."
+    },
+    "agent": {
+      "type": "string",
+      "description": "Your agent name exactly as in your definition (e.g. api-agent). Checked against the agent that actually ran."
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "`git rev-parse HEAD` before you changed anything: the commit your work is based on. Must equal the brief's BASE."
+    },
+    "head_sha": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "The commit holding your work if you committed, else null."
     },
     "summary": {
       "type": "string",
+      "minLength": 1,
       "description": "One paragraph: what was actually produced. Never claim success with an empty or stubbed deliverable."
     },
     "files_changed": {
       "type": "array",
+      "description": "Every file you created, modified or deleted, however you changed it (Edit, Write or a Bash command). Must be empty for read-only agents.",
       "items": {
         "type": "object",
         "required": ["path", "change_type"],
         "additionalProperties": false,
         "properties": {
-          "path": { "type": "string" },
+          "path": { "type": "string", "description": "Repo-relative path." },
           "change_type": { "type": "string", "enum": ["created", "modified", "deleted"] }
         }
       }
     },
     "tests_run": {
       "type": "array",
-      "description": "Every test command actually executed, with its real result. Empty array means no tests were run -- that is itself meaningful and should be rare for a TDD task.",
+      "description": "Every check you actually executed, in order, with its real result. A TDD red run is recorded with phase red and result fail. On success, every fail or error must be phase red, and an implementation spoke needs at least one passing green or gate run. A read-only agent's success needs at least one entry: an empty list can't be told apart from a run that never happened.",
       "items": {
         "type": "object",
-        "required": ["command", "result"],
+        "required": ["command", "result", "phase"],
         "additionalProperties": false,
         "properties": {
           "command": { "type": "string" },
-          "result": { "type": "string", "enum": ["pass", "fail"] }
+          "result": {
+            "type": "string",
+            "enum": ["pass", "fail", "skip", "error"],
+            "description": "skip = the command ran and skipped (e.g. the persona smoke eval without a key). error = it could not run (collection error, missing tool)."
+          },
+          "phase": {
+            "type": "string",
+            "enum": ["red", "green", "gate"],
+            "description": "red = the test written first, expected to fail. green = the same tests after implementing. gate = suite-wide checks (full pytest, mypy, lint, import-linter, dep-cruise, storybook, golden dataset)."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Optional one-line result, e.g. '411 passed, 8 skipped'."
+          }
         }
       }
     },
     "contract_gaps": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Places the brief's contract was insufficient for what was actually needed. Empty array (not omitted) if none -- distinguish 'checked, no gaps' from not having checked."
+      "description": "Places the shared interface (contracts.py, schema.sql, API models, prop types) was insufficient. Empty array, not omitted, if none."
+    },
+    "brief_defects": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Places the brief itself was wrong: a stale count, a path that doesn't exist, a rubric that contradicts the code, a numeric premise that didn't hold. The work can still be success. Empty array if none (#96)."
+    },
+    "findings": {
+      "type": "array",
+      "description": "Defects found. For reviewer and validator this is the deliverable. Implementation spokes report defects noticed outside their task here instead of fixing them.",
+      "items": { "$ref": "#/$defs/finding" }
     },
     "failure_type": {
       "type": "string",
@@ -61,9 +102,13 @@
         "rubric-failed",
         "blocked-by-missing-input",
         "tool-or-environment-failure",
-        "scope-collision",
-        "malformed-return"
-      ]
+        "scope-collision"
+      ],
+      "description": "malformed-return is deliberately absent: only the coordinator assigns it, when a return never validated."
+    },
+    "retryable": {
+      "type": "boolean",
+      "description": "true if the same brief could succeed on a re-run (a transient tool or network failure). false if the brief, the contract or an input must change first."
     },
     "attempted": {
       "type": "string",
@@ -84,6 +129,48 @@
     "alternatives": {
       "type": "string",
       "description": "What to try next, or what the coordinator should change about the brief."
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "category", "summary", "file", "line", "evidence", "owner", "tracked_issue"],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": ["blocking", "pre-existing", "nit"],
+          "description": "blocking = introduced or exposed by this round's change, or a rubric item that fails; it must be fixed before merge. pre-existing = a real defect that predates this round; it goes to /triage, not to another review round. nit = optional polish; never a reason for another round."
+        },
+        "category": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Short kebab-case class of defect, e.g. grounding-false-negative, missing-test, boundary-violation. Reused across rounds so repeat patterns are countable."
+        },
+        "summary": { "type": "string", "minLength": 1 },
+        "file": {
+          "type": ["string", "null"],
+          "description": "Repo-relative path, or null if the finding is not about one file."
+        },
+        "line": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Line number, or null. Never guess a line."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What proves it: a command and its output, a quoted line, a failing input."
+        },
+        "owner": {
+          "type": "string",
+          "description": "The agent that owns the fix (per .claude/ownership.json), or coordinator."
+        },
+        "tracked_issue": {
+          "type": ["integer", "null"],
+          "description": "The open GitHub issue already tracking this, found with `gh issue list --search`, or null if you found none."
+        }
+      }
     }
   }
 }

@@ -1,0 +1,22 @@
+{
+  "agent": "api-agent",
+  "issue": 999,
+  "round": 1,
+  "base_sha": "e5aeddc95b2438e338d6e7afddc1fc2e5da7029d",
+  "scratch_dir": "/private/tmp/claude-501/<project>/<session>/scratchpad/999-api-r1",
+  "objective": "A Postgres outage must degrade a verdict, not fail it. When the persona cache's get or set raises psycopg.OperationalError, /api/verdict/* still returns 200 with a fresh narration (cached=false) and logs one warning per failed call. Illustrative example: issue 999 is not a real issue.",
+  "contract": "apps/api/src/api/persona/cache.py -- NarrationCacheStore protocol (unchanged):\n    def get(self, key: CacheKey) -> CachedNarration | None: ...\n    def set(self, key: CacheKey, narration: CachedNarration) -> None: ...\nNarrationOut.cached: bool (unchanged).",
+  "scope": ["apps/api/src/api/persona/**", "apps/api/tests/**"],
+  "negative": [
+    "No change to NarrationCacheStore's signature, the cache SQL, PROMPT_VERSION or NarrationOut.",
+    "Nothing outside apps/api/. packages/cfb-engine and apps/web belong to other agents.",
+    "Don't add retries or a circuit breaker: fail open on each call, nothing more."
+  ],
+  "rubric": [
+    "Written first and seen failing: tests/test_persona_cache_outage.py -- get raising, set raising, both raising; each asserts HTTP 200, cached=false, and a warning logged.",
+    "Sabotage: re-raise in the get wrapper -> the get tests go red; restore byte-exact.",
+    "Gates clean from apps/api: uv run pytest -q; uv run mypy --strict src/api tests; uv run ruff check .; uv run ruff format --check .; uv run lint-imports."
+  ],
+  "concurrency": "A web-agent round on issue 998 is editing apps/web/src/lib/api/client.ts; nothing it touches overlaps this scope.",
+  "gate": null
+}

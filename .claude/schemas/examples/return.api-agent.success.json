@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "agent": "api-agent",
+  "base_sha": "e5aeddc95b2438e338d6e7afddc1fc2e5da7029d",
+  "head_sha": null,
+  "summary": "Wrapped PostgresNarrationCache's get and set so psycopg.OperationalError is logged once and treated as a miss (get) or a no-op (set). Both verdict routes now return 200 with cached=false during an outage. Three new tests cover get, set and both; the sabotage turned the get tests red as expected.",
+  "files_changed": [
+    { "path": "apps/api/src/api/persona/cache.py", "change_type": "modified" },
+    { "path": "apps/api/tests/test_persona_cache_outage.py", "change_type": "created" }
+  ],
+  "tests_run": [
+    { "command": "uv run pytest -q tests/test_persona_cache_outage.py", "result": "fail", "phase": "red" },
+    { "command": "uv run pytest -q tests/test_persona_cache_outage.py", "result": "pass", "phase": "green" },
+    { "command": "uv run pytest -q", "result": "pass", "phase": "gate", "detail": "414 passed, 8 skipped" },
+    { "command": "uv run pytest -q -rs tests/test_persona_smoke_eval.py", "result": "skip", "phase": "gate", "detail": "no ANTHROPIC_API_KEY" },
+    { "command": "uv run mypy --strict src/api tests", "result": "pass", "phase": "gate" },
+    { "command": "uv run ruff check . && uv run ruff format --check .", "result": "pass", "phase": "gate" },
+    { "command": "uv run lint-imports", "result": "pass", "phase": "gate", "detail": "3 kept, 0 broken" }
+  ],
+  "contract_gaps": [],
+  "brief_defects": [
+    "RUBRIC named tests/test_persona_cache.py as the existing cache suite to extend; it only exercises the in-memory fake, so the outage tests went in a new file."
+  ],
+  "findings": [
+    {
+      "severity": "pre-existing",
+      "category": "connection-per-call",
+      "summary": "PostgresNarrationCache opens a new psycopg connection on every get and set; there is no pool.",
+      "file": "apps/api/src/api/persona/cache.py",
+      "line": 95,
+      "evidence": "psycopg.connect(self._dsn) inside both get() and set()",
+      "owner": "api-agent",
+      "tracked_issue": null
+    }
+  ]
+}

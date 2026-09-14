@@ -1,160 +1,194 @@
 # My Team Is Better — operating manual
 
-Product/architecture context lives in `docs/PRD.md` and `docs/ARCHITECTURE.md` — read
-those first. This file governs *how* changes get made from here on: a hub-and-spoke
-coordinator/subagent process (same pattern proven in `../cfb-strength-orchestrated`,
-adapted with JSON-Schema-validated inter-agent contracts) plus non-negotiable
-engineering standards for both the Python and React sides.
+Product and architecture context lives in `docs/PRD.md` and `docs/ARCHITECTURE.md`; read
+those first. This file governs *how* changes get made: a hub-and-spoke
+coordinator/subagent process whose contracts are **enforced by hooks**, not just written
+down, plus non-negotiable engineering standards for the Python and React sides.
+
+Procedures live in skills, so they load only when used: `/orient` (session start),
+`/delegate` (every delegation), `/ship` (PR to merged main), `/triage` (filing
+findings). Exact per-language commands live in `.claude/rules/python.md` and
+`.claude/rules/web.md`. Every spoke preloads the `spoke-protocol` skill.
 
 ---
 
-## Starting a session (do this before anything else)
+## Starting a session
 
-This project's memory is externalized on purpose — GitHub Issues/Milestones/PRs and
-`git log`, not conversation history. A fresh or just-cleared session is expected to
-reconstruct state from these, not ask the user to re-explain it:
+Run `/orient` before anything else. This project's memory is GitHub (issues, PRs,
+labels) and `git log`, not conversation history: a fresh or just-cleared session
+reconstructs state from them rather than asking the founder to re-explain it. `/orient`
+reports what other sessions have in flight, what just landed and what it flagged, open
+and claimed issues, untracked gaps, and which files are at collision risk.
 
-1. `gh issue list --state open` — what's left, and read the open Sprint milestone
-   (`gh api repos/:owner/:repo/milestones`) for the current sprint's framing.
-2. `git log --oneline -15` — what actually landed on `main` recently.
-3. `gh pr list --state merged --limit 5` and skim each merged PR's description (not
-   just its title) — verification notes and any `contract_gaps` a spoke flagged live
-   there, not in a separate log.
-4. Check for open items with no issue yet: grep recent PR descriptions and
-   `docs/ARCHITECTURE.md` for phrases like "not yet extended," "known gap," "TODO" —
-   if something real surfaces with no tracking issue, **file one** before starting
-   unrelated work, so it doesn't get rediscovered from scratch a third time. (This
-   project already hit exactly this once: `packages/cfb-engine`'s `ingest_season.py`
-   hardcoding `MIN_YEAR = 2000` / `MAX_YEAR = 2023` was mentioned in three separate
-   places — `docs/ARCHITECTURE.md` §3.1, `render.yaml`'s build-command comment, and a
-   PR description — before anyone filed it as a real issue. It's tracked as #9 now;
-   check its current status there instead of re-deriving the gap from scratch again.)
+If something real surfaces with no tracking issue, file it (`/triage`) before starting
+unrelated work. `ingest_season.py`'s hardcoded year range was mentioned in three places
+before anyone filed it (#9); don't let a gap get rediscovered a third time.
 
-There is no separate `docs/delegation-log.md` in this project (unlike
-`../cfb-strength-orchestrated`, which used one) — merged PR descriptions serve that
-role instead, since they're linked to the actual diff and checked by CI, which a
-prose log entry isn't. Don't create a parallel log that duplicates what a PR
-description already says; do create a GitHub issue for anything real that has no
-tracking anywhere yet.
+There is no separate delegation log. Merged PR descriptions carry the verification
+record (`/ship`'s template), because they're linked to the diff and checked by CI.
+
+## Several sessions at once
+
+Three or four coordinator sessions usually run in parallel, each in its own git worktree.
+
+- **Claim before you start.** `/delegate` adds the `in-progress` label and a claim
+  comment naming the files you expect to touch. Don't start an issue someone has claimed.
+- **Hot files** — `contracts.py`, `apps/api/src/api/models.py`,
+  `apps/web/src/lib/api/types.ts`, `docs/ARCHITECTURE.md`, `.github/workflows/ci.yml` —
+  are touched by roughly a quarter of all PRs. When another in-flight branch touches one,
+  sequence the work (merge theirs, rebase) instead of racing it.
+- **The git stash is shared by every worktree.** A hook blocks bare `git stash` and
+  `git stash pop`; use a WIP commit.
+- **Spoke worktrees branch from your `HEAD`** (`worktree.baseRef: "head"` in
+  `.claude/settings.json`). Commit contract changes before delegating; uncommitted work
+  isn't carried over.
+- **Every spoke gets its own scratch directory** (the brief's `scratch_dir`, checked).
+- **Picking up a process change** (this file, `.claude/`): merge `main` into your branch.
+  Agent definitions, skills and hook settings reload live. CLAUDE.md and rules load at
+  session start, so start a fresh session to get those.
 
 ---
 
 ## Engineering standards (apply to every change, not just new code)
 
-These are standing rules, not a one-time setup task. Any brief that would violate one
-of these is mis-scoped — fix the brief, don't ship the violation.
+These are standing rules, not a one-time setup task. A brief that would violate one is
+mis-scoped: fix the brief, don't ship the violation.
 
-- **TDD.** Write the failing test first, then implement against it. A brief's RUBRIC
-  names the test(s) that must exist and pass; a RETURN's `tests_run` must reflect
-  commands actually executed, never a claimed-but-unrun test.
-- **CI gates everything.** `.github/workflows/ci.yml` runs on every PR and push to
-  `main`. Nothing merges with a red check. Add a job to that workflow the moment a new
-  app (`apps/api`, `apps/web`) gets its first line of code — don't let untested code
-  accumulate ahead of its own CI job.
-- **`main` is protected — process, not (yet) a GitHub-enforced gate.** GitHub blocks
-  branch protection (both the classic API and the newer Rulesets API — checked
-  directly, not assumed) on a private repo without GitHub Pro. Founder chose to stay
-  private and skip the paid plan for now, so this is enforced by discipline: every
-  change — including this one — goes through a feature branch, a PR, and a green CI
-  run before merging, with no direct `git push` to `main`. If the repo goes public or
-  moves to GitHub Pro later, flip on classic branch protection / a ruleset requiring
-  the CI job(s) below — the workflow doesn't change, only the enforcement mechanism.
-- **Python side**: `uv` for dependencies/workspace, `mypy --strict` on anything that
-  crosses a module boundary (already true for `contracts.py`; extend to `apps/api`'s
-  request/response models), `import-linter` for enforced (not just documented) module
-  boundaries, `pytest`, pre-commit hooks running all of the above locally
-  (`.pre-commit-config.yaml`).
-- **React/TypeScript side**: TypeScript strict mode, ESLint + `typescript-eslint`
-  (the modern successor to TSLint — never reach for the deprecated tool),
-  `dependency-cruiser` for enforced module boundaries (the JS analogue of
-  `import-linter` — same philosophy: a boundary stated in prose and never checked
-  erodes by the third round), Vitest + React Testing Library for TDD, Prettier,
-  Storybook build as a CI gate (not just local dev — Storybook coverage is a project
-  goal in its own right, per the PRD).
-- **Modularity is enforced, not just written down**, on both sides — this project
-  already proved that principle in `packages/cfb-engine`'s `.importlinter` config;
-  every new app extends it with its own checked tool rather than a "please don't
-  import across this boundary" comment.
+- **TDD.** Write the failing test first, then implement against it. A brief's rubric
+  names the tests; a return's `tests_run` records the red run and every command actually
+  executed, never a claimed-but-unrun test.
+- **CI gates everything.** `.github/workflows/ci.yml` runs on every PR into `main` and
+  every push to `main`, and nothing merges with a red check. Known exceptions, listed so
+  nobody assumes more coverage than exists:
+  - the `e2e` job is not yet treated as blocking;
+  - the persona smoke eval step always skips in CI, because there is no API key secret
+    (#109);
+  - nothing in CI runs `prettier --check` (#116), or ruff on `packages/cfb-engine`
+    (#141). Run those locally.
+
+  A new app gets its own CI job with its first line of code. The process hooks have one
+  (`claude-process`).
+- **`main` is protected by process and a hook.** GitHub can't enforce branch protection
+  on this private repo without GitHub Pro; the founder chose to stay private. Every
+  change goes through a feature branch, a PR and green CI. `.claude/hooks/guard_bash.py`
+  blocks pushes to `main` from any session. If the repo goes public or moves to Pro, turn
+  on a ruleset requiring the CI jobs.
+- **Python side**: `uv`; `mypy --strict` across module boundaries; `import-linter` for
+  enforced boundaries; `pytest`; ruff; pre-commit mirroring CI. Commands:
+  `.claude/rules/python.md`.
+- **React/TypeScript side**: TypeScript strict; ESLint + `typescript-eslint` (never the
+  deprecated TSLint); `dependency-cruiser` for enforced boundaries; Vitest + React
+  Testing Library; Prettier; the Storybook build and its a11y tests as CI gates
+  (Storybook coverage is a project goal per the PRD). Commands: `.claude/rules/web.md`.
+- **Modularity is enforced, not just written down**, on both sides. A boundary stated in
+  prose and never checked erodes by the third round.
+- **Secrets**: never run `apps/api`'s tests from a checkout containing `apps/api/.env`.
+  Its persona integration test makes a real Claude call and rewrites a production
+  Postgres row (details in `spoke-protocol`).
 
 ---
 
 ## Roles
 
-**The main session is the coordinator (the hub).** Subagents are spokes: fresh
-context each time, see only the brief they're given, return only their final message.
+**The main session is the coordinator (the hub).** Subagents are spokes: fresh context
+each time, they see only their brief plus CLAUDE.md, the rules and the preloaded
+`spoke-protocol`, and only their final message comes back.
 
-Starting **coarse, deliberately** — two implementation spokes, not one per module.
-`packages/cfb-engine` earned its fine-grained split (`ingest-agent`/`ratings-agent`/
-`evidence-agent`/`mcp-agent`) because it has four genuinely independent modules with a
-real `import-linter` boundary between them. `apps/api` and `apps/web` don't have that
-seam yet — split further only when a real one appears (e.g. the debate/tool-calling
-logic in Architecture Brief §4.6 growing complex enough to deserve its own owner), not
-preemptively.
+Start **coarse, deliberately.** Split an owner only when a real seam appears with its own
+checked boundary, not preemptively. `packages/cfb-engine` earned four spokes because it
+has four independent modules behind `import-linter` contracts.
 
 | Agent | Owns | Must not touch |
 |---|---|---|
 | `api-agent` | `apps/api/` | `apps/web/`, `packages/cfb-engine/`, `.github/`, branch protection |
 | `web-agent` | `apps/web/` | `apps/api/`, `packages/cfb-engine/`, `.github/`, branch protection |
+| `ingest-agent` | `cfb_strength/ingest/`, `data/raw/` | ratings/, evidence/, mcp_server/, contracts.py, db/ |
+| `ratings-agent` | `cfb_strength/ratings/` | ingest/, evidence/, mcp_server/, contracts.py, db/ |
+| `evidence-agent` | `cfb_strength/evidence/` | ingest/, ratings/, mcp_server/, contracts.py, db/ |
+| `mcp-agent` | `cfb_strength/mcp_server/` + its integration test | everything else |
 | `validator` | nothing (read-only) | everything — golden dataset + persona smoke eval |
-| `reviewer` | nothing (read-only) | everything — cross-cutting seams + standards compliance |
+| `reviewer` | nothing (read-only) | everything — independent review of a diff and its seams |
 
-`packages/cfb-engine`'s existing ownership map (ingest/ratings/evidence/mcp-agent,
-`contracts.py`/`schema.sql` coordinator-owned) is unchanged — see the agent
-definitions in `.claude/agents/` (`ingest-agent.md`, `ratings-agent.md`,
-`evidence-agent.md`, `mcp-agent.md`) for that layer; this table only covers the two
-new apps. Every engine spoke named here must have a definition file there, and vice
-versa (#105 was the one that didn't).
+The exact globs live in `.claude/ownership.json`, which the edit-scope hook and the
+brief validator read. Coordinator-owned: everything no agent owns (this file, `.claude/`,
+`.github/`, `docs/`, `render.yaml`, `contracts.py`, `db/`, `cli.py`, `config.py`,
+`credit_math.py`). `.claude/hooks/tests/test_ownership.py` keeps this table, the JSON and
+`.claude/agents/*.md` in step, so an agent can't exist in one place and be missing from
+another (#105).
 
 ---
 
-## The delegation contract: JSON Schema, not prose
+## What is enforced, and what is still prose
 
-Every brief and every spoke return is validated against a checked-in schema —
-`.claude/schemas/brief.schema.json` and `return.schema.json`. **Be honest about what
-this does and doesn't guarantee**: Task-tool subagents don't get native
-`tool_choice`-forced structured output the way a raw Anthropic API call does — this is
-schema-*disciplined prompting plus coordinator-side verification*, not a hard
-API-level guarantee. Concretely:
+| Rule | Enforced by | Mode |
+|---|---|---|
+| A spoke's edits stay inside its owned paths | PreToolUse `guard_edit_scope.py` | **warn**: a note in the spoke's context plus a log at `<git-common-dir>/claude-hooks/scope-warnings.jsonl`. Flip `edit_scope_mode` to `block` once the log stays clean |
+| No push to `main`; no shared-stash use | PreToolUse `guard_bash.py` | block |
+| Brief shape; scope inside ownership; own scratch dir | `delegation.py render-brief` | block (the brief won't render) |
+| Return shape and its semantic rules | SubagentStop `delegation.py` | block: the spoke gets the errors back, 2 retries, then `malformed-return` |
+| Agents, ownership map and Roles table agree | `claude-process` CI job | block |
+| No merge-conflict markers land | `claude-process` CI job | block |
 
-1. The coordinator constructs every brief against `brief.schema.json`'s fields
-   (`objective`, `contract`, `scope`, `negative`, `rubric`) before delegating.
-2. Every spoke's `.md` definition instructs it to return a single fenced ` ```json `
-   block conforming to `return.schema.json` — no prose outside the fence.
-3. **The coordinator actually validates it** (`jsonschema.validate`, already a project
-   dependency — don't skip this and eyeball the JSON instead). A return that fails to
-   parse or fails validation is a `failure_type: malformed-return` — a real failure
-   mode, not something to interpret charitably.
-4. `status: success` requires `summary`, `files_changed`, `tests_run`,
-   `contract_gaps` (empty array, not omitted, if none). `status: failure` requires
-   `failure_type`, `attempted`, `partial_results`, `alternatives`. Never report success
-   with an empty or stubbed deliverable.
+What these don't guarantee: Claude Code can't force a subagent's output format, so the
+return check runs after the fact and feeds errors back (retry with feedback). Writes
+through Bash bypass the edit guard; the return check flags `files_changed` outside
+ownership instead. Everything else in this file is prose.
+
+---
+
+## The delegation contract (v2)
+
+Use `/delegate`. In short:
+
+1. **Briefs are JSON** against `.claude/schemas/brief.schema.json`, rendered to the
+   prompt by `delegation.py render-brief`, never hand-written prose. Rendering makes
+   every brief the same shape and checks scope, base commit, scratch dir, concurrency
+   and, for gate work, the threat model and review-round cap.
+2. **Returns are one fenced JSON block** against `.claude/schemas/return.schema.json`,
+   validated by the SubagentStop hook. Worked examples: `.claude/schemas/examples/`.
+3. **The coordinator tells apart three outcomes:**
+   - the round failed: `status: failure` with a `failure_type` and `retryable`;
+   - it succeeded: `status: success` with no blocking findings;
+   - it succeeded but the brief was wrong: `success` plus `brief_defects` (#96).
+
+   Findings route by severity: `blocking` → the next round, `pre-existing` → `/triage`,
+   `nit` → usually nowhere.
+4. **A validated return proves shape, not truth.** The coordinator re-runs the rubric's
+   gate commands itself before shipping.
 
 ---
 
 ## Routing table (dynamic selection)
 
-Don't fan out on work that didn't need fanning out — the most common failure in this
-architecture.
+Don't fan out on work that didn't need fanning out; that's the most common failure in
+this architecture.
 
 | Request shape | Invoke | Skip |
 |---|---|---|
 | Anything inside `apps/api/` | `api-agent` | web-agent |
 | Anything inside `apps/web/` | `web-agent` | api-agent |
-| Anything inside `packages/cfb-engine/` | the existing engine agents (see its own docs) | api-agent, web-agent |
+| Anything inside `packages/cfb-engine/` | the owning engine agent (Roles) | api-agent, web-agent |
 | "Is the ranking / persona still correct?" | `validator` | — |
-| "Is this done?" | `reviewer` + `validator` in parallel | — |
-| Persona *voice/tone quality* judgment calls ("does this read as a good bar-stool guy?") | **coordinator directly** — this is a continuous, subjective, iterative judgment call, not a scoped implementation task (same reasoning as `cfb-strength-orchestrated`'s "algorithm disagrees with golden dataset" rule: some things don't decompose) | all spokes, until the coordinator has a specific, scoped prompt change to delegate |
+| "Is this done?" | `reviewer` + `validator` in parallel; the reviewer gets only the brief and the diff | — |
+| Pre-existing findings from any return, or an untracked gap | coordinator via `/triage` | all spokes |
+| Persona *voice/tone quality* ("does this read as a good bar-stool guy?") | **coordinator directly** — a continuous, subjective, iterative judgment, not a scoped task | all spokes, until there is a specific, scoped prompt change to delegate |
+| Why a ranking disagrees with known outcomes | **coordinator directly** | ratings-agent, until there's a specific hypothesis to implement |
 | Typo, rename, one-line fix, config change | **nobody** — coordinator does it inline | all |
-| A contract (shared type/schema) needs a new field | coordinator amends it, then re-delegates to every affected spoke | — |
+| A contract (shared type/schema) needs a new field | coordinator amends and commits it, then re-delegates every affected spoke | — |
 
 ---
 
 ## Error handling
 
-All error handling routes through the coordinator. A subagent that fails, times out,
-or returns a `malformed-return` is the coordinator's decision: retry with a rewritten
-brief (append the specific validation error, mirroring retry-with-feedback), substitute
-a different agent, or proceed with a named gap. Subagents never retry each other.
-Silently suppressing a failure (treating an empty result as success) and aborting an
-entire round because one spoke failed are both anti-patterns — a degraded round with a
-named gap beats a dead round.
+All error handling routes through the coordinator; subagents never retry each other.
+
+- **Malformed return** (the hook's retries ran out): retry once with a rewritten brief,
+  or substitute an agent.
+- **`retryable: true`**: one retry with `attempted` and `alternatives` appended.
+- **`contract-insufficient`**: amend the contract, then re-delegate.
+- **`scope-collision`**: split the round by owner.
+- **Review rounds** stop at the gate's `max_review_rounds`; what remains becomes issues.
+
+Silently suppressing a failure (treating an empty result as success) and aborting a whole
+round because one spoke failed are both anti-patterns. A degraded round with a named gap
+beats a dead round.

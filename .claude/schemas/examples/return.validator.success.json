@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "agent": "validator",
+  "base_sha": "e5aeddc95b2438e338d6e7afddc1fc2e5da7029d",
+  "head_sha": null,
+  "summary": "Built a fresh db from the committed cache, cfb doctor exited 0, and ran all seven golden years under Keener. The five must-match years PASS. 2003 is contested: evidenced #1 LSU 13-1, with USC #2. 2017 is contested: evidenced #1 Alabama 13-1, with Georgia #2. One blocking finding: 2019 now ranks Ohio State #2 above Clemson, which a round-1 change caused.",
+  "files_changed": [],
+  "tests_run": [
+    { "command": "CFB_DB_PATH=$S/cfb.sqlite3 uv run cfb ingest --years 1998-2025 && CFB_DB_PATH=$S/cfb.sqlite3 uv run cfb rate", "result": "pass", "phase": "gate" },
+    { "command": "uv run cfb doctor --db-path $S/cfb.sqlite3", "result": "pass", "phase": "gate", "detail": "exit 0, no findings" },
+    { "command": "golden years 2001 2004 2005 2013 2019 (must match)", "result": "pass", "phase": "gate", "detail": "5/5 PASS" },
+    { "command": "golden years 2003 2017 (contested)", "result": "pass", "phase": "gate", "detail": "reported, not asserted" }
+  ],
+  "contract_gaps": [],
+  "brief_defects": [],
+  "findings": [
+    {
+      "severity": "blocking",
+      "category": "golden-order-regression",
+      "summary": "2019 top-3 order changed: Ohio State now #2 ahead of Clemson (was LSU, Clemson, Ohio State at base). #1 is still LSU, so the must-match year passes, but the change comes from this round's margin cap.",
+      "file": "packages/cfb-engine/src/cfb_strength/ratings/keener.py",
+      "line": null,
+      "evidence": "base e5aeddc: LSU 0.1123, Clemson 0.1041, Ohio State 0.1039; branch: LSU 0.1120, Ohio State 0.1044, Clemson 0.1037",
+      "owner": "ratings-agent",
+      "tracked_issue": null
+    }
+  ]
+}
