@@ -56,6 +56,16 @@
   color: var(--ink-muted);
 }
 
+/* Issue #154: which engine answered -- a quiet attribution line under the
+   narration, not a headline. */
+.engine {
+  margin: var(--sp-3) 0 0;
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
 .tagContested {
   background: var(--gold-bright);
   color: var(--leather-strong);

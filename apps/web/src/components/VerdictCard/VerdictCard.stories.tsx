@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { fn } from 'storybook/test'
+import { expect, fn, within } from 'storybook/test'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
 import { VerdictCard } from './VerdictCard'
 
@@ -165,6 +165,71 @@ export const TeamCaseSuccess: Story = {
 export const ComparisonSuccess: Story = {
   args: {
     state: { status: 'success', envelope: comparisonEnvelope },
+  },
+}
+
+/**
+ * Issue #154: a team case answered by Elo. The card names the engine that
+ * answered, read off the envelope; the rating prints on Elo's scale with no
+ * Keener breakdown disclosure (issue #153).
+ */
+export const TeamCaseAnsweredByElo: Story = {
+  args: {
+    state: {
+      status: 'success',
+      envelope: {
+        ...teamCaseEnvelope,
+        evidence: {
+          ...teamCaseEnvelope.evidence,
+          method: 'elo',
+          rating: 1933.19,
+          rating_breakdown: { entries: [], residual_contribution: 0 },
+        },
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Engine: Elo (second opinion)')).toBeVisible()
+    await expect(canvas.getByText(/Rating 1,933/)).toBeVisible()
+    await expect(
+      canvasElement.querySelector('[aria-haspopup="dialog"]'),
+    ).toBeNull()
+  },
+}
+
+/** Issue #154: a comparison answered by Elo -- the same quiet engine label. */
+export const ComparisonAnsweredByElo: Story = {
+  args: {
+    state: {
+      status: 'success',
+      envelope: {
+        ...comparisonEnvelope,
+        evidence: {
+          ...comparisonEnvelope.evidence,
+          method: 'elo',
+          team_a: {
+            ...comparisonEnvelope.evidence.team_a,
+            rating: 1933.19,
+            rating_breakdown: { entries: [], residual_contribution: 0 },
+          },
+          team_b: {
+            ...comparisonEnvelope.evidence.team_b,
+            rating: 1891.83,
+            rating_breakdown: { entries: [], residual_contribution: 0 },
+          },
+          rating_diff: 1933.19 - 1891.83,
+        },
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Engine: Elo (second opinion)')).toBeVisible()
+    await expect(canvas.getByText('1,933')).toBeVisible()
+    await expect(
+      canvasElement.querySelector('[aria-haspopup="dialog"]'),
+    ).toBeNull()
   },
 }
 

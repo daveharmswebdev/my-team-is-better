@@ -177,6 +177,7 @@ describe('HomePage', () => {
       year: 2005,
       user_team: null,
       sport: 'cfb',
+      method: 'keener',
     })
   })
 
@@ -237,6 +238,7 @@ describe('HomePage', () => {
       team: 'Texas State',
       user_team: null,
       sport: 'cfb',
+      method: 'keener',
     })
   })
 
@@ -290,6 +292,132 @@ describe('HomePage', () => {
     expect(within(alert).queryByRole('button')).not.toBeInTheDocument()
   })
 
+  describe('the Engine toggle (issue #154)', () => {
+    function eloRadio() {
+      return screen.getByRole('radio', { name: 'Elo (second opinion)' })
+    }
+
+    it.each([
+      {
+        questionType: 'champion' as const,
+        fill: async () => {},
+        assertCalled: () =>
+          expect(mockedFetchChampion).toHaveBeenCalledWith({
+            year: 2005,
+            user_team: null,
+            sport: 'cfb',
+            method: 'elo',
+          }),
+      },
+      {
+        questionType: 'team_case' as const,
+        fill: async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.type(screen.getByLabelText(/^team$/i), 'USC')
+        },
+        assertCalled: () =>
+          expect(mockedFetchTeamCase).toHaveBeenCalledWith({
+            year: 2005,
+            team: 'USC',
+            user_team: null,
+            sport: 'cfb',
+            method: 'elo',
+          }),
+      },
+      {
+        questionType: 'compare' as const,
+        fill: async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.type(screen.getByLabelText(/team a/i), 'Texas')
+          await user.type(screen.getByLabelText(/team b/i), 'USC')
+        },
+        assertCalled: () =>
+          expect(mockedFetchCompare).toHaveBeenCalledWith({
+            year: 2005,
+            team_a: 'Texas',
+            team_b: 'USC',
+            user_team: null,
+            sport: 'cfb',
+            method: 'elo',
+          }),
+      },
+    ])(
+      'sends method "elo" in the $questionType request',
+      async ({ questionType, fill, assertCalled }) => {
+        const user = userEvent.setup()
+        // Never settles: only the request body is under test.
+        mockedFetchChampion.mockReturnValue(new Promise(() => {}))
+        mockedFetchTeamCase.mockReturnValue(new Promise(() => {}))
+        mockedFetchCompare.mockReturnValue(new Promise(() => {}))
+
+        render(<HomePage />)
+        await user.selectOptions(
+          screen.getByLabelText(/what do you want to know/i),
+          questionType,
+        )
+        await waitForDefaultYear()
+        await user.click(eloRadio())
+        await waitForDefaultYear()
+        await user.clear(screen.getByLabelText(/year/i))
+        await user.type(screen.getByLabelText(/year/i), '2005')
+        await fill(user)
+        await user.click(
+          screen.getByRole('button', { name: /get the verdict/i }),
+        )
+
+        await waitFor(assertCalled)
+      },
+    )
+
+    it('keeps the selected engine across a pill correction: the corrected request and the remounted form both say Elo', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion
+        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
+
+      render(<HomePage />)
+      await waitForDefaultYear()
+      await user.click(eloRadio())
+      const submit = screen.getByRole('button', { name: /get the verdict/i })
+      await waitFor(() => expect(submit).not.toBeDisabled())
+      await user.click(submit)
+
+      await user.click(
+        await screen.findByRole('button', { name: String(CORRECTED_YEAR) }),
+      )
+
+      expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
+        year: CORRECTED_YEAR,
+        user_team: null,
+        sport: 'cfb',
+        method: 'elo',
+      })
+      expect(eloRadio()).toBeChecked()
+    })
+
+    it('flipping the toggle neither re-asks nor clears the verdict on screen', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion.mockResolvedValue(
+        envelopeFor('Texas', 'Texas, full stop.'),
+      )
+
+      render(<HomePage />)
+      const submit = screen.getByRole('button', { name: /get the verdict/i })
+      await waitFor(() => expect(submit).not.toBeDisabled())
+      await user.click(submit)
+      expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
+
+      await user.click(eloRadio())
+
+      await expectThroughout(() => {
+        expect(screen.getByText('Texas, full stop.')).toBeInTheDocument()
+        expect(screen.getByText('Engine: Keener (default)')).toBeInTheDocument()
+      })
+      expect(mockedFetchChampion).toHaveBeenCalledTimes(1)
+      expect(mockedFetchTeamCase).not.toHaveBeenCalled()
+      expect(mockedFetchCompare).not.toHaveBeenCalled()
+    })
+  })
+
   describe('pill corrections update the visible form (issue #38)', () => {
     it('updates the Year input, not just the verdict, when a year pill is picked', async () => {
       const user = userEvent.setup()
@@ -311,6 +439,7 @@ describe('HomePage', () => {
         year: 2018,
         user_team: null,
         sport: 'cfb',
+        method: 'keener',
       })
       // The point of the issue: the form must agree with what was asked.
       expect(screen.getByLabelText(/year/i)).toHaveValue(2018)
@@ -392,6 +521,7 @@ describe('HomePage', () => {
           team_b: 'Texas State',
           user_team: null,
           sport: 'cfb',
+          method: 'keener',
         }),
       )
       expect(screen.getByLabelText(/team a/i)).toHaveValue('USC')
@@ -436,6 +566,7 @@ describe('HomePage', () => {
         year: CORRECTED_YEAR,
         user_team: null,
         sport: 'nfl',
+        method: 'keener',
       })
     })
 
@@ -468,7 +599,7 @@ describe('HomePage', () => {
       const held: { promise?: Promise<TeamsOut>; release: () => void } = {
         release: () => {},
       }
-      mockedFetchTeams.mockImplementation((_sport, year) => {
+      mockedFetchTeams.mockImplementation((_sport, _method, year) => {
         if (year !== IN_FLIGHT_YEAR) {
           return Promise.resolve(TEAMS)
         }
@@ -498,6 +629,7 @@ describe('HomePage', () => {
         () =>
           expect(mockedFetchTeams).toHaveBeenLastCalledWith(
             'cfb',
+            'keener',
             IN_FLIGHT_YEAR,
           ),
         { timeout: YEAR_DEBOUNCE_MS * 5 },
@@ -517,7 +649,7 @@ describe('HomePage', () => {
       await waitFor(() =>
         expect(
           mockedFetchTeams.mock.calls.slice(callsBeforeCorrection),
-        ).toContainEqual(['cfb', CORRECTED_YEAR]),
+        ).toContainEqual(['cfb', 'keener', CORRECTED_YEAR]),
       )
 
       held.release()
@@ -533,6 +665,7 @@ describe('HomePage', () => {
         year: CORRECTED_YEAR,
         user_team: null,
         sport: 'cfb',
+        method: 'keener',
       })
     })
   })

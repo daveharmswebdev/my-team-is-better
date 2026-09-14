@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { DISPLAYED_METHODS } from '../methods'
+import type { DisplayedMethod } from '../methods'
 import { METHODS, SPORTS, isVerdictErrorBody } from './types'
+import type { Method } from './types'
 
 /**
  * Issue #112 (epic #113): apps/web's closed vocabularies are checked against
@@ -78,6 +81,22 @@ function isNotMirrored(
   return !Array.isArray(decision)
 }
 
+/**
+ * Epic #147 / issue #154: every method the API publishes is a decision for the
+ * Engine toggle, not just for the type mirror above. A method is either offered
+ * (`DISPLAYED_METHODS`) or listed here with the reason it is not. Typed off
+ * `Method` so tsc also refuses a method that is neither, but the runtime test
+ * below reads the API's published list too, so a method the API adds fails web
+ * CI until someone decides whether the toggle shows it.
+ */
+const METHOD_TOGGLE_EXCLUSIONS: Record<
+  Exclude<Method, DisplayedMethod>,
+  string
+> = {
+  elo_career:
+    'elo_career lets prior seasons contribute to a rank that nothing on the card (receipts, persona fact block) can justify; it stays API-only (founder decision, epic #147).',
+}
+
 describe('published API vocabularies (issue #112)', () => {
   const vocabularies = loadVocabularies()
 
@@ -124,6 +143,43 @@ describe('published API vocabularies (issue #112)', () => {
     const method = vocabularies['method']
     expect(method?.length).toBeGreaterThan(0)
     expect([...METHODS]).toEqual(method)
+  })
+
+  describe('the Engine toggle decides every published method (issue #154)', () => {
+    const exclusions: Readonly<Record<string, string | undefined>> =
+      METHOD_TOGGLE_EXCLUSIONS
+    const displayed: readonly string[] = DISPLAYED_METHODS
+
+    it('offers or explicitly excludes, with a reason, every method the API publishes', () => {
+      const published = vocabularies['method'] ?? []
+      expect(published.length).toBeGreaterThan(0)
+      for (const method of new Set([...published, ...METHODS])) {
+        const isDisplayed = displayed.includes(method)
+        const reason = exclusions[method]?.trim() ?? ''
+        // Exactly one of the two: a method both offered and excluded is as
+        // undecided as one that is neither.
+        expect({ method, isDisplayed, hasExclusion: reason !== '' }).toEqual({
+          method,
+          isDisplayed,
+          hasExclusion: !isDisplayed,
+        })
+      }
+    })
+
+    it('offers only published methods and excludes only published methods', () => {
+      const published = vocabularies['method'] ?? []
+      expect(displayed.length).toBeGreaterThan(0)
+      for (const method of [...displayed, ...Object.keys(exclusions)]) {
+        expect(published).toContain(method)
+      }
+    })
+
+    it('records why elo_career is deliberately not offered', () => {
+      expect(displayed).not.toContain('elo_career')
+      expect(METHOD_TOGGLE_EXCLUSIONS.elo_career).toBe(
+        'elo_career lets prior seasons contribute to a rank that nothing on the card (receipts, persona fact block) can justify; it stays API-only (founder decision, epic #147).',
+      )
+    })
   })
 
   describe('isVerdictErrorBody follows the sport list', () => {

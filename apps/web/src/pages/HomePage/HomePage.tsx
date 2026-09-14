@@ -13,6 +13,7 @@ import {
   fetchTeamCase,
 } from '../../lib/api/client'
 import type {
+  Method,
   Sport,
   VerdictCardState,
   VerdictErrorState,
@@ -37,6 +38,8 @@ interface FormSeed {
   generation: number
   questionType: QuestionType
   sport: Sport
+  /** The engine the corrected question was asked of, so the remount keeps it (issue #154). */
+  method: Method
   year: number
   team?: string
   teamA?: string
@@ -51,6 +54,7 @@ function seedFrom(
     generation,
     questionType: submission.questionType,
     sport: submission.sport,
+    method: submission.method,
     year: submission.year,
   }
   if (submission.questionType === 'team_case') {
@@ -81,6 +85,7 @@ export function HomePage() {
               year: next.year,
               user_team: next.userTeam,
               sport: next.sport,
+              method: next.method,
             })
           : next.questionType === 'team_case'
             ? await fetchTeamCase({
@@ -88,6 +93,7 @@ export function HomePage() {
                 team: next.team,
                 user_team: next.userTeam,
                 sport: next.sport,
+                method: next.method,
               })
             : await fetchCompare({
                 year: next.year,
@@ -95,6 +101,7 @@ export function HomePage() {
                 team_b: next.teamB,
                 user_team: next.userTeam,
                 sport: next.sport,
+                method: next.method,
               })
       setState({ status: 'success', envelope })
     } catch (error) {
@@ -153,6 +160,7 @@ export function HomePage() {
         isSubmitting={state?.status === 'loading'}
         initialQuestionType={formSeed?.questionType}
         initialSport={formSeed?.sport}
+        initialMethod={formSeed?.method}
         initialYear={formSeed?.year}
         initialTeam={formSeed?.team}
         initialTeamA={formSeed?.teamA}

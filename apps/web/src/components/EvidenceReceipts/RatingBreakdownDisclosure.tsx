@@ -73,6 +73,10 @@ function opponentRecord(entry: OpponentCreditOut): string {
  * regularizer plus the credit matrix's dominant eigenvalue being below 1),
  * typically ~47-53% of a team's rating -- it is labeled as its own named
  * thing ("Rating-system baseline"), never folded into "other"/rounding.
+ *
+ * Keener-only copy: callers render this only for a method whose
+ * `RATING_BREAKDOWN_BY_METHOD` entry has a breakdown (issue #153). Under Elo
+ * it would claim "Total 0" matches a rating of 1,684.
  */
 export function RatingBreakdownDisclosure({
   teamName,

@@ -4,7 +4,8 @@
   gap: var(--sp-4);
 }
 
-.sportToggle {
+.sportToggle,
+.engineToggle {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
@@ -14,7 +15,8 @@
   font-family: var(--font-label);
 }
 
-.sportToggle legend {
+.sportToggle legend,
+.engineToggle legend {
   font-weight: 600;
   font-size: 0.82rem;
   letter-spacing: 0.04em;
@@ -23,7 +25,8 @@
   padding: 0 0.3rem;
 }
 
-.sportToggle label {
+.sportToggle label,
+.engineToggle label {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
@@ -31,6 +34,12 @@
   font-size: 0.95rem;
   color: var(--ink);
   cursor: pointer;
+}
+
+/* The engine names are longer than the league names, so let them wrap on a
+   narrow screen rather than overflow the fieldset (issue #154). */
+.engineToggle {
+  flex-wrap: wrap;
 }
 
 .qfield {
