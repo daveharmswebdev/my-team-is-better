@@ -416,10 +416,13 @@ browser URL is always the current question's link.
   - the engine must be displayed
   - anything else yields no fetch
 
-  For direct requests, the API caps `user_team` at 64 characters (a 422) and
-  resolves it against the request sport's team catalog, ignoring case and
-  surrounding whitespace. An unknown value becomes `null` rather than a 422,
-  so a stale saved team never breaks a verdict (#188). `year` is not yet
+  For direct requests, the API resolves `user_team` against the request
+  sport's team catalog with the web typeahead's own rule: a folded
+  (case-, accent- and surrounding-whitespace-insensitive) match on the
+  canonical name, or else on exactly one team's alias, sent on as the
+  canonical name. Anything else becomes `null` rather than a 422: over 64
+  characters, unknown, or an alias two teams share. So a stale or mistyped
+  saved team never breaks a verdict (#188). `year` is not yet
   bounded (#189), and nothing is rate-limited (#236).
 - **Champion links carry no `for`.** The best-team question has no user team
   (#198). `toShareSearch` omits `for` from champion links, and
