@@ -10,7 +10,9 @@
  *
  * Every failure a user can see carries plain copy in the narrator's voice,
  * never a raw HTTP status (issue #215):
- * - `fetch` itself rejects, or a verdict request times out: `VerdictNetworkError`.
+ * - `fetch` itself rejects, or a request times out (verdicts after
+ *   `VERDICT_TIMEOUT_MS`, the credits and catalog GETs after
+ *   `CATALOG_TIMEOUT_MS`): `VerdictNetworkError`.
  * - a verdict endpoint's typed error body: `VerdictApiError` (in-character copy
  *   lives in `VerdictError`).
  * - any other non-OK response: `VerdictHttpError`, whose message is chosen by
@@ -43,7 +45,18 @@ const API_BASE_URL: string =
  */
 export const VERDICT_TIMEOUT_MS = 30_000
 
-/** The API couldn't be reached, or a verdict request timed out. */
+/**
+ * How long a `/api/credits`, `/api/years` or `/api/teams` GET may take,
+ * headers and body together, before it is abandoned as a network error
+ * (issue #237). Production GETs measured 2026-09-14: `/api/credits`
+ * 0.14-0.33 s (2.5 KB), `/api/years` 0.14-0.19 s, `/api/teams` (cfb, no year,
+ * 72 KB) 0.17-0.23 s, `/api/teams?year=2005` 0.15-0.27 s, nfl/elo
+ * 0.13-0.16 s -- 15 calls, slowest 0.33 s, so 10 s is ~30x the slowest
+ * observed. The API's Render plan does not spin down.
+ */
+export const CATALOG_TIMEOUT_MS = 10_000
+
+/** The API couldn't be reached, or a request timed out. */
 export const NETWORK_ERROR_COPY =
   "Lost you there, pal. Couldn't get through. Check your connection and ask me again."
 
@@ -68,7 +81,7 @@ export class VerdictApiError extends Error {
   }
 }
 
-/** Unreachable API (`fetch` rejected), or a verdict request that timed out. */
+/** Unreachable API (`fetch` rejected), or a request that timed out. */
 export class VerdictNetworkError extends Error {
   constructor(message: string) {
     super(message)
@@ -174,17 +187,20 @@ function errorDetail(bodyText: string): unknown {
 }
 
 /**
- * One verdict request, bounded by `VERDICT_TIMEOUT_MS` from the start of the
- * request to the end of reading its body, and abortable by the caller. The
- * timer is `setTimeout` + `AbortController` rather than `AbortSignal.timeout`
- * / `AbortSignal.any`, so fake timers drive it and older mobile Safari has it.
+ * Runs one request, `send`, bounded by `timeoutMs` from the start of the
+ * request to the end of reading its body (issues #214, #237), and abortable
+ * by `callerSignal` if one is given. `send` must hand the signal it receives
+ * to `fetch` and to every body read. A timeout rejects with a
+ * `VerdictNetworkError`, a caller abort with an `AbortError`, whatever `send`
+ * itself rejected with. The timer is `setTimeout` + `AbortController` rather
+ * than `AbortSignal.timeout` / `AbortSignal.any`, so fake timers drive it and
+ * older mobile Safari has it.
  */
-async function postVerdict<T>(
-  path: string,
-  payload: unknown,
-  options: VerdictRequestOptions = {},
+async function withDeadline<T>(
+  timeoutMs: number,
+  send: (signal: AbortSignal) => Promise<T>,
+  callerSignal?: AbortSignal,
 ): Promise<T> {
-  const callerSignal = options.signal
   const controller = new AbortController()
   const abortForCaller = () => {
     controller.abort(abortError())
@@ -196,14 +212,10 @@ async function postVerdict<T>(
   }
   const timer = setTimeout(() => {
     controller.abort(new VerdictNetworkError(NETWORK_ERROR_COPY))
-  }, VERDICT_TIMEOUT_MS)
+  }, timeoutMs)
 
   try {
-    return await sendVerdict<T>(
-      `${API_BASE_URL}${path}`,
-      payload,
-      controller.signal,
-    )
+    return await send(controller.signal)
   } catch (error) {
     if (controller.signal.aborted) {
       // Whatever the fetch or body read rejected with, the abort's reason
@@ -216,6 +228,20 @@ async function postVerdict<T>(
     clearTimeout(timer)
     callerSignal?.removeEventListener('abort', abortForCaller)
   }
+}
+
+/** One verdict request, bounded by `VERDICT_TIMEOUT_MS` and abortable by the caller. */
+function postVerdict<T>(
+  path: string,
+  payload: unknown,
+  options: VerdictRequestOptions = {},
+): Promise<T> {
+  const url = `${API_BASE_URL}${path}`
+  return withDeadline(
+    VERDICT_TIMEOUT_MS,
+    (signal) => sendVerdict<T>(url, payload, signal),
+    options.signal,
+  )
 }
 
 async function sendVerdict<T>(
@@ -317,21 +343,34 @@ export function fetchCompare(
 /**
  * Shared GET for the endpoints with no typed error contract: a rejected
  * `fetch` is a `VerdictNetworkError`, and any non-OK response a
- * `VerdictHttpError`. No timeout here (issue #214 scoped it to verdicts).
+ * `VerdictHttpError`. Bounded by `CATALOG_TIMEOUT_MS` from the start of the
+ * request to the end of reading its body (issue #237): a hung request rejects
+ * with a `VerdictNetworkError` too, so callers take the failure path they
+ * already have. No caller signal: callers discard stale results themselves.
  */
-async function getJson<T>(url: string): Promise<T> {
+function getJson<T>(url: string): Promise<T> {
+  return withDeadline(CATALOG_TIMEOUT_MS, (signal) =>
+    receiveJson<T>(url, signal),
+  )
+}
+
+async function receiveJson<T>(url: string, signal: AbortSignal): Promise<T> {
   let response: Response
   try {
-    response = await fetch(url)
+    response = await fetch(url, { signal })
   } catch {
     throw new VerdictNetworkError(NETWORK_ERROR_COPY)
   }
 
   if (!response.ok) {
-    throw unmappedHttpError(url, response.status, await readBodyText(response))
+    throw unmappedHttpError(
+      url,
+      response.status,
+      await readBodyText(response, signal),
+    )
   }
 
-  return (await response.json()) as T
+  return await untilAborted(response.json() as Promise<T>, signal)
 }
 
 /**
