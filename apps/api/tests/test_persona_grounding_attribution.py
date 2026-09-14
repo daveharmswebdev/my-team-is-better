@@ -60,6 +60,22 @@ Round 2 (sections C and D below) closes two escapes the round-1 rules left:
   `1518.88` ("1519"), against LSU's `2044.43` ("2044"). 2005 Ohio State beat
   Miami (OH) 34-14 (Elo `1547.04`, "1547"); 2013 Michigan State beat Purdue
   14-0 (its record is 13-1-0).
+
+Round 3 (section E below) removes the false positive round 2 pinned as a
+limit: a sentence naming one compared team while quoting *both* compared
+teams' ratings, which is the engine's own verdict sentence handed to the
+narrator ("Texas rates higher overall (1933.2 vs 1891.8, rank 1 vs 2)") and
+its voiced forms ("Texas rates higher, 1933 to 1892"). On a comparison block
+a bare rating-only token that is the *other* subject's rating is grounded
+when the same sentence quotes the named subject's rating too (the module
+docstring's round-3 rule), so `test_verdict_quoted_verbatim` now asserts the
+verdict is fully grounded. A lone bare token stays held to the named team
+("Elo has Texas at 1892" is still flagged), a parenthetical never uses the
+rule, and a team case (one subject) never does. Round 3 adds the 2019 LSU
+vs Clemson (Elo `2044.43` / `1915.36`, verdict "2044.4 vs 1915.4") and 2001
+Miami vs Florida (Elo `1932.55` / `1850.35`, verdict "1932.5 vs 1850.3")
+comparisons to the verdict blocks; the 2001 verdict's common-opponent
+sentence names Florida State, so round 2's name rule runs on it too.
 """
 
 from __future__ import annotations
@@ -154,6 +170,8 @@ def _block(
         return block, "cfb", cfb_conn
     if name == "compare_2019_elo":
         return _comparison_block(cfb_conn, 2019, "LSU", "Clemson", "cfb", "elo"), "cfb", cfb_conn
+    if name == "compare_2001_elo":
+        return _comparison_block(cfb_conn, 2001, "Miami", "Florida", "cfb", "elo"), "cfb", cfb_conn
     if name == "kilo_case":
         return _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl", "keener"), "nfl", nfl_conn
     if name == "kilo_compare":
@@ -682,6 +700,19 @@ VERDICT_RATINGS = [
         id="2013-keener",
     ),
     pytest.param(
+        "compare_2019_elo", "LSU", "Clemson", "2044.4", "1915.4", "2044.4", "1915.4", id="2019-elo"
+    ),
+    pytest.param(
+        "compare_2001_elo",
+        "Miami",
+        "Florida",
+        "1932.5",
+        "1850.3",
+        "1932.5",
+        "1850.3",
+        id="2001-elo",
+    ),
+    pytest.param(
         "kilo_compare",
         "Kilo Kings",
         "Mike Mustangs",
@@ -792,48 +823,49 @@ def test_verdict_quoted_verbatim(
     a_own: str,
     b_own: str,
 ) -> None:
-    """The engine's verdict quoted as-is. Every sentence of it that names both
-    teams (the head-to-head and common-opponent sentences) stays grounded.
-    Its last sentence, "<team_a> rates higher overall (<a> vs <b>, rank ...)",
-    names only `team_a` once the response is split into sentences, so it is
-    the one-name limit pinned in
-    `test_single_name_sentence_quoting_both_ratings_is_the_documented_limit`:
-    the retry feedback names the fix (say whose the second rating is)."""
+    """The engine's verdict quoted as-is is fully grounded. Every sentence of
+    it that names both teams (the head-to-head and common-opponent sentences)
+    is grounded as before. Its last sentence, "<team_a> rates higher overall
+    (<a> vs <b>, rank ...)", names only `team_a` once the response is split
+    into sentences, and quotes both subjects' ratings: round 2 flagged that
+    as the one-name limit; round 3 grounds it as a comparison statement
+    (section E), since the rating that is not the named team's can only be
+    the other compared team's."""
     fact_block, sport, conn = block
     verdict: str = json.loads(fact_block)["verdict"]
     *both_named, rating_sentence = re.split(r"(?<=[.!?])\s+", verdict)
-    limit = [f"{b_stated} is not {team_a}'s rating; {team_a}'s rating is {a_own}"]
 
     assert team_a in rating_sentence and team_b not in rating_sentence
     assert a_stated in rating_sentence and b_stated in rating_sentence
     for sentence in both_named:
         assert team_a in sentence and team_b in sentence, sentence
         assert _check(conn, sentence, fact_block, sport) == [], sentence
-    assert _check(conn, rating_sentence, fact_block, sport) == limit
-    assert _check(conn, verdict, fact_block, sport) == limit
+    assert _check(conn, rating_sentence, fact_block, sport) == []
+    assert _check(conn, verdict, fact_block, sport) == []
 
 
 @pytest.mark.parametrize("block", ["compare_elo", "compare_keener"], indirect=True)
 def test_single_name_sentence_quoting_both_ratings_is_the_documented_limit(
     block: tuple[str, Sport, sqlite3.Connection],
 ) -> None:
-    """Accepted trade-off, the same limit as #26's score rule and the
-    two-team swap above: nearest-name attribution has one name to give a
-    rating to, so a sentence naming one team while quoting both ratings
-    hands the second rating to that team and flags it. Naming the other
-    team rescues it (the bare rescue), which is what the retry feedback
-    tells the narrator to do. Asserted so a future change is deliberate."""
+    """Round 3 flipped this from the pinned limit to the pinned acceptance: a
+    one-name sentence quoting both compared ratings is grounded as a
+    comparison statement, whichever way round it says them. The accepted
+    trade-off, the same class as the two-team swap above: "Texas sits at
+    1892, up from 1933" quotes both subjects' ratings and bare prose cannot
+    say which is Texas's, so it is grounded too. Asserted so a future change
+    is deliberate."""
     fact_block, sport, conn = block
     elo = _rating_word(fact_block) == "Elo"
     a_stated, b_stated = ("1933.2", "1891.8") if elo else ("0.005044", "0.004736")
+    a_shown, b_shown = ("1933", "1892") if elo else ("5.04", "4.74")
 
-    assert _check(conn, f"Texas rates higher, {a_stated} vs {b_stated}.", fact_block, sport) == [
-        f"{b_stated} is not Texas's rating; Texas's rating is {a_stated}"
-    ]
+    assert _check(conn, f"Texas rates higher, {a_stated} vs {b_stated}.", fact_block, sport) == []
     assert (
         _check(conn, f"Texas rates higher than USC, {a_stated} vs {b_stated}.", fact_block, sport)
         == []
     )
+    assert _check(conn, f"Texas sits at {b_shown}, up from {a_shown}.", fact_block, sport) == []
 
 
 @pytest.mark.parametrize(
@@ -1163,3 +1195,151 @@ def test_wrong_record_equal_to_a_game_score_is_the_documented_limit(
     assert _check(cfb_conn, "Michigan State went 14-0-0.", block, "cfb") == [
         "14-0-0 is not Michigan State's record; Michigan State's record is 13-1-0"
     ]
+
+
+# ---------------------------------------------------------------------------
+# E. a sentence quoting both compared teams' ratings is a comparison
+# statement (#166 round 3): on a comparison block, a bare rating-only token
+# that is the *other* subject's rating is grounded when the same sentence
+# also quotes, bare, the rating of the subject it is attributed to. The
+# flagged cases sit right after the grounded ones so the boundary is visible.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(_VERDICT_PARAMS, VERDICT_RATINGS, indirect=["block"])
+def test_one_name_sentence_quoting_both_compared_ratings_is_grounded(
+    block: tuple[str, Sport, sqlite3.Connection],
+    team_a: str,
+    team_b: str,
+    a_stated: str,
+    b_stated: str,
+    a_own: str,
+    b_own: str,
+) -> None:
+    """The verdict's rating pair in voiced prose on every comparison block:
+    naming either subject, with the ratings in either order."""
+    fact_block, sport, conn = block
+    word = _rating_word(fact_block)
+    responses = [
+        f"{team_a} rates higher, {a_stated} vs {b_stated}.",
+        f"{team_b} rates lower, {a_stated} vs {b_stated}.",
+        f"{word} has it {team_a}, {a_stated} to {b_stated}.",
+        f"{team_b} trails, {b_stated} to {a_stated}.",
+    ]
+
+    for response in responses:
+        assert _check(conn, response, fact_block, sport) == [], response
+
+
+@pytest.mark.parametrize(
+    ("block", "response"),
+    [
+        pytest.param("compare_elo", "Texas rates higher, 1933 to 1892.", id="elo-as-shown"),
+        pytest.param(
+            "compare_elo", "Texas rates higher, 1933.2 vs 1891.8.", id="elo-verdict-rounded"
+        ),
+        pytest.param("compare_elo", "USC rates lower, 1933.2 vs 1891.8.", id="elo-team-b-named"),
+        pytest.param("compare_elo", "Elo has it Texas, 1,933 to 1,892.", id="elo-grouped"),
+        pytest.param("compare_keener", "Keener has it Texas, 5.04 to 4.74.", id="keener-as-shown"),
+        pytest.param("compare_keener", "USC trails, 4.74 to 5.04.", id="keener-team-b-named"),
+        pytest.param(
+            "compare_elo",
+            "Texas beat Oklahoma 45-12, and Elo has it 1933 to 1892.",
+            id="elo-opponent-nearer-than-the-subject",
+        ),
+        pytest.param(
+            "kilo_compare", "Kilo Kings rate higher, 250.00 to 150.00.", id="nfl-as-shown"
+        ),
+    ],
+    indirect=["block"],
+)
+def test_voiced_comparison_statements_are_grounded(
+    block: tuple[str, Sport, sqlite3.Connection], response: str
+) -> None:
+    """The brief's voiced forms of the verdict: the ratings as the site
+    shows them, as the verdict rounds them, grouped, with `team_b` as the
+    named team, and with a non-subject opponent (Oklahoma, whose own
+    `opponent_rating` is in the block) standing nearer both numbers than the
+    sentence's one subject does."""
+    fact_block, sport, conn = block
+
+    assert _check(conn, response, fact_block, sport) == []
+
+
+_LONE_1892 = ["1892 is not Texas's rating; Texas's rating is 1933"]
+
+
+@pytest.mark.parametrize(
+    ("block", "response", "expected"),
+    [
+        pytest.param("compare_elo", "Elo has Texas at 1892.", _LONE_1892, id="lone-bare-as-shown"),
+        pytest.param(
+            "compare_elo",
+            "Elo has Texas at 1891.8.",
+            ["1891.8 is not Texas's rating; Texas's rating is 1933.2"],
+            id="lone-bare-verdict-rounded",
+        ),
+        pytest.param(
+            "compare_keener",
+            "Keener has Texas at 4.74.",
+            ["4.74 is not Texas's rating; Texas's rating is 5.04"],
+            id="lone-bare-keener",
+        ),
+        pytest.param("compare_elo", "Texas (1892) is rated.", _LONE_1892, id="parenthetical"),
+        pytest.param(
+            "compare_elo",
+            "Texas (1892) sits above 1933.",
+            _LONE_1892,
+            id="parenthetical-token-never-uses-the-rule",
+        ),
+        pytest.param(
+            "compare_elo",
+            "Texas sits at 1892 (1933).",
+            _LONE_1892,
+            id="parenthetical-other-token-does-not-count",
+        ),
+        pytest.param(
+            "compare_elo",
+            "Elo has Texas at 1892 and 1891.8.",
+            [
+                "1891.8 is not Texas's rating; Texas's rating is 1933.2",
+                "1892 is not Texas's rating; Texas's rating is 1933",
+            ],
+            id="neither-token-is-the-named-teams",
+        ),
+        pytest.param(
+            "compare_elo",
+            "Oklahoma saw 1933 and 1892.",
+            [
+                "1892 is not Oklahoma's rating; Oklahoma's rating is 1715",
+                "1933 is not Oklahoma's rating; Oklahoma's rating is 1715",
+            ],
+            id="no-subject-named",
+        ),
+        pytest.param(
+            "texas_case_elo",
+            "Texas sits at 1892, up from 1933.",
+            _LONE_1892,
+            id="team-case-has-one-subject",
+        ),
+        pytest.param(
+            "texas_case_elo",
+            "Texas beat Oklahoma 45-12, and Elo has it 1933 to 1892.",
+            ["1892 is not Oklahoma's rating; Oklahoma's rating is 1715"],
+            id="team-case-opponent-nearer",
+        ),
+    ],
+    indirect=["block"],
+)
+def test_wrong_team_rating_stays_flagged_beside_the_comparison_rule(
+    block: tuple[str, Sport, sqlite3.Connection], response: str, expected: list[str]
+) -> None:
+    """The boundary of the round-3 rule, with round 1's and round 2's exact
+    messages: a lone bare token is still held to the team it is nearest;
+    a parenthetical token never uses the rule and never counts as the
+    sentence's other quoted rating; both tokens must be the two subjects'
+    ratings; the named subject must be in the sentence; and a team case,
+    with one subject, never uses it."""
+    fact_block, sport, conn = block
+
+    assert _check(conn, response, fact_block, sport) == expected

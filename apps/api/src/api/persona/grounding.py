@@ -253,6 +253,26 @@ in the same sentence owns it.
   decimal places when the token is a rounding, else the exact literal. When
   the name carries more than one distinct rating, only "1892 is not Texas's
   rating".
+* **A sentence quoting both compared teams' ratings is a comparison
+  statement (round 3).** On a comparison -- two subjects, `team_a` and
+  `team_b`, each with a `rating` under its `team_name` -- a bare
+  rating-only token that fails the nearest-name check and the bare rescue
+  is also grounded when it is the rating (exact, rounded or as displayed)
+  of the subject that is *not* its nearest name, and another bare
+  rating-only token in the same sentence is the other subject's rating,
+  that other subject being the nearest subject mention to it. The engine's
+  own verdict sentence handed to the narrator, "Texas rates higher overall
+  (1933.2 vs 1891.8, rank 1 vs 2)", names only `team_a`, and it and its
+  voiced forms ("Texas rates higher, 1933 to 1892"; "USC rates lower,
+  1933.2 vs 1891.8") are grounded: a sentence quoting both compared teams'
+  ratings is a comparison statement, and the rating that is not the named
+  team's can only be the other team's. A lone bare token gets no such
+  rescue, so "Elo has Texas at 1892" on the comparison is still flagged;
+  a parenthetical token never uses it and never counts as the partner
+  ("Texas (1892) sits above 1933" and "Texas sits at 1892 (1933)" are
+  flagged); a sentence naming neither subject has no named subject to
+  hold the partner to; and a team case has one subject, so the rule never
+  applies there.
 
 * **A name is a mention only when it stands on its own.** The sentence's
   name mentions (`_name_occurrences`, shared by the score rule, the record
@@ -271,12 +291,11 @@ one sentence ("Texas went 12-1 and USC went 13-0"; "Elo has USC at 1933 and
 Texas at 1892") is rescued, because the bare phrasing itself cannot say
 which of the two names each number belongs to, and the rescue is what keeps
 "USC lost only to Texas, finishing 12-1" and "beat USC 41-38, and Elo has
-them at 1,933" grounded. A sentence naming one team while quoting both
-ratings ("Texas rates higher, 1933.2 vs 1891.8", and so the verdict's own
-rating sentence quoted verbatim, which names only `team_a`) is flagged,
-because nearest-name attribution has only one name to give the second
-rating to; naming the other team ("Texas rates higher than USC, 1933.2 vs
-1891.8") is rescued, and the retry feedback names that fix. A wrong-team
+them at 1,933" grounded. The comparison-statement rule has the same
+trade-off in one-name prose: "Texas sits at 1892, up from 1933" quotes both
+compared teams' ratings, and bare prose cannot say which figure is Texas's,
+so it is grounded like the two-team swap; a lone wrong rating beside a name
+("Elo has Texas at 1892") is still caught. A wrong-team
 two-part record that equals, in order, a game score the block states
 ("Michigan State went 14-0" in Michigan State's 13-1-0 season, after a 14-0
 win over Purdue) is grounded by the game-score rule, the same kind of
@@ -384,6 +403,10 @@ _NameOccurrence = tuple[str, tuple[int, int]]
 # beside an `opponent_name`, as exact `Decimal`s (issue #166).
 _RatingsByName = dict[str, set[Decimal]]
 
+# A response number token grounded only as a rating, with its span in the
+# sentence it was found in and the token as written (issue #166, round 3).
+_RatingToken = tuple[tuple[int, int], str]
+
 
 @dataclass(frozen=True)
 class _SubjectRecord:
@@ -436,6 +459,10 @@ class _NumberFacts:
     # absent from this set is grounded only as a rating.
     non_rating_numbers: set[str]
     ratings_by_name: _RatingsByName
+    # A comparison's `team_a` / `team_b` `rating` under each `team_name`,
+    # for the comparison-statement rule (#166, round 3). Empty on a team
+    # case, or when either side lacks a name or a finite rating.
+    compared_ratings: Mapping[str, Decimal]
 
 
 @dataclass(frozen=True)
@@ -508,6 +535,7 @@ def _extract_number_facts(fact_block_json: str) -> _NumberFacts:
         method=method,
         non_rating_numbers=set(_NUMBER_RE.findall(blanked)),
         ratings_by_name=_extract_ratings_by_name(fact_block_json),
+        compared_ratings=_extract_compared_ratings(fact_block_json),
     )
 
 
@@ -613,6 +641,30 @@ def _extract_ratings_by_name(fact_block_json: str) -> _RatingsByName:
                 ratings[team_name].add(rating)
     _collect_opponent_ratings(data, ratings)
     return ratings
+
+
+def _extract_compared_ratings(fact_block_json: str) -> Mapping[str, Decimal]:
+    """A comparison's two subjects' own ratings under their names (issue
+    #166, round 3): `{team_a.team_name: team_a.rating, team_b.team_name:
+    team_b.rating}` when both sides carry a string `team_name` and a finite
+    `rating` and the names differ, else empty. A team case has one subject,
+    so the comparison-statement rule never applies to it.
+    """
+    try:
+        data: Any = json.loads(fact_block_json, parse_float=Decimal)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    compared: dict[str, Decimal] = {}
+    for side in (data.get("team_a"), data.get("team_b")):
+        if not isinstance(side, dict):
+            return {}
+        team_name, rating = side.get("team_name"), side.get("rating")
+        if not (isinstance(team_name, str) and isinstance(rating, Decimal) and rating.is_finite()):
+            return {}
+        compared[team_name] = rating
+    return compared if len(compared) == 2 else {}
 
 
 def _collect_opponent_ratings(node: Any, ratings: _RatingsByName) -> None:
@@ -1209,19 +1261,26 @@ def _find_rating_mismatches(
     sentence, in a sentence that names at least one team: attribute it to
     its nearest name (parenthetical within `_PROXIMITY_WINDOW`, bare at any
     distance) and require it to be that name's rating -- exactly, rounded
-    (#162) or as displayed (#165) -- or, bare, another named team's.
+    (#162) or as displayed (#165) -- or, bare, another named team's, or,
+    bare on a comparison, the other compared team's beside the named team's
+    (`_is_comparison_statement`, round 3).
     """
     mismatches: set[str] = set()
     for sentence in _split_sentences(response_text):
         name_occurrences = _name_occurrences(sentence, known_team_names)
         if not name_occurrences:
             continue
-        for token_match in _RESPONSE_NUMBER_RE.finditer(sentence):
-            token = token_match.group()
-            if not _is_rating_only(token, numbers):
-                continue
+        rating_tokens: list[_RatingToken] = [
+            (token_match.span(), token_match.group())
+            for token_match in _RESPONSE_NUMBER_RE.finditer(sentence)
+            if _is_rating_only(token_match.group(), numbers)
+        ]
+        bare_tokens = [
+            (span, token) for span, token in rating_tokens if not _is_parenthesized(sentence, span)
+        ]
+        for span, token in rating_tokens:
             mismatch = _check_rating_claim(
-                sentence, token_match.span(), token, name_occurrences, numbers
+                sentence, span, token, name_occurrences, numbers, bare_tokens
             )
             if mismatch is not None:
                 mismatches.add(mismatch)
@@ -1247,6 +1306,7 @@ def _check_rating_claim(
     token: str,
     name_occurrences: list[_NameOccurrence],
     numbers: _NumberFacts,
+    bare_tokens: list[_RatingToken],
 ) -> str | None:
     plain = token.replace(",", "")
     parenthetical = _is_parenthesized(sentence, token_span)
@@ -1271,12 +1331,58 @@ def _check_rating_claim(
         for value in numbers.ratings_by_name.get(other, set())
     ):
         return None
+    if not parenthetical and _is_comparison_statement(
+        plain, token_span, name, name_occurrences, numbers, bare_tokens
+    ):
+        return None
 
     if len(values) > 1:
         return f"{token} is not {name}'s rating"
     (value,) = values
     own = _rating_as_claimed(plain, value, numbers)
     return f"{token} is not {name}'s rating; {name}'s rating is {own}"
+
+
+def _is_comparison_statement(
+    plain: str,
+    token_span: tuple[int, int],
+    nearest_name: str,
+    name_occurrences: list[_NameOccurrence],
+    numbers: _NumberFacts,
+    bare_tokens: list[_RatingToken],
+) -> bool:
+    """Whether a bare rating-only token that failed the nearest-name check
+    and the bare rescue is half of a comparison statement (issue #166, round
+    3; see the module docstring): on a block with two rated subjects, it
+    states the rating of the subject S2 that is *not* its nearest name, and
+    another bare rating-only token in the sentence states the other subject
+    S1's rating, where S1 is that token's nearest subject mention. Never for
+    a parenthetical token (the caller's check), never with a parenthetical
+    partner (`bare_tokens` excludes them), and never on a one-subject block
+    (`compared_ratings` is empty there). A lone token has no partner, so
+    "Elo has Texas at 1892" is never grounded this way.
+    """
+    compared = numbers.compared_ratings
+    if len(compared) != 2:
+        return False
+    subject_mentions = [occurrence for occurrence in name_occurrences if occurrence[0] in compared]
+    for other_subject, other_rating in compared.items():
+        if other_subject == nearest_name or not _rating_matches(
+            plain, other_rating, numbers.method
+        ):
+            continue
+        (named_subject,) = (subject for subject in compared if subject != other_subject)
+        for partner_span, partner in bare_tokens:
+            if partner_span == token_span:
+                continue
+            if not _rating_matches(
+                partner.replace(",", ""), compared[named_subject], numbers.method
+            ):
+                continue
+            partner_subject = _nearest_name(partner_span, subject_mentions)
+            if partner_subject is not None and partner_subject[0] == named_subject:
+                return True
+    return False
 
 
 def _rating_matches(plain_token: str, rating: Decimal, method: Method | None) -> bool:
