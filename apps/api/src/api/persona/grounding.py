@@ -171,8 +171,13 @@ not settle -- whose record the reverse is, though, is simply true. When no
 subject's record is the reverse, or more than one subject's is, no owner is
 named ("7-1-1 is not a stated record"). An unattributed pair that is none of
 the above is reported as "42-25 is not a score from any game in the facts".
-These rules mirror the independent smoke-eval checker's
+These rules are stricter than the independent smoke-eval checker's
 (`tests/test_persona_smoke_eval.py`), which production must never import.
+That checker accepts any object's W-L or W-L-T in its stated order and any
+game score in either order, and has no rule of its own for a reversed
+record. Production grounds a three-part claim only as a subject's record,
+and flags a subject's `(wins, losses)` stated backwards unless it is a game
+score in that order or a hyphen pair inside some string value.
 
 Sentence-scoping (splitting `response_text` naively on `.`/`!`/`?`) keeps
 both checks from reaching across unrelated sentences to grab a team name

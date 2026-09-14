@@ -5,6 +5,7 @@ persona's response must be a subset of what's in the fact block.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -15,7 +16,7 @@ from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.deps import list_all_team_names
-from api.models import ComparisonResultOut, Sport, TeamCaseOut
+from api.models import ComparisonResultOut, Method, Sport, TeamCaseOut
 from api.persona.grounding import find_ungrounded_tokens
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
@@ -329,8 +330,10 @@ def nfl_conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _team_case_block(conn: sqlite3.Connection, year: int, team: str, sport: Sport) -> str:
-    case = build_team_case(conn, year, team, method="keener", sport=sport)
+def _team_case_block(
+    conn: sqlite3.Connection, year: int, team: str, sport: Sport, method: Method = "keener"
+) -> str:
+    case = build_team_case(conn, year, team, method=method, sport=sport)
     return team_case_fact_block_json(TeamCaseOut.from_dataclass(case))
 
 
@@ -551,10 +554,41 @@ def test_unnamed_sentence_real_game_score_in_either_order_is_grounded(
     cfb_conn: sqlite3.Connection, texas_2005_case: str, score: str
 ) -> None:
     """The Rose Bowl, 41-38, said from either side: which side is said first
-    is attribution, which a sentence naming no team can't be held to."""
+    is attribution, which a sentence naming no team can't be held to. This
+    Keener block's USC explanation also quotes "41-38", so the string-value
+    allowance grounds 38-41 too; the Elo test below is the one that guards
+    the either-order game-score allowance on its own."""
     response = f"Texas went 13-0 in 2005. They won it {score}."
 
     assert _check(cfb_conn, response, texas_2005_case, "cfb") == []
+
+
+def _string_values(value: object) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _string_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _string_values(item)
+
+
+@pytest.mark.parametrize("score", ["33-7", "7-33"])
+def test_unnamed_sentence_real_game_score_in_either_order_is_grounded_on_an_elo_block(
+    cfb_conn: sqlite3.Connection, score: str
+) -> None:
+    """2001 Miami beat Penn State 33-7. An Elo block carries no explanation
+    strings (`rating_breakdown.entries` is empty), so nothing but the game
+    tuple can ground 7-33: removing the either-order game-score allowance
+    for sentences naming no team turns this red."""
+    block = _team_case_block(cfb_conn, 2001, "Miami", "cfb", method="elo")
+    facts = json.loads(block)
+    assert facts["rating_breakdown"]["entries"] == []
+    assert not [text for text in _string_values(facts) if any(ch.isdigit() for ch in text)]
+    response = f"Miami went 12-0 in 2001. That one ended {score}."
+
+    assert _check(cfb_conn, response, block, "cfb") == []
 
 
 def test_unnamed_sentence_breakdown_record_in_order_is_grounded(
