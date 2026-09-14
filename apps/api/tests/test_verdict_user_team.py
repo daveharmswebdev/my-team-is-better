@@ -1,39 +1,54 @@
-"""Issue #188: `user_team` is bounded and resolved against the team catalog
-before it can reach the persona system prompt or the narration cache key.
+"""Issue #188: `user_team` is resolved against the team catalog before it can
+reach the persona system prompt or the narration cache key.
 
 `user_team` is interpolated straight into the Claude system prompt
 (`api.persona.prompt.build_system_prompt`), and since share links (#184) a
-third party can set it. So every `/api/verdict/*` route:
+third party can set it. So every `/api/verdict/*` route passes it through
+`api.verdict.resolve_user_team`, which mirrors `apps/web`'s own "is this a
+real team?" rule (`isTeamInCatalog` in
+`components/TeamCombobox/teamMatching.ts`) so the API and the web agree on
+which saved values are real teams:
 
-- rejects a value longer than 64 characters at the request boundary (422),
-  the same bound as `apps/web`'s `MAX_TEAM_NAME_LENGTH`;
-- resolves the rest against `api.deps.list_all_team_names(conn, sport)`:
-  surrounding whitespace stripped, case ignored, a match replaced by the
-  catalog's canonical spelling. Anything else (empty, injection text, a typo,
-  another sport's team) becomes `None` and the verdict still answers 200 with
-  no-team narration. That is a coordinator decision: the web client keeps one
-  saved team across seasons and sports, so a stale or out-of-scope team must
-  never break a verdict.
+- surrounding whitespace is stripped; a value longer than 64 characters after
+  that is not a team;
+- the rest is folded (accents dropped, case ignored) and matched exactly
+  against every canonical team name for the sport, then, failing that,
+  against every alias; an alias only counts when exactly one team has it;
+- a match is replaced by the team's canonical name. Anything else (empty,
+  over-long, injection text, a typo, an ambiguous alias, another sport's
+  team) becomes `None`, and the verdict still answers 200 with no-team
+  narration. That is a coordinator decision: the web client keeps one saved
+  team across seasons and sports, with no length bound, so a stale, odd or
+  out-of-scope saved team must never break a verdict.
 
-Every test drives the real HTTP route and records the `system` prompt the
-narrator actually received, so these prove what reaches Claude, not just the
-status code. The Claude call is always a fake.
+The HTTP tests drive the real route and record the `system` prompt the
+narrator actually received and the cache key that was written, so they prove
+what reaches Claude, not just the status code. The Claude call is always a
+fake. Canonical-over-alias precedence can't be shown on the committed fixture
+(no alias there equals another team's name), so that part is tested on a
+small db built per test.
 """
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import pytest
+from cfb_strength.db.connection import ensure_schema, get_conn
 from fastapi.testclient import TestClient
 
 from api.config import PROMPT_VERSION
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
+from api.models import USER_TEAM_MAX_LENGTH
 from api.persona.cache import InMemoryNarrationCache, cache_key
+from api.verdict import resolve_user_team
 
 # Distinctive fragments of the two allegiance clauses in
 # `api.persona.prompt`. The with-team clause breaks the line before the team.
@@ -103,6 +118,7 @@ ROUTES = [
     ),
 ]
 ROUTE_IDS = ["champion", "team-case", "compare"]
+TEAM_CASE = ROUTES[1]
 
 
 def _assert_no_team_prompt(system: str) -> None:
@@ -110,29 +126,67 @@ def _assert_no_team_prompt(system: str) -> None:
     assert WITH_TEAM_PREFIX not in system
 
 
+def _assert_team_prompt(system: str, team: str) -> None:
+    assert f"{WITH_TEAM_PREFIX}{team} " in system
+    assert NO_TEAM_CLAUSE not in system
+
+
 # ---------------------------------------------------------------------------
-# (a) the request boundary
+# (a) length: an over-long value is not a team, never a 422
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
-def test_user_team_longer_than_64_characters_is_a_422(client: TestClient, route: Route) -> None:
-    with _wired() as (narrator, _):
-        response = client.post(route.path, json=route.request("x" * 65))
+def test_user_team_longer_than_64_characters_is_narrated_as_no_team(
+    client: TestClient, route: Route
+) -> None:
+    """The web's 'Your team' field and its saved value have no length bound,
+    so a long saved value must still get a verdict."""
+    long_value = "x" * (USER_TEAM_MAX_LENGTH + 1)
 
-    assert response.status_code == 422
-    assert narrator.systems == []
+    with _wired() as (narrator, cache):
+        response = client.post(route.path, json=route.request(long_value))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_no_team_prompt(narrator.systems[0])
+    assert long_value not in narrator.systems[0]
+    assert cache.get(route.key(None)) is not None
+    assert cache.get(route.key(long_value)) is None
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
 def test_user_team_of_exactly_64_characters_is_accepted(client: TestClient, route: Route) -> None:
-    with _wired() as (narrator, _):
-        response = client.post(route.path, json=route.request("x" * 64))
+    with _wired() as (narrator, cache):
+        response = client.post(route.path, json=route.request("x" * USER_TEAM_MAX_LENGTH))
 
     assert response.status_code == 200
     # Not a real team, so it never reaches the prompt either.
     assert len(narrator.systems) == 1
     _assert_no_team_prompt(narrator.systems[0])
+    assert cache.get(route.key(None)) is not None
+
+
+def test_the_length_cutoff_is_measured_after_stripping(client: TestClient) -> None:
+    padded = f"{' ' * USER_TEAM_MAX_LENGTH}Texas{' ' * USER_TEAM_MAX_LENGTH}"
+
+    with _wired() as (narrator, cache):
+        response = client.post(TEAM_CASE.path, json=TEAM_CASE.request(padded))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_team_prompt(narrator.systems[0], "Texas")
+    assert cache.get(TEAM_CASE.key("Texas")) is not None
+
+
+def test_a_long_value_that_would_otherwise_match_an_alias_is_not_a_team(tmp_path: Path) -> None:
+    """The cutoff applies before matching, whatever the catalog holds."""
+    long_alias = "A" * (USER_TEAM_MAX_LENGTH + 1)
+    conn = _catalog_db(tmp_path, [(1, "Alpha", [long_alias], "cfb")])
+    try:
+        assert resolve_user_team(conn, long_alias, "cfb") is None
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +198,7 @@ def test_user_team_of_exactly_64_characters_is_accepted(client: TestClient, rout
 def test_injection_text_is_dropped_and_narrated_as_no_team(
     client: TestClient, route: Route
 ) -> None:
-    assert len(INJECTION) < 64
+    assert len(INJECTION) < USER_TEAM_MAX_LENGTH
 
     with _wired() as (narrator, cache):
         response = client.post(route.path, json=route.request(INJECTION))
@@ -172,8 +226,7 @@ def test_a_real_team_reaches_the_prompt(client: TestClient, route: Route) -> Non
 
     assert response.status_code == 200
     assert len(narrator.systems) == 1
-    assert f"{WITH_TEAM_PREFIX}Texas " in narrator.systems[0]
-    assert NO_TEAM_CLAUSE not in narrator.systems[0]
+    _assert_team_prompt(narrator.systems[0], "Texas")
     assert cache.get(route.key("Texas")) is not None
 
 
@@ -194,7 +247,7 @@ def test_case_and_whitespace_resolve_to_the_canonical_name_and_share_its_cache_e
     assert second.status_code == 200
     assert len(narrator.systems) == 1, "the canonical request should have hit the cache"
     system = narrator.systems[0]
-    assert f"{WITH_TEAM_PREFIX}Texas " in system
+    _assert_team_prompt(system, "Texas")
     assert "tEXas" not in system
     assert first.json()["narration"]["cached"] is False
     assert second.json()["narration"]["cached"] is True
@@ -249,7 +302,7 @@ def test_the_same_team_is_kept_on_its_own_sports_request(sport_client: TestClien
 
     assert response.status_code == 200
     assert len(narrator.systems) == 1
-    assert f"{WITH_TEAM_PREFIX}Delta Squad " in narrator.systems[0]
+    _assert_team_prompt(narrator.systems[0], "Delta Squad")
     key = cache_key(
         question_type="team_case",
         year=2023,
@@ -260,3 +313,225 @@ def test_the_same_team_is_kept_on_its_own_sports_request(sport_client: TestClien
         prompt_version=PROMPT_VERSION,
     )
     assert cache.get(key) is not None
+
+
+# ---------------------------------------------------------------------------
+# (g) an alias that belongs to exactly one team resolves to that team
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
+def test_a_single_team_alias_reaches_the_prompt_and_cache_key_as_the_canonical_name(
+    client: TestClient, route: Route
+) -> None:
+    """'OSU' is an alias of Ohio State, and of no other team, in the fixture."""
+    with _wired() as (narrator, cache):
+        response = client.post(route.path, json=route.request("OSU"))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_team_prompt(narrator.systems[0], "Ohio State")
+    assert "OSU" not in narrator.systems[0]
+    assert cache.get(route.key("Ohio State")) is not None
+    assert cache.get(route.key("OSU")) is None
+    assert cache.get(route.key(None)) is None
+
+
+@pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
+def test_an_alias_in_any_case_with_whitespace_shares_the_canonical_cache_entry(
+    client: TestClient, route: Route
+) -> None:
+    with _wired() as (narrator, cache):
+        first = client.post(route.path, json=route.request("  osu\t"))
+        second = client.post(route.path, json=route.request("Ohio State"))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert len(narrator.systems) == 1, "the canonical request should have hit the cache"
+    _assert_team_prompt(narrator.systems[0], "Ohio State")
+    assert first.json()["narration"]["cached"] is False
+    assert second.json()["narration"]["cached"] is True
+    assert cache.get(route.key("Ohio State")) is not None
+
+
+# Every value the round-1 review saw narrated as no-team, each a real
+# single-team alias in `cfb_verdict_fixture.sqlite3` (checked against its
+# `teams.alternate_names`), except 'San Jose State', which is the accent-folded
+# canonical name (h).
+@pytest.mark.parametrize(
+    ("user_team", "canonical"),
+    [
+        ("OSU", "Ohio State"),
+        ("Louisiana State", "LSU"),
+        ("SJSU", "San José State"),
+        ("San Jose St.", "San José State"),
+        ("Miami (FL)", "Miami"),
+        ("TEX", "Texas"),
+        ("MISS", "Ole Miss"),
+        ("San Jose State", "San José State"),
+    ],
+)
+def test_values_the_web_accepts_as_teams_are_narrated_as_those_teams(
+    client: TestClient, user_team: str, canonical: str
+) -> None:
+    with _wired() as (narrator, cache):
+        response = client.post(TEAM_CASE.path, json=TEAM_CASE.request(user_team))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_team_prompt(narrator.systems[0], canonical)
+    assert cache.get(TEAM_CASE.key(canonical)) is not None
+
+
+# ---------------------------------------------------------------------------
+# (h) accents are folded away, on names and aliases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("user_team", ["san jose state", "SAN JOSE STATE", " San Jose State "])
+@pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
+def test_an_unaccented_name_resolves_to_the_accented_canonical_name(
+    client: TestClient, route: Route, user_team: str
+) -> None:
+    with _wired() as (narrator, cache):
+        response = client.post(route.path, json=route.request(user_team))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_team_prompt(narrator.systems[0], "San José State")
+    assert cache.get(route.key("San José State")) is not None
+    assert cache.get(route.key(None)) is None
+
+
+@pytest.mark.parametrize("user_team", ["san jose st", "SAN JOSÉ ST", "San José State"])
+def test_accent_folding_works_in_both_directions(client: TestClient, user_team: str) -> None:
+    """'San José St' is an alias with an accent; the canonical name has one
+    too. An unaccented value, an accented one, and the exact name all land on
+    'San José State'."""
+    with _wired() as (narrator, cache):
+        response = client.post(TEAM_CASE.path, json=TEAM_CASE.request(user_team))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_team_prompt(narrator.systems[0], "San José State")
+    assert cache.get(TEAM_CASE.key("San José State")) is not None
+
+
+# ---------------------------------------------------------------------------
+# (i) an alias shared by more than one team resolves to None
+# ---------------------------------------------------------------------------
+
+
+# Measured on the fixture: 'lam' is Lamar's and Lambuth's, 'uni' is Northern
+# Iowa's and Union College's, 'liu' is LIU Post's and Long Island
+# University's, 'wes' is Wesley College's and Western Washington's.
+@pytest.mark.parametrize("user_team", ["LAM", "uni", " Liu ", "WES"])
+@pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
+def test_an_alias_shared_by_two_teams_is_narrated_as_no_team(
+    client: TestClient, route: Route, user_team: str
+) -> None:
+    with _wired() as (narrator, cache):
+        response = client.post(route.path, json=route.request(user_team))
+
+    assert response.status_code == 200
+    assert len(narrator.systems) == 1
+    _assert_no_team_prompt(narrator.systems[0])
+    assert cache.get(route.key(None)) is not None
+
+
+def test_a_shared_alias_still_resolves_by_each_teams_canonical_name(client: TestClient) -> None:
+    with _wired() as (narrator, _):
+        response = client.post(TEAM_CASE.path, json=TEAM_CASE.request("lamar"))
+
+    assert response.status_code == 200
+    _assert_team_prompt(narrator.systems[0], "Lamar")
+
+
+# ---------------------------------------------------------------------------
+# (j) precedence and scoping, on a purpose-built catalog
+# ---------------------------------------------------------------------------
+
+CatalogRow = tuple[int, str, list[str] | None, str]
+
+
+def _catalog_db(tmp_path: Path, rows: list[CatalogRow]) -> sqlite3.Connection:
+    """A schema-only db holding just `teams` rows (id, school, aliases,
+    sport), shaped like `tests/fixtures/sport_fixture.py`'s inserts plus
+    `alternate_names` as JSON. The resolver reads nothing else."""
+    conn = get_conn(tmp_path / "user_team_catalog.sqlite3")
+    ensure_schema(conn)
+    for team_id, school, aliases, sport in rows:
+        conn.execute(
+            "INSERT INTO teams (id, school, classification, sport, alternate_names) "
+            "VALUES (?, ?, NULL, ?, ?)",
+            (team_id, school, sport, json.dumps(aliases) if aliases is not None else None),
+        )
+    conn.commit()
+    return conn
+
+
+def test_a_canonical_name_wins_over_another_teams_identical_alias(tmp_path: Path) -> None:
+    # Team B (listed first, so catalog order can't be what decides) carries an
+    # alias that folds to team A's canonical name.
+    conn = _catalog_db(
+        tmp_path,
+        [
+            (1, "Delta University", ["DELTA", "DU"], "cfb"),
+            (2, "Delta", ["DEL"], "cfb"),
+        ],
+    )
+    try:
+        assert resolve_user_team(conn, "delta", "cfb") == "Delta"
+        assert resolve_user_team(conn, " DELTA ", "cfb") == "Delta"
+        assert resolve_user_team(conn, "du", "cfb") == "Delta University"
+    finally:
+        conn.close()
+
+
+def test_alias_resolution_is_scoped_to_the_sport(tmp_path: Path) -> None:
+    conn = _catalog_db(
+        tmp_path,
+        [
+            (1, "Echo State", ["ECHO"], "cfb"),
+            (101, "Echo City Chargers", ["ECHO", "ECC"], "nfl"),
+        ],
+    )
+    try:
+        # The same alias in two sports is not ambiguous within either one.
+        assert resolve_user_team(conn, "echo", "cfb") == "Echo State"
+        assert resolve_user_team(conn, "echo", "nfl") == "Echo City Chargers"
+        # Another sport's alias is not a team here.
+        assert resolve_user_team(conn, "ECC", "cfb") is None
+        assert resolve_user_team(conn, "ECC", "nfl") == "Echo City Chargers"
+    finally:
+        conn.close()
+
+
+def test_ambiguity_counts_teams_not_alias_entries(tmp_path: Path) -> None:
+    conn = _catalog_db(
+        tmp_path,
+        [
+            # One team listing the same alias twice, and its own name as an
+            # alias, is still one team.
+            (1, "Foxtrot", ["FOX", "fox", "Foxtrot"], "cfb"),
+            (2, "Golf Tech", ["GT"], "cfb"),
+            (3, "Georgia Tech-ish", ["gt"], "cfb"),
+            (4, "No Aliases U", None, "cfb"),
+        ],
+    )
+    try:
+        assert resolve_user_team(conn, "fox", "cfb") == "Foxtrot"
+        assert resolve_user_team(conn, "GT", "cfb") is None
+        assert resolve_user_team(conn, "no aliases u", "cfb") == "No Aliases U"
+    finally:
+        conn.close()
+
+
+def test_no_partial_or_fuzzy_matching(tmp_path: Path) -> None:
+    conn = _catalog_db(tmp_path, [(1, "Hotel State", ["HSU"], "cfb")])
+    try:
+        for value in ["Hotel", "Hotel State University", "HS", "HSUx", "hotelstate"]:
+            assert resolve_user_team(conn, value, "cfb") is None, value
+        assert resolve_user_team(conn, None, "cfb") is None
+    finally:
+        conn.close()

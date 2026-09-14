@@ -44,13 +44,15 @@ universe, same justification -- promoted from a private
 from __future__ import annotations
 
 import sqlite3
+import unicodedata
 
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi import APIRouter, Depends
 
-from api.deps import get_db_conn, get_narration_cache, get_narrator, list_all_team_names
+from api.deps import get_db_conn, get_narration_cache, get_narrator, list_team_records
 from api.errors import COMPARISON_ERROR_RESPONSES, TEAM_CASE_ERROR_RESPONSES
 from api.models import (
+    USER_TEAM_MAX_LENGTH,
     ChampionRequest,
     ComparisonEnvelope,
     ComparisonRequest,
@@ -66,37 +68,74 @@ from api.persona.service import narrate_comparison, narrate_team_case
 router = APIRouter(prefix="/api/verdict", tags=["verdict"])
 
 
+def _fold(text: str) -> str:
+    """Accent- and case-insensitive form of `text`.
+
+    Mirrors `fold` in `apps/web/src/components/TeamCombobox/teamMatching.ts`
+    (`normalize('NFD')`, strip `\\p{Diacritic}`, `toLowerCase()`): decompose,
+    drop combining marks, casefold. On every committed db the two agree; the
+    only non-ASCII names are 'San José State' and its alias 'San José St'.
+    """
+    decomposed = unicodedata.normalize("NFD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
 def resolve_user_team(conn: sqlite3.Connection, user_team: str | None, sport: str) -> str | None:
     """The only `user_team` a route may hand the persona layer (issue #188).
 
     `user_team` is interpolated into the Claude system prompt and is part of
     the narration cache key, and since share links (#184) a third party can
     set it. So it is resolved against the sport's team catalog,
-    `list_all_team_names(conn, sport)` (the grounding check's own known-name
-    universe): surrounding whitespace is stripped, case is ignored, and a
-    match comes back in the catalog's canonical spelling, so `"  texas "`
-    narrates and caches exactly as `"Texas"`. Anything else becomes `None`:
-    empty or whitespace-only text, typos, injection text, another sport's
-    team. Aliases (`teams.alternate_names`) are deliberately not matched.
+    `list_team_records(conn, sport)` with no year (the same universe as the
+    grounding check's `list_all_team_names`, plus aliases), and only a
+    canonical catalog name, `teams.school` verbatim, ever comes back.
+
+    The matching rule mirrors the web's `isTeamInCatalog`
+    (`apps/web/src/components/TeamCombobox/teamMatching.ts`), so a value the
+    web's 'Your team' field treats as a real team is narrated as that team:
+
+    1. Strip surrounding whitespace. Empty, or longer than
+       `USER_TEAM_MAX_LENGTH`, is `None`. The web field and its saved value
+       have no length bound, so this is a cutoff, not a request error.
+    2. Fold both sides (`_fold`: accents dropped, case ignored) and look for
+       an exact match on a canonical name. `"  san jose state "` becomes
+       `"San José State"`.
+    3. Failing that, an exact folded match on an alias
+       (`teams.alternate_names`) counts only when exactly one team has it:
+       `"OSU"` becomes `"Ohio State"`, while `"LAM"` (Lamar's and
+       Lambuth's) is `None`. The web only asks "is this some team?", so it
+       has no ambiguity rule to mirror; picking a team at random would put
+       the wrong allegiance in the prompt.
+
+    A canonical name beats another team's identical alias. No substring,
+    prefix, mascot or fuzzy matching.
 
     Unknown is `None`, never a 422: the web client keeps one saved team across
     seasons and sports, so a stale or out-of-scope team must still get a
     verdict, just with no-team narration. For the same reason the lookup is
     scoped to the sport, not the year.
 
-    Matching is unambiguous on the committed data: no two stored names within
-    a sport are equal after strip + casefold. If that ever stopped being true,
-    the first name in catalog order would win.
+    No two canonical names within a sport fold equal on the committed data.
+    If that ever stopped being true, the first name in catalog order would win.
     """
     if user_team is None:
         return None
-    wanted = user_team.strip().casefold()
-    if not wanted:
+    stripped = user_team.strip()
+    if not stripped or len(stripped) > USER_TEAM_MAX_LENGTH:
         return None
-    for name in list_all_team_names(conn, sport):
-        if name.strip().casefold() == wanted:
-            return name
-    return None
+    wanted = _fold(stripped)
+
+    records = list_team_records(conn, sport)
+    for record in records:
+        if _fold(record.name) == wanted:
+            return record.name
+
+    alias_owners = {
+        record.name for record in records if any(_fold(alias) == wanted for alias in record.aliases)
+    }
+    if len(alias_owners) != 1:
+        return None
+    return next(iter(alias_owners))
 
 
 def _resolve_champion_name(
