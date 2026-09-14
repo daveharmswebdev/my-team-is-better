@@ -68,9 +68,9 @@ def get_credits() -> Credits:
                     "earned it, not because a license required it. The pro "
                     "football constants are theirs; the college ones are our own "
                     "first pass and are not yet calibrated against anything. "
-                    "Offered as a second opinion, not a replacement -- where Elo "
-                    "and Keener disagree about a season, that disagreement is "
-                    "the interesting part."
+                    "Offered as a second opinion, not a replacement -- two "
+                    "different methods will naturally rank teams differently "
+                    "from time to time."
                 ),
             ),
         ],

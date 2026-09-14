@@ -65,6 +65,20 @@ def test_elo_methodology_credits_arpad_elo_and_fivethirtyeight() -> None:
     assert "not yet calibrated" in methodology.summary
 
 
+def test_elo_credit_expects_the_methods_to_differ_without_playing_it_up() -> None:
+    """Epic #147's neutrality rule, worded by the founder on #167: a split
+    between the engines is neither a goal nor a defect. The credit used to
+    call disagreement "the interesting part", which plays it up; it now says
+    only that two methods should be expected to rank teams differently at
+    times. Pinned because it is a product rule, not phrasing."""
+    summary = _methodology_by_name("Elo").summary
+    assert "interesting part" not in summary
+    assert "disagree" not in summary
+    assert "two different methods will naturally rank teams differently from time to time" in (
+        summary
+    )
+
+
 def _data_source_by_name(name_fragment: str) -> DataSourceCredit:
     matches = [
         source for source in get_credits().data_sources if name_fragment in source.name
