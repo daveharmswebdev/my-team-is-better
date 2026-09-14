@@ -1847,6 +1847,76 @@ describe('QuestionForm', () => {
 
       expect(screen.getByLabelText(/^team$/i)).toHaveValue('Texas State')
     })
+
+    /**
+     * Issue #184: a share link's `for` team seeds "your team" for this visit
+     * only. Opening a friend's link must never overwrite your own saved team.
+     */
+    describe('initialUserTeam (issue #184)', () => {
+      it('seeds "your team" from initialUserTeam instead of the stored value, without writing localStorage', () => {
+        window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
+
+        render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+
+        expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+        expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+          'Ohio State',
+        )
+      })
+
+      it('leaves an unset stored team unset', () => {
+        render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+
+        expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+        expect(
+          window.localStorage.getItem('myTeamIsBetter.userTeam'),
+        ).toBeNull()
+      })
+
+      it('seeds an empty field from null, still without touching the stored value', () => {
+        window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
+
+        render(<QuestionForm onSubmit={vi.fn()} initialUserTeam={null} />)
+
+        expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+        expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+          'Ohio State',
+        )
+      })
+
+      it('still reads the stored value when initialUserTeam is omitted', () => {
+        window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
+
+        render(<QuestionForm onSubmit={vi.fn()} />)
+
+        expect(screen.getByLabelText(/your team/i)).toHaveValue('Ohio State')
+      })
+
+      it('submits the seeded team, and writes storage only once the user edits the field', async () => {
+        const user = userEvent.setup()
+        const onSubmit = vi.fn()
+        render(<QuestionForm onSubmit={onSubmit} initialUserTeam="Texas" />)
+        const submit = screen.getByRole('button', { name: /get the verdict/i })
+        await waitFor(() => expect(submit).not.toBeDisabled())
+
+        await user.click(submit)
+        expect(onSubmit).toHaveBeenLastCalledWith(
+          expect.objectContaining({ userTeam: 'Texas' }),
+        )
+        expect(
+          window.localStorage.getItem('myTeamIsBetter.userTeam'),
+        ).toBeNull()
+
+        // Queried once: focusing the field opens a suggestions listbox whose
+        // own label also contains "your team".
+        const yourTeam = screen.getByLabelText(/your team/i)
+        await user.clear(yourTeam)
+        await user.type(yourTeam, 'USC')
+        expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+          'USC',
+        )
+      })
+    })
   })
 
   /**

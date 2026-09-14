@@ -71,6 +71,16 @@ export interface QuestionFormProps {
   initialTeam?: string
   initialTeamA?: string
   initialTeamB?: string
+  /**
+   * The "Your team (optional)" field's initial value (issue #184) -- same
+   * read-once semantics. When given (`null` seeds an empty field) it is used
+   * *instead of* the stored team and is **not** written to `localStorage`:
+   * a share link's `for` team belongs to that visit, so opening a friend's
+   * link never overwrites your own saved team. Only a real edit to the field
+   * writes storage, as always. Omitted (`undefined`), the field reads the
+   * stored team exactly as before.
+   */
+  initialUserTeam?: string | null
 }
 
 /**
@@ -415,6 +425,7 @@ export function QuestionForm({
   initialTeam,
   initialTeamA,
   initialTeamB,
+  initialUserTeam,
 }: QuestionFormProps) {
   const questionTypeId = useId()
   const sportName = useId()
@@ -441,7 +452,13 @@ export function QuestionForm({
   const [team, setTeam] = useState(initialTeam ?? '')
   const [teamA, setTeamA] = useState(initialTeamA ?? '')
   const [teamB, setTeamB] = useState(initialTeamB ?? '')
-  const [userTeam, setUserTeam] = useState(() => getStoredUserTeam())
+  // A parent-seeded team (issue #184) replaces the stored one for this mount
+  // and is deliberately not written back: see `initialUserTeam`.
+  const [userTeam, setUserTeam] = useState(() =>
+    initialUserTeam === undefined
+      ? getStoredUserTeam()
+      : (initialUserTeam ?? ''),
+  )
   const [loadedYearCatalog, setYearCatalog] =
     useState<YearCatalogState>(EMPTY_YEAR_CATALOG)
   const [teamCatalog, setTeamCatalog] =

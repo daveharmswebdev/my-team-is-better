@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type {
   QuestionSubmission,
   QuestionType,
@@ -19,13 +20,15 @@ import type {
   VerdictErrorState,
 } from '../../lib/api/types'
 import styles from './HomePage.module.css'
+import { fromShareSearch, toShareSearch } from './shareLink'
 
 /**
  * A correction accepted from one of `VerdictError`'s pills, pushed back into
  * `QuestionForm` (issue #38). `QuestionForm` owns its fields as internal
  * state, so re-running the API call against a corrected submission used to
  * leave the visible form disagreeing with the question that was actually
- * just asked -- showing 2026 next to a 2018 verdict.
+ * just asked -- showing 2026 next to a 2018 verdict. A share-link landing
+ * (issue #184) seeds the form the same way.
  *
  * `generation` is the remount counter: it is spent as `QuestionForm`'s
  * `key`, which is React's standard way to reset a child's internal state
@@ -44,11 +47,20 @@ interface FormSeed {
   team?: string
   teamA?: string
   teamB?: string
+  /**
+   * The "your team" to remount the form with: a share link's `for` team on
+   * landing (issue #184), or `undefined` -- every pill correction -- to have
+   * the form re-read `localStorage` exactly as it always has. So after a
+   * correction, the field shows the visitor's saved team while the question
+   * keeps the link's.
+   */
+  userTeam: string | null | undefined
 }
 
 function seedFrom(
   submission: QuestionSubmission,
   generation: number,
+  userTeam: string | null | undefined,
 ): FormSeed {
   const base = {
     generation,
@@ -56,6 +68,7 @@ function seedFrom(
     sport: submission.sport,
     method: submission.method,
     year: submission.year,
+    userTeam,
   }
   if (submission.questionType === 'team_case') {
     return { ...base, team: submission.team }
@@ -71,6 +84,15 @@ function seedFrom(
  * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
  */
 export function HomePage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  /**
+   * The question the page was opened on, if its URL is a share link (issue
+   * #184). Read once, by a lazy initializer, so no later URL change -- this
+   * page's own address-bar sync on every run included -- re-triggers it.
+   */
+  const [landing] = useState(() => fromShareSearch(searchParams.toString()))
+  /** Outlives StrictMode's double effect run on mount, so a link is asked once. */
+  const landedRef = useRef(false)
   const [submission, setSubmission] = useState<QuestionSubmission | null>(null)
   const [state, setState] = useState<VerdictCardState | null>(null)
   const [formSeed, setFormSeed] = useState<FormSeed | null>(null)
@@ -78,6 +100,9 @@ export function HomePage() {
   async function runSubmission(next: QuestionSubmission) {
     setSubmission(next)
     setState({ status: 'loading' })
+    // The address bar is always the share link of the question on screen
+    // (issue #184); `replace`, so re-asking never piles up history entries.
+    setSearchParams(toShareSearch(next), { replace: true })
     try {
       const envelope =
         next.questionType === 'champion'
@@ -109,14 +134,38 @@ export function HomePage() {
     }
   }
 
-  /** Re-asks the corrected question *and* re-seeds the visible form with it,
-   * so the two can't disagree (issue #38). */
-  function applyCorrection(corrected: QuestionSubmission) {
+  /**
+   * Re-asks `next` *and* re-seeds the visible form with it, so the two can't
+   * disagree (issue #38). `userTeam` seeds "your team"; `undefined` keeps the
+   * form's own `localStorage` read.
+   */
+  function reseedAndAsk(
+    next: QuestionSubmission,
+    userTeam: string | null | undefined,
+  ) {
     setFormSeed((previous) =>
-      seedFrom(corrected, (previous?.generation ?? 0) + 1),
+      seedFrom(next, (previous?.generation ?? 0) + 1, userTeam),
     )
-    void runSubmission(corrected)
+    void runSubmission(next)
   }
+
+  /** A pill correction (issue #38). */
+  function applyCorrection(corrected: QuestionSubmission) {
+    reseedAndAsk(corrected, undefined)
+  }
+
+  /** A share-link landing (issue #184): the form shows the link's team, unsaved. */
+  const answerShareLink = useEffectEvent((linked: QuestionSubmission) => {
+    reseedAndAsk(linked, linked.userTeam)
+  })
+
+  useEffect(() => {
+    if (landing === null || landedRef.current) {
+      return
+    }
+    landedRef.current = true
+    answerShareLink(landing)
+  }, [landing])
 
   function handleSelectYear(year: number) {
     if (!submission) {
@@ -153,8 +202,9 @@ export function HomePage() {
     <main className={styles.wrap}>
       <h1 className={styles.title}>My Team Is Better</h1>
       <QuestionForm
-        // Remount-to-reset: the only thing that ever changes this key is an
-        // accepted pill correction, so ordinary typing is never disturbed.
+        // Remount-to-reset: the only things that ever change this key are an
+        // accepted pill correction and a share-link landing, so ordinary
+        // typing is never disturbed.
         key={formSeed?.generation ?? 0}
         onSubmit={(next) => void runSubmission(next)}
         isSubmitting={state?.status === 'loading'}
@@ -165,12 +215,18 @@ export function HomePage() {
         initialTeam={formSeed?.team}
         initialTeamA={formSeed?.teamA}
         initialTeamB={formSeed?.teamB}
+        initialUserTeam={formSeed?.userTeam}
       />
       {state && (
         <VerdictCard
           state={state}
           onSelectYear={handleSelectYear}
           onSelectCandidate={handleSelectCandidate}
+          shareUrl={
+            state.status === 'success' && submission !== null
+              ? `${window.location.origin}/?${toShareSearch(submission)}`
+              : undefined
+          }
         />
       )}
     </main>
