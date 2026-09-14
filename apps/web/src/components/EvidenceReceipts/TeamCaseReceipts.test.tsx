@@ -309,17 +309,21 @@ describe('TeamCaseReceipts', () => {
   })
 
   /**
-   * Issue #153: the breakdown disclosure explains Keener's math, and Elo
-   * writes no breakdown rows -- so under Elo it would print "Total 0" beside
-   * "Matches the displayed rating: 1,684". Whether to show it is decided by
-   * the method, never by the breakdown's emptiness.
+   * Issue #183: what the rating opens is decided by the method and the
+   * ledger, never by the Keener breakdown's emptiness -- the Keener panel
+   * under Elo would print "Total 0" beside "Matches the displayed rating:
+   * 1,684". These cases deliberately send no ledger (`elo_ledger: null`, what
+   * a stale API or db would send; the current API always sends one for elo):
+   * the rating prints as plain text with one honest note, and Keener keeps
+   * its breakdown disclosure. The real-ledger path is in "Elo ledger
+   * disclosure (issue #183)" below.
    */
-  describe('rating breakdown is decided by method, not by emptiness (issue #153)', () => {
+  describe('Elo with no ledger, and Keener unchanged: the rating’s disclosure follows method and ledger, not breakdown emptiness (issue #183)', () => {
     const NO_BREAKDOWN_EXPLAINER =
       'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
 
-    // Issue #183 retired the explainer above. With no ledger in the
-    // response, each Elo method prints its own line instead.
+    // The explainer above is retired. With no ledger in the response, each
+    // Elo method prints its own line instead.
     const NOTE_WITHOUT_LEDGER = {
       elo: "This rating's game-by-game work isn't available right now.",
       elo_career:
@@ -341,7 +345,7 @@ describe('TeamCaseReceipts', () => {
 
     describe.each(['elo', 'elo_career'] as const)('%s', (method) => {
       it.each(BREAKDOWN_SHAPES)(
-        'renders the rating as plain Elo-format text with no breakdown trigger and no Keener copy (breakdown %s)',
+        'with a null ledger: the rating is plain Elo-format text, no trigger, no Keener copy, and the no-ledger note shows (breakdown %s)',
         (_label, rating_breakdown) => {
           const { container } = render(
             <TeamCaseReceipts
@@ -423,7 +427,7 @@ describe('TeamCaseReceipts', () => {
       elo_ledger: TEXAS_ELO.elo_ledger,
     }
 
-    it('elo: the rating is a trigger that opens the team’s ledger, with no old explainer or Keener copy', async () => {
+    it('elo with a real ledger: the rating is a trigger that opens the team’s ledger panel, with no old explainer or Keener copy', async () => {
       const user = userEvent.setup()
       const { container } = render(<TeamCaseReceipts evidence={texasElo} />)
 

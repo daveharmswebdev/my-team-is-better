@@ -206,7 +206,7 @@ describe('EloLedgerDisclosure', () => {
     ).toBeInTheDocument()
     expect(
       within(dialog).getByText(
-        "Figures are rounded for display, so multiplying a row's rounded numbers can land a tenth away from its change; the engine keeps full precision, and every row's math checks out at full precision.",
+        "Every figure here is rounded for display, so redoing the arithmetic with these printed numbers can come out a few tenths off; the engine keeps full precision, and every row's math checks out exactly at full precision.",
       ),
     ).toBeInTheDocument()
   })

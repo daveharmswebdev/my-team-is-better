@@ -15,18 +15,150 @@ export interface RatingDisclosureShellProps {
    * - `'region'`: the panel is a fixed frame, and only the child that marks
    *   itself as the scroll region (with `flex: 1 1 auto; min-height: 0;
    *   overflow-y: auto`) scrolls, so everything above and below it stays in
-   *   view. The desktop popover is also wider, and is kept inside the
-   *   viewport.
+   *   view. The desktop popover is also wider. A region can also set
+   *   `data-min-visible-items` to the number of its items that must show
+   *   whole at once.
    */
   scroll?: 'panel' | 'region'
   /** The panel body, rendered below the heading. */
   children: ReactNode
 }
 
-/** Smallest height, in px, the viewport-fitted popover will shrink to. */
-const MIN_FITTED_POPOVER_HEIGHT = 240
-/** Gap, in px, kept between the fitted popover and the viewport edge. */
+/** Gap, in px, kept between the popover and the viewport edge. */
 const VIEWPORT_MARGIN = 8
+/**
+ * Narrowest the popover may get when it opens beside the trigger; with less
+ * room than this on both sides it opens above or below instead.
+ */
+const MIN_SIDE_WIDTH = 280
+/** Largest share of the viewport's height a popover takes by default. */
+const DEFAULT_HEIGHT_SHARE = 0.8
+
+/**
+ * Attribute a scroll region sets to the number of its items that must be
+ * fully visible at once (`data-min-visible-items={4}`). The popover grows
+ * past its default height (up to the room it has) until they are.
+ */
+const MIN_VISIBLE_ITEMS_ATTRIBUTE = 'data-min-visible-items'
+
+type Side = 'right' | 'left' | 'below' | 'above'
+
+/**
+ * Places the desktop popover so all of it is on screen, wherever the trigger
+ * sits, and keeps it touching the trigger so the pointer can travel into it.
+ *
+ * - Beside the trigger (right, else left: whichever has room, else more
+ *   room), where the whole viewport height is available. The popover slides
+ *   up or down to stay on screen, always overlapping the trigger's row.
+ * - Only when neither side is at least `MIN_SIDE_WIDTH` wide (a very narrow
+ *   window) does it open above or below, on whichever has more room.
+ *
+ * Height: `DEFAULT_HEIGHT_SHARE` of the viewport, then grown until the scroll
+ * region's `MIN_VISIBLE_ITEMS_ATTRIBUTE` items are fully visible, never past
+ * the room available. The gap between trigger and panel is the popover's own
+ * padding (see `data-side` in the stylesheet), so it counts as hovering.
+ */
+function placePopover(popover: HTMLElement, anchor: HTMLElement): Side {
+  const style = popover.style
+  style.top = ''
+  style.bottom = ''
+  style.left = ''
+  style.right = ''
+  style.width = ''
+  style.maxHeight = ''
+  style.translate = ''
+
+  const viewportWidth = document.documentElement.clientWidth
+  const viewportHeight = window.innerHeight
+  const trigger = anchor.getBoundingClientRect()
+  const naturalWidth = popover.getBoundingClientRect().width
+  const roomRight = viewportWidth - VIEWPORT_MARGIN - trigger.right
+  const roomLeft = trigger.left - VIEWPORT_MARGIN
+  const fullHeight = viewportHeight - 2 * VIEWPORT_MARGIN
+
+  let side: Side
+  let heightLimit: number
+  if (Math.max(roomRight, roomLeft) >= Math.min(naturalWidth, MIN_SIDE_WIDTH)) {
+    side = roomRight >= naturalWidth || roomRight >= roomLeft ? 'right' : 'left'
+    popover.dataset.side = side
+    const room = side === 'right' ? roomRight : roomLeft
+    style.width = `${Math.min(naturalWidth, room)}px`
+    style.left = side === 'right' ? '100%' : 'auto'
+    style.right = side === 'left' ? '100%' : 'auto'
+    style.top = '0px'
+    style.bottom = 'auto'
+    heightLimit = fullHeight
+  } else {
+    const roomBelow = viewportHeight - VIEWPORT_MARGIN - trigger.bottom
+    const roomAbove = trigger.top - VIEWPORT_MARGIN
+    side = roomBelow >= roomAbove ? 'below' : 'above'
+    popover.dataset.side = side
+    style.top = side === 'below' ? '100%' : 'auto'
+    style.bottom = side === 'above' ? '100%' : 'auto'
+    heightLimit = Math.max(roomBelow, roomAbove)
+    const rect = popover.getBoundingClientRect()
+    let shift = 0
+    if (rect.right > viewportWidth - VIEWPORT_MARGIN) {
+      shift = viewportWidth - VIEWPORT_MARGIN - rect.right
+    }
+    if (rect.left + shift < VIEWPORT_MARGIN) {
+      shift = VIEWPORT_MARGIN - rect.left
+    }
+    if (shift !== 0) {
+      style.translate = `${shift}px 0`
+    }
+  }
+
+  const defaultHeight = Math.min(
+    DEFAULT_HEIGHT_SHARE * viewportHeight,
+    heightLimit,
+  )
+  style.maxHeight = `${defaultHeight}px`
+  growUntilItemsVisible(popover, heightLimit)
+
+  if (side === 'right' || side === 'left') {
+    // Line the panel's heading up with the trigger, then slide it back on
+    // screen. The popover is at least as tall as the trigger, so a clamped
+    // position still overlaps the trigger's row.
+    const height = popover.getBoundingClientRect().height
+    const wanted = trigger.top - VIEWPORT_MARGIN
+    const top = Math.min(
+      Math.max(wanted, VIEWPORT_MARGIN),
+      viewportHeight - VIEWPORT_MARGIN - height,
+    )
+    style.top = `${Math.max(top, VIEWPORT_MARGIN) - trigger.top}px`
+  }
+  return side
+}
+
+/**
+ * Raises the popover's max-height, up to `heightLimit`, until the first N
+ * items of its scroll region (N from `MIN_VISIBLE_ITEMS_ATTRIBUTE`) are fully
+ * inside the region's visible box.
+ */
+function growUntilItemsVisible(popover: HTMLElement, heightLimit: number) {
+  const region = popover.querySelector<HTMLElement>(
+    `[${MIN_VISIBLE_ITEMS_ATTRIBUTE}]`,
+  )
+  if (region === null) {
+    return
+  }
+  const wanted = Number(region.getAttribute(MIN_VISIBLE_ITEMS_ATTRIBUTE))
+  const items = region.children
+  const count = Math.min(Number.isFinite(wanted) ? wanted : 0, items.length)
+  const last = items.item(count - 1)
+  if (count < 1 || last === null) {
+    return
+  }
+  const regionTop =
+    region.getBoundingClientRect().top + region.clientTop - region.scrollTop
+  const needed = last.getBoundingClientRect().bottom - regionTop
+  const deficit = Math.ceil(needed - region.clientHeight)
+  if (deficit > 0) {
+    const height = popover.getBoundingClientRect().height
+    popover.style.maxHeight = `${Math.min(height + deficit, heightLimit)}px`
+  }
+}
 
 /**
  * Reports whether the current pointer is touch/coarse (mobile: tap-to-open
@@ -76,6 +208,7 @@ export function RatingDisclosureShell({
 }: RatingDisclosureShellProps) {
   const isTouch = useIsTouchInteraction()
   const [open, setOpen] = useState(false)
+  const wrapperRef = useRef<HTMLSpanElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -162,33 +295,17 @@ export function RatingDisclosureShell({
     }
   }, [open, isTouch])
 
-  // A framed popover is wide and holds a scroll region, so it must fit on
-  // screen: shift it sideways back inside the viewport, and cap its height at
-  // 80vh or the room below the trigger, whichever is smaller (never below a
-  // usable minimum), so the region (not the page) takes the overflow. Layout
-  // only, before paint.
+  // Every desktop popover is placed on screen next to its trigger, wherever
+  // the trigger sits on the page (see `placePopover`). Layout only, before
+  // paint.
   useLayoutEffect(() => {
     const popover = popoverRef.current
-    if (!open || isTouch || !framed || popover === null) {
+    const anchor = wrapperRef.current
+    if (!open || isTouch || popover === null || anchor === null) {
       return
     }
-    popover.style.translate = ''
-    popover.style.maxHeight = ''
-    const rect = popover.getBoundingClientRect()
-    const viewportWidth = document.documentElement.clientWidth
-    let shift = 0
-    if (rect.right > viewportWidth - VIEWPORT_MARGIN) {
-      shift = viewportWidth - VIEWPORT_MARGIN - rect.right
-    }
-    if (rect.left + shift < VIEWPORT_MARGIN) {
-      shift = VIEWPORT_MARGIN - rect.left
-    }
-    if (shift !== 0) {
-      popover.style.translate = `${shift}px 0`
-    }
-    const roomBelow = window.innerHeight - rect.top - VIEWPORT_MARGIN
-    popover.style.maxHeight = `min(80vh, ${Math.max(roomBelow, MIN_FITTED_POPOVER_HEIGHT)}px)`
-  }, [open, isTouch, framed])
+    placePopover(popover, anchor)
+  }, [open, isTouch])
 
   const panel = (
     <div className={classes(styles.panel, framed && styles.framed)}>
@@ -212,6 +329,7 @@ export function RatingDisclosureShell({
 
   return (
     <span
+      ref={wrapperRef}
       className={styles.wrapper}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

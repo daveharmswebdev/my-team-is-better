@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
+import { TEXAS_ELO, USC_ELO } from '../EvidenceReceipts/eloLedgerFixture'
 import { VerdictCard } from './VerdictCard'
 
 const teamCaseEnvelope: TeamCaseEnvelope = {
@@ -172,9 +173,10 @@ export const ComparisonSuccess: Story = {
 }
 
 /**
- * Issue #154: a team case answered by Elo. The card names the engine that
- * answered, read off the envelope; the rating prints on Elo's scale with no
- * Keener breakdown disclosure (issue #153).
+ * Issues #154 and #183: a team case answered by Elo, as the API really sends
+ * it -- with the engine's game-by-game ledger. The card names the engine that
+ * answered, prints the rating on Elo's scale, and hovering the rating opens
+ * that ledger through the card.
  */
 export const TeamCaseAnsweredByElo: Story = {
   args: {
@@ -185,8 +187,10 @@ export const TeamCaseAnsweredByElo: Story = {
         evidence: {
           ...teamCaseEnvelope.evidence,
           method: 'elo',
-          rating: 1933.19,
+          team_name: TEXAS_ELO.team_name,
+          rating: TEXAS_ELO.rating,
           rating_breakdown: { entries: [], residual_contribution: 0 },
+          elo_ledger: TEXAS_ELO.elo_ledger,
         },
       },
     },
@@ -194,14 +198,19 @@ export const TeamCaseAnsweredByElo: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Engine: Elo (second opinion)')).toBeVisible()
-    await expect(canvas.getByText(/Rating 1,933/)).toBeVisible()
+    await userEvent.hover(canvas.getByRole('button', { name: '1,661' }))
     await expect(
-      canvasElement.querySelector('[aria-haspopup="dialog"]'),
-    ).toBeNull()
+      await canvas.findByRole('dialog', {
+        name: 'Texas Elo rating, game by game',
+      }),
+    ).toBeVisible()
   },
 }
 
-/** Issue #154: a comparison answered by Elo -- the same quiet engine label. */
+/**
+ * Issues #154 and #183: a comparison answered by Elo -- the same quiet engine
+ * label, and each team's rating opens that team's own ledger through the card.
+ */
 export const ComparisonAnsweredByElo: Story = {
   args: {
     state: {
@@ -213,15 +222,19 @@ export const ComparisonAnsweredByElo: Story = {
           method: 'elo',
           team_a: {
             ...comparisonEnvelope.evidence.team_a,
-            rating: 1933.19,
+            team_name: TEXAS_ELO.team_name,
+            rating: TEXAS_ELO.rating,
             rating_breakdown: { entries: [], residual_contribution: 0 },
+            elo_ledger: TEXAS_ELO.elo_ledger,
           },
           team_b: {
             ...comparisonEnvelope.evidence.team_b,
-            rating: 1891.83,
+            team_name: USC_ELO.team_name,
+            rating: USC_ELO.rating,
             rating_breakdown: { entries: [], residual_contribution: 0 },
+            elo_ledger: USC_ELO.elo_ledger,
           },
-          rating_diff: 1933.19 - 1891.83,
+          rating_diff: TEXAS_ELO.rating - USC_ELO.rating,
         },
       },
     },
@@ -229,10 +242,20 @@ export const ComparisonAnsweredByElo: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Engine: Elo (second opinion)')).toBeVisible()
-    await expect(canvas.getByText('1,933')).toBeVisible()
-    await expect(
-      canvasElement.querySelector('[aria-haspopup="dialog"]'),
-    ).toBeNull()
+    for (const [label, team] of [
+      ['1,661', 'Texas'],
+      ['1,527', 'USC'],
+    ] as const) {
+      const trigger = canvas.getByRole('button', { name: label })
+      await userEvent.hover(trigger)
+      await expect(
+        await canvas.findByRole('dialog', {
+          name: `${team} Elo rating, game by game`,
+        }),
+      ).toBeVisible()
+      await userEvent.unhover(trigger)
+      await expect(canvas.queryByRole('dialog')).toBeNull()
+    }
   },
 }
 

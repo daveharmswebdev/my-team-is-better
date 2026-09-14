@@ -19,18 +19,40 @@
   border-bottom-color: var(--navy);
 }
 
-/* Desktop hover popover, anchored just below/right of the trigger. Scrolls
-   instead of overflowing the viewport once entries (each now with its own
-   explanation line) push it taller than the window, same as `.modal` below. */
+/* Desktop hover popover. `RatingDisclosureShell` places it beside the trigger
+   (or, in a very narrow window, above/below) and sets `data-side`; these
+   defaults only hold until then. Scrolls instead of overflowing the viewport
+   once entries push it taller than the window, same as `.modal` below.
+
+   The gap between trigger and panel is padding on the side facing the
+   trigger, never margin: it is part of the popover's own box, so moving the
+   pointer across it into the panel never leaves the disclosure and closes
+   it on the way. */
 .popover {
   position: absolute;
   z-index: 20;
   top: 100%;
   right: 0;
-  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
   width: 280px;
   max-height: 80vh;
   overflow-y: auto;
+}
+
+.popover[data-side='right'] {
+  padding: 0 0 0 var(--sp-2);
+}
+
+.popover[data-side='left'] {
+  padding: 0 var(--sp-2) 0 0;
+}
+
+.popover[data-side='below'] {
+  padding: var(--sp-2) 0 0;
+}
+
+.popover[data-side='above'] {
+  padding: 0 0 var(--sp-2);
 }
 
 /* Mobile tap modal: full-viewport backdrop, centered panel. */
@@ -71,11 +93,6 @@
      most of the height; never wider than the viewport. */
   width: min(36rem, 90vw);
   max-width: calc(100vw - 2 * var(--sp-2));
-  /* Padding, not margin: the gap between trigger and panel is part of the
-     popover's own box, so moving the pointer down into the panel never
-     leaves the disclosure and closes it on the way. */
-  margin-top: 0;
-  padding-top: var(--sp-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;

@@ -183,8 +183,14 @@ export function EloLedgerDisclosure({
 
       {steps.length > 0 ? (
         // Focusable so a keyboard user can scroll it (it's the one region
-        // that scrolls on a long season).
-        <ol className={styles.steps} aria-label="Games, in order" tabIndex={0}>
+        // that scrolls on a long season). The desktop popover grows until at
+        // least four whole games show at once.
+        <ol
+          className={styles.steps}
+          aria-label="Games, in order"
+          tabIndex={0}
+          data-min-visible-items={4}
+        >
           {steps.map((step) => (
             <li key={step.game_number} className={styles.step}>
               <span className={styles.stepGame}>{gameLabel(step)}</span>
@@ -212,9 +218,10 @@ export function EloLedgerDisclosure({
           {`The card rounds this to ${formatRating(rating, 'elo')}.`}
         </p>
         <p className={styles.footnote}>
-          Figures are rounded for display, so multiplying a row&apos;s rounded
-          numbers can land a tenth away from its change; the engine keeps full
-          precision, and every row&apos;s math checks out at full precision.
+          Every figure here is rounded for display, so redoing the arithmetic
+          with these printed numbers can come out a few tenths off; the engine
+          keeps full precision, and every row&apos;s math checks out exactly at
+          full precision.
         </p>
       </div>
     </RatingDisclosureShell>

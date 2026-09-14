@@ -635,18 +635,21 @@ describe('ComparisonReceipts', () => {
   })
 
   /**
-   * Issue #153: the breakdown disclosure explains Keener's math, and Elo
-   * writes no breakdown rows. Whether to show it is decided by the method,
-   * never by the breakdown's emptiness.
+   * Issue #183: what a rating opens is decided by the method and the ledger,
+   * never by the Keener breakdown's emptiness. These cases deliberately send
+   * no ledger (`elo_ledger: null`, what a stale API or db would send; the
+   * current API always sends one for elo): the ratings print as plain text
+   * with one honest note, and Keener keeps its breakdown disclosure. The
+   * real-ledger path is in "Elo ledger disclosure (issue #183)" below.
    */
-  describe('rating breakdown is decided by method, not by emptiness (issue #153)', () => {
+  describe('Elo with no ledger, and Keener unchanged: a rating’s disclosure follows method and ledger, not breakdown emptiness (issue #183)', () => {
     const NO_BREAKDOWN_EXPLAINER =
       'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
 
     const EMPTY = { entries: [], residual_contribution: 0 }
 
-    // Issue #183 retired the explainer above. With no ledger in the response,
-    // Elo says so once per team; career Elo explains once per receipts block.
+    // The explainer above is retired. With no ledger in the response, Elo
+    // says so once per team; career Elo explains once per receipts block.
     const NOTE_WITHOUT_LEDGER = {
       elo: {
         text: "This rating's game-by-game work isn't available right now.",
@@ -680,7 +683,7 @@ describe('ComparisonReceipts', () => {
 
     describe.each(['elo', 'elo_career'] as const)('%s', (method) => {
       it.each(['empty', 'non-empty'] as const)(
-        'renders both ratings as plain Elo-format text, no breakdown trigger, no Keener copy, one explainer (breakdowns %s)',
+        'with a null ledger: both ratings are plain Elo-format text, no trigger, no Keener copy, and the no-ledger note shows (breakdowns %s)',
         (breakdowns) => {
           const { container } = render(
             <ComparisonReceipts evidence={eloComparison(method, breakdowns)} />,
@@ -759,7 +762,7 @@ describe('ComparisonReceipts', () => {
       }
     }
 
-    it('(f) elo: each team has its own ledger trigger, and the old explainer is gone', async () => {
+    it('(f) elo with real ledgers: each team’s rating is a trigger that opens that team’s own ledger panel, and the old explainer is gone', async () => {
       const user = userEvent.setup()
       render(<ComparisonReceipts evidence={texasVsUsc('elo')} />)
 
@@ -790,7 +793,7 @@ describe('ComparisonReceipts', () => {
       }
     })
 
-    it('(f) elo: one team with a null ledger gets the plain rating and the unavailable line; the other keeps its trigger', () => {
+    it('(f) elo with one null ledger: that team gets the plain rating and the unavailable line; the other keeps its trigger', () => {
       const both = texasVsUsc('elo')
       render(
         <ComparisonReceipts
