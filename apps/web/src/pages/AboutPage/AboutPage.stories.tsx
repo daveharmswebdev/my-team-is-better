@@ -29,7 +29,7 @@ const mockCredits: CreditsOut = {
         'Arpad E. Elo, The Rating of Chessplayers, Past and Present, Arco, 1978 -- as adapted for professional football by FiveThirtyEight (fivethirtyeight/nfl-elo-game).',
       url: 'https://github.com/fivethirtyeight/nfl-elo-game',
       summary:
-        'Every team starts even and they trade points after each game: beat someone better than you and you take more from them than you would from a team you were supposed to beat. Arpad Elo built it for chess; FiveThirtyEight published the football adaptation implemented here -- including the margin-of-victory multiplier, so unlike Keener above, blowouts do count. Offered as a second opinion, not a replacement -- where Elo and Keener disagree about a season, that disagreement is the interesting part.',
+        'Every team starts even and they trade points after each game: beat someone better than you and you take more from them than you would from a team you were supposed to beat. Arpad Elo built it for chess; FiveThirtyEight published the football adaptation implemented here -- including the margin-of-victory multiplier, so unlike Keener above, blowouts do count. Offered as a second opinion, not a replacement -- two different methods will naturally rank teams differently from time to time.',
     },
   ],
   data_sources: [
