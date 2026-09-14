@@ -32,7 +32,7 @@ def test_prompt_carries_the_non_negotiable_grounding_rules_verbatim() -> None:
 
     assert "MUST appear in the" in prompt
     assert "FACT BLOCK" in prompt
-    assert "Never contradict or hedge on who the FACT BLOCK says is ranked #1" in prompt
+    assert "Never contradict, hedge on, or argue against who the FACT BLOCK says is" in prompt
     assert "PG-13 rivalry trash talk" in prompt
     assert "No slurs, no profanity" in prompt
     assert "Two or three sentences" in prompt
@@ -74,6 +74,85 @@ def test_rule_1_does_not_ask_the_narrator_to_compute_a_display_value() -> None:
         assert "multiplied by" not in prompt
         assert "5.04" not in prompt
         assert "0.005044" not in prompt
+
+
+_ATTITUDE_PARAGRAPH = (
+    "no punching at real people.\n"
+    "\n"
+    "Your whole attitude: the numbers are the numbers. This is math — that's why\n"
+    "people come to this site. Your confidence comes from the math, never from\n"
+    "arguing with it.\n"
+    "\n"
+    "You are given a FACT BLOCK below"
+)
+
+_RULE_2_THE_NUMBERS_ARE_THE_NUMBERS = (
+    "   as 1933).\n"
+    "2. Never contradict, hedge on, or argue against who the FACT BLOCK says is\n"
+    '   ranked #1 or rated higher. The numbers are the numbers. No "on paper…\n'
+    '   but" contrasts, no "don\'t sleep on" the lower-rated team, and never say a\n'
+    '   game "proved" something the rating didn\'t. You can cite a head-to-head\n'
+    "   result or a big win from the FACT BLOCK, but as something the math\n"
+    "   already counted, never as a rebuttal to it. You can be as opinionated as\n"
+    "   you want about *how it felt to watch*, but the ranking itself is not\n"
+    "   yours to relitigate.\n"
+    "3. If `contested` is true"
+)
+
+_REJECTED_ARGUE_WITH_THE_RANKING_EXAMPLE = (
+    "margin wrong. Every number you say must come straight from the FACT BLOCK.\n"
+    "\n"
+    "Example of a REJECTED comparison response, given a fact block where Texas A&M\n"
+    "is rated higher than Texas but Texas won their game 27-17 (do NOT do this):\n"
+    "\"Texas A&M's the higher-rated squad on paper, but Texas already proved who\n"
+    'shows up when it matters." — this argues with the ranking. Say it like this\n'
+    'instead: "Sure, Texas beat them 27-17 — and the math counted every point of\n'
+    'that. Texas A&M still rates higher. The numbers are the numbers."\n'
+)
+
+
+def test_both_prompts_carry_the_numbers_are_the_numbers_attitude_and_rule_2() -> None:
+    # issue #231: persona-v6 served a grounded narration that argued against
+    # the ranking ("higher-rated on paper, but Texas already proved who shows
+    # up"). The attitude paragraph and rule 2 now forbid relitigating it.
+    for user_team in ("Texas", None):
+        prompt = build_system_prompt(user_team)
+
+        assert _ATTITUDE_PARAGRAPH in prompt
+        assert _RULE_2_THE_NUMBERS_ARE_THE_NUMBERS in prompt
+
+
+def test_with_team_prompt_trusts_the_math_over_the_fan_s_heart() -> None:
+    prompt = build_system_prompt("Texas")
+
+    assert "you'll die on a hill for them, but you\ntrust the math over your own heart" in prompt
+    assert (
+        "4. If Texas appears in the FACT BLOCK and the numbers favor them, root\n"
+        "   for them outright. If the numbers don't, break it to them straight —\n"
+        "   sympathetic, but the math wins."
+    ) in prompt
+
+
+def test_no_team_prompt_hypes_whoever_the_numbers_put_on_top() -> None:
+    prompt = build_system_prompt(None)
+
+    assert "loud hype man for whoever the numbers put on top" in prompt
+    assert "the math wins" not in prompt
+
+
+def test_both_prompts_reject_arguing_with_the_ranking_by_example() -> None:
+    for user_team in ("Texas", None):
+        prompt = build_system_prompt(user_team)
+
+        assert prompt.endswith(_REJECTED_ARGUE_WITH_THE_RANKING_EXAMPLE)
+
+
+def test_neither_prompt_leaves_a_literal_brace() -> None:
+    for user_team in ("Texas", None):
+        prompt = build_system_prompt(user_team)
+
+        assert "{" not in prompt
+        assert "}" not in prompt
 
 
 def test_prompt_includes_the_worked_examples() -> None:
