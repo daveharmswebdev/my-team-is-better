@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  CATALOG_TIMEOUT_MS,
   CLIENT_ERROR_COPY,
   NETWORK_ERROR_COPY,
   SERVER_ERROR_COPY,
@@ -502,6 +503,122 @@ describe('verdict request timeout and abort (issue #214)', () => {
   })
 })
 
+/**
+ * Issue #237: the catalog and credits GETs are bounded too, so a hung
+ * `/api/credits`, `/api/years` or `/api/teams` fails like a dropped
+ * connection instead of leaving the UI pending forever.
+ */
+describe('GET request timeout (issue #237)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  const GETS = [
+    ['fetchCredits', () => fetchCredits()],
+    ['fetchYears', () => fetchYears('nfl', 'elo')],
+    ['fetchTeams', () => fetchTeams('cfb', 'keener', 2005)],
+  ] as const
+
+  it('is shorter than the verdict timeout', () => {
+    expect(CATALOG_TIMEOUT_MS).toBeGreaterThan(0)
+    expect(CATALOG_TIMEOUT_MS).toBeLessThan(VERDICT_TIMEOUT_MS)
+  })
+
+  it.each(GETS)(
+    '%s is still pending one millisecond before CATALOG_TIMEOUT_MS, and rejects with the network copy at it',
+    async (_name, send) => {
+      const { fetchMock, signals } = neverAnsweringFetch()
+      vi.stubGlobal('fetch', fetchMock)
+
+      const outcome = track(send())
+
+      await vi.advanceTimersByTimeAsync(CATALOG_TIMEOUT_MS - 1)
+      await flushMicrotasks()
+      expect(outcome.settled).toBe(false)
+      expect(signals).toHaveLength(1)
+      expect(signals[0]).toBeInstanceOf(AbortSignal)
+      expect(signals[0]?.aborted).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await flushMicrotasks()
+      // Settles only because the request's own signal aborted.
+      expect(outcome.settled).toBe(true)
+      expect(signals[0]?.aborted).toBe(true)
+      expect(outcome.error).toBeInstanceOf(VerdictNetworkError)
+      expect((outcome.error as VerdictNetworkError).message).toBe(
+        NETWORK_ERROR_COPY,
+      )
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it.each(GETS)(
+    '%s also times out when the headers arrive but the JSON body never finishes',
+    async (_name, send) => {
+      const response = jsonResponse(200, {})
+      vi.spyOn(response, 'json').mockReturnValue(new Promise(() => {}))
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+
+      const outcome = track(send())
+
+      await vi.advanceTimersByTimeAsync(CATALOG_TIMEOUT_MS - 1)
+      await flushMicrotasks()
+      expect(outcome.settled).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(1)
+      await flushMicrotasks()
+      expect(outcome.settled).toBe(true)
+      expect(outcome.error).toBeInstanceOf(VerdictNetworkError)
+      expect((outcome.error as VerdictNetworkError).message).toBe(
+        NETWORK_ERROR_COPY,
+      )
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it.each(GETS)(
+    '%s clears its timer once a successful response has been read',
+    async (_name, send) => {
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValue(
+            jsonResponse(200, { years: [], teams: [], team_details: [] }),
+          ),
+      )
+
+      await send()
+
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+
+  it.each(GETS)(
+    '%s clears its timer after an HTTP error, which stays a VerdictHttpError',
+    async (_name, send) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(503, { detail: 'boom' })),
+      )
+
+      const outcome = track(send())
+      await flushMicrotasks()
+
+      expect(outcome.settled).toBe(true)
+      expect(outcome.error).toBeInstanceOf(VerdictHttpError)
+      expect(vi.getTimerCount()).toBe(0)
+    },
+  )
+})
+
 describe('fetchCredits', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -543,8 +660,10 @@ describe('fetchCredits', () => {
     const result = await fetchCredits()
 
     expect(result).toEqual(credits)
+    // Issue #237: every GET carries the signal its timeout aborts.
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/credits'),
+      expect.objectContaining({ signal: expect.any(AbortSignal) as unknown }),
     )
   })
 

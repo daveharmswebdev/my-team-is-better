@@ -1,6 +1,7 @@
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  CATALOG_TIMEOUT_MS,
   NETWORK_ERROR_COPY,
   SERVER_ERROR_COPY,
   VerdictNetworkError,
@@ -218,6 +219,56 @@ describe('AboutPage', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent(
         SERVER_ERROR_COPY,
       )
+    })
+  })
+
+  /** Issue #237, through the real client: only `fetch` and the clock are faked. */
+  describe('a hung /api/credits (issue #237)', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    })
+
+    /** Moves the fake clock, then lets the rejection chain and React settle. */
+    async function advance(ms: number) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+        for (let i = 0; i < 20; i += 1) {
+          await Promise.resolve()
+        }
+      })
+    }
+
+    it('replaces "Loading methods" with the network copy once CATALOG_TIMEOUT_MS passes', async () => {
+      const actual = await vi.importActual<
+        typeof import('../../lib/api/client')
+      >('../../lib/api/client')
+      mockedFetchCredits.mockImplementation(actual.fetchCredits)
+      // Never answers; gives up only when its request's signal aborts.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(
+          (_url: string, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener('abort', () => {
+                reject(new DOMException('aborted', 'AbortError'))
+              })
+            }),
+        ),
+      )
+      vi.useFakeTimers()
+
+      render(<AboutPage />)
+
+      await advance(CATALOG_TIMEOUT_MS - 1)
+      expect(screen.getByRole('status')).toHaveTextContent(/loading methods/i)
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      await advance(1)
+      expect(screen.getByRole('alert')).toHaveTextContent(NETWORK_ERROR_COPY)
+      expect(screen.queryByText(/loading methods/i)).not.toBeInTheDocument()
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })
   })
 })
