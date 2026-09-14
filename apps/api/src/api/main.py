@@ -19,6 +19,7 @@ origin can call these routes), and (via `lifespan`) the one-time
 context manager rather than the deprecated `@app.on_event("startup")`.
 """
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -29,8 +30,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.catalog import router as catalog_router
 from api.config import CORS_ALLOWED_ORIGINS, DATABASE_URL
 from api.errors import register_exception_handlers
-from api.persona.cache import ensure_schema
+from api.persona.cache import CONNECT_TIMEOUT_SECONDS, ensure_schema
 from api.verdict import router as verdict_router
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -38,8 +41,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # `DATABASE_URL` is intentionally unset in CI (see CLAUDE.md/issue #4's
     # negative scope) -- skip schema setup rather than failing startup.
     if DATABASE_URL:
-        with psycopg.connect(DATABASE_URL) as conn:
-            ensure_schema(conn)
+        # Issue #206: the persona cache is optional, the app is not. A
+        # Postgres failure here is logged and the app serves anyway: verdicts
+        # and the catalog come from SQLite, and the cache store fails open
+        # per request (see `api.persona.cache`).
+        try:
+            with psycopg.connect(DATABASE_URL, connect_timeout=CONNECT_TIMEOUT_SECONDS) as conn:
+                ensure_schema(conn)
+        except psycopg.Error as exc:
+            logger.warning("Persona cache schema setup failed, starting without a cache: %s", exc)
     yield
 
 

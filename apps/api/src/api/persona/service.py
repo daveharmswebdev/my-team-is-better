@@ -29,11 +29,22 @@ row through the cache's upsert.
 Accepted trade-off: a key whose fact block fails grounding persistently now
 costs up to two Claude calls on every request, instead of being pinned to
 the fallback after the first failure.
+
+**A cache outage never fails the verdict (issue #206).** `_cached_narration`
+treats a `psycopg.Error` from any store's `get` as a miss and from its `set`
+as a skipped write, logging one warning each, so the verdict narrates
+normally with `cached=False`. `PostgresNarrationCache` already degrades this
+way on its own; this guard makes the same promise for every
+`NarrationCacheStore`. Only database errors are caught -- a programming bug
+in a store still surfaces.
 """
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+
+import psycopg
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
 from api.deps import list_all_team_names
@@ -42,6 +53,8 @@ from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 from api.persona.narrate import narrate
+
+logger = logging.getLogger(__name__)
 
 # Issue #183: the Elo ledger is published to clients but kept out of both
 # fact blocks, so the narrator's input stays byte-identical to before #183.
@@ -166,7 +179,11 @@ def _cached_narration(
     """
     contested = is_contested(year)
 
-    cached = cache.get(key)
+    try:
+        cached = cache.get(key)
+    except psycopg.Error as exc:
+        logger.warning("Narration cache read failed, narrating uncached: %s", exc)
+        cached = None
     if cached is not None and cached.text != fallback_text:
         return NarrationOut(text=cached.text, contested=cached.contested, cached=True)
 
@@ -180,5 +197,8 @@ def _cached_narration(
     )
 
     if not result.is_fallback:
-        cache.set(key, CachedNarration(text=result.text, contested=contested))
+        try:
+            cache.set(key, CachedNarration(text=result.text, contested=contested))
+        except psycopg.Error as exc:
+            logger.warning("Narration cache write failed, narration not cached: %s", exc)
     return NarrationOut(text=result.text, contested=contested, cached=False)

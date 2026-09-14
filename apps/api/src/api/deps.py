@@ -43,7 +43,9 @@ building a `PostgresNarrationCache`, and `get_narrator` returns a
 `app.dependency_overrides` to lean on -- pytest's `TestClient`-based
 overrides in `tests/conftest.py` are unaffected and unchanged by this flag.
 When `APP_TEST_MODE` is false/unset, both functions behave exactly as
-before.
+before, except that a missing `DATABASE_URL` no longer raises (issue #206):
+`get_narration_cache` logs a warning and returns a `DisabledNarrationCache`,
+so verdicts are served uncached instead of 500-ing.
 
 `list_all_team_names` (issue #13) is the shared "known team names" universe
 -- originally a private helper on `api.persona.service` (issue #4's
@@ -72,6 +74,7 @@ default argument.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -80,8 +83,15 @@ from cfb_strength.config import DB_PATH
 from cfb_strength.db.connection import get_conn
 
 from api.config import APP_TEST_MODE, DATABASE_URL, PROMPT_VERSION
-from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore, PostgresNarrationCache
+from api.persona.cache import (
+    DisabledNarrationCache,
+    InMemoryNarrationCache,
+    NarrationCacheStore,
+    PostgresNarrationCache,
+)
 from api.persona.claude_client import ClaudeNarrator, Narrator, StubNarrator
+
+logger = logging.getLogger(__name__)
 
 
 def get_db_conn() -> Iterator[sqlite3.Connection]:
@@ -105,9 +115,11 @@ def get_narration_cache() -> NarrationCacheStore:
     if APP_TEST_MODE:
         return InMemoryNarrationCache()
     if not DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL is not configured -- the persona response cache requires it"
-        )
+        # Issue #206: this used to raise, which 500'd every verdict route.
+        # Availability beats the extra Claude calls, so serve uncached -- and
+        # log it on every request, so a missing DATABASE_URL is never silent.
+        logger.warning("DATABASE_URL is not configured -- persona narration cache disabled")
+        return DisabledNarrationCache()
     return PostgresNarrationCache(DATABASE_URL, prompt_version=PROMPT_VERSION)
 
 

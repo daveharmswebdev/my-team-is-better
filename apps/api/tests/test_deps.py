@@ -19,6 +19,7 @@ fresh after monkeypatching the environment -- mirrors `test_config.py`'s
 from __future__ import annotations
 
 import importlib
+import logging
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -162,9 +163,16 @@ def test_get_narrator_returns_stub_narrator_in_test_mode(
     assert narrator.complete(system="", messages=[]) == "Solid case, no notes."
 
 
-def test_get_narration_cache_still_raises_without_database_url_when_test_mode_unset(
+def test_get_narration_cache_serves_uncached_without_database_url_when_test_mode_unset(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Issue #206: this used to raise `RuntimeError`, which 500'd every
+    verdict route. Availability beats the extra Claude calls, so a missing
+    `DATABASE_URL` now yields a store that never hits -- and says so in the
+    log, so the condition is never silent."""
+    from api.persona.cache import CachedNarration, InMemoryNarrationCache, PostgresNarrationCache
+
     monkeypatch.delenv("APP_TEST_MODE", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     # Point the dotenv loader at a directory with no .env of its own, so this
@@ -174,8 +182,15 @@ def test_get_narration_cache_still_raises_without_database_url_when_test_mode_un
 
     deps = _reimport_deps()
 
-    with pytest.raises(RuntimeError):
-        deps.get_narration_cache()  # type: ignore[attr-defined]
+    with caplog.at_level(logging.WARNING):
+        cache = deps.get_narration_cache()  # type: ignore[attr-defined]
+
+    assert not isinstance(cache, (InMemoryNarrationCache, PostgresNarrationCache))
+    cache.set("some-key", CachedNarration(text="Solid case, no notes.", contested=False))
+    assert cache.get("some-key") is None
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    assert "DATABASE_URL" in warnings[0].getMessage()
 
 
 def test_get_narrator_still_returns_claude_narrator_when_test_mode_unset(
