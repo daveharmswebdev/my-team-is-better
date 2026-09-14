@@ -83,7 +83,23 @@ def test_prompt_version_is_past_the_no_rating_rounding_prompt() -> None:
     "never round" rule and would keep being served unless the version moves."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v4"  # type: ignore[attr-defined]
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+    }
+
+
+def test_prompt_version_is_past_the_no_keener_display_prompt() -> None:
+    """Issue #165 changed the system prompt itself: rule 1 now tells the
+    narrator a Keener rating may be quoted the way the site displays it
+    (scaled and rounded, from `api.rating_display.RATING_DISPLAY`). The cache
+    key doesn't cover the prompt text, so narrations cached under `persona-v4`
+    were written without that rule and would keep being served unless the
+    version moves."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v5"  # type: ignore[attr-defined]
 
 
 def test_config_exposes_contested_years() -> None:

@@ -5,7 +5,7 @@ that fixed two real gaps in the first relational pass).
 Every number-like token and known-team-name mention in the persona's
 generated response must be a subset of what's already in the fact block
 (the exact evidence JSON given to Claude) -- nothing invented, nothing
-rounded, with one deliberate exception (issue #162):
+rounded, with two deliberate exceptions for ratings (issues #162 and #165):
 
 * **A rating may be rounded.** A number is also grounded if it equals the
   value of some key named exactly `rating` or `opponent_rating` in the fact
@@ -17,6 +17,19 @@ rounded, with one deliberate exception (issue #162):
   as fabricating it. The literal is parsed as an exact `Decimal`, so the
   rounding never depends on float repr. A token's own decimal places are
   the precision it claims: "1933.0" is not a rounding of `1933.19`.
+* **A rating may be quoted as the site displays it (issue #165).** apps/web
+  shows a Keener rating scaled up and rounded ("5.04" for
+  `0.005044108672990355`), which no rounding of the raw literal produces. So
+  a number is also grounded if it is exactly
+  `api.rating_display.display_value(v, method)` for some `rating` or
+  `opponent_rating` value `v`, where `method` is the fact block's own
+  top-level `"method"` (`TeamCaseOut.method` for champion and team-case
+  blocks, `ComparisonResultOut.method` for compare). The comparison is on
+  the string, so only the display's own precision counts: "5.04" is
+  grounded, "5.0" and "5.040" are not (by this rule). The scale is the
+  block's method's, so a Keener-scaled figure in an Elo block is not
+  grounded. A block with no `method`, or one not in `RATING_DISPLAY`, gets
+  no display allowance; the literal and #162 rules still apply to it.
 * **Only ratings, not every float.** The allowance is scoped by field name
   because a rounded rating restates a fact, while a rounding of any float
   would quietly ground numbers nobody decided to allow: a rounded
@@ -25,7 +38,7 @@ rounded, with one deliberate exception (issue #162):
   not something this checker settles by accident. An `opponent_rating` is
   included because it is another team's real rating, restated; `credit`,
   `contribution`, `residual_contribution` and `rating_diff` are derived and
-  stay exact-membership only.
+  stay exact-membership only -- neither rounded nor scaled.
 * **Grouped thousands.** A narrator mirroring the UI's "1,933" writes an
   en-US comma-grouped integer, which is read as one number token (its
   ungrouped value is checked under the same rules above) rather than as
@@ -110,6 +123,9 @@ from collections.abc import Iterable
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
+from api.models import Method
+from api.rating_display import RATING_DISPLAY, display_value
+
 # No leading `-?`: records and scores in this domain (e.g. "13-0", "41-38")
 # use a hyphen as a separator, not a negative sign, and treating it as one
 # would misparse "13-0" as the tokens "13" and "-0" instead of "13" and "0".
@@ -166,10 +182,14 @@ def find_ungrounded_tokens(
     """
     fact_numbers = set(_NUMBER_RE.findall(fact_block_json))
     rating_values = _extract_rating_values(fact_block_json)
+    method = _extract_fact_block_method(fact_block_json)
+    display_values = (
+        set() if method is None else {display_value(rating, method) for rating in rating_values}
+    )
     ungrounded_numbers = {
         token
         for token in _RESPONSE_NUMBER_RE.findall(response_text)
-        if not _is_grounded_number(token, fact_numbers, rating_values)
+        if not _is_grounded_number(token, fact_numbers, rating_values, display_values)
     }
 
     names = [name for name in known_team_names if name]
@@ -183,13 +203,16 @@ def find_ungrounded_tokens(
     return sorted(ungrounded_numbers | ungrounded_teams | relational_mismatches)
 
 
-def _is_grounded_number(token: str, fact_numbers: set[str], rating_values: list[Decimal]) -> bool:
+def _is_grounded_number(
+    token: str, fact_numbers: set[str], rating_values: list[Decimal], display_values: set[str]
+) -> bool:
     """A response number token is grounded if its ungrouped form is a
-    number token of the fact block, or it is a rounding of a value under
-    one of `_ROUNDABLE_KEYS` (`rating` or `opponent_rating`).
+    number token of the fact block, exactly the display value of a value
+    under one of `_ROUNDABLE_KEYS` (`rating` or `opponent_rating`) under the
+    fact block's method, or a rounding of such a value.
     """
     plain = token.replace(",", "")
-    if plain in fact_numbers:
+    if plain in fact_numbers or plain in display_values:
         return True
     return any(_is_rounding_of(plain, rating) for rating in rating_values)
 
@@ -220,7 +243,8 @@ def _extract_rating_values(fact_block_json: str) -> list[Decimal]:
     """Every value of a key in `_ROUNDABLE_KEYS`, anywhere in the fact
     block, parsed as an exact `Decimal` from its JSON literal (so rounding
     never depends on float repr). Walks by field name, like
-    `_extract_valid_score_tuples`, never importing the Pydantic models.
+    `_extract_valid_score_tuples`, never importing the Pydantic response
+    models (this module takes only the `Method` alias from `api.models`).
     """
     try:
         data: Any = json.loads(fact_block_json, parse_float=Decimal)
@@ -230,6 +254,21 @@ def _extract_rating_values(fact_block_json: str) -> list[Decimal]:
     ratings: list[Decimal] = []
     _collect_rating_values(data, ratings)
     return ratings
+
+
+def _extract_fact_block_method(fact_block_json: str) -> Method | None:
+    """The fact block's own top-level `"method"`, if it is one
+    `RATING_DISPLAY` knows; `None` otherwise (missing, not a string, or not
+    a displayed method), in which case no display allowance applies.
+    """
+    try:
+        data: Any = json.loads(fact_block_json)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("method")
+    return next((method for method in RATING_DISPLAY if method == raw), None)
 
 
 def _collect_rating_values(node: Any, ratings: list[Decimal]) -> None:
@@ -245,7 +284,7 @@ def _collect_rating_values(node: Any, ratings: list[Decimal]) -> None:
 
 def _extract_valid_score_tuples(fact_block_json: str) -> _ScoreTuplesByName:
     """Recursively walk the parsed fact block, pattern-matching dict shapes
-    by field name (never importing the Pydantic models -- see
+    by field name (never importing the Pydantic response models -- see
     `api.models` for `OpponentResultOut` / `HeadToHeadMeetingOut` /
     `CommonOpponentOut`, the three shapes recognized here) to build every
     `name -> {(own_score, other_score), ...}` fact this fact block states.

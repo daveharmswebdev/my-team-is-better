@@ -1,0 +1,14 @@
+{
+  "elo": {
+    "decimals": 0,
+    "scale": 1
+  },
+  "elo_career": {
+    "decimals": 0,
+    "scale": 1
+  },
+  "keener": {
+    "decimals": 2,
+    "scale": 1000
+  }
+}
