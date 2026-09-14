@@ -110,19 +110,19 @@ export const Default: Story = {
     // Issue #136: the Year defaults to the newest season with data, not the
     // calendar year.
     await expect(await canvas.findByDisplayValue('2007')).toBeVisible()
-    await expect(
-      canvas.getByText(/saved on this device\. included in links you share\./i),
-    ).toBeVisible()
+    // Issue #198: the best-team question names no team, so it has no
+    // "Your team" field -- and none of that field's privacy note.
+    await expect(canvas.queryByLabelText(/your team/i)).not.toBeInTheDocument()
   },
 }
 
 /**
  * The "your team" typeahead, open -- issue #80's headline fix. This field
- * had no suggestions at all before, and on the `champion` question type it
- * is the *only* team input, which is why the form looked like it lost its
- * typeahead depending on the question selected.
+ * had no suggestions at all before. It shows on the questions that name a
+ * team; the best-team question has no "your team" field since issue #198.
  */
 export const UserTeamSuggestionsOpen: Story = {
+  args: { initialQuestionType: 'team_case' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     // Wait for the catalog-backed combobox before typing. Until `/api/teams`
@@ -171,8 +171,10 @@ export const Compare: Story = {
 }
 
 /** Switching the toggle to NFL re-fetches the catalog scoped to "nfl" --
- * including league-appropriate placeholder copy and suggestions. */
+ * including league-appropriate placeholder copy and suggestions. On a
+ * question that names a team: the best-team one has no team field (#198). */
 export const NflToggle: Story = {
+  args: { initialQuestionType: 'team_case' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getByRole('radio', { name: /nfl/i }))
@@ -180,9 +182,10 @@ export const NflToggle: Story = {
     await expect(
       canvas.getByRole('radio', { name: /college/i }),
     ).not.toBeChecked()
-    await expect(
-      canvas.getByPlaceholderText(/kansas city chiefs/i),
-    ).toBeVisible()
+    // Team and "your team" both switch to NFL examples.
+    const fields = canvas.getAllByPlaceholderText(/kansas city chiefs/i)
+    await expect(fields).toHaveLength(2)
+    await expect(fields[0]).toBeVisible()
   },
 }
 
@@ -379,8 +382,10 @@ export const CatalogLoading: Story = {
 
 /** Catalog fetch fails -- the comboboxes degrade to plain typed inputs and
  * surface a small inline hint rather than blocking submission: any typed
- * year is accepted, since there is no range to check it against. */
+ * year is accepted, since there is no range to check it against. Shown on a
+ * question with team fields: the best-team one has none (issue #198). */
 export const CatalogError: Story = {
+  args: { initialQuestionType: 'team_case' },
   decorators: [
     (Story) => {
       installCatalogFetch(() =>
@@ -391,18 +396,19 @@ export const CatalogError: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(
-      await canvas.findByText(/couldn't load the team list/i),
-    ).toBeVisible()
+    const hints = await canvas.findAllByText(/couldn't load the team list/i)
+    await expect(hints[0]).toBeVisible()
   },
 }
 
 /**
  * A *successful* year-scoped response with no teams in it -- an un-ingested
  * season. Distinct from `CatalogError` above and reads differently: there is
- * nothing wrong with the connection, the year just has no data.
+ * nothing wrong with the connection, the year just has no data. Shown on a
+ * question with team fields: the best-team one has none (issue #198).
  */
 export const EmptyYearScopedCatalog: Story = {
+  args: { initialQuestionType: 'team_case' },
   decorators: [
     (Story) => {
       installCatalogFetch((path) =>
@@ -415,7 +421,8 @@ export const EmptyYearScopedCatalog: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(await canvas.findByText(/no teams found for/i)).toBeVisible()
+    const notes = await canvas.findAllByText(/no teams found for/i)
+    await expect(notes[0]).toBeVisible()
     await expect(
       canvas.queryByText(/couldn't load the team list/i),
     ).not.toBeInTheDocument()

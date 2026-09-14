@@ -14,7 +14,8 @@ test('submitting a team-case question renders a verdict for USC in 2005', async 
     .selectOption({ label: 'How good was a team in a year?' })
   await page.getByLabel('Year').fill('2005')
   // `pickTeam` matches the label exactly -- a substring match would also hit
-  // the always-present "Your team (optional)" field.
+  // the "Your team (optional)" field, which team_case shows (champion alone
+  // doesn't, since issue #198).
   await pickTeam(page, 'Team', 'USC')
   await page.getByRole('button', { name: 'Get the verdict' }).click()
 

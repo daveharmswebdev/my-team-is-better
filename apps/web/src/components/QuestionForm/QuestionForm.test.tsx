@@ -341,7 +341,7 @@ describe('QuestionForm', () => {
   it('prefills the "your team" field from localStorage on mount', () => {
     window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
 
-    render(<QuestionForm onSubmit={vi.fn()} />)
+    render(<QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />)
 
     expect(screen.getByLabelText(/your team/i)).toHaveValue('Ohio State')
   })
@@ -352,6 +352,92 @@ describe('QuestionForm', () => {
     const select = screen.getByLabelText(/what do you want to know/i)
     const options = within(select).getAllByRole('option')
     expect(options).toHaveLength(3)
+  })
+
+  /**
+   * Issue #198: on the best-team question the API uses `user_team` only for
+   * the narrator's allegiance, and that fact block holds the #1 team alone,
+   * so the field did nothing visible. It is not rendered there, and the
+   * submission never carries one -- while the saved team stays saved for
+   * the two questions that still use it.
+   */
+  describe('no "Your team" on the champion question (issue #198)', () => {
+    it('does not render "Your team (optional)", its privacy note or its stale notice for champion', async () => {
+      // Not in the catalog, so the stale-team notice would show if the field did.
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'Gonzaga')
+      render(<QuestionForm onSubmit={vi.fn()} />)
+      await waitForDefaultYear()
+
+      expect(screen.queryByLabelText(/your team/i)).not.toBeInTheDocument()
+      expect(
+        screen.queryByText(/saved on this device/i),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByText(ANY_STALE_NOTICE)).not.toBeInTheDocument()
+    })
+
+    it('submits userTeam null for champion even when localStorage holds a team, and leaves it stored', async () => {
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'Texas')
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+      await waitForDefaultYear()
+
+      await user.click(submitButton())
+
+      expect(onSubmit).toHaveBeenCalledWith({
+        questionType: 'champion',
+        year: NEWEST_DEFAULT_YEAR,
+        userTeam: null,
+        sport: 'cfb',
+        method: 'keener',
+      })
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+        'Texas',
+      )
+    })
+
+    it('submits userTeam null for champion even with a parent-seeded team', async () => {
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} initialUserTeam="Texas" />)
+      await waitForDefaultYear()
+
+      await user.click(submitButton())
+
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ questionType: 'champion', userTeam: null }),
+      )
+    })
+
+    it('shows the saved team again on switching back to team_case or compare, without touching storage', async () => {
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'Texas')
+      const user = userEvent.setup()
+      const onSubmit = vi.fn()
+      render(<QuestionForm onSubmit={onSubmit} />)
+      await waitForDefaultYear()
+      const questionType = screen.getByLabelText(/what do you want to know/i)
+
+      await user.selectOptions(questionType, 'team_case')
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+
+      await user.selectOptions(questionType, 'champion')
+      expect(screen.queryByLabelText(/your team/i)).not.toBeInTheDocument()
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+        'Texas',
+      )
+
+      await user.selectOptions(questionType, 'compare')
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+      await user.type(screen.getByLabelText(/team a/i), 'Texas')
+      await user.type(screen.getByLabelText(/team b/i), 'USC')
+      await user.click(submitButton())
+      expect(onSubmit).toHaveBeenLastCalledWith(
+        expect.objectContaining({ questionType: 'compare', userTeam: 'Texas' }),
+      )
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+        'Texas',
+      )
+    })
   })
 
   describe('catalog-backed year suggestions', () => {
@@ -764,8 +850,8 @@ describe('QuestionForm', () => {
   })
 
   describe('team typeahead (issue #80)', () => {
+    // No champion row: that question has no team field at all since #198.
     it.each([
-      ['champion', /your team/i],
       ['team_case', /^team$/i],
       ['compare', /team a/i],
     ] as const)(
@@ -791,14 +877,12 @@ describe('QuestionForm', () => {
       },
     )
 
-    it('gives "your team" a typeahead even on the champion type, where it is the only team input', async () => {
+    it('gives "your team" a typeahead of its own', async () => {
       const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
       await waitForInitialCatalog()
-
-      // No other team field is rendered for this question type at all.
-      expect(screen.queryByLabelText(/^team$/i)).not.toBeInTheDocument()
-      expect(screen.queryByLabelText(/team a/i)).not.toBeInTheDocument()
 
       const userTeamField = screen.getByLabelText(/your team/i)
       await waitFor(() =>
@@ -815,7 +899,9 @@ describe('QuestionForm', () => {
     it('scopes "your team" suggestions to the selected league', async () => {
       stubSportScopedTeams()
       const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
       await waitForInitialCatalog()
 
       const userTeamField = screen.getByLabelText(/your team/i)
@@ -845,7 +931,9 @@ describe('QuestionForm', () => {
 
     it('persists a "your team" suggestion picked from the list to localStorage', async () => {
       const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
       await waitForInitialCatalog()
 
       const userTeamField = screen.getByLabelText(/your team/i)
@@ -872,7 +960,9 @@ describe('QuestionForm', () => {
         ]),
       )
       const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
       await waitForInitialCatalog()
 
       const userTeamField = screen.getByLabelText(/your team/i)
@@ -979,13 +1069,21 @@ describe('QuestionForm', () => {
       mockedFetchTeams.mockRejectedValue(new Error('network down'))
       const user = userEvent.setup()
       const onSubmit = vi.fn()
-      render(<QuestionForm onSubmit={onSubmit} />)
+      // compare: the champion question has no "your team" field (issue #198).
+      render(
+        <QuestionForm
+          onSubmit={onSubmit}
+          initialQuestionType="compare"
+          initialTeamA="Texas"
+          initialTeamB="USC"
+        />,
+      )
 
       await waitFor(() => expect(mockedFetchYears).toHaveBeenCalled())
       await waitFor(() =>
         expect(
-          screen.getByText(/couldn't load the team list/i),
-        ).toBeInTheDocument(),
+          screen.getAllByText(/couldn't load the team list/i),
+        ).not.toHaveLength(0),
       )
 
       const yearInput = screen.getByLabelText(/year/i)
@@ -1001,8 +1099,10 @@ describe('QuestionForm', () => {
       await user.click(screen.getByRole('button', { name: /get the verdict/i }))
 
       expect(onSubmit).toHaveBeenCalledWith({
-        questionType: 'champion',
+        questionType: 'compare',
         year: 2005,
+        teamA: 'Texas',
+        teamB: 'USC',
         userTeam: 'Whatever FC',
         sport: 'cfb',
         method: 'keener',
@@ -1011,14 +1111,16 @@ describe('QuestionForm', () => {
 
     it('reads an empty year-scoped list differently from a failed fetch', async () => {
       mockedFetchTeams.mockResolvedValue({ teams: [], team_details: [] })
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
 
       await waitForInitialCatalog()
 
-      const emptyNote = await screen.findByText(
+      const emptyNotes = await screen.findAllByText(
         new RegExp(`no teams .*${NEWEST_DEFAULT_YEAR}`, 'i'),
       )
-      expect(emptyNote).toBeInTheDocument()
+      expect(emptyNotes).not.toHaveLength(0)
       expect(
         screen.queryByText(/couldn't load the team list/i),
       ).not.toBeInTheDocument()
@@ -1296,7 +1398,13 @@ describe('QuestionForm', () => {
       stubYearScopedTeams()
       const user = userEvent.setup()
       window.localStorage.setItem('myTeamIsBetter.userTeam', 'Texas')
-      render(<QuestionForm onSubmit={vi.fn()} initialYear={2018} />)
+      render(
+        <QuestionForm
+          onSubmit={vi.fn()}
+          initialQuestionType="team_case"
+          initialYear={2018}
+        />,
+      )
 
       expect(
         await screen.findByText(staleNotice('Texas', '2018 college football')),
@@ -1723,15 +1831,16 @@ describe('QuestionForm', () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
       await waitForInitialCatalog()
 
-      // champion: "your team" is the only team input.
-      expect(screen.getByLabelText(/your team/i)).toHaveAttribute(
-        'placeholder',
-        expect.stringMatching(/e\.g\./i),
-      )
+      // champion names no team at all since issue #198.
+      expect(screen.queryByLabelText(/your team/i)).not.toBeInTheDocument()
 
       await user.selectOptions(
         screen.getByLabelText(/what do you want to know/i),
         'team_case',
+      )
+      expect(screen.getByLabelText(/your team/i)).toHaveAttribute(
+        'placeholder',
+        expect.stringMatching(/e\.g\./i),
       )
       expect(screen.getByLabelText(/^team$/i)).toHaveAttribute(
         'placeholder',
@@ -1757,7 +1866,9 @@ describe('QuestionForm', () => {
     })
 
     it('keeps the privacy note on the user-team field, saying shared links include it (issue #184)', async () => {
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
       await waitForInitialCatalog()
 
       expect(
@@ -1774,7 +1885,9 @@ describe('QuestionForm', () => {
     it('offers league-appropriate team examples', async () => {
       stubSportScopedTeams()
       const user = userEvent.setup()
-      render(<QuestionForm onSubmit={vi.fn()} />)
+      render(
+        <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+      )
       await waitForInitialCatalog()
 
       expect(screen.getByLabelText(/your team/i)).toHaveAttribute(
@@ -1862,7 +1975,13 @@ describe('QuestionForm', () => {
       it('seeds "your team" from initialUserTeam instead of the stored value, without writing localStorage', () => {
         window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
 
-        render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+        render(
+          <QuestionForm
+            onSubmit={vi.fn()}
+            initialQuestionType="team_case"
+            initialUserTeam="Texas"
+          />,
+        )
 
         expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
         expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
@@ -1871,7 +1990,13 @@ describe('QuestionForm', () => {
       })
 
       it('leaves an unset stored team unset', () => {
-        render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+        render(
+          <QuestionForm
+            onSubmit={vi.fn()}
+            initialQuestionType="team_case"
+            initialUserTeam="Texas"
+          />,
+        )
 
         expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
         expect(
@@ -1882,7 +2007,13 @@ describe('QuestionForm', () => {
       it('seeds an empty field from null, still without touching the stored value', () => {
         window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
 
-        render(<QuestionForm onSubmit={vi.fn()} initialUserTeam={null} />)
+        render(
+          <QuestionForm
+            onSubmit={vi.fn()}
+            initialQuestionType="team_case"
+            initialUserTeam={null}
+          />,
+        )
 
         expect(screen.getByLabelText(/your team/i)).toHaveValue('')
         expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
@@ -1893,7 +2024,9 @@ describe('QuestionForm', () => {
       it('still reads the stored value when initialUserTeam is omitted', () => {
         window.localStorage.setItem('myTeamIsBetter.userTeam', 'Ohio State')
 
-        render(<QuestionForm onSubmit={vi.fn()} />)
+        render(
+          <QuestionForm onSubmit={vi.fn()} initialQuestionType="team_case" />,
+        )
 
         expect(screen.getByLabelText(/your team/i)).toHaveValue('Ohio State')
       })
@@ -1901,7 +2034,14 @@ describe('QuestionForm', () => {
       it('submits the seeded team, and writes storage only once the user edits the field', async () => {
         const user = userEvent.setup()
         const onSubmit = vi.fn()
-        render(<QuestionForm onSubmit={onSubmit} initialUserTeam="Texas" />)
+        render(
+          <QuestionForm
+            onSubmit={onSubmit}
+            initialQuestionType="team_case"
+            initialTeam="USC"
+            initialUserTeam="Texas"
+          />,
+        )
         const submit = screen.getByRole('button', { name: /get the verdict/i })
         await waitFor(() => expect(submit).not.toBeDisabled())
 
@@ -1947,7 +2087,13 @@ describe('QuestionForm', () => {
 
         it('"Clear this team" on an out-of-catalog seeded team empties only the field', async () => {
           const user = userEvent.setup()
-          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Gonzaga" />)
+          render(
+            <QuestionForm
+              onSubmit={vi.fn()}
+              initialQuestionType="team_case"
+              initialUserTeam="Gonzaga"
+            />,
+          )
 
           const clear = await screen.findByRole('button', {
             name: 'Clear this team',
@@ -1966,7 +2112,13 @@ describe('QuestionForm', () => {
 
         it('a league switch empties only the field', async () => {
           const user = userEvent.setup()
-          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+          render(
+            <QuestionForm
+              onSubmit={vi.fn()}
+              initialQuestionType="team_case"
+              initialUserTeam="Texas"
+            />,
+          )
           await waitForUserTeamCombobox()
 
           await user.click(screen.getByRole('radio', { name: /nfl/i }))
@@ -1979,7 +2131,13 @@ describe('QuestionForm', () => {
 
         it('ends at the first real edit, after which Clear forgets the stored team as always', async () => {
           const user = userEvent.setup()
-          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+          render(
+            <QuestionForm
+              onSubmit={vi.fn()}
+              initialQuestionType="team_case"
+              initialUserTeam="Texas"
+            />,
+          )
           const yourTeam = await waitForUserTeamCombobox()
 
           await user.clear(yourTeam)
@@ -2001,7 +2159,13 @@ describe('QuestionForm', () => {
 
         it('ends at the first real edit, after which a league switch forgets the stored team as always', async () => {
           const user = userEvent.setup()
-          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+          render(
+            <QuestionForm
+              onSubmit={vi.fn()}
+              initialQuestionType="team_case"
+              initialUserTeam="Texas"
+            />,
+          )
           const yourTeam = await waitForUserTeamCombobox()
 
           await user.clear(yourTeam)

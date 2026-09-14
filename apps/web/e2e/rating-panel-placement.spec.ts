@@ -2,9 +2,14 @@ import { test, expect } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 
 // Issue #183: a rating's show-your-work panel has to be readable wherever the
-// rating sits on the page, not only near the top. The trigger is scrolled to
-// three heights (near the top, mid-page, near the bottom), hovered, and the
+// rating sits on screen, not only near the top. The trigger is scrolled to
+// three heights (near the top, mid-way, near the bottom), hovered, and the
 // open panel is measured in the real app against the real API and fixture db.
+//
+// Since issue #198 the verdict opens in a modal that covers the viewport and
+// scrolls itself, while the page behind it can't scroll. So this spec
+// scrolls the modal, and it counts rating panels inside the verdict: the
+// modal is a dialog too.
 //
 // 1280x800 is the bar the founder's check used. 1280x720 is a common laptop
 // height where the popover's default height (80% of the viewport) is too
@@ -31,6 +36,9 @@ const GAMES_2005 = 13
 /** The fewest complete game rows the Elo ledger must show at once. */
 const MIN_VISIBLE_ROWS = 4
 
+/** The open verdict modal, in page script. */
+const OPEN_MODAL = "document.querySelector('dialog[open]')"
+
 interface Box {
   top: number
   bottom: number
@@ -54,6 +62,11 @@ function viewportBox({ width, height }: Viewport): Box {
   return { top: 0, left: 0, bottom: height, right: width }
 }
 
+/** The verdict card, inside the verdict modal. */
+function verdictIn(page: Page): Locator {
+  return page.getByRole('dialog', { name: 'The verdict' }).getByRole('article')
+}
+
 async function askForThe2005Champion(
   page: Page,
   engine: 'keener' | 'elo',
@@ -75,7 +88,7 @@ async function askForThe2005Champion(
   await year.fill('2005')
   await expect(year).toHaveValue('2005')
   await page.getByRole('button', { name: 'Get the verdict' }).click()
-  const verdict = page.getByRole('article')
+  const verdict = verdictIn(page)
   await expect(verdict).toBeVisible()
   return verdict
     .getByRole('region', { name: 'Texas evidence' })
@@ -105,9 +118,9 @@ function inside(inner: Box, outer: Box): boolean {
 }
 
 /**
- * Scrolls so the trigger's top edge sits `top` px below the viewport's top.
- * Spacers on the body (outside the app's own layout) give the page room to
- * scroll that far either way.
+ * Scrolls the verdict modal so the trigger's top edge sits `top` px below the
+ * viewport's top. Spacers on the modal's panel, outside the app's own layout,
+ * give it room to scroll that far either way.
  */
 async function placeTriggerAt(
   page: Page,
@@ -116,18 +129,19 @@ async function placeTriggerAt(
   top: number,
 ) {
   await page.addStyleTag({
-    content: `body { padding-bottom: ${viewport.height * 2}px; }`,
+    content: `dialog[open] > * { padding-bottom: ${viewport.height * 2}px; }`,
   })
-  const pageTop =
-    (await boxOf(trigger)).top + (await page.evaluate<number>('window.scrollY'))
-  if (pageTop < top) {
+  const scrolledTop =
+    (await boxOf(trigger)).top +
+    (await page.evaluate<number>(`${OPEN_MODAL}.scrollTop`))
+  if (scrolledTop < top) {
     await page.addStyleTag({
-      content: `body { padding-top: ${top - pageTop}px; }`,
+      content: `dialog[open] > * { padding-top: ${top - scrolledTop}px; }`,
     })
   }
   const current = (await boxOf(trigger)).top
   await page.evaluate(
-    `window.scrollBy({ top: ${current - top}, behavior: 'instant' })`,
+    `${OPEN_MODAL}.scrollBy({ top: ${current - top}, behavior: 'instant' })`,
   )
   expect(Math.abs((await boxOf(trigger)).top - top)).toBeLessThanOrEqual(2)
 }
@@ -169,7 +183,7 @@ async function travelIntoDialog(page: Page, trigger: Locator, dialog: Locator) {
     { steps: 25 },
   )
   await expect(dialog).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(1)
+  await expect(verdictIn(page).getByRole('dialog')).toHaveCount(1)
 }
 
 /** Moves the pointer to a viewport corner clear of the dialog and trigger; the dialog closes. */
@@ -194,10 +208,16 @@ async function leaveAndExpectClosed(
     throw new Error('no viewport corner is clear of the dialog and trigger')
   }
   await page.mouse.move(clear.x, clear.y, { steps: 5 })
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(verdictIn(page).getByRole('dialog')).toHaveCount(0)
+  // Only the rating panel closed: the verdict is still open.
+  await expect(verdictIn(page)).toBeVisible()
 }
 
-/** The open ledger dialog's geometry, measured in the page. */
+/**
+ * The open ledger dialog's geometry, measured in the page. The verdict modal
+ * is a native <dialog> with no role attribute, so `[role="dialog"]` is the
+ * rating panel alone.
+ */
 const MEASURE_LEDGER = `(() => {
   const dialog = document.querySelector('[role="dialog"]')
   const box = (node) => {
@@ -254,7 +274,7 @@ for (const { viewport, triggerTops } of LAYOUTS) {
           name: 'Texas Elo rating, game by game',
         })
         await expect(dialog).toBeVisible()
-        await expect(page.getByRole('dialog')).toHaveCount(1)
+        await expect(verdictIn(page).getByRole('dialog')).toHaveCount(1)
         await expect(
           dialog
             .getByRole('list', { name: 'Games, in order' })

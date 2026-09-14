@@ -12,9 +12,14 @@ test('submitting a champion question renders a verdict for the 2005 champion', a
     .getByLabel('What do you want to know?')
     .selectOption({ label: 'Who was the best team in a year?' })
   await page.getByLabel('Year').fill('2005')
+  // The best-team question has no "Your team" field (issue #198).
+  await expect(page.getByLabel('Your team (optional)')).toHaveCount(0)
   await page.getByRole('button', { name: 'Get the verdict' }).click()
 
-  const verdict = page.getByRole('article')
+  // The verdict opens in the modal over the form (issue #198).
+  const verdict = page
+    .getByRole('dialog', { name: 'The verdict' })
+    .getByRole('article')
   await expect(verdict).toBeVisible()
   await expect(verdict.getByText('Solid case, no notes.')).toBeVisible()
   // `TeamCaseReceipts` labels its evidence section `${team_name} evidence` --

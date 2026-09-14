@@ -1,0 +1,126 @@
+/* Issue #198. The <dialog> itself covers the viewport and is the scroll
+   container. It replaces the UA defaults for a modal dialog: centered, with
+   a max size and a border. The panel inside is what looks like the modal. */
+.dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.dialog::backdrop {
+  background: rgba(28, 20, 12, 0.6);
+}
+
+/* The page behind an open verdict doesn't scroll. The modal scrolls itself. */
+:global(html):has(.dialog[open]) {
+  overflow: hidden;
+}
+
+/* Phone first: the panel fills the screen, at least. */
+.panel {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+/* Sticky, so the close button stays in view while the verdict scrolls. The
+   z-index sits below a rating popover's (20), which can open over it. */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: max(var(--sp-2), env(safe-area-inset-top)) var(--sp-4) var(--sp-2);
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+}
+
+.title {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--leather-strong);
+}
+
+/* At least 44x44px, the touch-target minimum. */
+.close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.close:hover {
+  border-color: var(--leather);
+}
+
+.close:focus-visible {
+  outline: 3px solid var(--navy);
+  outline-offset: 2px;
+}
+
+.closeIcon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+/* Top padding clears the verdict card's "Certified Verdict" stamp, which
+   sticks up above the card. */
+.body {
+  padding: var(--sp-8) var(--sp-4) max(var(--sp-6), env(safe-area-inset-bottom));
+}
+
+/* Wider screens: a centered column over the dimmed page. */
+@media (min-width: 48rem) {
+  /* Inline padding only. The gap above and below is the panel's margin,
+     which scrolls away, so the sticky header sits flush with the top of the
+     screen instead of hanging a padding's height below it. */
+  .dialog {
+    padding-inline: var(--sp-6);
+  }
+
+  .panel {
+    min-height: auto;
+    max-width: 52rem;
+    margin: var(--sp-8) auto;
+    border: 1px solid var(--rule-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .header {
+    border-radius: var(--radius) var(--radius) 0 0;
+  }
+
+  .body {
+    padding-inline: var(--sp-6);
+  }
+}
