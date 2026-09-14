@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { NETWORK_ERROR_COPY, SERVER_ERROR_COPY } from '../../lib/api/client'
 import { VerdictError } from './VerdictError'
 
 describe('VerdictError', () => {
@@ -121,10 +122,23 @@ describe('VerdictError', () => {
   it('renders the network error message', () => {
     render(
       <VerdictError
-        state={{ kind: 'network_error', message: 'Could not reach the API.' }}
+        state={{ kind: 'network_error', message: NETWORK_ERROR_COPY }}
       />,
     )
 
-    expect(screen.getByText('Could not reach the API.')).toBeInTheDocument()
+    expect(screen.getByText(NETWORK_ERROR_COPY)).toBeInTheDocument()
+  })
+
+  it('renders an unmapped HTTP error in the same plain system-error display (issue #215)', () => {
+    render(
+      <VerdictError
+        state={{ kind: 'network_error', message: SERVER_ERROR_COPY }}
+      />,
+    )
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(SERVER_ERROR_COPY)
+    expect(alert).not.toHaveTextContent(/status/i)
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 })

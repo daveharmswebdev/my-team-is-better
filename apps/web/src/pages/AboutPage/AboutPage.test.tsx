@@ -1,6 +1,10 @@
 import { render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { VerdictNetworkError } from '../../lib/api/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  NETWORK_ERROR_COPY,
+  SERVER_ERROR_COPY,
+  VerdictNetworkError,
+} from '../../lib/api/client'
 import type { CreditsMethodologyOut, CreditsOut } from '../../lib/api/types'
 import { AboutPage } from './AboutPage'
 
@@ -166,13 +170,54 @@ describe('AboutPage', () => {
 
   it('shows an error state when the credits request fails', async () => {
     mockedFetchCredits.mockRejectedValue(
-      new VerdictNetworkError('Could not reach the API.'),
+      new VerdictNetworkError(NETWORK_ERROR_COPY),
     )
 
     render(<AboutPage />)
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /could not reach the api/i,
+      NETWORK_ERROR_COPY,
     )
+  })
+
+  /** Issue #215, through the real client: only `fetch` is faked. */
+  describe('an HTTP error from /api/credits (issue #215)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    })
+
+    it('shows the 5xx copy for a 500, and never the status', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const actual = await vi.importActual<
+        typeof import('../../lib/api/client')
+      >('../../lib/api/client')
+      mockedFetchCredits.mockImplementation(actual.fetchCredits)
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response(JSON.stringify({ detail: 'boom' }), { status: 500 }),
+          ),
+      )
+
+      render(<AboutPage />)
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        SERVER_ERROR_COPY,
+      )
+      expect(screen.getByRole('main')).not.toHaveTextContent(/status/i)
+    })
+
+    it('shows the 5xx copy for an error the client never classified', async () => {
+      mockedFetchCredits.mockRejectedValue(new Error('something odd'))
+
+      render(<AboutPage />)
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        SERVER_ERROR_COPY,
+      )
+    })
   })
 })

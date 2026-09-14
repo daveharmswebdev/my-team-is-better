@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { fn } from 'storybook/test'
+import { NETWORK_ERROR_COPY, SERVER_ERROR_COPY } from '../../lib/api/client'
 import { VerdictError } from './VerdictError'
 
 const meta = {
@@ -90,7 +91,20 @@ export const NetworkError: Story = {
   args: {
     state: {
       kind: 'network_error',
-      message: 'Could not reach the API. Check your connection and try again.',
+      message: NETWORK_ERROR_COPY,
+    },
+  },
+}
+
+/**
+ * An unmapped 5xx (issue #215): the same plain system-error display as a
+ * network failure, with copy chosen by status class and never the status.
+ */
+export const ServerError: Story = {
+  args: {
+    state: {
+      kind: 'network_error',
+      message: SERVER_ERROR_COPY,
     },
   },
 }

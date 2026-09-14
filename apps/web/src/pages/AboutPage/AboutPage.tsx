@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
-import { VerdictNetworkError, fetchCredits } from '../../lib/api/client'
+import {
+  SERVER_ERROR_COPY,
+  VerdictHttpError,
+  VerdictNetworkError,
+  fetchCredits,
+} from '../../lib/api/client'
 import type { CreditsOut } from '../../lib/api/types'
 import styles from './AboutPage.module.css'
 
@@ -34,10 +39,12 @@ export function AboutPage() {
         if (cancelled) {
           return
         }
+        // Both carry plain user-facing copy, never a raw status (issue #215).
         const message =
-          error instanceof VerdictNetworkError
+          error instanceof VerdictNetworkError ||
+          error instanceof VerdictHttpError
             ? error.message
-            : 'Something went wrong. Please try again.'
+            : SERVER_ERROR_COPY
         setState({ status: 'error', message })
       })
     return () => {
