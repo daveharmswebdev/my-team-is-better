@@ -456,12 +456,14 @@ def test_w_l_t_record_next_to_a_tied_opponent_is_grounded(nfl_conn: sqlite3.Conn
 
 
 def test_w_l_t_fabricated_record_is_still_flagged(nfl_conn: sqlite3.Connection) -> None:
+    """#181 reads a W-L-T record as one claim, so "7-1-1" is checked as a
+    record (it used to be read as the pair "7-1" and attributed to Mike
+    Mustangs as a score). Its reverse, 1-7-1, is no subject's record, so no
+    owner is named."""
     block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
     response = TIE_TEAM_CASE.format(tie_score="17-17", record="7-1-1")
 
-    assert _check(nfl_conn, response, block, "nfl") == [
-        "Mike Mustangs's score should be stated 17-17, not 7-1"
-    ]
+    assert _check(nfl_conn, response, block, "nfl") == ["7-1-1 is not a stated record"]
 
 
 def test_w_l_t_fabricated_tie_score_beside_a_real_record_is_still_flagged(
@@ -492,11 +494,16 @@ def test_w_l_t_records_of_both_compared_teams_are_grounded(nfl_conn: sqlite3.Con
 def test_w_l_t_fabricated_record_in_a_comparison_is_still_flagged(
     nfl_conn: sqlite3.Connection,
 ) -> None:
+    """#181 reads a W-L-T record as one claim, so "1-0-1" is checked as a
+    record (it used to be read as the pair "1-0" and attributed to Kilo Kings
+    as a score). Its reverse, 0-1-1, is Mike Mustangs's record and no other
+    subject's, so the message names whose record that is -- true whichever
+    team the sentence meant, which attribution (#166) doesn't settle."""
     block = _comparison_block(nfl_conn, 2023, "Kilo Kings", "Mike Mustangs", "nfl")
     response = TIE_COMPARISON.format(record="1-0-1")
 
     assert _check(nfl_conn, response, block, "nfl") == [
-        "Kilo Kings's score should be stated 17-17, not 1-0"
+        "1-0-1 is not a stated record; Mike Mustangs's record is 0-1-1"
     ]
 
 
@@ -582,7 +589,9 @@ def test_w_l_t_subject_record_stated_out_of_order_is_flagged(
     block: str = request.getfixturevalue(block_fixture)
     response = "Texas went 0-13-0 in 2005."
 
-    assert _check(cfb_conn, response, block, "cfb") == ["the record 0-13-0 should be stated 13-0-0"]
+    assert _check(cfb_conn, response, block, "cfb") == [
+        "0-13-0 is not a stated record; Texas's record is 13-0-0"
+    ]
 
 
 def test_w_l_t_record_matching_no_subject_either_way_is_flagged(
@@ -590,9 +599,7 @@ def test_w_l_t_record_matching_no_subject_either_way_is_flagged(
 ) -> None:
     response = "Texas went 13-1-0 in 2005."
 
-    assert _check(cfb_conn, response, texas_2005_case, "cfb") == [
-        "the record 13-1-0 does not match a stated record"
-    ]
+    assert _check(cfb_conn, response, texas_2005_case, "cfb") == ["13-1-0 is not a stated record"]
 
 
 @pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
@@ -614,16 +621,20 @@ def test_w_l_subject_record_stated_out_of_order_is_flagged(
     block: str = request.getfixturevalue(block_fixture)
     response = "Texas went 0-13 in 2005."
 
-    assert _check(cfb_conn, response, block, "cfb") == ["the record 0-13 should be stated 13-0"]
+    assert _check(cfb_conn, response, block, "cfb") == [
+        "0-13 is not a stated record; Texas's record is 13-0"
+    ]
 
 
 def test_second_compared_teams_record_stated_out_of_order_is_flagged(
     cfb_conn: sqlite3.Connection, texas_usc_2005: str
 ) -> None:
+    """The owner named is whoever's record the reverse is -- team_b here,
+    never just the first subject."""
     response = "USC went 1-12 in 2005."
 
     assert _check(cfb_conn, response, texas_usc_2005, "cfb") == [
-        "the record 1-12 should be stated 12-1"
+        "1-12 is not a stated record; USC's record is 12-1"
     ]
 
 
@@ -634,7 +645,40 @@ def test_w_l_subject_record_out_of_order_in_an_unnamed_sentence_is_flagged(
     block: str = request.getfixturevalue(block_fixture)
     response = "They went 0-13 in 2005."
 
-    assert _check(cfb_conn, response, block, "cfb") == ["the record 0-13 should be stated 13-0"]
+    assert _check(cfb_conn, response, block, "cfb") == [
+        "0-13 is not a stated record; Texas's record is 13-0"
+    ]
+
+
+def test_reversed_record_owned_by_both_compared_teams_names_no_owner() -> None:
+    """No fixture comparison has two subjects with the same record, so this
+    is hand-typed: both teams went 12-1. Naming either one as the owner of
+    12-1 would pick a team the sentence may not be about, so no owner is
+    named."""
+    fact_block = (
+        '{"team_a": {"team_name": "Texas", "wins": 12, "losses": 1, "ties": 0}, '
+        '"team_b": {"team_name": "USC", "wins": 12, "losses": 1, "ties": 0}}'
+    )
+    response = "They went 1-12."
+
+    assert find_ungrounded_tokens(response, fact_block, KNOWN_TEAMS) == [
+        "1-12 is not a stated record"
+    ]
+
+
+def test_string_value_score_equal_to_a_reversed_record_is_not_read_as_a_record(
+    cfb_conn: sqlite3.Connection,
+) -> None:
+    """The 2013 Florida State (team_a, 14-0-0) vs Michigan State (team_b,
+    13-1-0) comparison: an explanation string in Michigan State's
+    `rating_breakdown` quotes a 14-0 win. "0-14" is that score said from the
+    other side, not Florida State's record read backwards, so the reversed-
+    record rule steps aside for a pair a string value states (#181's accepted
+    trade-off, like #107's)."""
+    block = _comparison_block(cfb_conn, 2013, "Florida State", "Michigan State", "cfb")
+    response = "That one ended 0-14."
+
+    assert _check(cfb_conn, response, block, "cfb") == []
 
 
 def test_real_game_score_equal_to_a_reversed_record_is_not_read_as_a_record() -> None:

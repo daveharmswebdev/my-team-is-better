@@ -140,7 +140,15 @@ through these rules in order:
   flagged, whether or not the sentence names a team and before either
   attribution branch, so it yields one message -- unless the pair is, in
   that order, a real game score for some name (a 3-1 team's 1-3 loss is that
-  game, not the record reversed).
+  game, not the record reversed), or is a hyphen pair inside some string
+  value, in either order. That last exemption exists because an
+  `explanation` quotes scores that are not always a game tuple of the block:
+  2013 Michigan State's breakdown quotes a 14-0 win, and "That one ended
+  0-14." in the 2013 Florida State (14-0) comparison is that score, not
+  Florida State's record backwards. An exempted pair falls through to the
+  two rules below, as any other pair does. Accepted trade-off, the same kind
+  as #107's: a record stated backwards goes uncaught when some string value
+  quotes a score equal to that record.
 * **A two-part claim in a sentence that names a team** goes through the
   parenthetical/bare attribution above, unchanged.
 * **A two-part claim in a sentence that names no team** can't be held to an
@@ -150,11 +158,19 @@ through these rules in order:
   are not always a game tuple of this block); or, in order, the
   `(wins, losses)` of any object (a `rating_breakdown` series record).
 
-A record mismatch names the corrected form when a subject record with wins
-and losses swapped (ties kept) matches ("the record 0-13 should be stated
-13-0", "the record 0-13-0 should be stated 13-0-0"), and otherwise says it
-"does not match a stated record". An unattributed pair that is none of the
-above is reported as "42-25 is not a score from any game in the facts".
+A record mismatch says the claim "is not a stated record". When exactly one
+subject team's record is the claim's reverse (wins and losses swapped, ties
+kept, same number of parts), it also names whose record that is: "0-13 is
+not a stated record; Texas's record is 13-0", "0-13-0 is not a stated
+record; Texas's record is 13-0-0". The owner is the subject's `team_name`
+(a team case's top level, or a comparison's `team_a` / `team_b`). The
+message deliberately does not say the claim "should be stated" as the
+reverse: in a comparison the sentence may be about the other team, and
+which team a sentence is about is attribution (#166), which this check does
+not settle -- whose record the reverse is, though, is simply true. When no
+subject's record is the reverse, or more than one subject's is, no owner is
+named ("7-1-1 is not a stated record"). An unattributed pair that is none of
+the above is reported as "42-25 is not a score from any game in the facts".
 These rules mirror the independent smoke-eval checker's
 (`tests/test_persona_smoke_eval.py`), which production must never import.
 
@@ -172,7 +188,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
@@ -247,6 +263,10 @@ class _ClaimFacts:
     object_records: frozenset[tuple[int, int]]
     # Two-part hyphen pairs inside any string value, stored `(low, high)`.
     string_value_pairs: frozenset[tuple[int, int]]
+    # A subject record, `(wins, losses)` or `(wins, losses, ties)`, to the
+    # `team_name` of every subject whose record it is (`None` for a subject
+    # with no string `team_name`), for naming whose record a reverse is.
+    record_owners: Mapping[tuple[int, ...], tuple[str | None, ...]]
 
 
 def find_ungrounded_tokens(
@@ -417,13 +437,20 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
         data = None
 
     subject_w_l_t_records: set[tuple[int, int, int]] = set()
+    record_owners: defaultdict[tuple[int, ...], list[str | None]] = defaultdict(list)
     if isinstance(data, dict):
         for subject in (data, data.get("team_a"), data.get("team_b")):
             if not isinstance(subject, dict):
                 continue
             wins, losses, ties = subject.get("wins"), subject.get("losses"), subject.get("ties")
-            if isinstance(wins, int) and isinstance(losses, int) and isinstance(ties, int):
+            if not (isinstance(wins, int) and isinstance(losses, int)):
+                continue
+            team_name = subject.get("team_name")
+            owner = team_name if isinstance(team_name, str) else None
+            record_owners[(wins, losses)].append(owner)
+            if isinstance(ties, int):
                 subject_w_l_t_records.add((wins, losses, ties))
+                record_owners[(wins, losses, ties)].append(owner)
 
     object_records: set[tuple[int, int]] = set()
     string_value_pairs: set[tuple[int, int]] = set()
@@ -435,6 +462,7 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
         subject_w_l_t_records=frozenset(subject_w_l_t_records),
         object_records=frozenset(object_records),
         string_value_pairs=frozenset(string_value_pairs),
+        record_owners={record: tuple(owners) for record, owners in record_owners.items()},
     )
 
 
@@ -567,25 +595,26 @@ def _check_claim(
 
 def _check_w_l_t_record(claimed: tuple[int, int, int], facts: _ClaimFacts) -> str | None:
     """A three-part claim is grounded only as a subject's `(wins, losses,
-    ties)`, in order. The correction is named when swapping wins and losses
-    (ties kept) gives one."""
+    ties)`, in order. Its reverse swaps wins and losses and keeps ties."""
     if claimed in facts.subject_w_l_t_records:
         return None
     wins, losses, ties = claimed
-    swapped = (losses, wins, ties)
-    return _record_mismatch_message(
-        claimed, swapped if swapped in facts.subject_w_l_t_records else None
-    )
+    return _record_mismatch_message(claimed, (losses, wins, ties), facts)
 
 
 def _check_reversed_record(claimed: tuple[int, int], facts: _ClaimFacts) -> str | None:
     """A two-part claim (already known not to be a subject record) that is a
-    subject's `(wins, losses)` backwards, and not itself a real game score
-    in that order."""
+    subject's `(wins, losses)` backwards -- unless it is a real game score in
+    that order, or a hyphen pair inside some string value in either order,
+    which fall through to the attribution / unattributed rules instead."""
     swapped = (claimed[1], claimed[0])
-    if swapped not in facts.subject_records or claimed in facts.game_scores:
+    if (
+        swapped not in facts.subject_records
+        or claimed in facts.game_scores
+        or (min(claimed), max(claimed)) in facts.string_value_pairs
+    ):
         return None
-    return _record_mismatch_message(claimed, swapped)
+    return _record_mismatch_message(claimed, swapped, facts)
 
 
 def _check_unattributed_pair(claimed: tuple[int, int], facts: _ClaimFacts) -> str | None:
@@ -603,14 +632,22 @@ def _check_unattributed_pair(claimed: tuple[int, int], facts: _ClaimFacts) -> st
     return f"{claimed[0]}-{claimed[1]} is not a score from any game in the facts"
 
 
-def _record_mismatch_message(claimed: tuple[int, ...], corrected: tuple[int, ...] | None) -> str:
-    """Retry feedback for a record claim (issue #181): the corrected form
-    when there is exactly one, otherwise a plain statement that it matches
-    no stated record."""
-    stated = "-".join(str(part) for part in claimed)
-    if corrected is None:
-        return f"the record {stated} does not match a stated record"
-    return f"the record {stated} should be stated {'-'.join(str(part) for part in corrected)}"
+def _record_mismatch_message(
+    claimed: tuple[int, ...], reverse: tuple[int, ...], facts: _ClaimFacts
+) -> str:
+    """Retry feedback for a record claim (issue #181). Names whose record
+    `reverse` is only when exactly one named subject owns it; never says the
+    claim "should be stated" as the reverse, since which team the sentence
+    is about is attribution (#166), not settled here."""
+    stated = _hyphenated(claimed)
+    owners = facts.record_owners.get(reverse, ())
+    if len(owners) == 1 and owners[0] is not None:
+        return f"{stated} is not a stated record; {owners[0]}'s record is {_hyphenated(reverse)}"
+    return f"{stated} is not a stated record"
+
+
+def _hyphenated(parts: tuple[int, ...]) -> str:
+    return "-".join(str(part) for part in parts)
 
 
 def _is_parenthesized(sentence: str, pair_span: tuple[int, int]) -> bool:
