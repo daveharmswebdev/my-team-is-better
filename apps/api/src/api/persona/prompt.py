@@ -6,18 +6,12 @@ request; when `user_team` is `None` (e.g. a champion request with no team
 named), both clauses are swapped for the coordinator-specified null-case
 wording ("a loud hype man for whoever's #1") rather than leaving a
 literal `{user_team}` placeholder unfilled in the text sent to Claude.
-Rule 1's Keener display sentence (issue #165) is also filled at build time,
-from `api.rating_display.RATING_DISPLAY`, so its numbers are never typed here.
 
 Everything else in `_PERSONA_TEMPLATE` is copied byte-for-byte from the
 brief.
 """
 
 from __future__ import annotations
-
-from decimal import Decimal
-
-from api import rating_display
 
 _ALLEGIANCE_CLAUSE_WITH_TEAM = (
     "You are rooting hard\n"
@@ -38,17 +32,6 @@ _RULE_4_WITH_TEAM = (
     "   is #1."
 )
 
-# Issue #165: how the site displays a Keener rating. The scale, precision and
-# example's display value are filled from `api.rating_display.RATING_DISPLAY`
-# at build time, never typed here, so the prompt can't drift from the card or
-# from the grounding check.
-_RULE_1_KEENER_DISPLAY = (
-    "   A Keener rating may also be quoted the way the site displays it:\n"
-    "   multiplied by {scale} and shown to {decimals} decimal places ({raw} is {shown})."
-)
-
-_KEENER_DISPLAY_EXAMPLE = Decimal("0.005044")
-
 _RULE_4_NO_TEAM = "4. Be a loud hype man for whoever the FACT BLOCK says is #1."
 
 _PERSONA_TEMPLATE = """You are the loudest guy at the end of the bar. You've got an opinion on every
@@ -67,7 +50,6 @@ whole and only truth. Rules, non-negotiable:
    Ratings are the only exception: a `rating` or `opponent_rating` may be
    rounded to fewer decimal places (an Elo rating of 1933.19 can be said
    as 1933).
-{rule_1_keener_display}
 2. Never contradict or hedge on who the FACT BLOCK says is ranked #1 or
    rated higher. You can be as opinionated as you want about *how it felt
    to watch* or eye-test stuff, but the ranking itself is not yours to
@@ -110,17 +92,8 @@ def build_system_prompt(user_team: str | None) -> str:
         allegiance_clause = _ALLEGIANCE_CLAUSE_NO_TEAM
         rule_4 = _RULE_4_NO_TEAM
 
-    keener = rating_display.RATING_DISPLAY["keener"]
-    rule_1_keener_display = _RULE_1_KEENER_DISPLAY.format(
-        scale=keener.scale,
-        decimals=keener.decimals,
-        raw=_KEENER_DISPLAY_EXAMPLE,
-        shown=rating_display.display_value(_KEENER_DISPLAY_EXAMPLE, "keener"),
-    )
-
     return _PERSONA_TEMPLATE.format(
         allegiance_clause=allegiance_clause,
-        rule_1_keener_display=rule_1_keener_display,
         rule_4=rule_4,
     )
 

@@ -424,12 +424,16 @@ never a subclass.
   `opponent_rating`, so a narrator can repeat Elo's whole-point number on
   screen (#162). It also accepts a rating written the way the card shows it
   (Keener ×1000 to 2 decimals, `5.04`), with the scale taken from the fact
-  block's own `method` (#165). Prompt rule 1 tells the narrator that
-  display.
+  block's own `method` (#165). The prompt deliberately does **not** describe
+  that scale. When `persona-v5` told the narrator how to compute a display
+  value, claude-haiku-4-5 invented wrong ones ("5.47" for 4.73), and
+  grounding served the fallback (#180; removed in `persona-v6`). Letting it
+  quote the on-card number safely would need the precomputed value in the
+  fact block, which is a founder call on #180.
 - **The display scale is defined once.** `api.rating_display.RATING_DISPLAY`
   defines it and publishes `apps/api/rating-display.json`. apps/web's
-  `formatRating` and the prompt are both checked against it, so changing one
-  side alone fails CI. `rating_diff` and other derived figures are still
+  `formatRating` and grounding both read it (web through a checked mirror),
+  so changing one side alone fails CI. `rating_diff` and other derived figures are still
   open (#108). The Keener breakdown panel's scaled figures (credit,
   contribution, baseline) are tracked separately in #175.
 

@@ -70,7 +70,10 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # persona-v5 (issue #165): the prompt changed -- rule 1 now says a Keener
 # rating may be quoted the way the site displays it (scaled and rounded, per
 # `api.rating_display.RATING_DISPLAY`), matching the grounding check.
-PROMPT_VERSION = "persona-v5"
+# persona-v6 (issue #180): the prompt changed -- rule 1 no longer describes how
+# the site displays a Keener rating. Asked to compute that value, the narrator
+# invented wrong ones and fell back, and #65 cached those fallbacks under v5.
+PROMPT_VERSION = "persona-v6"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
 

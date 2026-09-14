@@ -10,10 +10,6 @@ suite being brittle to incidental whitespace changes.
 
 from __future__ import annotations
 
-from types import MappingProxyType
-
-import pytest
-
 from api.persona.prompt import build_system_prompt, build_user_message
 
 
@@ -62,38 +58,22 @@ def test_rule_1_permits_rounding_ratings_and_nothing_else() -> None:
         assert "round differently" not in prompt
 
 
-_RULE_1_KEENER_DISPLAY = (
-    "   as 1933).\n"
-    "   A Keener rating may also be quoted the way the site displays it:\n"
-    "   multiplied by 1000 and shown to 2 decimal places (0.005044 is 5.04).\n"
-    "2. Never contradict"
-)
-
-
-def test_rule_1_permits_quoting_a_keener_rating_as_the_site_displays_it() -> None:
-    # issue #165: grounding accepts a Keener rating at its display value, but
-    # the narrator only sees the raw rating, so the prompt has to say how the
-    # site displays it -- immediately after #162's rounding exception.
+def test_rule_1_does_not_ask_the_narrator_to_compute_a_display_value() -> None:
+    # issue #180: persona-v5 told the narrator how the site displays a Keener
+    # rating (x1000 to 2 decimals, with a worked example). claude-haiku-4-5
+    # then did that arithmetic itself and got it wrong ("5.47" for LSU 2003's
+    # 4.73) on the first attempt and on the retry, so grounding served the
+    # fallback. Rule 1 now goes straight from #162's rounding exception to
+    # rule 2, and no scaled figure or worked display example is left in the
+    # prompt. Grounding still accepts a correctly quoted display value (#165).
     for user_team in ("Texas", None):
-        assert _RULE_1_KEENER_DISPLAY in build_system_prompt(user_team)
+        prompt = build_system_prompt(user_team)
 
-
-def test_rule_1_keener_display_follows_rating_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The scale, precision and example are rendered from RATING_DISPLAY, not
-    # typed into the template.
-    import api.rating_display as rating_display
-
-    patched = dict(rating_display.RATING_DISPLAY)
-    patched["keener"] = rating_display.RatingDisplay(scale=100, decimals=3)
-    monkeypatch.setattr(rating_display, "RATING_DISPLAY", MappingProxyType(patched))
-
-    prompt = build_system_prompt("Texas")
-
-    assert (
-        "   A Keener rating may also be quoted the way the site displays it:\n"
-        "   multiplied by 100 and shown to 3 decimal places (0.005044 is 0.504).\n"
-    ) in prompt
-    assert "1000" not in prompt
+        assert "   as 1933).\n2. Never contradict" in prompt
+        assert "the way the site displays it" not in prompt
+        assert "multiplied by" not in prompt
+        assert "5.04" not in prompt
+        assert "0.005044" not in prompt
 
 
 def test_prompt_includes_the_worked_examples() -> None:

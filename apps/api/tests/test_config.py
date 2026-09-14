@@ -99,7 +99,24 @@ def test_prompt_version_is_past_the_no_keener_display_prompt() -> None:
     version moves."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v5"  # type: ignore[attr-defined]
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+        "persona-v4",
+    }
+
+
+def test_prompt_version_is_past_the_keener_display_prompt() -> None:
+    """Issue #180 removed #165's Keener display sentence from rule 1: asked to
+    scale a rating itself, claude-haiku-4-5 invented values ("5.47" for LSU
+    2003's 4.73), and grounding served the templated fallback, which #65 then
+    caches as if it were a real narration. Narrations cached under
+    `persona-v5` include those fallbacks, so the version must move for them to
+    stop being served."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v6"  # type: ignore[attr-defined]
 
 
 def test_config_exposes_contested_years() -> None:

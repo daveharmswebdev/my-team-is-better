@@ -3,9 +3,10 @@
 apps/web shows a rating scaled and rounded to a fixed number of decimals
 (a Keener rating is a small fraction, so it is scaled up; an Elo rating is
 shown in whole points). The persona grounding check has to accept exactly
-that on-screen number, and the persona prompt has to tell the narrator what
-it is, so all three read the scale from `RATING_DISPLAY` here instead of
-each typing their own.
+that on-screen number, so both it and apps/web read the scale from
+`RATING_DISPLAY` here instead of each typing their own. (The persona prompt
+deliberately does not describe the scale: asked to compute a display value,
+the narrator invented wrong ones -- issue #180.)
 
 The definition is published as `apps/api/rating-display.json`, which apps/web
 is checked against. `tests/test_rating_display.py` fails when that committed
