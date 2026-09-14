@@ -26,8 +26,10 @@
 ; 1. `source_modules = api` is the *installed* `api` package, i.e. `src/api/`.
 ;    `tests/fixtures/build_fixture.py` is a standalone generator script that
 ;    is not part of the `api` package (and is not collected by pytest), so it
-;    is not in this graph at all. Its `cfb_strength.ratings` import is
-;    therefore a STRUCTURAL exception, not a suppressed one: there is no
+;    is not in this graph at all. Its `cfb_strength.ratings` import
+;    (`compute_and_store`) and its `cfb_strength.ingest` import
+;    (`ingest.currency.check_currency`, the build-time `cfb doctor` check,
+;    #110) are therefore STRUCTURAL exceptions, not suppressed ones: there is no
 ;    ignore rule here and none is wanted. If you ever find yourself adding an
 ;    ignore/exception directive to "fix" that file, stop -- the boundary this
 ;    contract is protecting is the running app, and the fixture builder is

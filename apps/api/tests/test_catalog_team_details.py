@@ -135,6 +135,9 @@ def test_real_fixture_serves_real_mascots_and_unpopulated_columns_alike(
         "aliases": [],
     }
     assert len(details) == 451
+    assert [name for name, detail in details.items() if detail["mascot"] is None] == [
+        "Cal State Northridge"
+    ]
 
 
 def test_teams_and_team_details_stay_aligned(

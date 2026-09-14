@@ -66,6 +66,17 @@ Anything else fails the build: `schema_not_current`, `no_cfb_mascots` (a
 source built without the #77 alias enrichment -- the old pre-#110 fixture had
 none), `raw_cache_*` and `cache_past_max_year`.
 
+What that bracket does NOT check: it compares (season, season_type) *pairs*
+against the cache, never individual games. A source missing some games inside
+a golden season -- even a title game -- still has that season's regular and
+postseason pairs, so it passes both currency checks. The only build-time
+guard against that is the Keener golden check below (the #1 school and its
+record for each golden year), and it catches a missing game only when the
+game moves a #1 or that #1's record. A missing game that changes neither
+passes the whole build. Completeness of the games inside a season is the
+engine fixture generator's job (`build_regression_fixtures.py` ingests every
+cached game), not something this script verifies.
+
 Two methods are baked, `keener` and `elo`, for each of the seven years. Elo
 was added when `method` became a validated Literal: `elo` is a shipped,
 credited method, and with keener-only rows no test could tell "Elo works
@@ -204,10 +215,31 @@ def build(
     # Built beside the output and moved into place only once every check
     # below has passed, so a failed build never leaves a half-built fixture.
     partial = output.with_name(f".{output.name}.partial")
-    for leftover in (partial, Path(f"{partial}-journal")):
-        leftover.unlink(missing_ok=True)
+    _remove_partial(partial)
     shutil.copy(source, partial)
+    try:
+        _bake(partial, raw_dir)
+        os.replace(partial, output)
+    except BaseException:
+        # Nothing gitignores the partial (an ~11 MB file next to the committed
+        # fixture), so a failed build must not leave it behind for a
+        # `git add -A` to pick up.
+        _remove_partial(partial)
+        raise
 
+    digest = hashlib.sha256(output.read_bytes()).hexdigest()
+    print(f"wrote {output}: {output.stat().st_size} bytes; sha256 {digest}")
+    return output
+
+
+def _remove_partial(partial: Path) -> None:
+    for leftover in (partial, *(Path(f"{partial}{s}") for s in ("-journal", "-wal", "-shm"))):
+        leftover.unlink(missing_ok=True)
+
+
+def _bake(partial: Path, raw_dir: Path) -> None:
+    """Rate `partial` in place and run every build-time check on it. Raises
+    on any failure; `build` removes the partial when it does."""
     conn: sqlite3.Connection = get_conn(partial)
     try:
         # A no-op on a current-schema source. If it would migrate anything,
@@ -304,11 +336,6 @@ def build(
         conn.close()
 
     check_slice_currency(partial, raw_dir, rated_methods=METHODS)
-    os.replace(partial, output)
-
-    digest = hashlib.sha256(output.read_bytes()).hexdigest()
-    print(f"wrote {output}: {output.stat().st_size} bytes; sha256 {digest}")
-    return output
 
 
 def main(argv: list[str] | None = None) -> int:

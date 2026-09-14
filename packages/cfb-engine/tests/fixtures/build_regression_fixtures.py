@@ -8,8 +8,10 @@ writes `tests/fixtures/cfb_regression.sqlite3` and
 somewhere else instead, and `--league cfb|nfl` builds only one.
 
 Not part of the pytest suite (the name doesn't match `test_*.py`, so it is
-never collected), and nothing under `src/` imports it. The tests only open
-the files it writes.
+never collected), and nothing under `src/` imports it. Two test modules
+import it: `tests/test_regression_fixtures_regenerate_identically.py` calls
+`build` to regenerate both fixtures into a temp dir, and
+`tests/test_regression_fixture_generator.py` tests its safety guarantees.
 
 Provenance
 ----------
@@ -26,10 +28,12 @@ machine-local db:
    fixture seasons, keeps each `teams` row exactly as a production build
    leaves it (`_write_teams` keeps the most recently ingested school name
    and classification).
-3. Cache-first with zero live calls: every live-fetch function in both
-   clients is replaced with one that raises before anything runs, and every
-   result's `fetched_live` is checked too. The committed `data/raw/` must
-   hold everything; the script fails instead of fetching.
+3. Cache-first with zero live calls. `live_fetches_disabled` replaces every
+   client function that reaches the network (`LIVE_FETCH_FUNCTIONS`) with
+   one that raises. It first checks that each of those names exists and is
+   callable, so a rename fails loudly instead of leaving the real function
+   in place. Every result's `fetched_live` is checked too. The committed
+   `data/raw/` must hold everything; the script fails instead of fetching.
 4. Pruned to the fixture seasons: `games` of those seasons, the `teams`
    those games reference, the `team_season` rows for those team/season
    pairs, and those seasons' `ingestion_log` rows.
@@ -39,18 +43,37 @@ machine-local db:
    VACUUMed. Ingest stamps `fetched_at` with the wall clock, the only
    run-dependent value in the db, so without this two runs would differ.
    With it, rerunning the script on an unchanged cache and schema produces
-   byte-identical files (checked for #110 with the same SQLite build; a
-   different SQLite version may lay pages out differently).
+   byte-identical files with the same SQLite build. A different SQLite
+   version may lay pages out differently, so the tests compare logical
+   content, never bytes.
+
+The build writes to a `.partial` file beside the destination and renames it
+into place only after every check passes. On any failure, including
+Ctrl-C, it removes the `.partial` file and its `-journal` / `-wal` / `-shm`
+before re-raising, and the existing fixture is left untouched.
 
 Seasons: CFB 2001, 2003, 2004, 2005, 2013, 2017, 2019 (the PRD's seven
 golden years). NFL 1999, 2004, 2013, 2022.
 
+What catches a stale committed fixture
+--------------------------------------
 Regenerate after any change to the schema, to either ingest path, or to the
-committed cache for these seasons. `tests/test_regression_fixtures_currency.py`
-fails when a committed fixture falls behind the schema or the cache, and
-`StaleDatabaseWarning` is an error in pytest (pyproject.toml), so a stale
-fixture cannot go unnoticed in CI. After regenerating, rebuild `apps/api`'s
-own fixture (`apps/api/tests/fixtures/build_fixture.py`), which starts from
+committed cache for these seasons. Three things in the suite catch a fixture
+that wasn't regenerated, and each covers something different:
+
+* `tests/test_regression_fixtures_regenerate_identically.py` rebuilds both
+  fixtures with `build` and compares the logical content (every row of
+  every table, and the schema) with the committed files. It is the only one
+  that notices a changed score, a missing game, or an edited mascot or
+  `ingestion_log` row, whether the fixture or the cache changed.
+* `tests/test_regression_fixtures_currency.py` runs `cfb doctor`'s check.
+  It covers the schema and which (season, season_type) batches are present,
+  and never looks at game content or counts.
+* `StaleDatabaseWarning` is an error in pytest (pyproject.toml), so a
+  fixture at an old schema also fails every test that opens it.
+
+After regenerating, rebuild `apps/api`'s own fixture
+(`apps/api/tests/fixtures/build_fixture.py`), which starts from
 `cfb_regression.sqlite3`.
 """
 
@@ -61,9 +84,11 @@ import hashlib
 import os
 import sqlite3
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import NoReturn
 
 from cfb_strength import config
@@ -82,6 +107,16 @@ COMMITTED_RAW_DIR = ENGINE_DIR / "data" / "raw"
 # A fixed placeholder, not a real fetch time. See step 6 of the docstring.
 FIXTURE_FETCHED_AT = "1970-01-01T00:00:00+00:00"
 
+# Every client function that reaches the network. Each `get_*` function
+# looks these up as module globals at call time, so replacing them disables
+# live fetching. tests/test_regression_fixture_generator.py fails if a
+# client function that touches `requests` is missing from this list.
+LIVE_FETCH_FUNCTIONS: tuple[tuple[ModuleType, str], ...] = (
+    (cfbd_client, "_fetch_games_live"),
+    (cfbd_client, "_fetch_teams_live"),
+    (nflverse_client, "_fetch_csv_live"),
+)
+
 
 @dataclass(frozen=True)
 class FixtureSpec:
@@ -98,18 +133,41 @@ def _refuse_live_fetch(*args: object, **kwargs: object) -> NoReturn:
     )
 
 
-def _disable_live_fetches() -> None:
-    # `get_games` / `get_teams` look these up as module globals at call time.
-    cfbd_client._fetch_games_live = _refuse_live_fetch
-    cfbd_client._fetch_teams_live = _refuse_live_fetch
-    nflverse_client._fetch_csv_live = _refuse_live_fetch
+@contextmanager
+def live_fetches_disabled() -> Iterator[None]:
+    """Replace every `LIVE_FETCH_FUNCTIONS` entry with `_refuse_live_fetch`
+    for the duration of the block, then put the originals back.
+
+    Every name is checked before any is replaced. Replacing a name that no
+    longer exists would just add an unused attribute and leave the renamed
+    real function reachable, which is how a rename once turned this guard
+    into a no-op."""
+    unusable = [
+        f"{module.__name__}.{name}"
+        for module, name in LIVE_FETCH_FUNCTIONS
+        if not callable(getattr(module, name, None))
+    ]
+    if unusable:
+        raise RuntimeError(
+            "refusing to build: cannot disable live fetching, because "
+            f"{', '.join(unusable)} is not a callable any more (renamed or removed?). "
+            "Update LIVE_FETCH_FUNCTIONS in build_regression_fixtures.py."
+        )
+    originals = [(module, name, getattr(module, name)) for module, name in LIVE_FETCH_FUNCTIONS]
+    try:
+        for module, name, _ in originals:
+            setattr(module, name, _refuse_live_fetch)
+        yield
+    finally:
+        for module, name, original in originals:
+            setattr(module, name, original)
 
 
 def _ingest_cfb(conn: sqlite3.Connection) -> None:
     # `ingest_one` reads `config.RAW_DIR` and has no raw_dir parameter, so the
     # environment must not have redirected it away from the committed cache.
     if config.RAW_DIR.resolve() != COMMITTED_RAW_DIR:
-        raise SystemExit(
+        raise RuntimeError(
             f"config.RAW_DIR is {config.RAW_DIR}, not the committed cache {COMMITTED_RAW_DIR}; "
             "unset CFB_DATA_DIR and rerun"
         )
@@ -202,23 +260,34 @@ def _check(conn: sqlite3.Connection, spec: FixtureSpec) -> None:
         raise RuntimeError(f"{spec.filename}: no team has a mascot")
 
 
+def _remove_partial(partial: Path) -> None:
+    for path in (partial, *(Path(f"{partial}{suffix}") for suffix in ("-journal", "-wal", "-shm"))):
+        path.unlink(missing_ok=True)
+
+
 def build(spec: FixtureSpec, out_dir: Path) -> Path:
+    """Build one fixture into `out_dir`. Callers must be inside
+    `live_fetches_disabled()`; `main` is."""
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / spec.filename
     partial = out_dir / f".{spec.filename}.partial"
-    for leftover in (partial, Path(f"{partial}-journal")):
-        leftover.unlink(missing_ok=True)
+    _remove_partial(partial)
 
-    conn = get_conn(partial)
     try:
-        ensure_schema(conn)
-        spec.build(conn)
-        _prune(conn, spec)
-        _check(conn, spec)
-        conn.execute("VACUUM")
-    finally:
-        conn.close()
-    os.replace(partial, dest)
+        conn = get_conn(partial)
+        try:
+            ensure_schema(conn)
+            spec.build(conn)
+            _prune(conn, spec)
+            _check(conn, spec)
+            conn.execute("VACUUM")
+        finally:
+            conn.close()
+        os.replace(partial, dest)
+    except BaseException:
+        # Ctrl-C included: never leave a half-built db beside the fixtures.
+        _remove_partial(partial)
+        raise
 
     conn = get_conn(dest, read_only=True)
     try:
@@ -253,10 +322,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    _disable_live_fetches()
     leagues = [args.league] if args.league else list(FIXTURES)
-    for league in leagues:
-        build(FIXTURES[league], args.out_dir)
+    with live_fetches_disabled():
+        for league in leagues:
+            build(FIXTURES[league], args.out_dir)
     return 0
 
 

@@ -22,9 +22,11 @@ This mirrors how `validator` checks the golden dataset against a
 doctor-verified full database, against a small, committed, hermetic slice
 of the same real data. Keener and elo rate each season in isolation, so the
 slice changes no rating (verified for #110 against a full db, top 25 to
-1e-12). `tests/test_regression_fixtures_currency.py` fails if the committed
-fixture falls behind the schema or the cache in any way other than its
-deliberate slicing.
+1e-12). `tests/test_regression_fixtures_regenerate_identically.py` fails
+unless the committed fixture's rows and schema equal a fresh regeneration
+from the committed cache, so a changed score or a missing game can't sit
+under these tests unnoticed. `tests/test_regression_fixtures_currency.py`
+separately runs `cfb doctor`'s schema and season-type coverage check.
 
 The seven golden years
 ----------------------

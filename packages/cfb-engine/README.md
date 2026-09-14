@@ -128,9 +128,21 @@ seasons, stores no ratings, and is byte-for-byte reproducible on the same
 SQLite build. Rerun it after any change to the schema, to either ingest
 path, or to those seasons' cached data, then rebuild `apps/api`'s fixture
 (`apps/api/tests/fixtures/build_fixture.py`), which starts from
-`cfb_regression.sqlite3`. Pytest treats `StaleDatabaseWarning` as an error,
-and `tests/test_regression_fixtures_currency.py` runs `cfb doctor`'s check
-on both fixtures, so a stale fixture fails the suite.
+`cfb_regression.sqlite3`.
+
+Three parts of the suite catch a fixture that wasn't regenerated, and each
+covers something different:
+
+- `tests/test_regression_fixtures_regenerate_identically.py` regenerates
+  both fixtures into a temp dir (about 2 seconds, no network) and fails
+  unless every row and the schema match the committed files. This catches
+  content drift: a changed score, a missing game, an edited mascot or
+  `ingestion_log` row, whether the fixture or the cache changed.
+- `tests/test_regression_fixtures_currency.py` runs `cfb doctor`'s check on
+  both fixtures. It covers the schema and which (season, season_type)
+  batches are present, not game content.
+- Pytest treats `StaleDatabaseWarning` as an error, so a fixture at an old
+  schema fails every test that opens it.
 
 ### `src/cfb_strength/py.typed`
 

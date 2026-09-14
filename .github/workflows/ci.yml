@@ -43,8 +43,14 @@ jobs:
       # it. If a future change makes one module genuinely un-annotatable,
       # narrow it with a `[[tool.mypy.overrides]]` entry rather than shrinking
       # this path back and silently dropping everything else.
-      - name: mypy --strict (whole package)
-        run: uv run mypy --strict src/cfb_strength
+      #
+      # The fixture generator (issue #110) is included explicitly. It patches
+      # private `_fetch_*` names in the ingest clients to forbid live calls,
+      # and a rename there would silently turn the stub into a no-op. mypy
+      # --strict reports `Module has no attribute ...` for that, but only if
+      # the generator is type-checked.
+      - name: mypy --strict (whole package + fixture generator)
+        run: uv run mypy --strict src/cfb_strength tests/fixtures/build_regression_fixtures.py
 
       - name: import-linter
         run: uv run lint-imports

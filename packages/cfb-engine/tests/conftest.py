@@ -12,9 +12,14 @@ makes a live CFBD API call. Both committed fixture dbs
 `tests/fixtures/build_regression_fixtures.py` (issue #110): the real ingest
 path, cache-first with zero live calls, into a fresh current-schema db,
 pruned to the fixture seasons, no ratings. Its docstring has the
-regeneration command. `tests/test_regression_fixtures_currency.py` fails if
-either falls behind the schema or the cache, and `StaleDatabaseWarning` is an
-error in this suite (pyproject.toml).
+regeneration command. Three checks cover different staleness:
+`tests/test_regression_fixtures_regenerate_identically.py` fails unless each
+fixture's rows and schema equal a fresh regeneration from the committed
+cache; `tests/test_regression_fixtures_currency.py` runs `cfb doctor`'s
+check, which covers the schema and which (season, season_type) batches are
+present but not game content; and `StaleDatabaseWarning` is an error in this
+suite (pyproject.toml), so a fixture at an old schema fails every test that
+opens it.
 """
 
 from __future__ import annotations

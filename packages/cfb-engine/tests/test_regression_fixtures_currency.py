@@ -1,5 +1,5 @@
-"""The committed regression fixtures are current, apart from their deliberate
-season slicing (issue #110, epic #113).
+"""The committed regression fixtures pass `cfb doctor`'s check apart from
+their deliberate season slicing (issue #110, epic #113).
 
 `tests/fixtures/cfb_regression.sqlite3` and `nfl_regression.sqlite3` are
 season slices of a real ingest, produced by
@@ -12,9 +12,18 @@ against the committed `data/raw/` and allows exactly the findings that
 
 - `season_behind_cache`, for seasons the fixture omits. A season the
   fixture does carry must have both of its cached season types;
-- `season_missing_ratings`, because the fixture stores no ratings. It must
-  name exactly the fixture's seasons, for every method;
+- `season_missing_ratings`, for seasons the fixture carries but deliberately
+  stores no ratings for under that method. These fixtures store no ratings
+  at all, so there is one finding per method, and each must name exactly the
+  fixture's own seasons and nothing else;
 - `league_has_no_games`, for the league the fixture doesn't carry.
+
+What this covers, and what it doesn't: `check_currency` compares the schema
+and which (season, season_type) batches are present. It never reads game
+content or counts, so a fixture missing one game, holding a score the cache
+has since changed, or carrying an edited mascot or `ingestion_log` row
+passes here. `tests/test_regression_fixtures_regenerate_identically.py`
+catches those, by comparing every row with a fresh regeneration.
 
 Anything else fails: `schema_not_current` (the fixture predates the schema,
 which is also what trips the `StaleDatabaseWarning` gate in pyproject.toml),
