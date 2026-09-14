@@ -9,19 +9,38 @@ lets the bulk of `apps/api`'s tests run with no live Postgres connection.
 `ensure_schema` mirrors `cfb_strength.db.connection.ensure_schema`'s own
 pattern (plain SQL, no migration framework) rather than pulling in Alembic
 for one additive table.
+
+**The cache is optional; the verdict is not (issue #206).** The verdict is
+computed from SQLite, and this cache only saves a Claude call, so a Postgres
+problem must never fail a request. `PostgresNarrationCache` treats a failed
+read as a miss and a failed write as a skip, logging one warning each, and
+every connect carries `CONNECT_TIMEOUT_SECONDS` so an unreachable host fails
+fast instead of hanging a request on the OS TCP timeout. Only `psycopg.Error`
+is swallowed: a programming bug in this path must still surface.
+`DisabledNarrationCache` is the store served when `DATABASE_URL` is unset
+outside test mode (see `api.deps.get_narration_cache`).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 import psycopg
 
+logger = logging.getLogger(__name__)
+
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+# libpq's `connect_timeout`, in seconds, for every Postgres connect this app
+# makes (cache reads, cache writes, and `api.main.lifespan`'s schema setup).
+# Short because a cache miss only costs one Claude call; a hung connect costs
+# the whole request.
+CONNECT_TIMEOUT_SECONDS = 3
 
 
 @dataclass(frozen=True)
@@ -87,39 +106,59 @@ class InMemoryNarrationCache:
         self._store[key] = narration
 
 
+class DisabledNarrationCache:
+    """A `NarrationCacheStore` that never hits: every `get` is a miss and
+    `set` does nothing. Served when no `DATABASE_URL` is configured outside
+    test mode (issue #206), so verdicts still narrate, just uncached."""
+
+    def get(self, key: str) -> CachedNarration | None:
+        return None
+
+    def set(self, key: str, narration: CachedNarration) -> None:
+        return None
+
+
 class PostgresNarrationCache:
-    """Real `persona_cache`-table-backed `NarrationCacheStore`."""
+    """Real `persona_cache`-table-backed `NarrationCacheStore`. Fails open on
+    database errors (see the module docstring, issue #206)."""
 
     def __init__(self, dsn: str, *, prompt_version: str) -> None:
         self._dsn = dsn
         self._prompt_version = prompt_version
 
     def get(self, key: str) -> CachedNarration | None:
-        with psycopg.connect(self._dsn) as conn:
-            row = conn.execute(
-                "SELECT narration_text, contested FROM persona_cache WHERE cache_key = %s",
-                (key,),
-            ).fetchone()
+        try:
+            with psycopg.connect(self._dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS) as conn:
+                row = conn.execute(
+                    "SELECT narration_text, contested FROM persona_cache WHERE cache_key = %s",
+                    (key,),
+                ).fetchone()
+        except psycopg.Error as exc:
+            logger.warning("Narration cache read failed, treating as a miss: %s", exc)
+            return None
         if row is None:
             return None
         text, contested = row
         return CachedNarration(text=str(text), contested=bool(contested))
 
     def set(self, key: str, narration: CachedNarration) -> None:
-        with psycopg.connect(self._dsn) as conn:
-            conn.execute(
-                """
-                INSERT INTO persona_cache (cache_key, narration_text, contested, prompt_version)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (cache_key) DO UPDATE SET
-                    narration_text = EXCLUDED.narration_text,
-                    contested = EXCLUDED.contested,
-                    prompt_version = EXCLUDED.prompt_version,
-                    created_at = now()
-                """,
-                (key, narration.text, narration.contested, self._prompt_version),
-            )
-            conn.commit()
+        try:
+            with psycopg.connect(self._dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO persona_cache (cache_key, narration_text, contested, prompt_version)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (cache_key) DO UPDATE SET
+                        narration_text = EXCLUDED.narration_text,
+                        contested = EXCLUDED.contested,
+                        prompt_version = EXCLUDED.prompt_version,
+                        created_at = now()
+                    """,
+                    (key, narration.text, narration.contested, self._prompt_version),
+                )
+                conn.commit()
+        except psycopg.Error as exc:
+            logger.warning("Narration cache write failed, narration not cached: %s", exc)
 
 
 def ensure_schema(conn: psycopg.Connection[Any]) -> None:
