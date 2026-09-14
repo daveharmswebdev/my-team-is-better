@@ -423,10 +423,13 @@ def test_comparison_records_attributed_to_their_own_teams_are_grounded(
 
 
 def test_comparison_fabricated_record_is_still_flagged(cfb_conn: sqlite3.Connection) -> None:
+    """#166: a record-shaped pair nearest a subject is a record claim, so 13-1
+    is no longer reported as USC's score; with both subjects named and
+    neither owning it, no team is named."""
     block = _comparison_block(cfb_conn, 2005, "Texas", "USC", "cfb")
     response = "Texas went 13-1 and USC went 12-1 in 2005."
 
-    assert _check(cfb_conn, response, block, "cfb") == ["USC 13-1"]
+    assert _check(cfb_conn, response, block, "cfb") == ["13-1 is not a stated record"]
 
 
 # --- team case, record next to an opponent (bare) --------------------------
@@ -494,10 +497,14 @@ def test_parenthetical_record_is_grounded(cfb_conn: sqlite3.Connection) -> None:
 
 
 def test_parenthetical_fabricated_record_is_still_flagged(cfb_conn: sqlite3.Connection) -> None:
+    """#166: a parenthetical bound to a subject is that subject's record
+    claim, so the message names the record, not a score."""
     block = _comparison_block(cfb_conn, 2005, "Texas", "USC", "cfb")
     response = PARENTHETICAL_2005.format(record="13-1")
 
-    assert _check(cfb_conn, response, block, "cfb") == ["Texas 13-1"]
+    assert _check(cfb_conn, response, block, "cfb") == [
+        "13-1 is not Texas's record; Texas's record is 13-0"
+    ]
 
 
 # --- W-L-T, using the NFL tie cluster in tests/fixtures/sport_fixture.py ----
@@ -519,12 +526,14 @@ def test_w_l_t_record_next_to_a_tied_opponent_is_grounded(nfl_conn: sqlite3.Conn
 def test_w_l_t_fabricated_record_is_still_flagged(nfl_conn: sqlite3.Connection) -> None:
     """#181 reads a W-L-T record as one claim, so "7-1-1" is checked as a
     record (it used to be read as the pair "7-1" and attributed to Mike
-    Mustangs as a score). Its reverse, 1-7-1, is no subject's record, so no
-    owner is named."""
+    Mustangs as a score). Its reverse, 1-7-1, is no subject's record; #166
+    attributes it to Kilo Kings, the one subject the sentence names."""
     block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
     response = TIE_TEAM_CASE.format(tie_score="17-17", record="7-1-1")
 
-    assert _check(nfl_conn, response, block, "nfl") == ["7-1-1 is not a stated record"]
+    assert _check(nfl_conn, response, block, "nfl") == [
+        "7-1-1 is not Kilo Kings's record; Kilo Kings's record is 2-1-1"
+    ]
 
 
 def test_w_l_t_fabricated_tie_score_beside_a_real_record_is_still_flagged(
@@ -686,9 +695,13 @@ def test_w_l_t_subject_record_stated_out_of_order_is_flagged(
 def test_w_l_t_record_matching_no_subject_either_way_is_flagged(
     cfb_conn: sqlite3.Connection, texas_2005_case: str
 ) -> None:
+    """#166: the sentence names Texas, so the message says whose record it
+    is not, and what that record is."""
     response = "Texas went 13-1-0 in 2005."
 
-    assert _check(cfb_conn, response, texas_2005_case, "cfb") == ["13-1-0 is not a stated record"]
+    assert _check(cfb_conn, response, texas_2005_case, "cfb") == [
+        "13-1-0 is not Texas's record; Texas's record is 13-0-0"
+    ]
 
 
 @pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
