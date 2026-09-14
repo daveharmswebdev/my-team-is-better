@@ -50,11 +50,21 @@
   font-style: italic;
 }
 
-/* Issue #153: the one-line note a method without a rating breakdown (Elo)
-   prints once, under both team summaries, in place of the disclosures. */
+/* Issues #153/#183: the one-line note a method with nothing to open (career
+   Elo) prints once, under both team summaries, in place of the disclosures. */
 .ratingNote {
   margin: var(--sp-3) 0 0;
   font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+/* Issue #183: printed under one team's plain Elo rating when that team's
+   response carries no ledger. */
+.ratingTeamNote {
+  margin: var(--sp-1) 0 0;
+  max-width: 16rem;
+  font-size: 0.8rem;
+  font-weight: 400;
   color: var(--ink-muted);
 }
 

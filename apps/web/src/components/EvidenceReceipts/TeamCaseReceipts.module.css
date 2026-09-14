@@ -16,9 +16,9 @@
   border-bottom: 1px solid var(--rule);
 }
 
-/* Issue #153: the one-line note a method without a rating breakdown (Elo)
-   prints in place of the breakdown disclosure -- quiet running copy, not a
-   stat. */
+/* Issues #153/#183: the one-line note printed where a rating has no
+   disclosure to open (career Elo, or an Elo response with no ledger) --
+   quiet running copy, not a stat. */
 .ratingNote {
   margin: var(--sp-2) 0 0;
   font-family: var(--font-body);

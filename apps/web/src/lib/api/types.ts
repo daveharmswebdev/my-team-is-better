@@ -41,6 +41,52 @@ export interface RatingBreakdownOut {
   residual_contribution: number
 }
 
+/**
+ * One game of an Elo season, from one team's side (issue #183). Every number
+ * is the engine's own, at full precision: apps/web formats these and never
+ * recomputes them. `rating_gap` is `rating_before - opponent_rating_before +
+ * home_field_adjustment`, and `rating_after` is `rating_before + shift`.
+ */
+export interface EloGameStepOut {
+  game_number: number
+  week: number | null
+  season_type: string
+  start_date: string | null
+  opponent_team_id: number
+  opponent_name: string
+  venue: 'home' | 'away' | 'neutral'
+  team_points: number
+  opponent_points: number
+  result: GameResult
+  rating_before: number
+  opponent_rating_before: number
+  /** `+hfa` at home, `-hfa` away, `0` at a neutral site. */
+  home_field_adjustment: number
+  rating_gap: number
+  /** This team's expected score, 0..1. */
+  win_expectancy: number
+  mov_multiplier: number
+  /** Signed, this team's. */
+  shift: number
+  rating_after: number
+}
+
+/**
+ * The work behind an Elo rating (issue #183): the constants the engine ran
+ * with, and every game in order. `steps[0].rating_before` is
+ * `starting_rating`, each step starts where the previous one ended, and the
+ * last `rating_after` is the team's rating.
+ */
+export interface EloLedgerOut {
+  starting_rating: number
+  k: number
+  hfa: number
+  scale: number
+  mov_scale: number
+  mov_autocorr: number
+  steps: EloGameStepOut[]
+}
+
 export interface TeamCaseOut {
   year: number
   /** Echoes the request's already-validated method; picks `formatRating`'s display scale. */
@@ -54,6 +100,13 @@ export interface TeamCaseOut {
   /** Required on the API side (issue #83). Render records via `formatRecord`. */
   ties: number
   rating_breakdown: RatingBreakdownOut
+  /**
+   * Issue #183: the Elo ledger under `elo`; `null` under `keener` and
+   * `elo_career`. The API always sends the key. It is optional here only so
+   * fixtures written before #183 still type-check; readers treat a missing
+   * value exactly like `null`.
+   */
+  elo_ledger?: EloLedgerOut | null
   games: OpponentResultOut[]
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
@@ -69,6 +122,8 @@ export interface ComparisonTeamSummaryOut {
   /** Required on the API side (issue #83). Render records via `formatRecord`. */
   ties: number
   rating_breakdown: RatingBreakdownOut
+  /** Same as `TeamCaseOut.elo_ledger`. */
+  elo_ledger?: EloLedgerOut | null
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
 }

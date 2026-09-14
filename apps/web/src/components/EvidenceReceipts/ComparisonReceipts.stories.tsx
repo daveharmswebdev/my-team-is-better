@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 import type { ComparisonResultOut } from '../../lib/api/types'
 import { ComparisonReceipts } from './ComparisonReceipts'
+import { TEXAS_ELO, USC_ELO } from './eloLedgerFixture'
 
 const evidence: ComparisonResultOut = {
   year: 2020,
@@ -194,46 +195,77 @@ export const RatingBreakdown: Story = {
   },
 }
 
+const texasVsUscElo: ComparisonResultOut = {
+  ...evidence,
+  year: 2005,
+  method: 'elo',
+  team_a: {
+    ...evidence.team_a,
+    team_id: TEXAS_ELO.team_id,
+    team_name: TEXAS_ELO.team_name,
+    rank: 1,
+    rating: TEXAS_ELO.rating,
+    wins: TEXAS_ELO.wins,
+    losses: TEXAS_ELO.losses,
+    ties: TEXAS_ELO.ties,
+    rating_breakdown: { entries: [], residual_contribution: 0 },
+    elo_ledger: TEXAS_ELO.elo_ledger,
+  },
+  team_b: {
+    ...evidence.team_b,
+    team_id: USC_ELO.team_id,
+    team_name: USC_ELO.team_name,
+    rank: 2,
+    rating: USC_ELO.rating,
+    wins: USC_ELO.wins,
+    losses: USC_ELO.losses,
+    ties: USC_ELO.ties,
+    rating_breakdown: { entries: [], residual_contribution: 0 },
+    elo_ledger: USC_ELO.elo_ledger,
+  },
+  common_opponents: [],
+  rating_diff: TEXAS_ELO.rating - USC_ELO.rating,
+  verdict: 'Texas rates higher overall (1661.4 vs 1526.9, rank 1 vs 2).',
+}
+
 /**
- * An Elo comparison (epic #147 / issues #82, #153): ratings, the rating diff
- * and the bottom line all print on Elo's own whole-point scale ("1,684 vs
- * 1,650"), never Keener's x1000 transform. Both ratings are plain text with no
- * breakdown disclosure -- Elo writes no breakdown rows (this is the real wire
- * shape) -- and one explainer line, once for the whole block, says why.
+ * An Elo comparison (epic #147 / issues #82, #183): ratings, the rating diff
+ * and the bottom line all print on Elo's own whole-point scale ("1,661 vs
+ * 1,527"), and each team's rating opens that team's own game-by-game ledger.
  */
 export const EloLeader: Story = {
+  args: { evidence: texasVsUscElo },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('button')).toHaveLength(2)
+    await userEvent.hover(canvas.getByRole('button', { name: '1,527' }))
+    await expect(
+      await canvas.findByRole('dialog', {
+        name: 'USC Elo rating, game by game',
+      }),
+    ).toBeVisible()
+    await expect(canvasElement.textContent).not.toMatch(/Keener/)
+  },
+}
+
+/** Career Elo: plain ratings, and one line for the whole block says why there is nothing to open. */
+export const EloCareer: Story = {
   args: {
     evidence: {
-      ...evidence,
-      method: 'elo',
-      team_a: {
-        ...evidence.team_a,
-        rank: 3,
-        rating: 1684.4,
-        rating_breakdown: { entries: [], residual_contribution: 0 },
-      },
-      team_b: {
-        ...evidence.team_b,
-        rank: 9,
-        rating: 1650.2,
-        rating_breakdown: { entries: [], residual_contribution: 0 },
-      },
-      rating_diff: 1684.4 - 1650.2,
-      verdict:
-        'Ohio State rates higher overall (1684.4 vs 1650.2, rank 3 vs 9).',
+      ...texasVsUscElo,
+      method: 'elo_career',
+      team_a: { ...texasVsUscElo.team_a, elo_ledger: null },
+      team_b: { ...texasVsUscElo.team_b, elo_ledger: null },
     },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('1,684')).toBeVisible()
-    await expect(canvas.getByText('1,650')).toBeVisible()
+    await expect(canvas.queryByRole('button')).toBeNull()
     await expect(
-      canvasElement.querySelector('[aria-haspopup="dialog"]'),
-    ).toBeNull()
-    await expect(
-      canvas.getAllByText(/has no per-opponent breakdown to show/),
+      canvas.getAllByText(
+        "Career Elo carries ratings across seasons, and its game-by-game work isn't shown yet.",
+      ),
     ).toHaveLength(1)
-    await expect(canvasElement.textContent).not.toMatch(/Keener/)
   },
 }
 

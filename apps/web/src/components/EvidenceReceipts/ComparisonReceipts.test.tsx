@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { METHODS, type ComparisonResultOut } from '../../lib/api/types'
 import { formatRating } from '../../lib/formatRating'
 import { ComparisonReceipts } from './ComparisonReceipts'
+import { TEXAS_ELO, USC_ELO } from './eloLedgerFixture'
 
 /**
  * A distinctive stand-in for the engine's raw `verdict` sentence. apps/web
@@ -642,6 +643,19 @@ describe('ComparisonReceipts', () => {
 
     const EMPTY = { entries: [], residual_contribution: 0 }
 
+    // Issue #183 retired the explainer above. With no ledger in the response,
+    // Elo says so once per team; career Elo explains once per receipts block.
+    const NOTE_WITHOUT_LEDGER = {
+      elo: {
+        text: "This rating's game-by-game work isn't available right now.",
+        count: 2,
+      },
+      elo_career: {
+        text: "Career Elo carries ratings across seasons, and its game-by-game work isn't shown yet.",
+        count: 1,
+      },
+    } as const
+
     /** Both teams on `method`, with the given breakdowns. */
     function eloComparison(
       method: ComparisonResultOut['method'],
@@ -675,8 +689,12 @@ describe('ComparisonReceipts', () => {
           expect(screen.queryByRole('button')).not.toBeInTheDocument()
           expect(screen.getByText('1,684')).toBeInTheDocument()
           expect(screen.getByText('1,650')).toBeInTheDocument()
-          // Once per receipts block, not once per team.
-          expect(screen.getAllByText(NO_BREAKDOWN_EXPLAINER)).toHaveLength(1)
+          expect(
+            screen.queryByText(NO_BREAKDOWN_EXPLAINER),
+          ).not.toBeInTheDocument()
+          expect(
+            screen.getAllByText(NOTE_WITHOUT_LEDGER[method].text),
+          ).toHaveLength(NOTE_WITHOUT_LEDGER[method].count)
         },
       )
     })
@@ -711,6 +729,101 @@ describe('ComparisonReceipts', () => {
         expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
       }
       expect(screen.queryByText(NO_BREAKDOWN_EXPLAINER)).not.toBeInTheDocument()
+    })
+  })
+
+  /** Issue #183: under Elo each team's rating opens that team's own ledger. */
+  describe('Elo ledger disclosure (issue #183)', () => {
+    const UNAVAILABLE =
+      "This rating's game-by-game work isn't available right now."
+    const CAREER =
+      "Career Elo carries ratings across seasons, and its game-by-game work isn't shown yet."
+    const OLD_EXPLAINER =
+      'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
+
+    function texasVsUsc(
+      method: ComparisonResultOut['method'],
+    ): ComparisonResultOut {
+      const base = withRatings(
+        evidence,
+        method,
+        { team_name: 'Texas', rank: 1, rating: TEXAS_ELO.rating },
+        { team_name: 'USC', rank: 2, rating: USC_ELO.rating },
+      )
+      return {
+        ...base,
+        team_a: { ...base.team_a, elo_ledger: TEXAS_ELO.elo_ledger },
+        team_b: { ...base.team_b, elo_ledger: USC_ELO.elo_ledger },
+      }
+    }
+
+    it('(f) elo: each team has its own ledger trigger, and the old explainer is gone', async () => {
+      const user = userEvent.setup()
+      render(<ComparisonReceipts evidence={texasVsUsc('elo')} />)
+
+      expect(screen.getAllByRole('button')).toHaveLength(2)
+      expect(screen.queryByText(OLD_EXPLAINER)).not.toBeInTheDocument()
+      expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
+      expect(screen.queryByText(CAREER)).not.toBeInTheDocument()
+
+      for (const [label, team, games] of [
+        ['1,661', 'Texas', 5],
+        ['1,527', 'USC', 2],
+      ] as const) {
+        const trigger = screen.getByRole('button', { name: label })
+        await user.hover(trigger)
+        const dialog = screen.getByRole('dialog', {
+          name: `${team} Elo rating, game by game`,
+        })
+        expect(
+          within(
+            within(dialog).getByRole('list', { name: 'Games, in order' }),
+          ).getAllByRole('listitem'),
+        ).toHaveLength(games)
+        expect(
+          within(dialog).getByText(`The card rounds this to ${label}.`),
+        ).toBeInTheDocument()
+        await user.unhover(trigger)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      }
+    })
+
+    it('(f) elo: one team with a null ledger gets the plain rating and the unavailable line; the other keeps its trigger', () => {
+      const both = texasVsUsc('elo')
+      render(
+        <ComparisonReceipts
+          evidence={{ ...both, team_b: { ...both.team_b, elo_ledger: null } }}
+        />,
+      )
+
+      expect(screen.getAllByRole('button')).toHaveLength(1)
+      expect(screen.getByRole('button', { name: '1,661' })).toBeInTheDocument()
+      expect(screen.getByText('1,527')).toBeInTheDocument()
+      expect(screen.getAllByText(UNAVAILABLE)).toHaveLength(1)
+    })
+
+    it('(f) keener: nothing changes -- Keener disclosures, no Elo copy', async () => {
+      const user = userEvent.setup()
+      render(<ComparisonReceipts evidence={evidence} />)
+
+      await user.hover(screen.getByRole('button', { name: '8.77' }))
+      const dialog = screen.getByRole('dialog', {
+        name: 'Ohio State rating breakdown',
+      })
+      expect(
+        within(dialog).getByText(/rating-system baseline/i),
+      ).toBeInTheDocument()
+      expect(screen.queryByText(/game by game/)).not.toBeInTheDocument()
+      expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
+      expect(screen.queryByText(CAREER)).not.toBeInTheDocument()
+    })
+
+    it('(g) elo_career: one career explainer, no triggers, even if ledgers were sent', () => {
+      render(<ComparisonReceipts evidence={texasVsUsc('elo_career')} />)
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument()
+      expect(screen.getAllByText(CAREER)).toHaveLength(1)
+      expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
     })
   })
 })
