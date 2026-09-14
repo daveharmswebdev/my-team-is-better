@@ -1,0 +1,151 @@
+.wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.trigger {
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--rule-strong);
+}
+
+.trigger:hover {
+  border-bottom-color: var(--navy);
+}
+
+/* Desktop hover popover. `RatingDisclosureShell` places it beside the trigger
+   (or, in a very narrow window, above/below) and sets `data-side`; these
+   defaults only hold until then. Scrolls instead of overflowing the viewport
+   once entries push it taller than the window, same as `.modal` below.
+
+   The gap between trigger and panel is padding on the side facing the
+   trigger, never margin: it is part of the popover's own box, so moving the
+   pointer across it into the panel never leaves the disclosure and closes
+   it on the way. */
+.popover {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  right: 0;
+  padding-top: var(--sp-2);
+  width: 280px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.popover[data-side='right'] {
+  padding: 0 0 0 var(--sp-2);
+}
+
+.popover[data-side='left'] {
+  padding: 0 var(--sp-2) 0 0;
+}
+
+.popover[data-side='below'] {
+  padding: var(--sp-2) 0 0;
+}
+
+.popover[data-side='above'] {
+  padding: 0 0 var(--sp-2);
+}
+
+/* Mobile tap modal: full-viewport backdrop, centered panel. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: rgba(28, 26, 23, 0.45);
+}
+
+.modal {
+  width: 100%;
+  max-width: 22rem;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--sp-4);
+  text-align: left;
+  font-weight: 400;
+}
+
+/* `scroll="region"`: the popover/modal and panel stop scrolling as a whole
+   and become a column frame, so only the content's own scroll region
+   scrolls and everything around it stays in view. Compound selectors, so
+   these win over the base rules regardless of stylesheet order. */
+.popover.framed {
+  /* Wide enough that formula lines barely wrap, so the scroll region keeps
+     most of the height; never wider than the viewport. */
+  width: min(36rem, 90vw);
+  max-width: calc(100vw - 2 * var(--sp-2));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Touch: a long ledger gets nearly the whole screen -- a thin backdrop
+   margin, up to the full padded height -- and every extra pixel goes to the
+   scroll region. */
+.overlay.framed {
+  padding: var(--sp-2);
+}
+
+.modal.framed {
+  max-width: 36rem;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel.framed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The heading's default block margins would take height from the scroll
+   region; the frame's own padding is spacing enough. */
+.panel.framed .panelTitle {
+  margin: 0;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.panelTitle {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.closeButton {
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-muted);
+  padding: 0 0 0 var(--sp-2);
+}

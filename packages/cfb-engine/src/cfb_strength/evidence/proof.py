@@ -1,7 +1,8 @@
 """Empirical-proof layer: schedules, quality wins, worst losses, and
 head-to-head / common-opponent comparisons between two teams.
 
-This module reads the `ratings`, `games`, and `teams` tables directly via
+This module reads the `ratings`, `games`, and `teams` tables (plus
+`rating_breakdowns`, `elo_ledger_steps` and `elo_ledger_configs`) directly via
 SQL. It must never import `cfb_strength.ratings` or `cfb_strength.ingest` --
 the database is the integration boundary, not Python imports (enforced by
 import-linter's independence contract).
@@ -18,6 +19,8 @@ from cfb_strength.contracts import (
     CommonOpponent,
     ComparisonResult,
     ComparisonTeamSummary,
+    EloGameStep,
+    EloLedger,
     HeadToHead,
     HeadToHeadMeeting,
     Method,
@@ -209,6 +212,112 @@ def _rating_breakdown(
     return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
+def _elo_ledger(
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    team_id: int,
+    sport: str,
+) -> EloLedger | None:
+    """Read a team's `EloLedger` back from `elo_ledger_configs` and
+    `elo_ledger_steps` (issue #183), exactly as stored.
+
+    Steps are ordered by `game_number` (the walk's order), and every
+    `opponent_name` comes from `teams.school` through one join rather than a
+    query per step. Every numeric field is copied as stored. Nothing is
+    recomputed or checked here: the stored values are the walk's own, and
+    re-deriving them would be a second, possibly different, answer.
+
+    Returns None when the (year, method, sport) has no config row and this
+    team has no steps. That is a method with no ledger (keener, elo_career) or
+    a database built before #183.
+
+    Raises ValueError, naming the missing table, when only one side is
+    present (a config row but no steps for this rated team, or steps with no
+    config row), or when a step's opponent has no `teams` row. Any of those is
+    a corrupt database. Inventing constants, dropping a step, or showing a
+    blank opponent would present fabricated work as evidence.
+    """
+    config = conn.execute(
+        """
+        SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr
+        FROM elo_ledger_configs c
+        WHERE c.year = ? AND c.method = ? AND c.sport = ?
+        """,
+        (year, method, sport),
+    ).fetchone()
+    rows = conn.execute(
+        """
+        SELECT s.game_number, s.week, s.season_type, s.start_date,
+               s.opponent_team_id, s.venue, s.team_points, s.opponent_points,
+               s.result, s.rating_before, s.opponent_rating_before,
+               s.home_field_adjustment, s.rating_gap, s.win_expectancy,
+               s.mov_multiplier, s.shift, s.rating_after,
+               t.school AS opponent_name
+        FROM elo_ledger_steps s
+        LEFT JOIN teams t ON t.id = s.opponent_team_id
+        WHERE s.year = ? AND s.method = ? AND s.sport = ? AND s.team_id = ?
+        ORDER BY s.game_number
+        """,
+        (year, method, sport, team_id),
+    ).fetchall()
+
+    if config is None and not rows:
+        return None
+    scope = f"year={year}, method={method!r}, sport={sport!r}"
+    if config is None:
+        raise ValueError(
+            f"corrupt Elo ledger: no elo_ledger_configs row for {scope}, "
+            f"although team_id={team_id} has {len(rows)} stored ledger step(s)"
+        )
+    if not rows:
+        raise ValueError(
+            f"corrupt Elo ledger: no elo_ledger_steps rows for team_id={team_id} "
+            f"({scope}), although a ledger config exists and the team is rated"
+        )
+
+    steps: list[EloGameStep] = []
+    for row in rows:
+        if row["opponent_name"] is None:
+            raise ValueError(
+                f"corrupt Elo ledger: step {row['game_number']} for team_id={team_id} "
+                f"({scope}) names opponent_team_id={row['opponent_team_id']}, "
+                "which has no row in teams"
+            )
+        steps.append(
+            EloGameStep(
+                game_number=int(row["game_number"]),
+                opponent_team_id=int(row["opponent_team_id"]),
+                venue=cast(Literal["home", "away", "neutral"], row["venue"]),
+                team_points=int(row["team_points"]),
+                opponent_points=int(row["opponent_points"]),
+                result=cast(Literal["W", "L", "T"], row["result"]),
+                rating_before=float(row["rating_before"]),
+                opponent_rating_before=float(row["opponent_rating_before"]),
+                home_field_adjustment=float(row["home_field_adjustment"]),
+                rating_gap=float(row["rating_gap"]),
+                win_expectancy=float(row["win_expectancy"]),
+                mov_multiplier=float(row["mov_multiplier"]),
+                shift=float(row["shift"]),
+                rating_after=float(row["rating_after"]),
+                week=int(row["week"]) if row["week"] is not None else None,
+                season_type=str(row["season_type"]),
+                start_date=str(row["start_date"]) if row["start_date"] is not None else None,
+                opponent_name=str(row["opponent_name"]),
+            )
+        )
+
+    return EloLedger(
+        starting_rating=float(config["starting_rating"]),
+        k=float(config["k"]),
+        hfa=float(config["hfa"]),
+        scale=float(config["scale"]),
+        mov_scale=float(config["mov_scale"]),
+        mov_autocorr=float(config["mov_autocorr"]),
+        steps=steps,
+    )
+
+
 def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: Sport) -> None:
     years = list_available_years(conn, method, sport)
     if year not in years:
@@ -373,6 +482,7 @@ def build_team_case(
     ratings = _ratings_map(conn, year, method, sport)
     games = _team_games(conn, year, team_id, sport)
     rating_breakdown = _rating_breakdown(conn, year, method, team_id, games, sport)
+    elo_ledger = _elo_ledger(conn, year, method, team_id, sport)
 
     opponent_results: list[OpponentResult] = []
     for game in games:
@@ -413,6 +523,7 @@ def build_team_case(
         games=opponent_results,
         quality_wins=quality_wins,
         worst_loss=worst_loss,
+        elo_ledger=elo_ledger,
     )
 
 
@@ -428,6 +539,7 @@ def _case_summary(case: TeamCase) -> ComparisonTeamSummary:
         rating_breakdown=case.rating_breakdown,
         quality_wins=case.quality_wins,
         worst_loss=case.worst_loss,
+        elo_ledger=case.elo_ledger,
     )
 
 

@@ -257,6 +257,7 @@ def _rerank_for_display(
             losses=tr.losses,
             ties=tr.ties,
             rating_breakdown=tr.rating_breakdown,
+            elo_ledger=tr.elo_ledger,
         )
         for i, tr in enumerate(candidates)
     ]
@@ -396,6 +397,124 @@ def _store_breakdowns(
         )
 
 
+def _store_elo_ledgers(
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    ratings: list[TeamRating],
+    sport: str,
+) -> None:
+    """Delete-then-insert the Elo ledger (issue #183) for (year, method,
+    sport): one `elo_ledger_steps` row per displayed team per game, and one
+    `elo_ledger_configs` row holding the constants the walk ran with.
+
+    The DELETE is unconditional, from both tables, even when no team has a
+    ledger: re-running replaces, and a method that writes no ledger (keener,
+    elo_career) leaves none behind for its own (year, method, sport). `sport`
+    is in both statements for `_store()`'s reason.
+
+    One config row can only describe ledgers that share their constants, so
+    ledgers that disagree raise before anything is written rather than
+    printing the wrong tuning beside some team's path. A single walk never
+    produces that; the check is a guard, not a code path.
+    """
+    computed_at = datetime.now(timezone.utc).isoformat()
+    ledgers = [(tr.team_id, tr.elo_ledger) for tr in ratings if tr.elo_ledger is not None]
+
+    config_row: tuple[int, str, str, float, float, float, float, float, float, str] | None
+    config_row = None
+    if ledgers:
+        constants = {
+            (
+                ledger.starting_rating,
+                ledger.k,
+                ledger.hfa,
+                ledger.scale,
+                ledger.mov_scale,
+                ledger.mov_autocorr,
+            )
+            for _, ledger in ledgers
+        }
+        if len(constants) != 1:
+            raise ValueError(
+                f"Elo ledgers for {year}/{method}/{sport} disagree on their "
+                f"constants: {sorted(constants)}"
+            )
+        ((starting_rating, k, hfa, scale, mov_scale, mov_autocorr),) = constants
+        config_row = (
+            year, method, sport, starting_rating, k, hfa, scale, mov_scale,
+            mov_autocorr, computed_at,
+        )
+
+    step_rows: list[
+        tuple[
+            int, str, str, int, int, int | None, str, str | None, int, str, int, int,
+            str, float, float, float, float, float, float, float, float, str,
+        ]
+    ] = [
+        (
+            year,
+            method,
+            sport,
+            team_id,
+            step.game_number,
+            step.week,
+            step.season_type,
+            step.start_date,
+            step.opponent_team_id,
+            step.venue,
+            step.team_points,
+            step.opponent_points,
+            step.result,
+            step.rating_before,
+            step.opponent_rating_before,
+            step.home_field_adjustment,
+            step.rating_gap,
+            step.win_expectancy,
+            step.mov_multiplier,
+            step.shift,
+            step.rating_after,
+            computed_at,
+        )
+        for team_id, ledger in ledgers
+        for step in ledger.steps
+    ]
+
+    with conn:
+        conn.execute(
+            "DELETE FROM elo_ledger_steps WHERE year = ? AND method = ? AND sport = ?",
+            (year, method, sport),
+        )
+        conn.execute(
+            "DELETE FROM elo_ledger_configs WHERE year = ? AND method = ? AND sport = ?",
+            (year, method, sport),
+        )
+        conn.executemany(
+            """
+            INSERT INTO elo_ledger_steps (
+                year, method, sport, team_id, game_number, week, season_type,
+                start_date, opponent_team_id, venue, team_points, opponent_points,
+                result, rating_before, opponent_rating_before, home_field_adjustment,
+                rating_gap, win_expectancy, mov_multiplier, shift, rating_after,
+                computed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            step_rows,
+        )
+        if config_row is not None:
+            conn.execute(
+                """
+                INSERT INTO elo_ledger_configs (
+                    year, method, sport, starting_rating, k, hfa, scale, mov_scale,
+                    mov_autocorr, computed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                config_row,
+            )
+
+
 def compute_and_store(
     conn: sqlite3.Connection, year: int, method: str, sport: str = "cfb"
 ) -> int:
@@ -435,6 +554,7 @@ def compute_and_store(
     if not full_ratings:
         _store(conn, year, method, [], sport)
         _store_breakdowns(conn, year, method, [], sport)
+        _store_elo_ledgers(conn, year, method, [], sport)
         return 0
 
     if sport == "cfb":
@@ -454,6 +574,7 @@ def compute_and_store(
     display_ratings = _rerank_for_display(full_ratings, display_team_ids)
     _store(conn, year, method, display_ratings, sport)
     _store_breakdowns(conn, year, method, display_ratings, sport)
+    _store_elo_ledgers(conn, year, method, display_ratings, sport)
     return len(display_ratings)
 
 

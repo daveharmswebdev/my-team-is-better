@@ -26,6 +26,8 @@ from cfb_strength.contracts import (
     ComparisonTeamSummary,
     Credits,
     DataSourceCredit,
+    EloGameStep,
+    EloLedger,
     HeadToHead,
     HeadToHeadMeeting,
     MethodologyCredit,
@@ -192,6 +194,92 @@ class RatingBreakdownOut(BaseModel):
         )
 
 
+class EloGameStepOut(BaseModel):
+    """One game's Elo update, from one team's side (issue #183), faithful to
+    `cfb_strength.contracts.EloGameStep` -- see its docstring for the
+    identities every step satisfies.
+
+    Every field is copied as the engine stored it, never recomputed. Field
+    order here is the published JSON order `apps/web` builds against (game
+    identity, then the matchup, then the arithmetic in the order it runs);
+    it differs from the dataclass's, whose defaulted fields must come last.
+    """
+
+    game_number: int
+    week: int | None
+    season_type: str
+    start_date: str | None
+    opponent_team_id: int
+    opponent_name: str
+    venue: Literal["home", "away", "neutral"]
+    team_points: int
+    opponent_points: int
+    result: Literal["W", "L", "T"]
+    rating_before: float
+    opponent_rating_before: float
+    home_field_adjustment: float
+    rating_gap: float
+    win_expectancy: float
+    mov_multiplier: float
+    shift: float
+    rating_after: float
+
+    @classmethod
+    def from_dataclass(cls, step: EloGameStep) -> EloGameStepOut:
+        return cls(
+            game_number=step.game_number,
+            week=step.week,
+            season_type=step.season_type,
+            start_date=step.start_date,
+            opponent_team_id=step.opponent_team_id,
+            opponent_name=step.opponent_name,
+            venue=step.venue,
+            team_points=step.team_points,
+            opponent_points=step.opponent_points,
+            result=step.result,
+            rating_before=step.rating_before,
+            opponent_rating_before=step.opponent_rating_before,
+            home_field_adjustment=step.home_field_adjustment,
+            rating_gap=step.rating_gap,
+            win_expectancy=step.win_expectancy,
+            mov_multiplier=step.mov_multiplier,
+            shift=step.shift,
+            rating_after=step.rating_after,
+        )
+
+
+class EloLedgerOut(BaseModel):
+    """The shown work behind a season Elo rating (issue #183), faithful to
+    `cfb_strength.contracts.EloLedger`: the constants the walk ran with and
+    every game's update in order. `steps[-1].rating_after` is the rating.
+
+    Published to clients, but deliberately kept out of the persona fact
+    block (`api.persona.service`): narrating ledger figures is an open
+    question (#175), not something this field quietly opts the narrator
+    into.
+    """
+
+    starting_rating: float
+    k: float
+    hfa: float
+    scale: float
+    mov_scale: float
+    mov_autocorr: float
+    steps: list[EloGameStepOut]
+
+    @classmethod
+    def from_dataclass(cls, ledger: EloLedger) -> EloLedgerOut:
+        return cls(
+            starting_rating=ledger.starting_rating,
+            k=ledger.k,
+            hfa=ledger.hfa,
+            scale=ledger.scale,
+            mov_scale=ledger.mov_scale,
+            mov_autocorr=ledger.mov_autocorr,
+            steps=[EloGameStepOut.from_dataclass(s) for s in ledger.steps],
+        )
+
+
 class TeamCaseOut(BaseModel):
     year: int
     method: str
@@ -205,6 +293,8 @@ class TeamCaseOut(BaseModel):
     # `cfb_strength.contracts.TeamRating.ties`.
     ties: int
     rating_breakdown: RatingBreakdownOut
+    # Issue #183: null for keener and elo_career, which record no ledger.
+    elo_ledger: EloLedgerOut | None
     games: list[OpponentResultOut]
     quality_wins: list[OpponentResultOut]
     worst_loss: OpponentResultOut | None
@@ -222,6 +312,11 @@ class TeamCaseOut(BaseModel):
             losses=case.losses,
             ties=case.ties,
             rating_breakdown=RatingBreakdownOut.from_dataclass(case.rating_breakdown),
+            elo_ledger=(
+                EloLedgerOut.from_dataclass(case.elo_ledger)
+                if case.elo_ledger is not None
+                else None
+            ),
             games=[OpponentResultOut.from_dataclass(g) for g in case.games],
             quality_wins=[OpponentResultOut.from_dataclass(g) for g in case.quality_wins],
             worst_loss=(
@@ -241,6 +336,8 @@ class ComparisonTeamSummaryOut(BaseModel):
     losses: int
     ties: int
     rating_breakdown: RatingBreakdownOut
+    # Issue #183: this team's own ledger; null for keener and elo_career.
+    elo_ledger: EloLedgerOut | None
     quality_wins: list[OpponentResultOut]
     worst_loss: OpponentResultOut | None
 
@@ -255,6 +352,11 @@ class ComparisonTeamSummaryOut(BaseModel):
             losses=summary.losses,
             ties=summary.ties,
             rating_breakdown=RatingBreakdownOut.from_dataclass(summary.rating_breakdown),
+            elo_ledger=(
+                EloLedgerOut.from_dataclass(summary.elo_ledger)
+                if summary.elo_ledger is not None
+                else None
+            ),
             quality_wins=[OpponentResultOut.from_dataclass(g) for g in summary.quality_wins],
             worst_loss=(
                 OpponentResultOut.from_dataclass(summary.worst_loss)

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { TeamCaseOut } from '../../lib/api/types'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
+import { TEXAS_ELO } from './eloLedgerFixture'
 
 const baseOpponent = {
   opponent_team_id: 2,
@@ -90,6 +91,7 @@ const evidence: TeamCaseOut = {
   // `quality_wins` here on purpose -- a real API response includes every
   // quality win (and the worst loss, if any) in the full game list too, so
   // the fixture should exercise that overlap rather than avoid it.
+  elo_ledger: null,
   games: [bowlGame, tennesseeGame, lsuGame, baseOpponent],
   quality_wins: [baseOpponent],
   worst_loss: null,
@@ -307,14 +309,26 @@ describe('TeamCaseReceipts', () => {
   })
 
   /**
-   * Issue #153: the breakdown disclosure explains Keener's math, and Elo
-   * writes no breakdown rows -- so under Elo it would print "Total 0" beside
-   * "Matches the displayed rating: 1,684". Whether to show it is decided by
-   * the method, never by the breakdown's emptiness.
+   * Issue #183: what the rating opens is decided by the method and the
+   * ledger, never by the Keener breakdown's emptiness -- the Keener panel
+   * under Elo would print "Total 0" beside "Matches the displayed rating:
+   * 1,684". These cases deliberately send no ledger (`elo_ledger: null`, what
+   * a stale API or db would send; the current API always sends one for elo):
+   * the rating prints as plain text with one honest note, and Keener keeps
+   * its breakdown disclosure. The real-ledger path is in "Elo ledger
+   * disclosure (issue #183)" below.
    */
-  describe('rating breakdown is decided by method, not by emptiness (issue #153)', () => {
+  describe('Elo with no ledger, and Keener unchanged: the rating’s disclosure follows method and ledger, not breakdown emptiness (issue #183)', () => {
     const NO_BREAKDOWN_EXPLAINER =
       'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
+
+    // The explainer above is retired. With no ledger in the response, each
+    // Elo method prints its own line instead.
+    const NOTE_WITHOUT_LEDGER = {
+      elo: "This rating's game-by-game work isn't available right now.",
+      elo_career:
+        "Career Elo carries ratings across seasons, and its game-by-game work isn't shown yet.",
+    } as const
 
     // The real Elo wire shape (zero rows deserialize to this), plus a
     // non-empty one: an emptiness heuristic would show a disclosure for the
@@ -331,7 +345,7 @@ describe('TeamCaseReceipts', () => {
 
     describe.each(['elo', 'elo_career'] as const)('%s', (method) => {
       it.each(BREAKDOWN_SHAPES)(
-        'renders the rating as plain Elo-format text with no breakdown trigger and no Keener copy (breakdown %s)',
+        'with a null ledger: the rating is plain Elo-format text, no trigger, no Keener copy, and the no-ledger note shows (breakdown %s)',
         (_label, rating_breakdown) => {
           const { container } = render(
             <TeamCaseReceipts
@@ -348,7 +362,12 @@ describe('TeamCaseReceipts', () => {
           expect(container.querySelector('[aria-haspopup="dialog"]')).toBeNull()
           expect(screen.queryByRole('button')).not.toBeInTheDocument()
           expect(screen.getByText(/Rating 1,684/)).toBeInTheDocument()
-          expect(screen.getAllByText(NO_BREAKDOWN_EXPLAINER)).toHaveLength(1)
+          expect(
+            screen.queryByText(NO_BREAKDOWN_EXPLAINER),
+          ).not.toBeInTheDocument()
+          expect(screen.getAllByText(NOTE_WITHOUT_LEDGER[method])).toHaveLength(
+            1,
+          )
         },
       )
     })
@@ -379,6 +398,97 @@ describe('TeamCaseReceipts', () => {
         'dialog',
       )
       expect(screen.queryByText(NO_BREAKDOWN_EXPLAINER)).not.toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Issue #183: under Elo the rating opens the engine's own game-by-game
+   * ledger. A stale API/db that sends no ledger gets the plain rating and one
+   * honest line, never an empty or invented panel; career Elo explains why
+   * its work isn't shown.
+   */
+  describe('Elo ledger disclosure (issue #183)', () => {
+    const UNAVAILABLE =
+      "This rating's game-by-game work isn't available right now."
+    const CAREER =
+      "Career Elo carries ratings across seasons, and its game-by-game work isn't shown yet."
+    const OLD_EXPLAINER =
+      'Elo builds its rating game by game, in date order, with margin of victory counted — it has no per-opponent breakdown to show.'
+
+    const texasElo: TeamCaseOut = {
+      ...evidence,
+      method: 'elo',
+      team_name: TEXAS_ELO.team_name,
+      rating: TEXAS_ELO.rating,
+      wins: TEXAS_ELO.wins,
+      losses: TEXAS_ELO.losses,
+      ties: TEXAS_ELO.ties,
+      rating_breakdown: { entries: [], residual_contribution: 0 },
+      elo_ledger: TEXAS_ELO.elo_ledger,
+    }
+
+    it('elo with a real ledger: the rating is a trigger that opens the team’s ledger panel, with no old explainer or Keener copy', async () => {
+      const user = userEvent.setup()
+      const { container } = render(<TeamCaseReceipts evidence={texasElo} />)
+
+      const trigger = screen.getByRole('button', { name: '1,661' })
+      expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
+      expect(screen.queryByText(OLD_EXPLAINER)).not.toBeInTheDocument()
+      expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
+      expect(screen.queryByText(CAREER)).not.toBeInTheDocument()
+
+      await user.hover(trigger)
+      const dialog = screen.getByRole('dialog', {
+        name: 'Texas Elo rating, game by game',
+      })
+      expect(
+        within(
+          within(dialog).getByRole('list', { name: 'Games, in order' }),
+        ).getAllByRole('listitem'),
+      ).toHaveLength(5)
+      expect(
+        within(dialog).queryByText(/rating-system baseline/i),
+      ).not.toBeInTheDocument()
+      expect(container.textContent).not.toMatch(/Keener/)
+    })
+
+    it('(e) elo with a null ledger: the plain rating and the unavailable line, no trigger', () => {
+      render(<TeamCaseReceipts evidence={{ ...texasElo, elo_ledger: null }} />)
+
+      expect(screen.queryByRole('button')).not.toBeInTheDocument()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByText(/Rating 1,661/)).toBeInTheDocument()
+      expect(screen.getAllByText(UNAVAILABLE)).toHaveLength(1)
+      expect(screen.queryByText(OLD_EXPLAINER)).not.toBeInTheDocument()
+    })
+
+    it('(g) elo_career: the career explainer and no trigger, even if a ledger were sent', () => {
+      for (const elo_ledger of [null, TEXAS_ELO.elo_ledger]) {
+        const { unmount } = render(
+          <TeamCaseReceipts
+            evidence={{ ...texasElo, method: 'elo_career', elo_ledger }}
+          />,
+        )
+
+        expect(screen.queryByRole('button')).not.toBeInTheDocument()
+        expect(screen.getByText(/Rating 1,661/)).toBeInTheDocument()
+        expect(screen.getAllByText(CAREER)).toHaveLength(1)
+        expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
+        unmount()
+      }
+    })
+
+    it('keener: still the Keener breakdown, with no Elo ledger copy', async () => {
+      const user = userEvent.setup()
+      render(<TeamCaseReceipts evidence={evidence} />)
+
+      await user.hover(screen.getByRole('button', { name: '12.34' }))
+      const dialog = screen.getByRole('dialog', {
+        name: 'Texas rating breakdown',
+      })
+      expect(within(dialog).queryByText(/game by game/)).not.toBeInTheDocument()
+      expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
+      expect(screen.queryByText(CAREER)).not.toBeInTheDocument()
     })
   })
 })

@@ -13,6 +13,7 @@ between `evidence` and `ratings`/`ingest`, not a Python import).
 
 from __future__ import annotations
 
+import dataclasses
 import sqlite3
 import typing
 from pathlib import Path
@@ -21,6 +22,8 @@ import pytest
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
+    EloGameStep,
+    EloLedger,
     Method,
     SameTeamComparisonError,
     Sport,
@@ -726,3 +729,326 @@ def test_unregistered_method_verdict_raises_instead_of_falling_back(
     # Scoped to the verdict's number formatting: the rest of the evidence
     # surface does no formatting and is unchanged for such a method.
     assert build_team_case(conn, YEAR, "Alpha State", method="glicko").rating == 1523.456789
+
+
+# ---------------------------------------------------------------------------
+# (g) issue #183 -- the Elo ledger is read back from elo_ledger_steps /
+# elo_ledger_configs, exactly as stored, scoped to (year, method, sport, team)
+# ---------------------------------------------------------------------------
+
+# Deliberately non-round, all-distinct values so a swapped or rounded field
+# cannot pass an equality check by coincidence.
+_ELO_CONFIG = {
+    "starting_rating": 1500.125,
+    "k": 20.5,
+    "hfa": 55.25,
+    "scale": 400.75,
+    "mov_scale": 2.2,
+    "mov_autocorr": 0.001,
+}
+
+
+def _insert_ledger_config(
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    sport: str,
+    starting_rating: float,
+    k: float,
+    hfa: float,
+    scale: float,
+    mov_scale: float,
+    mov_autocorr: float,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO elo_ledger_configs (
+            year, method, sport, starting_rating, k, hfa, scale, mov_scale,
+            mov_autocorr, computed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')
+        """,
+        (year, method, sport, starting_rating, k, hfa, scale, mov_scale, mov_autocorr),
+    )
+
+
+def _insert_ledger_step(
+    conn: sqlite3.Connection,
+    year: int,
+    method: str,
+    sport: str,
+    team_id: int,
+    step: EloGameStep,
+) -> None:
+    """Store `step` for `team_id`. `step.opponent_name` is not stored -- the
+    table has no such column; the evidence layer resolves it from `teams`."""
+    conn.execute(
+        """
+        INSERT INTO elo_ledger_steps (
+            year, method, sport, team_id, game_number, week, season_type,
+            start_date, opponent_team_id, venue, team_points, opponent_points,
+            result, rating_before, opponent_rating_before, home_field_adjustment,
+            rating_gap, win_expectancy, mov_multiplier, shift, rating_after,
+            computed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')
+        """,
+        (
+            year,
+            method,
+            sport,
+            team_id,
+            step.game_number,
+            step.week,
+            step.season_type,
+            step.start_date,
+            step.opponent_team_id,
+            step.venue,
+            step.team_points,
+            step.opponent_points,
+            step.result,
+            step.rating_before,
+            step.opponent_rating_before,
+            step.home_field_adjustment,
+            step.rating_gap,
+            step.win_expectancy,
+            step.mov_multiplier,
+            step.shift,
+            step.rating_after,
+        ),
+    )
+
+
+# Alpha State (id 1): beat Bravo Tech at home, then won at Charlie U in the
+# postseason. Values are stand-ins, not a real walk -- this layer copies what
+# is stored and must not recompute or validate the arithmetic.
+_ALPHA_STEP_1 = EloGameStep(
+    game_number=1,
+    opponent_team_id=2,
+    venue="home",
+    team_points=30,
+    opponent_points=10,
+    result="W",
+    rating_before=1500.125,
+    opponent_rating_before=1499.0625,
+    home_field_adjustment=55.25,
+    rating_gap=56.3125,
+    win_expectancy=0.580123456789,
+    mov_multiplier=1.87654321,
+    shift=16.1234567891,
+    rating_after=1516.2484567891,
+    week=1,
+    season_type="regular",
+    start_date="2023-09-02T16:00:00.000Z",
+    opponent_name="Bravo Tech",
+)
+_ALPHA_STEP_2 = EloGameStep(
+    game_number=2,
+    opponent_team_id=3,
+    venue="away",
+    team_points=40,
+    opponent_points=3,
+    result="W",
+    rating_before=1516.2484567891,
+    opponent_rating_before=1483.9876,
+    home_field_adjustment=-55.25,
+    rating_gap=-22.9891432109,
+    win_expectancy=0.467012345678,
+    mov_multiplier=2.3456789012,
+    shift=25.6543210987,
+    rating_after=1541.9027778878,
+    week=None,
+    season_type="postseason",
+    start_date=None,
+    opponent_name="Charlie U",
+)
+# Bravo Tech (id 2), for the comparison test: lost at Alpha, beat Charlie on
+# a neutral field.
+_BRAVO_STEP_1 = EloGameStep(
+    game_number=1,
+    opponent_team_id=1,
+    venue="away",
+    team_points=10,
+    opponent_points=30,
+    result="L",
+    rating_before=1499.0625,
+    opponent_rating_before=1500.125,
+    home_field_adjustment=-55.25,
+    rating_gap=-56.3125,
+    win_expectancy=0.419876543211,
+    mov_multiplier=1.87654321,
+    shift=-16.1234567891,
+    rating_after=1482.9390432109,
+    week=1,
+    season_type="regular",
+    start_date="2023-09-02T16:00:00.000Z",
+    opponent_name="Alpha State",
+)
+_BRAVO_STEP_2 = EloGameStep(
+    game_number=2,
+    opponent_team_id=3,
+    venue="neutral",
+    team_points=20,
+    opponent_points=17,
+    result="W",
+    rating_before=1482.9390432109,
+    opponent_rating_before=1483.9876,
+    home_field_adjustment=0.0,
+    rating_gap=-1.0485567891,
+    win_expectancy=0.498490000001,
+    mov_multiplier=0.9876543,
+    shift=10.3123456789,
+    rating_after=1493.2513888898,
+    week=2,
+    season_type="regular",
+    start_date="2023-09-09T19:30:00.000Z",
+    opponent_name="Charlie U",
+)
+
+
+def _insert_elo_ledger_fixture(conn: sqlite3.Connection) -> None:
+    """Elo ratings for the CFB cycle plus a ledger for Alpha State and Bravo
+    Tech. Alpha's steps are inserted in reverse game_number order, so row
+    order and game order disagree."""
+    _insert_cfb_cycle_ratings(conn, "elo", (1541.9027778878, 1493.2513888898, 1400.0))
+    _insert_ledger_config(conn, YEAR, "elo", "cfb", **_ELO_CONFIG)
+    _insert_ledger_step(conn, YEAR, "elo", "cfb", 1, _ALPHA_STEP_2)
+    _insert_ledger_step(conn, YEAR, "elo", "cfb", 1, _ALPHA_STEP_1)
+    _insert_ledger_step(conn, YEAR, "elo", "cfb", 2, _BRAVO_STEP_1)
+    _insert_ledger_step(conn, YEAR, "elo", "cfb", 2, _BRAVO_STEP_2)
+    conn.commit()
+
+
+def _expected_ledger(*steps: EloGameStep) -> EloLedger:
+    return EloLedger(**_ELO_CONFIG, steps=list(steps))
+
+
+def test_elo_case_ledger_is_ordered_resolved_and_copied_exactly(
+    conn: sqlite3.Connection,
+) -> None:
+    """(a) Steps come back in game_number order despite reverse insertion,
+    every opponent_name is resolved from `teams`, the constants are the config
+    row's, and every stored field is equal to what was inserted -- including
+    NULL week / start_date and a non-regular season_type."""
+    _insert_elo_ledger_fixture(conn)
+
+    case = build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
+
+    assert case.elo_ledger is not None
+    assert [s.game_number for s in case.elo_ledger.steps] == [1, 2]
+    assert [s.opponent_name for s in case.elo_ledger.steps] == ["Bravo Tech", "Charlie U"]
+    assert case.elo_ledger == _expected_ledger(_ALPHA_STEP_1, _ALPHA_STEP_2)
+
+
+def test_keener_case_has_no_elo_ledger_even_when_elo_ledger_rows_exist(
+    conn: sqlite3.Connection,
+) -> None:
+    """(b) Keener writes no ledger. Elo ledger rows for the same team, year
+    and sport must not leak into a keener case."""
+    _insert_elo_ledger_fixture(conn)
+
+    case = build_team_case(conn, YEAR, "Alpha State", method="keener", sport="cfb")
+
+    assert case.elo_ledger is None
+
+
+def test_elo_ratings_without_any_ledger_rows_give_no_ledger(
+    conn: sqlite3.Connection,
+) -> None:
+    """(b) A db whose elo ratings predate #183 has no rows in either ledger
+    table: that is "no ledger", not a corrupt db."""
+    _insert_cfb_cycle_ratings(conn, "elo", (1523.456789, 1498.04, 1400.0))
+
+    case = build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
+
+    assert case.elo_ledger is None
+
+
+def test_build_comparison_carries_each_teams_own_ledger(conn: sqlite3.Connection) -> None:
+    """(c) ComparisonTeamSummary.elo_ledger is the same ledger as that team's
+    TeamCase.elo_ledger, for both sides, and neither side gets the other's."""
+    _insert_elo_ledger_fixture(conn)
+
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="elo", sport="cfb")
+
+    assert comparison.team_a.elo_ledger == _expected_ledger(_ALPHA_STEP_1, _ALPHA_STEP_2)
+    assert comparison.team_b.elo_ledger == _expected_ledger(_BRAVO_STEP_1, _BRAVO_STEP_2)
+
+
+def test_keener_comparison_carries_no_ledgers(conn: sqlite3.Connection) -> None:
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener")
+    assert comparison.team_a.elo_ledger is None
+    assert comparison.team_b.elo_ledger is None
+
+
+def test_ledger_steps_without_a_config_row_raise_naming_the_config_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """(d) Steps with no config row: the constants are missing. Inventing
+    them (or dropping the ledger) would misreport a corrupt db."""
+    _insert_cfb_cycle_ratings(conn, "elo", (1541.9027778878, 1493.2513888898, 1400.0))
+    _insert_ledger_step(conn, YEAR, "elo", "cfb", 1, _ALPHA_STEP_1)
+    conn.commit()
+
+    with pytest.raises(ValueError, match="elo_ledger_configs"):
+        build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
+
+
+def test_config_row_without_steps_for_this_team_raises_naming_the_steps_table(
+    conn: sqlite3.Connection,
+) -> None:
+    """(d) A config row says a ledger was written for this (year, method,
+    sport), so every rated team must have steps. Charlie U (id 3) is rated but
+    has none, while its neighbours do."""
+    _insert_elo_ledger_fixture(conn)
+
+    with pytest.raises(ValueError, match="elo_ledger_steps"):
+        build_team_case(conn, YEAR, "Charlie U", method="elo", sport="cfb")
+
+
+def test_ledger_step_with_an_opponent_missing_from_teams_raises(
+    conn: sqlite3.Connection,
+) -> None:
+    """A step whose opponent has no `teams` row is a corrupt db (the column
+    references teams(id)). It must not be silently dropped from the ledger or
+    shown with a blank name."""
+    _insert_elo_ledger_fixture(conn)
+    conn.execute("PRAGMA foreign_keys = OFF")
+    orphan = dataclasses.replace(_ALPHA_STEP_2, game_number=3, opponent_team_id=999)
+    _insert_ledger_step(conn, YEAR, "elo", "cfb", 1, orphan)
+    conn.commit()
+
+    with pytest.raises(ValueError, match="teams"):
+        build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
+
+
+@pytest.mark.parametrize(
+    ("decoy_year", "decoy_method", "decoy_sport", "decoy_team_id"),
+    [
+        (YEAR, "elo", "cfb", 3),  # another team
+        (YEAR - 1, "elo", "cfb", 1),  # another year
+        (YEAR, "elo_career", "cfb", 1),  # another method
+        (YEAR, "elo", "nfl", 1),  # another sport
+    ],
+    ids=["other-team", "other-year", "other-method", "other-sport"],
+)
+def test_ledger_rows_outside_the_cases_scope_never_appear(
+    conn: sqlite3.Connection,
+    decoy_year: int,
+    decoy_method: str,
+    decoy_sport: str,
+    decoy_team_id: int,
+) -> None:
+    """(e) One decoy step (game_number 3, so it would extend the real ledger
+    rather than collide with it) plus a decoy config with different constants,
+    keyed one dimension away from Alpha State's (YEAR, elo, cfb) ledger."""
+    _insert_elo_ledger_fixture(conn)
+    decoy_step = dataclasses.replace(_ALPHA_STEP_2, game_number=3, shift=-999.0, opponent_team_id=2)
+    _insert_ledger_step(conn, decoy_year, decoy_method, decoy_sport, decoy_team_id, decoy_step)
+    if (decoy_year, decoy_method, decoy_sport) != (YEAR, "elo", "cfb"):
+        _insert_ledger_config(
+            conn, decoy_year, decoy_method, decoy_sport, **{k: v + 1 for k, v in _ELO_CONFIG.items()}
+        )
+    conn.commit()
+
+    case = build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
+
+    assert case.elo_ledger == _expected_ledger(_ALPHA_STEP_1, _ALPHA_STEP_2)

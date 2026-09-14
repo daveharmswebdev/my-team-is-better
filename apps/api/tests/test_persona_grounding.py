@@ -17,6 +17,7 @@ from fixtures.sport_fixture import make_sport_fixture_db
 from api.deps import list_all_team_names
 from api.models import ComparisonResultOut, Sport, TeamCaseOut
 from api.persona.grounding import find_ungrounded_tokens
+from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
 FACT_BLOCK = (
     '{"team_name": "Texas", "year": 2005, "wins": 13, "losses": 0, "rank": 1, '
@@ -261,6 +262,7 @@ def _bengals_fact_block(*, with_tie_game: bool) -> str:
         losses=9,
         ties=1,
         rating_breakdown=RatingBreakdownOut(entries=[], residual_contribution=0.0),
+        elo_ledger=None,
         games=games,
         quality_wins=[],
         worst_loss=None,
@@ -295,8 +297,9 @@ def test_tied_game_score_is_grounded_against_the_tied_opponent() -> None:
 # the fix, a record was attributed to its nearest team name like any other
 # hyphen pair and flagged whenever that name had game data -- which served the
 # fallback for correct narrations in production. Every fact block here is the
-# real one `api.persona.service` hands Claude (`model_dump_json()` of the
-# evidence built from a committed fixture), not a hand-typed string.
+# real one `api.persona.service` hands Claude (its `team_case_fact_block_json`
+# / `comparison_fact_block_json` of the evidence built from a committed
+# fixture, which leave out `elo_ledger`, #183), not a hand-typed string.
 #
 # Each grounded sentence is paired with the same sentence carrying a
 # fabricated pair that is NOT a subject team's record, asserted to produce the
@@ -328,14 +331,14 @@ def nfl_conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
 
 def _team_case_block(conn: sqlite3.Connection, year: int, team: str, sport: Sport) -> str:
     case = build_team_case(conn, year, team, method="keener", sport=sport)
-    return TeamCaseOut.from_dataclass(case).model_dump_json()
+    return team_case_fact_block_json(TeamCaseOut.from_dataclass(case))
 
 
 def _comparison_block(
     conn: sqlite3.Connection, year: int, team_a: str, team_b: str, sport: Sport
 ) -> str:
     comparison = build_comparison(conn, year, team_a, team_b, method="keener", sport=sport)
-    return ComparisonResultOut.from_dataclass(comparison).model_dump_json()
+    return comparison_fact_block_json(ComparisonResultOut.from_dataclass(comparison))
 
 
 def _check(conn: sqlite3.Connection, response: str, fact_block: str, sport: Sport) -> list[str]:

@@ -77,6 +77,7 @@ from api.models import TeamCaseOut
 from api.persona.claude_client import MODEL, ClaudeNarrator, Narrator
 from api.persona.fallback import team_case_fallback_text
 from api.persona.prompt import build_user_message
+from api.persona.service import team_case_fact_block_json
 from api.rating_display import RATING_DISPLAY
 
 # The Keener #1 per golden year, as the PRD's golden dataset and the fixture
@@ -478,7 +479,7 @@ def test_champion_narration_meets_the_section_8_properties(client: TestClient, y
     narration = body["narration"]
     text: str = narration["text"]
     team_name = case.team_name
-    fact_block_json = case.model_dump_json()
+    fact_block_json = team_case_fact_block_json(case)
     fallback_text = team_case_fallback_text(case)
     # The retry's last user turn is production's grounding feedback, so a
     # retry or fallback shows what `api.persona.grounding` objected to.
@@ -553,7 +554,7 @@ def _section_8_violations(
     """
     violations: list[str] = []
     team_name = case.team_name
-    fact_block_json = case.model_dump_json()
+    fact_block_json = team_case_fact_block_json(case)
     pattern = _team_mention_pattern(catalog)
     mentions = _team_mentions(pattern, text)
 

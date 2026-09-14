@@ -7,8 +7,9 @@ import type {
 import { formatRating } from '../../lib/formatRating'
 import { formatRecord } from '../../lib/formatRecord'
 import { resultLabel } from '../../lib/resultLabel'
+import { EloLedgerDisclosure } from './EloLedgerDisclosure'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
-import { RATING_BREAKDOWN_BY_METHOD } from './ratingBreakdownByMethod'
+import { ratingWorkFor } from './ratingBreakdownByMethod'
 import styles from './TeamCaseReceipts.module.css'
 
 const TAG_CLASS: Record<GameResult, string | undefined> = {
@@ -113,8 +114,8 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
   const qualityWinsHeadingId = `${headingId}-quality-wins`
   const worstLossHeadingId = `${headingId}-worst-loss`
   const fullScheduleHeadingId = `${headingId}-full-schedule`
-  // Issue #153: by method, never by the breakdown's emptiness.
-  const breakdownSupport = RATING_BREAKDOWN_BY_METHOD[evidence.method]
+  // Issues #153/#183: by method, never by the breakdown's emptiness.
+  const work = ratingWorkFor(evidence.method, evidence.elo_ledger)
 
   return (
     <section
@@ -124,18 +125,27 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
       <div className={styles.stats}>
         Record: {formatRecord(evidence.wins, evidence.losses, evidence.ties)}{' '}
         &middot; Rank #{evidence.rank} &middot; Rating{' '}
-        {breakdownSupport.hasBreakdown ? (
+        {work.kind === 'keener-breakdown' ? (
           <RatingBreakdownDisclosure
             teamName={evidence.team_name}
             method={evidence.method}
             rating={evidence.rating}
             breakdown={evidence.rating_breakdown}
           />
+        ) : work.kind === 'elo-ledger' ? (
+          <EloLedgerDisclosure
+            teamName={evidence.team_name}
+            rating={evidence.rating}
+            ledger={work.ledger}
+          />
         ) : (
           formatRating(evidence.rating, evidence.method)
         )}
-        {!breakdownSupport.hasBreakdown && (
-          <p className={styles.ratingNote}>{breakdownSupport.explainer}</p>
+        {work.kind === 'no-disclosure' && (
+          <p className={styles.ratingNote}>{work.explainer}</p>
+        )}
+        {work.kind === 'ledger-unavailable' && (
+          <p className={styles.ratingNote}>{work.note}</p>
         )}
       </div>
 

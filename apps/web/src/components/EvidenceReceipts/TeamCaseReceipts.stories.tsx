@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 import type { TeamCaseOut } from '../../lib/api/types'
+import { TEXAS_ELO } from './eloLedgerFixture'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
 
 const qualityWin = {
@@ -100,6 +101,7 @@ const undefeated: TeamCaseOut = {
     ],
     residual_contribution: 0.00734,
   },
+  elo_ledger: null,
   games: [openerWin, qualityWin, midseasonWin, lateSeasonWin, bowlWin],
   quality_wins: [qualityWin],
   worst_loss: null,
@@ -191,32 +193,68 @@ export const RatingBreakdown: Story = {
   },
 }
 
+const texasElo: TeamCaseOut = {
+  ...undefeated,
+  method: 'elo',
+  rating: TEXAS_ELO.rating,
+  wins: TEXAS_ELO.wins,
+  losses: TEXAS_ELO.losses,
+  ties: TEXAS_ELO.ties,
+  rating_breakdown: { entries: [], residual_contribution: 0 },
+  elo_ledger: TEXAS_ELO.elo_ledger,
+}
+
 /**
- * An Elo team case (epic #147 / issues #82, #153): the rating prints on Elo's
- * own whole-point scale ("1,684"), picked from `evidence.method`, never
- * Keener's x1000 transform -- and as plain text, with no breakdown disclosure.
- * Elo writes no breakdown rows (this is the real wire shape), so a Keener-style
- * panel would claim "Total 0" matches 1,684; one explainer line says why there
- * is nothing to open instead.
+ * An Elo team case (epic #147 / issues #82, #183): the rating prints on Elo's
+ * own whole-point scale ("1,661"), and hovering it opens the engine's own
+ * game-by-game ledger -- the rule, the start, every game's worked step and
+ * the rating the card rounds.
  */
 export const Elo: Story = {
+  args: { evidence: texasElo },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/Rating/)).toBeVisible()
+    await userEvent.hover(canvas.getByRole('button', { name: '1,661' }))
+    await expect(
+      await canvas.findByRole('dialog', {
+        name: 'Texas Elo rating, game by game',
+      }),
+    ).toBeVisible()
+    await expect(canvasElement.textContent).not.toMatch(/Keener/)
+  },
+}
+
+/**
+ * An Elo response from a stale API/db with no ledger: the plain rating and
+ * one honest line, never an empty or invented panel.
+ */
+export const EloLedgerUnavailable: Story = {
+  args: { evidence: { ...texasElo, elo_ledger: null } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/Rating 1,661/)).toBeVisible()
+    await expect(canvas.queryByRole('button')).toBeNull()
+    await expect(
+      canvas.getByText(
+        "This rating's game-by-game work isn't available right now.",
+      ),
+    ).toBeVisible()
+  },
+}
+
+/** Career Elo: nothing to open yet, and one line says why. */
+export const EloCareer: Story = {
   args: {
-    evidence: {
-      ...undefeated,
-      method: 'elo',
-      rating: 1684.4,
-      rating_breakdown: { entries: [], residual_contribution: 0 },
-    },
+    evidence: { ...texasElo, method: 'elo_career', elo_ledger: null },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText(/Rating 1,684/)).toBeVisible()
+    await expect(canvas.queryByRole('button')).toBeNull()
     await expect(
-      canvasElement.querySelector('[aria-haspopup="dialog"]'),
-    ).toBeNull()
-    await expect(
-      canvas.getByText(/has no per-opponent breakdown to show/),
+      canvas.getByText(
+        "Career Elo carries ratings across seasons, and its game-by-game work isn't shown yet.",
+      ),
     ).toBeVisible()
-    await expect(canvasElement.textContent).not.toMatch(/Keener/)
   },
 }

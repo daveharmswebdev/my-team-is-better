@@ -9,8 +9,12 @@ import type {
   HeadToHeadMeetingOut,
   Method,
 } from '../../lib/api/types'
+import { EloLedgerDisclosure } from './EloLedgerDisclosure'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
-import { RATING_BREAKDOWN_BY_METHOD } from './ratingBreakdownByMethod'
+import {
+  RATING_BREAKDOWN_BY_METHOD,
+  ratingWorkFor,
+} from './ratingBreakdownByMethod'
 import styles from './ComparisonReceipts.module.css'
 
 const TAG_CLASS: Record<GameResult, string | undefined> = {
@@ -45,6 +49,9 @@ function TeamSummary({
   team: ComparisonTeamSummaryOut
   method: Method
 }) {
+  // Issues #153/#183: by method, never by the breakdown's emptiness.
+  const work = ratingWorkFor(method, team.elo_ledger)
+
   return (
     <>
       <h4 className={styles.label}>{team.team_name}</h4>
@@ -56,16 +63,25 @@ function TeamSummary({
         <div>
           <dt>Rating</dt>
           <dd>
-            {/* Issue #153: by method, never by the breakdown's emptiness. */}
-            {RATING_BREAKDOWN_BY_METHOD[method].hasBreakdown ? (
+            {work.kind === 'keener-breakdown' ? (
               <RatingBreakdownDisclosure
                 teamName={team.team_name}
                 method={method}
                 rating={team.rating}
                 breakdown={team.rating_breakdown}
               />
+            ) : work.kind === 'elo-ledger' ? (
+              <EloLedgerDisclosure
+                teamName={team.team_name}
+                rating={team.rating}
+                ledger={work.ledger}
+              />
             ) : (
               formatRating(team.rating, method)
+            )}
+            {/* About this team's response, so beside this team's rating. */}
+            {work.kind === 'ledger-unavailable' && (
+              <p className={styles.ratingTeamNote}>{work.note}</p>
             )}
           </dd>
         </div>
@@ -147,8 +163,8 @@ export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
     <section aria-label="comparison evidence" className={styles.receipts}>
       <TeamSummary team={team_a} method={method} />
       <TeamSummary team={team_b} method={method} />
-      {/* Once for the whole block, not once per team. */}
-      {!breakdownSupport.hasBreakdown && (
+      {/* About the method, so once for the whole block, not once per team. */}
+      {breakdownSupport.kind === 'no-disclosure' && (
         <p className={styles.ratingNote}>{breakdownSupport.explainer}</p>
       )}
 

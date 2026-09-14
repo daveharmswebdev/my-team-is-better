@@ -43,6 +43,33 @@ from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 from api.persona.narrate import narrate
 
+# Issue #183: the Elo ledger is published to clients but kept out of both
+# fact blocks, so the narrator's input stays byte-identical to before #183.
+# Left in, every pre-game rating and per-game shift would reach the prompt
+# and, through `find_ungrounded_tokens(text, fact_block_json, ...)`,
+# grounding's accepted-number set -- quietly licensing the narrator to quote
+# figures nobody decided it should narrate (#175's open question). Removing an
+# entry here is that decision, and needs a PROMPT_VERSION bump with it.
+TEAM_CASE_FACT_BLOCK_EXCLUDE: dict[str, bool] = {"elo_ledger": True}
+COMPARISON_FACT_BLOCK_EXCLUDE: dict[str, dict[str, bool]] = {
+    "team_a": {"elo_ledger": True},
+    "team_b": {"elo_ledger": True},
+}
+
+
+def team_case_fact_block_json(case: TeamCaseOut) -> str:
+    """The FACT BLOCK JSON the narrator and the grounding check see for a
+    champion or team-case verdict. The one definition: tests that exercise
+    grounding on "the real fact block" build it here too, so they cannot
+    drift into a more permissive block than production hands Claude."""
+    return case.model_dump_json(exclude=TEAM_CASE_FACT_BLOCK_EXCLUDE)
+
+
+def comparison_fact_block_json(comparison: ComparisonResultOut) -> str:
+    """The FACT BLOCK JSON for a compare verdict; see
+    `team_case_fact_block_json`."""
+    return comparison.model_dump_json(exclude=COMPARISON_FACT_BLOCK_EXCLUDE)
+
 
 def is_contested(year: int) -> bool:
     """§4.1's `contested` flag -- true for the years the human polls and
@@ -73,7 +100,8 @@ def narrate_team_case(
     )
     return _cached_narration(
         conn,
-        case,
+        year=case.year,
+        fact_block_json=team_case_fact_block_json(case),
         key=key,
         fallback_text=team_case_fallback_text(case),
         user_team=user_team,
@@ -104,7 +132,8 @@ def narrate_comparison(
     )
     return _cached_narration(
         conn,
-        comparison,
+        year=comparison.year,
+        fact_block_json=comparison_fact_block_json(comparison),
         key=key,
         fallback_text=comparison_fallback_text(comparison),
         user_team=user_team,
@@ -116,8 +145,9 @@ def narrate_comparison(
 
 def _cached_narration(
     conn: sqlite3.Connection,
-    evidence: TeamCaseOut | ComparisonResultOut,
     *,
+    year: int,
+    fact_block_json: str,
     key: str,
     fallback_text: str,
     user_team: str | None,
@@ -129,15 +159,19 @@ def _cached_narration(
     it is the fallback. A cached entry whose text is this request's
     `fallback_text` is a legacy fallback row and counts as a miss (see the
     module docstring, issue #65).
+
+    `fact_block_json` comes from `team_case_fact_block_json` /
+    `comparison_fact_block_json`, never a bare `model_dump_json()`, so the
+    #183 ledger exclusion cannot be bypassed here.
     """
-    contested = is_contested(evidence.year)
+    contested = is_contested(year)
 
     cached = cache.get(key)
     if cached is not None and cached.text != fallback_text:
         return NarrationOut(text=cached.text, contested=cached.contested, cached=True)
 
     result = narrate(
-        fact_block_json=evidence.model_dump_json(),
+        fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
         known_team_names=list_all_team_names(conn, sport),

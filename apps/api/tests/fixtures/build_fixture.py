@@ -94,10 +94,18 @@ ratings would model nothing and would be actively misleading to assert
 against. Tracked as issue #98; `method="elo_career"` is still accepted by the
 API (it is a registered method) and correctly returns nothing here.
 
+Issue #183: `elo` also records an Elo ledger (`elo_ledger_steps`,
+`elo_ledger_configs`), the shown work the API serves as `elo_ledger`.
+`check_elo_ledgers` fails the build unless every elo-rated team has ledger
+steps, a config row, and a final `rating_after` equal to its rating -- so a
+fixture whose ledger writer skipped a team, or whose chain drifted from the
+rating, never gets committed for the API tests to trust.
+
 Determinism: `compute_and_store` stamps `computed_at` with the wall clock,
-the only run-dependent value it writes. The build overwrites it with
-`FIXTURE_COMPUTED_AT` and VACUUMs, so rerunning on an unchanged source and
-engine produces a byte-identical file (with the same SQLite build). Nothing
+the only run-dependent value it writes, in every table in `STAMPED_TABLES`.
+The build overwrites it with `FIXTURE_COMPUTED_AT` and VACUUMs, so rerunning
+on an unchanged source and engine produces a byte-identical file (with the
+same SQLite build). Nothing
 in `apps/api` or `apps/web` reads `computed_at`.
 """
 
@@ -148,6 +156,72 @@ KEENER_CHAMPIONS: dict[int, tuple[str, int, int, bool]] = {
 WAIVABLE_FOR_A_SLICE = frozenset(
     {"season_behind_cache", "season_missing_ratings", "league_has_no_games"}
 )
+
+# The baked methods that record an Elo ledger (issue #183). Keener has a
+# `rating_breakdown` instead; `elo_career` records none and is not baked.
+LEDGER_METHODS: tuple[Method, ...] = ("elo",)
+
+# Every table `compute_and_store` stamps with the wall clock. See "Determinism".
+STAMPED_TABLES: tuple[str, ...] = (
+    "ratings",
+    "rating_breakdowns",
+    "elo_ledger_steps",
+    "elo_ledger_configs",
+)
+
+
+def check_elo_ledgers(conn: sqlite3.Connection) -> None:
+    """Fail unless every team rated by a `LEDGER_METHODS` method, in every
+    baked year, has an Elo ledger whose chain lands on its rating (#183).
+
+    Checked per rated team rather than per stored step, so a team the writer
+    skipped entirely is caught, not only a short one: it must have ledger
+    steps, a config row for its (year, method), and a final step (highest
+    `game_number`) whose `rating_after` equals its `ratings.rating` exactly.
+    Exactly, because the engine's final `rating_after` *is* the rating (the
+    walk's own addition) and both are stored from that one float."""
+    placeholders = ", ".join("?" for _ in LEDGER_METHODS)
+    rows = conn.execute(
+        f"""
+        SELECT r.year AS year, r.method AS method, t.school AS school,
+               r.rating AS rating,
+               (SELECT COUNT(*) FROM elo_ledger_steps s
+                 WHERE s.year = r.year AND s.method = r.method
+                   AND s.sport = r.sport AND s.team_id = r.team_id) AS steps,
+               (SELECT s.rating_after FROM elo_ledger_steps s
+                 WHERE s.year = r.year AND s.method = r.method
+                   AND s.sport = r.sport AND s.team_id = r.team_id
+                 ORDER BY s.game_number DESC LIMIT 1) AS final_rating_after,
+               EXISTS (SELECT 1 FROM elo_ledger_configs c
+                 WHERE c.year = r.year AND c.method = r.method
+                   AND c.sport = r.sport) AS has_config
+        FROM ratings r JOIN teams t ON t.id = r.team_id
+        WHERE r.method IN ({placeholders})
+        ORDER BY r.method, r.year, r.rank
+        """,
+        LEDGER_METHODS,
+    ).fetchall()
+    if not rows:
+        raise AssertionError(f"no ratings rows at all for ledger methods {LEDGER_METHODS}")
+
+    broken: list[str] = []
+    for row in rows:
+        where = f"{row['year']} {row['method']} {row['school']}"
+        if row["steps"] == 0:
+            broken.append(f"{where}: no elo_ledger_steps rows")
+        elif not row["has_config"]:
+            broken.append(f"{where}: no elo_ledger_configs row")
+        elif row["final_rating_after"] != row["rating"]:
+            broken.append(
+                f"{where}: final rating_after {row['final_rating_after']!r} "
+                f"!= rating {row['rating']!r}"
+            )
+    if broken:
+        raise AssertionError(
+            f"{len(broken)} of {len(rows)} ledger-method ratings have no ledger landing on "
+            "their rating (issue #183):\n  - " + "\n  - ".join(broken)
+        )
+    print(f"elo ledger check passed: {len(rows)} ratings, each with a ledger ending on its rating")
 
 
 def _record(wins: int, losses: int, ties: int) -> str:
@@ -316,21 +390,24 @@ def _bake(partial: Path, raw_dir: Path) -> None:
             print(f"teams with ties > 0 for {method}: {tied}")
 
         for method in METHODS:
-            ratings_count = conn.execute(
-                "SELECT COUNT(*) AS n FROM ratings WHERE method = ?", (method,)
-            ).fetchone()["n"]
-            breakdown_count = conn.execute(
-                "SELECT COUNT(*) AS n FROM rating_breakdowns WHERE method = ?",
-                (method,),
-            ).fetchone()["n"]
-            print(
-                f"row counts for {method}: ratings={ratings_count} "
-                f"rating_breakdowns={breakdown_count}"
-            )
+            counts = {
+                table: conn.execute(
+                    f"SELECT COUNT(*) AS n FROM {table} WHERE method = ?", (method,)
+                ).fetchone()["n"]
+                for table in (
+                    "ratings",
+                    "rating_breakdowns",
+                    "elo_ledger_steps",
+                    "elo_ledger_configs",
+                )
+            }
+            print(f"row counts for {method}: " + " ".join(f"{t}={n}" for t, n in counts.items()))
+
+        check_elo_ledgers(conn)
 
         with conn:
-            conn.execute("UPDATE ratings SET computed_at = ?", (FIXTURE_COMPUTED_AT,))
-            conn.execute("UPDATE rating_breakdowns SET computed_at = ?", (FIXTURE_COMPUTED_AT,))
+            for table in STAMPED_TABLES:
+                conn.execute(f"UPDATE {table} SET computed_at = ?", (FIXTURE_COMPUTED_AT,))
         conn.execute("VACUUM")
     finally:
         conn.close()

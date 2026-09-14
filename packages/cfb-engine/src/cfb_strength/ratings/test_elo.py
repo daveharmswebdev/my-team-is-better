@@ -17,6 +17,8 @@ import pytest
 
 from cfb_strength.contracts import (
     CareerRatingMethod,
+    EloGameStep,
+    EloLedger,
     Game,
     RatingMethod,
     TeamRating,
@@ -842,3 +844,219 @@ def test_unregistered_sport_raises_naming_the_available_sports() -> None:
         ELO_CONFIGS["nba"]
     assert "nba" in str(exc.value)
     assert "cfb" in str(exc.value) and "nfl" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# EloLedger (issue #183): the shown work behind a season Elo rating. Every
+# number in a step is the value the walk used or produced, so the chain
+# identities below are asserted with `==`, not `approx` -- a ledger that is
+# merely close to the rating is a recomputation, not a record.
+# ---------------------------------------------------------------------------
+
+E = 5
+
+_RESULT_SCORE = {"W": 1.0, "T": 0.5, "L": 0.0}
+
+
+def _ledger_season() -> list[Game]:
+    """Five teams, eight games, in walk order: home wins, away wins, two
+    neutral-site games, a home tie and a neutral tie, with every ordering
+    field populated so the copy-through can be checked. A plays five games
+    (home, away and neutral), so its chain is long enough to catch a
+    swapped or dropped step anywhere in the middle."""
+    def g(
+        home: int,
+        away: int,
+        hp: int,
+        ap: int,
+        week: int | None,
+        *,
+        neutral: bool = False,
+        season_type: str = "regular",
+        start_date: str | None = None,
+    ) -> Game:
+        return Game(
+            home_team_id=home,
+            away_team_id=away,
+            home_points=hp,
+            away_points=ap,
+            neutral_site=neutral,
+            season=2009,
+            week=week,
+            season_type=season_type,
+            start_date=start_date,
+        )
+
+    return [
+        g(A, B, 31, 10, 1, start_date="2009-09-05"),  # A home win
+        g(C, A, 24, 27, 2, start_date="2009-09-12"),  # A away win
+        g(B, D, 17, 17, 2),  # home tie
+        g(A, D, 14, 35, 3, neutral=True),  # neutral, A loses
+        g(C, E, 3, 3, 4, neutral=True),  # neutral tie
+        g(D, B, 49, 0, None),  # null week
+        g(E, A, 20, 21, 5),  # A away win by one
+        g(A, C, 38, 7, None, season_type="postseason", start_date="2010-01-01"),
+    ]
+
+
+def _step_pairs(
+    games: list[Game], ratings: dict[int, TeamRating]
+) -> list[tuple[Game, EloGameStep, EloGameStep]]:
+    """Pair each game with its home and away steps, by per-team walk order."""
+    cursor: dict[int, int] = {}
+    pairs: list[tuple[Game, EloGameStep, EloGameStep]] = []
+    for game in games:
+        steps: list[EloGameStep] = []
+        for team_id in (game.home_team_id, game.away_team_id):
+            ledger = ratings[team_id].elo_ledger
+            assert ledger is not None
+            steps.append(ledger.steps[cursor.get(team_id, 0)])
+            cursor[team_id] = cursor.get(team_id, 0) + 1
+        pairs.append((game, steps[0], steps[1]))
+    return pairs
+
+
+def test_elo_ledger_chain_is_exact_for_every_team() -> None:
+    """Rubric (a): the chain holds bit for bit, and ends on the rating."""
+    ratings = EloRating(CFB).rate(_ledger_season())
+    assert set(ratings) == {A, B, C, D, E}
+    for team_id, tr in ratings.items():
+        ledger = tr.elo_ledger
+        assert ledger is not None, team_id
+        assert ledger.steps, team_id
+        assert ledger.steps[0].rating_before == ledger.starting_rating
+        for before, after in zip(ledger.steps, ledger.steps[1:]):
+            assert after.rating_before == before.rating_after
+        for step in ledger.steps:
+            assert step.rating_after == step.rating_before + step.shift
+        assert [s.game_number for s in ledger.steps] == list(
+            range(1, len(ledger.steps) + 1)
+        )
+        assert ledger.steps[-1].rating_after == tr.rating
+        assert ledger.starting_rating + sum(s.shift for s in ledger.steps) == pytest.approx(
+            tr.rating
+        )
+
+
+def test_elo_ledger_steps_re_derive_from_their_own_fields() -> None:
+    """Rubric (b): every step's win expectancy, multiplier and shift follow
+    from its own fields and the ledger's constants."""
+    ratings = EloRating(CFB).rate(_ledger_season())
+    for tr in ratings.values():
+        ledger = tr.elo_ledger
+        assert ledger is not None
+        assert ledger.starting_rating == CFB.initial
+        assert (ledger.k, ledger.hfa, ledger.scale, ledger.mov_scale, ledger.mov_autocorr) == (
+            CFB.k, CFB.hfa, CFB.scale, CFB.mov_scale, CFB.mov_autocorr,
+        )
+        for step in ledger.steps:
+            result_score = _RESULT_SCORE[step.result]
+            assert expected_score(step.rating_gap, CFB) == pytest.approx(
+                step.win_expectancy, abs=1e-9
+            )
+            multiplier = mov_multiplier(
+                step.team_points - step.opponent_points, step.rating_gap, result_score, CFB
+            )
+            assert multiplier == pytest.approx(step.mov_multiplier, abs=1e-9)
+            assert CFB.k * step.mov_multiplier * (
+                result_score - step.win_expectancy
+            ) == pytest.approx(step.shift, abs=1e-9)
+            assert step.rating_gap == pytest.approx(
+                step.rating_before - step.opponent_rating_before + step.home_field_adjustment,
+                abs=1e-9,
+            )
+            expected_adjustment = {"home": CFB.hfa, "away": -CFB.hfa, "neutral": 0.0}
+            assert step.home_field_adjustment == expected_adjustment[step.venue]
+            if step.team_points > step.opponent_points:
+                assert step.result == "W"
+            elif step.team_points < step.opponent_points:
+                assert step.result == "L"
+            else:
+                assert step.result == "T"
+
+
+def test_elo_ledger_records_what_the_walk_used_and_copies_the_game() -> None:
+    """The two sides of each game, against the game itself (rubric (c) plus
+    the field-by-field copy). The home step's numbers are the update
+    functions' own outputs, exactly; the away step mirrors them."""
+    games = _ledger_season()
+    ratings = EloRating(CFB).rate(games)
+    pairs = _step_pairs(games, ratings)
+    assert len(pairs) == len(games)
+    venues: set[str] = set()
+    for game, home, away in pairs:
+        # Rubric (c).
+        assert away.shift == -home.shift
+        assert away.mov_multiplier == home.mov_multiplier
+        assert home.win_expectancy + away.win_expectancy == pytest.approx(1.0)
+
+        assert (home.opponent_team_id, away.opponent_team_id) == (
+            game.away_team_id, game.home_team_id,
+        )
+        assert (home.team_points, home.opponent_points) == (game.home_points, game.away_points)
+        assert (away.team_points, away.opponent_points) == (game.away_points, game.home_points)
+        assert home.opponent_rating_before == away.rating_before
+        assert away.opponent_rating_before == home.rating_before
+        for step in (home, away):
+            assert (step.week, step.season_type, step.start_date) == (
+                game.week, game.season_type, game.start_date,
+            )
+            assert step.opponent_name == ""
+        if game.neutral_site:
+            assert home.venue == away.venue == "neutral"
+        else:
+            assert (home.venue, away.venue) == ("home", "away")
+        venues.update((home.venue, away.venue))
+
+        # Exactly the walk's values, not a recomputation that happens to agree.
+        assert home.rating_gap == home.rating_before - away.rating_before + (
+            0.0 if game.neutral_site else CFB.hfa
+        )
+        assert away.rating_gap == -home.rating_gap
+        assert home.win_expectancy == expected_score(home.rating_gap, CFB)
+        assert away.win_expectancy == 1.0 - home.win_expectancy
+        assert home.shift == rating_shift(
+            home.rating_before,
+            away.rating_before,
+            game.home_points,
+            game.away_points,
+            game.neutral_site,
+            CFB,
+        )
+    assert venues == {"home", "away", "neutral"}
+
+
+def test_elo_ledger_step_count_is_the_record() -> None:
+    """Rubric (d), including ties."""
+    ratings = EloRating(CFB).rate(_ledger_season())
+    assert any(tr.ties for tr in ratings.values())
+    for tr in ratings.values():
+        assert tr.elo_ledger is not None
+        assert len(tr.elo_ledger.steps) == tr.wins + tr.losses + tr.ties
+
+
+def test_elo_ledger_carries_the_nfl_constants() -> None:
+    """The constants are the config the walk ran with, per sport."""
+    ratings = EloRating(NFL).rate(_ledger_season())
+    ledger = ratings[A].elo_ledger
+    assert ledger is not None
+    assert ledger == EloLedger(
+        starting_rating=NFL.initial,
+        k=NFL.k,
+        hfa=NFL.hfa,
+        scale=NFL.scale,
+        mov_scale=NFL.mov_scale,
+        mov_autocorr=NFL.mov_autocorr,
+        steps=ledger.steps,
+    )
+    assert {s.home_field_adjustment for s in ledger.steps} == {NFL.hfa, -NFL.hfa, 0.0}
+
+
+def test_elo_ledger_is_none_for_career_elo_and_keener() -> None:
+    """Rubric (e): only season-isolated Elo produces a ledger."""
+    games = _ledger_season()
+    career = EloCareerRating(CFB, {}).rate_through(games, 2009)
+    keener = KeenerRating().rate(games)
+    assert career and keener
+    assert all(tr.elo_ledger is None for tr in career.values())
+    assert all(tr.elo_ledger is None for tr in keener.values())

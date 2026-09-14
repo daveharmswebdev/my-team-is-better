@@ -454,10 +454,36 @@ never a subclass.
 - **The card.** It names the engine that answered, read off the envelope's
   echoed `method`. `formatRating(value, method)` shows Keener ×1000 and Elo
   as whole points (#82).
-- **The rating breakdown.** Whether a rating gets `RatingBreakdownDisclosure`
-  is decided by method, not by emptiness (`RATING_BREAKDOWN_BY_METHOD`,
-  #153): Elo writes no breakdown rows, so it shows plain text and a one-line
-  explainer.
+- **Showing the work behind a rating (#183).** Every rating the UI shows
+  must answer "how did the engine arrive at this value?" with enough shown
+  work that a fan could re-derive it. Each method does that in the shape that
+  is honest for it, not in one shared layout. `RATING_BREAKDOWN_BY_METHOD`
+  decides which, by method rather than by emptiness:
+  - **Keener** decomposes by opponent: `RatingBreakdown`, rendered by
+    `RatingBreakdownDisclosure` (#31, #37).
+  - **Elo** (season) has no per-opponent split. #153 stopped there. It is a
+    path, and the path is the evidence: `EloLedger` holds the constants the
+    walk ran with, the starting rating, and one `EloGameStep` per game with
+    every intermediate `_walk` used (gap, win expectancy, margin multiplier,
+    shift, running total). `starting_rating + Σ shift` is the rating.
+    - **Recorded, never recomputed.** The engine records the ledger during
+      the walk (`elo_ledger_steps`, `elo_ledger_configs`). Evidence reads it
+      back by SQL, and the web panel only formats it. Tests re-derive every
+      row from its own stored fields, so the panel can't drift into
+      decoration.
+    - **Scope.** `elo_career` has no ledger yet (its steps would need
+      offseason reversion). The Engine toggle doesn't offer it, so the
+      career explainer in `RATING_BREAKDOWN_BY_METHOD` is typed but
+      unreachable from the UI.
+    - **A missing ledger is never an invented panel.** If an Elo response's
+      `elo_ledger` is null (a stale db or API), the receipts print the plain
+      rating with a per-team "isn't available right now" note.
+    - **Rounding is disclosed.** The panel prints rounded figures, so redoing
+      a row's arithmetic with them can come out a few tenths off. The
+      footnote says so; the engine's values chain exactly.
+  - **The persona fact block excludes `elo_ledger`.** Whether a narrator may
+    quote ledger figures is the same open question as #175's Keener panel
+    figures, so narration inputs and grounding are unchanged.
 - **Grounding.** Persona grounding accepts a rounded `rating` or
   `opponent_rating`, so a narrator can repeat Elo's whole-point number on
   screen (#162). It also accepts a rating written the way the card shows it
