@@ -55,8 +55,9 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal
 
-from cfb_strength.contracts import Game, TeamRating
+from cfb_strength.contracts import EloGameStep, EloLedger, Game, TeamRating
 
 
 @dataclass(frozen=True)
@@ -290,6 +291,48 @@ def mov_multiplier(
     return math.log(max(abs(point_diff), 1.0) + 1.0) * (cfg.mov_scale / denom)
 
 
+@dataclass(frozen=True)
+class _GameUpdate:
+    """Every intermediate of one game's update, from the home side, as
+    `_game_update` computed it. `shift` is exactly `rating_shift`'s return
+    value; the other fields exist so `_walk` can record the numbers it used
+    in an `EloLedger` without recomputing any of them."""
+
+    home_field_adjustment: float
+    elo_diff: float
+    result: float
+    expected: float
+    multiplier: float
+    shift: float
+
+
+def _game_update(
+    elo_home: float,
+    elo_away: float,
+    home_points: int,
+    away_points: int,
+    neutral_site: bool,
+    cfg: EloConfig,
+) -> _GameUpdate:
+    """`rating_shift`'s body, keeping its intermediates. The expressions and
+    their evaluation order are `rating_shift`'s own, so `.shift` is
+    bit-identical to it (pinned by
+    `test_elo.py::test_pinned_single_game_update_cfb`)."""
+    home_field_adjustment = 0.0 if neutral_site else cfg.hfa
+    elo_diff = elo_home - elo_away + home_field_adjustment
+    result = game_result(home_points, away_points)
+    multiplier = mov_multiplier(home_points - away_points, elo_diff, result, cfg)
+    expected = expected_score(elo_diff, cfg)
+    return _GameUpdate(
+        home_field_adjustment=home_field_adjustment,
+        elo_diff=elo_diff,
+        result=result,
+        expected=expected,
+        multiplier=multiplier,
+        shift=cfg.k * multiplier * (result - expected),
+    )
+
+
 def rating_shift(
     elo_home: float,
     elo_away: float,
@@ -305,11 +348,13 @@ def rating_shift(
     home team's *effective* rating for the prediction only -- it never
     enters either team's stored rating -- and is dropped entirely on a
     neutral field.
+
+    Delegates to `_game_update`, which `_walk` calls directly so that the
+    ledger records the intermediates this function discards.
     """
-    elo_diff = elo_home - elo_away + (0.0 if neutral_site else cfg.hfa)
-    result = game_result(home_points, away_points)
-    multiplier = mov_multiplier(home_points - away_points, elo_diff, result, cfg)
-    return cfg.k * multiplier * (result - expected_score(elo_diff, cfg))
+    return _game_update(
+        elo_home, elo_away, home_points, away_points, neutral_site, cfg
+    ).shift
 
 
 def revert_between_seasons(elo: float, cfg: EloConfig) -> float:
@@ -412,6 +457,7 @@ def _rank(
     wins: dict[int, int],
     losses: dict[int, int],
     ties: dict[int, int],
+    ledgers: Mapping[int, EloLedger] | None = None,
 ) -> dict[int, TeamRating]:
     """Rank 1..n by rating descending, team id ascending as the tiebreak.
 
@@ -419,6 +465,8 @@ def _rank(
     `compute_ratings`' module docstring), so this rank is mostly for direct
     callers and tests -- but it is deterministic, which matters more than
     it being final.
+
+    `ledgers=None` (the career walk) leaves every `elo_ledger` None.
     """
     order = sorted(ratings, key=lambda team_id: (-ratings[team_id], team_id))
     return {
@@ -429,9 +477,18 @@ def _rank(
             wins=wins.get(team_id, 0),
             losses=losses.get(team_id, 0),
             ties=ties.get(team_id, 0),
+            elo_ledger=None if ledgers is None else ledgers[team_id],
         )
         for position, team_id in enumerate(order)
     }
+
+
+def _result_letter(team_points: int, opponent_points: int) -> Literal["W", "L", "T"]:
+    if team_points > opponent_points:
+        return "W"
+    if team_points < opponent_points:
+        return "L"
+    return "T"
 
 
 def _record_participant(
@@ -473,6 +530,7 @@ def _walk(
     roots: Mapping[int, int],
     career: bool,
     record_season: int | None,
+    record_ledger: bool = False,
 ) -> dict[int, TeamRating]:
     """One chronological pass over `games`; the single update loop both
     public classes use.
@@ -499,8 +557,21 @@ def _walk(
     season-isolated case; when it is set, a game from a *later* season is a
     caller-contract violation and raises, rather than silently making the
     emitted rating the end-of-*last*-season one.
+
+    `record_ledger=True` (season-isolated only) records one `EloGameStep`
+    per team per game, keyed by the actual team id, from the values this
+    loop computed: `_game_update`'s intermediates, the ratings read just
+    before the update, and each rating read just after its own addition.
+    It is rejected with `career=True`, whose reversions a ledger of game
+    steps alone cannot show (issue #183 leaves career ledgers out of scope).
     """
+    if record_ledger and career:
+        raise ValueError(
+            "an Elo ledger is recorded only for a season-isolated walk; a career "
+            "ledger would also need offseason-reversion steps"
+        )
     elo: dict[int, float] = {}
+    steps: dict[int, list[EloGameStep]] = {}
     last_season: dict[int, int] = {}
     # root -> the actual team id that played in `record_season`.
     participants: dict[int, int] = {}
@@ -550,16 +621,71 @@ def _walk(
                     )
                     last_season[root] = season
 
-        shift = rating_shift(
-            elo[home_root],
-            elo[away_root],
+        home_before = elo[home_root]
+        away_before = elo[away_root]
+        update = _game_update(
+            home_before,
+            away_before,
             game.home_points,
             game.away_points,
             game.neutral_site,
             cfg,
         )
+        shift = update.shift
         elo[home_root] += shift
+        home_after = elo[home_root]
         elo[away_root] -= shift
+        away_after = elo[away_root]
+
+        if record_ledger:
+            home_steps = steps.setdefault(home_id, [])
+            home_steps.append(
+                EloGameStep(
+                    game_number=len(home_steps) + 1,
+                    opponent_team_id=away_id,
+                    venue="neutral" if game.neutral_site else "home",
+                    team_points=game.home_points,
+                    opponent_points=game.away_points,
+                    result=_result_letter(game.home_points, game.away_points),
+                    rating_before=home_before,
+                    opponent_rating_before=away_before,
+                    home_field_adjustment=update.home_field_adjustment,
+                    rating_gap=update.elo_diff,
+                    win_expectancy=update.expected,
+                    mov_multiplier=update.multiplier,
+                    shift=shift,
+                    rating_after=home_after,
+                    week=game.week,
+                    season_type=game.season_type,
+                    start_date=game.start_date,
+                )
+            )
+            away_steps = steps.setdefault(away_id, [])
+            away_steps.append(
+                EloGameStep(
+                    game_number=len(away_steps) + 1,
+                    opponent_team_id=home_id,
+                    venue="neutral" if game.neutral_site else "away",
+                    team_points=game.away_points,
+                    opponent_points=game.home_points,
+                    result=_result_letter(game.away_points, game.home_points),
+                    rating_before=away_before,
+                    opponent_rating_before=home_before,
+                    # `0.0 - x` rather than `-x`: on a neutral field the
+                    # walk used +0.0, and the away side's is +0.0 too, not
+                    # a signed zero.
+                    home_field_adjustment=0.0 - update.home_field_adjustment,
+                    rating_gap=-update.elo_diff,
+                    # The walk evaluates only the home side's expectancy.
+                    win_expectancy=1.0 - update.expected,
+                    mov_multiplier=update.multiplier,
+                    shift=-shift,
+                    rating_after=away_after,
+                    week=game.week,
+                    season_type=game.season_type,
+                    start_date=game.start_date,
+                )
+            )
 
         if record_season is not None and season != record_season:
             continue
@@ -583,7 +709,21 @@ def _walk(
             ties[away_id] += 1
 
     ratings = {actual_id: elo[root] for root, actual_id in participants.items()}
-    return _rank(ratings, wins, losses, ties)
+    if not record_ledger:
+        return _rank(ratings, wins, losses, ties)
+    ledgers = {
+        team_id: EloLedger(
+            starting_rating=cfg.initial,
+            k=cfg.k,
+            hfa=cfg.hfa,
+            scale=cfg.scale,
+            mov_scale=cfg.mov_scale,
+            mov_autocorr=cfg.mov_autocorr,
+            steps=team_steps,
+        )
+        for team_id, team_steps in steps.items()
+    }
+    return _rank(ratings, wins, losses, ties, ledgers)
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +748,15 @@ class EloRating:
         self.cfg = cfg
 
     def rate(self, games: list[Game]) -> dict[int, TeamRating]:
-        return _walk(games, self.cfg, roots={}, career=False, record_season=None)
+        """Every returned `TeamRating` carries an `EloLedger` (issue #183)."""
+        return _walk(
+            games,
+            self.cfg,
+            roots={},
+            career=False,
+            record_season=None,
+            record_ledger=True,
+        )
 
 
 class EloCareerRating:

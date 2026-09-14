@@ -6,6 +6,7 @@ may not be populated yet; see this module's RETURN notes).
 
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -16,11 +17,14 @@ from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ratings.compute_ratings import (
     _franchise_successors,
     _load_games,
+    _rerank_for_display,
+    _store_elo_ledgers,
     compute_and_store,
     main,
 )
 from cfb_strength.ratings.elo import (
     ELO_CONFIGS,
+    EloRating,
     rating_shift,
     revert_between_seasons,
 )
@@ -1097,4 +1101,336 @@ def test_elo_career_nfl_without_a_lineage_row_starts_cold(tmp_path: Path) -> Non
     opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
     shift = rating_shift(nfl.initial, opponent_start_2016, 24, 20, False, nfl)
     assert stored[new_team] == nfl.initial + shift
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #183: the Elo ledger, persisted to `elo_ledger_steps` and
+# `elo_ledger_configs`. The real-season tests run against a tmp copy of the
+# committed regression fixtures (games only, no ratings), so the chain is
+# checked across a whole season of real schedules, neutral sites included.
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
+
+_STEP_COLUMNS = (
+    "team_id, game_number, week, season_type, start_date, opponent_team_id, venue, "
+    "team_points, opponent_points, result, rating_before, opponent_rating_before, "
+    "home_field_adjustment, rating_gap, win_expectancy, mov_multiplier, shift, rating_after"
+)
+
+
+def _fixture_conn(tmp_path: Path, name: str) -> sqlite3.Connection:
+    dest = tmp_path / name
+    shutil.copy(_FIXTURES_DIR / name, dest)
+    return get_conn(dest)
+
+
+def _ledger_row_counts(
+    conn: sqlite3.Connection, year: int, method: str, sport: str
+) -> tuple[int, int]:
+    steps = conn.execute(
+        "SELECT COUNT(*) AS c FROM elo_ledger_steps WHERE year = ? AND method = ? AND sport = ?",
+        (year, method, sport),
+    ).fetchone()["c"]
+    configs = conn.execute(
+        "SELECT COUNT(*) AS c FROM elo_ledger_configs WHERE year = ? AND method = ? AND sport = ?",
+        (year, method, sport),
+    ).fetchone()["c"]
+    return int(steps), int(configs)
+
+
+def _assert_stored_ledger_matches_ratings(
+    conn: sqlite3.Connection, year: int, sport: str
+) -> None:
+    """The stored ledger for (year, 'elo', sport), against the stored
+    ratings: one config row equal to the sport's EloConfig, steps for
+    exactly the displayed teams, and an exact chain ending on each rating."""
+    cfg = ELO_CONFIGS[sport]
+    configs = conn.execute(
+        "SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr "
+        "FROM elo_ledger_configs WHERE year = ? AND method = 'elo' AND sport = ?",
+        (year, sport),
+    ).fetchall()
+    assert [tuple(r) for r in configs] == [
+        (cfg.initial, cfg.k, cfg.hfa, cfg.scale, cfg.mov_scale, cfg.mov_autocorr)
+    ]
+
+    ratings = {
+        r["team_id"]: r
+        for r in conn.execute(
+            "SELECT team_id, rating, wins, losses, ties FROM ratings "
+            "WHERE year = ? AND method = 'elo' AND sport = ?",
+            (year, sport),
+        ).fetchall()
+    }
+    assert ratings
+    steps_by_team: dict[int, list[sqlite3.Row]] = {}
+    for row in conn.execute(
+        f"SELECT {_STEP_COLUMNS} FROM elo_ledger_steps "
+        "WHERE year = ? AND method = 'elo' AND sport = ? ORDER BY team_id, game_number",
+        (year, sport),
+    ).fetchall():
+        steps_by_team.setdefault(row["team_id"], []).append(row)
+    assert set(steps_by_team) == set(ratings)
+
+    for team_id, steps in steps_by_team.items():
+        rating = ratings[team_id]
+        assert [s["game_number"] for s in steps] == list(range(1, len(steps) + 1))
+        assert len(steps) == rating["wins"] + rating["losses"] + rating["ties"]
+        assert steps[0]["rating_before"] == cfg.initial
+        for before, after in zip(steps, steps[1:]):
+            assert after["rating_before"] == before["rating_after"]
+        for step in steps:
+            assert step["rating_after"] == step["rating_before"] + step["shift"]
+        assert steps[-1]["rating_after"] == rating["rating"]
+
+
+@pytest.mark.parametrize(
+    ("fixture", "year", "sport"),
+    [("cfb_regression.sqlite3", 2005, "cfb"), ("nfl_regression.sqlite3", 2022, "nfl")],
+)
+def test_elo_ledger_is_stored_for_a_real_season(
+    tmp_path: Path, fixture: str, year: int, sport: str
+) -> None:
+    conn = _fixture_conn(tmp_path, fixture)
+    count = compute_and_store(conn, year, "elo", sport)
+    assert count > 0
+    _assert_stored_ledger_matches_ratings(conn, year, sport)
+
+    venues = {
+        r["venue"]
+        for r in conn.execute(
+            "SELECT DISTINCT venue FROM elo_ledger_steps WHERE year = ? AND sport = ?",
+            (year, sport),
+        ).fetchall()
+    }
+    assert venues == {"home", "away", "neutral"}
+    conn.close()
+
+
+def test_stored_elo_ledger_round_trips_the_in_memory_ledger(tmp_path: Path) -> None:
+    """Every stored column is the in-memory step's field, in the right
+    column: a transposed INSERT tuple would still satisfy the chain if it
+    swapped two columns the chain does not read."""
+    conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")
+    compute_and_store(conn, 2005, "elo")
+    expected = EloRating(ELO_CONFIGS["cfb"]).rate(_load_games(conn, 2005, "cfb"))
+
+    stored = conn.execute(
+        f"SELECT {_STEP_COLUMNS} FROM elo_ledger_steps "
+        "WHERE year = 2005 AND method = 'elo' AND sport = 'cfb' ORDER BY team_id, game_number"
+    ).fetchall()
+    assert stored
+    for row in stored:
+        ledger = expected[row["team_id"]].elo_ledger
+        assert ledger is not None
+        step = ledger.steps[row["game_number"] - 1]
+        assert tuple(row)[1:] == (
+            step.game_number,
+            step.week,
+            step.season_type,
+            step.start_date,
+            step.opponent_team_id,
+            step.venue,
+            step.team_points,
+            step.opponent_points,
+            step.result,
+            step.rating_before,
+            step.opponent_rating_before,
+            step.home_field_adjustment,
+            step.rating_gap,
+            step.win_expectancy,
+            step.mov_multiplier,
+            step.shift,
+            step.rating_after,
+        )
+    conn.close()
+
+
+def test_keener_and_elo_career_write_no_ledger_rows(tmp_path: Path) -> None:
+    conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")
+    assert compute_and_store(conn, 2005, "keener") > 0
+    assert compute_and_store(conn, 2005, "elo_career") > 0
+    assert conn.execute("SELECT COUNT(*) AS c FROM elo_ledger_steps").fetchone()["c"] == 0
+    assert conn.execute("SELECT COUNT(*) AS c FROM elo_ledger_configs").fetchone()["c"] == 0
+    conn.close()
+
+
+def test_rerunning_elo_replaces_the_ledger_without_duplicates(tmp_path: Path) -> None:
+    conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")
+    compute_and_store(conn, 2005, "elo")
+    first = _ledger_row_counts(conn, 2005, "elo", "cfb")
+    assert first[0] > 0 and first[1] == 1
+
+    compute_and_store(conn, 2005, "elo")
+    assert _ledger_row_counts(conn, 2005, "elo", "cfb") == first
+    duplicates = conn.execute(
+        "SELECT team_id, game_number FROM elo_ledger_steps "
+        "GROUP BY year, method, sport, team_id, game_number HAVING COUNT(*) > 1"
+    ).fetchall()
+    assert duplicates == []
+    _assert_stored_ledger_matches_ratings(conn, 2005, "cfb")
+    conn.close()
+
+
+def _seed_stale_ledger(conn: sqlite3.Connection, year: int, method: str, sport: str) -> None:
+    """One junk config row and one junk step row for (year, method, sport)."""
+    team_ids = [r["id"] for r in conn.execute(
+        "SELECT id FROM teams WHERE sport = ? ORDER BY id LIMIT 2", (sport,)
+    ).fetchall()]
+    conn.execute(
+        "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, hfa, "
+        "scale, mov_scale, mov_autocorr, computed_at) "
+        "VALUES (?, ?, ?, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 'stale')",
+        (year, method, sport),
+    )
+    conn.execute(
+        "INSERT INTO elo_ledger_steps (year, method, sport, team_id, game_number, week, "
+        "season_type, start_date, opponent_team_id, venue, team_points, opponent_points, "
+        "result, rating_before, opponent_rating_before, home_field_adjustment, rating_gap, "
+        "win_expectancy, mov_multiplier, shift, rating_after, computed_at) "
+        "VALUES (?, ?, ?, ?, 99, NULL, 'regular', NULL, ?, 'home', 1, 0, 'W', "
+        "1.0, 1.0, 0.0, 0.0, 0.5, 1.0, 1.0, 2.0, 'stale')",
+        (year, method, sport, team_ids[0], team_ids[1]),
+    )
+    conn.commit()
+
+
+@pytest.mark.parametrize("method", ["keener", "elo_career"])
+def test_a_method_without_a_ledger_clears_stale_ledger_rows(
+    tmp_path: Path, method: str
+) -> None:
+    """The DELETE is unconditional: a method that writes no ledger leaves
+    none behind for its (year, method, sport)."""
+    conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")
+    _seed_stale_ledger(conn, 2005, method, "cfb")
+    assert _ledger_row_counts(conn, 2005, method, "cfb") == (1, 1)
+    compute_and_store(conn, 2005, method)
+    assert _ledger_row_counts(conn, 2005, method, "cfb") == (0, 0)
+    conn.close()
+
+
+def test_elo_with_no_games_clears_its_ledger(tmp_path: Path) -> None:
+    """The empty-ratings path deletes too, so a season whose games vanish
+    does not keep serving the old ledger."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+    for tid in (1, 2):
+        _insert_team(conn, tid, f"Team {tid}")
+        _insert_team_season(conn, tid, year, "fbs")
+    _insert_game(conn, 1, year, 1, 2, 21, 14)
+    conn.commit()
+
+    compute_and_store(conn, year, "elo")
+    assert _ledger_row_counts(conn, year, "elo", "cfb") == (2, 1)
+
+    conn.execute("DELETE FROM games")
+    conn.commit()
+    assert compute_and_store(conn, year, "elo") == 0
+    assert _ledger_row_counts(conn, year, "elo", "cfb") == (0, 0)
+    conn.close()
+
+
+def test_elo_ledger_rows_are_sport_scoped(tmp_path: Path) -> None:
+    """An NFL Elo run, and a rerun of it, never touches CFB's ledger rows
+    for the same year, and each sport's config row is its own."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2023
+    for tid in (1, 2, 3):
+        _insert_team(conn, tid, f"CFB Team {tid}", sport="cfb")
+        _insert_team_season(conn, tid, year, "fbs", sport="cfb")
+    _insert_game(conn, 1, year, 1, 2, 30, 10, sport="cfb")
+    _insert_game(conn, 2, year, 2, 3, 20, 17, sport="cfb")
+    for tid in (101, 102):
+        _insert_team(conn, tid, f"NFL Team {tid}", sport="nfl")
+        _insert_team_season(conn, tid, year, None, sport="nfl")
+    _insert_game(conn, 101, year, 101, 102, 24, 20, sport="nfl")
+    conn.commit()
+
+    compute_and_store(conn, year, "elo", "cfb")
+    cfb_rows = [
+        tuple(r)
+        for r in conn.execute(
+            "SELECT * FROM elo_ledger_steps WHERE sport = 'cfb' ORDER BY id"
+        ).fetchall()
+    ]
+    assert len(cfb_rows) == 4
+
+    compute_and_store(conn, year, "elo", "nfl")
+    compute_and_store(conn, year, "elo", "nfl")
+
+    assert [
+        tuple(r)
+        for r in conn.execute(
+            "SELECT * FROM elo_ledger_steps WHERE sport = 'cfb' ORDER BY id"
+        ).fetchall()
+    ] == cfb_rows
+    assert _ledger_row_counts(conn, year, "elo", "cfb") == (4, 1)
+    assert _ledger_row_counts(conn, year, "elo", "nfl") == (2, 1)
+    _assert_stored_ledger_matches_ratings(conn, year, "cfb")
+    _assert_stored_ledger_matches_ratings(conn, year, "nfl")
+    conn.close()
+
+
+def test_elo_ledger_is_stored_only_for_displayed_teams(tmp_path: Path) -> None:
+    """The FBS display filter applies to the ledger like the ratings: an FCS
+    team gets no steps, but still appears as a displayed team's opponent."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    year = 2005
+    _insert_team(conn, 1, "FBS A")
+    _insert_team_season(conn, 1, year, "fbs")
+    _insert_team(conn, 2, "FBS B")
+    _insert_team_season(conn, 2, year, "fbs")
+    _insert_team(conn, 3, "FCS C")
+    _insert_team_season(conn, 3, year, "fcs")
+    _insert_game(conn, 1, year, 1, 3, 14, 14)
+    _insert_game(conn, 2, year, 2, 1, 30, 20)
+    conn.commit()
+
+    assert compute_and_store(conn, year, "elo") == 2
+    rows = conn.execute(
+        "SELECT team_id, opponent_team_id, venue, result FROM elo_ledger_steps "
+        "ORDER BY team_id, game_number"
+    ).fetchall()
+    assert [tuple(r) for r in rows] == [
+        (1, 3, "home", "T"),
+        (1, 2, "away", "L"),
+        (2, 1, "home", "W"),
+    ]
+    _assert_stored_ledger_matches_ratings(conn, year, "cfb")
+    conn.close()
+
+
+def test_rerank_for_display_carries_the_elo_ledger() -> None:
+    games = [
+        Game(home_team_id=1, away_team_id=2, home_points=28, away_points=21),
+        Game(home_team_id=2, away_team_id=3, home_points=10, away_points=13),
+    ]
+    full = EloRating(ELO_CONFIGS["cfb"]).rate(games)
+    displayed = _rerank_for_display(full, {1, 3})
+    assert sorted(tr.team_id for tr in displayed) == [1, 3]
+    for tr in displayed:
+        assert tr.elo_ledger is not None
+        assert tr.elo_ledger is full[tr.team_id].elo_ledger
+
+
+def test_store_elo_ledgers_rejects_ledgers_with_different_constants(tmp_path: Path) -> None:
+    """One config row per (year, method, sport) can only describe ledgers
+    that share their constants; anything else would print a wrong tuning
+    beside some team's path, so it raises instead of picking one."""
+    db_path = _make_db(tmp_path)
+    conn = get_conn(db_path)
+    for tid in (1, 2):
+        _insert_team(conn, tid, f"Team {tid}")
+    conn.commit()
+    games = [Game(home_team_id=1, away_team_id=2, home_points=28, away_points=21)]
+    cfb = EloRating(ELO_CONFIGS["cfb"]).rate(games)
+    nfl = EloRating(ELO_CONFIGS["nfl"]).rate(games)
+    with pytest.raises(ValueError, match="constants"):
+        _store_elo_ledgers(conn, 2005, "elo", [cfb[1], nfl[2]], "cfb")
+    assert _ledger_row_counts(conn, 2005, "elo", "cfb") == (0, 0)
     conn.close()
