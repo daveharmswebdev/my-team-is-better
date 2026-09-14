@@ -3,6 +3,7 @@ import { isTeamCaseEnvelope } from '../../lib/api/types'
 import { METHOD_RADIO_LABEL } from '../../lib/methods'
 import { ComparisonReceipts } from '../EvidenceReceipts/ComparisonReceipts'
 import { TeamCaseReceipts } from '../EvidenceReceipts/TeamCaseReceipts'
+import { ShareButton } from '../ShareButton/ShareButton'
 import { VerdictError } from '../VerdictError/VerdictError'
 import styles from './VerdictCard.module.css'
 
@@ -12,6 +13,12 @@ export interface VerdictCardProps {
   onSelectYear?: (year: number) => void
   /** Re-submits the same question with the exact resolved team name (ambiguous_team only). */
   onSelectCandidate?: (candidate: string) => void
+  /**
+   * The absolute share link for the verdict on screen (issue #184). When set,
+   * a success card ends with a "Share this verdict" button; loading and error
+   * states never offer one, since there is no verdict to share.
+   */
+  shareUrl?: string
 }
 
 /**
@@ -27,6 +34,7 @@ export function VerdictCard({
   state,
   onSelectYear,
   onSelectCandidate,
+  shareUrl,
 }: VerdictCardProps) {
   if (state.status === 'loading') {
     return (
@@ -71,6 +79,7 @@ export function VerdictCard({
       ) : (
         <ComparisonReceipts evidence={envelope.evidence} />
       )}
+      {shareUrl !== undefined && <ShareButton url={shareUrl} />}
     </article>
   )
 }

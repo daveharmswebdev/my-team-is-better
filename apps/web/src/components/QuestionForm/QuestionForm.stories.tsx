@@ -110,7 +110,9 @@ export const Default: Story = {
     // Issue #136: the Year defaults to the newest season with data, not the
     // calendar year.
     await expect(await canvas.findByDisplayValue('2007')).toBeVisible()
-    await expect(canvas.getByText(/stays on this device only/i)).toBeVisible()
+    await expect(
+      canvas.getByText(/saved on this device\. included in links you share\./i),
+    ).toBeVisible()
   },
 }
 
