@@ -56,12 +56,22 @@ Add the attribution lines your session's instructions give you.
 1. `gh pr ready <pr>`, then `gh pr checks <pr> --watch`. Every job must be green,
    `e2e` included. Red means fix, never merge.
 2. Check for dependents: `gh pr list --base <branch>`.
-   - **None:** `gh pr merge <pr> --squash --delete-branch`.
+   - **None:** `gh pr merge <pr> --squash`, then delete the branch (step 3).
    - **Some:** retarget each dependent first (`gh pr edit <dep> --base main`), then merge
      **without** `--delete-branch`. Rebase each dependent with
      `git rebase --onto origin/main <old-base-tip> <dep-branch>` and
-     `git push --force-with-lease`, which also fires its CI. Delete the old branch last.
-     (`--delete-branch` on a base PR closed #174 for good.)
+     `git push --force-with-lease`, which also fires its CI. Delete the old branch last
+     (step 3). (`--delete-branch` on a base PR closed #174 for good.)
+3. Delete the merged branch yourself; don't rely on `gh pr merge --delete-branch`. After
+   merging, `gh` switches this checkout to `main`. With several worktrees running,
+   another one usually has `main` checked out, so that switch fails
+   (`'main' is already used by worktree`). The merge still lands, but `gh` skips the
+   branch deletion and leaves the branch on GitHub (#241).
+   ```bash
+   gh pr view <pr> --json state -q .state          # MERGED, before deleting anything
+   git push origin --delete <branch>
+   git fetch -q origin && git switch --detach origin/main && git branch -D <branch>
+   ```
 
 ## 4. After the merge
 
