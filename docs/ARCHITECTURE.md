@@ -418,8 +418,16 @@ never a subclass.
   #153): Elo writes no breakdown rows, so it shows plain text and a one-line
   explainer.
 - **Grounding.** Persona grounding accepts a rounded `rating` or
-  `opponent_rating`, so a narrator can repeat the whole-point number on
-  screen (#162). Derived figures are still open (#108).
+  `opponent_rating`, so a narrator can repeat Elo's whole-point number on
+  screen (#162). It also accepts a rating written the way the card shows it
+  (Keener ×1000 to 2 decimals, `5.04`), with the scale taken from the fact
+  block's own `method` (#165). Prompt rule 1 tells the narrator that
+  display.
+- **The display scale is defined once.** `api.rating_display.RATING_DISPLAY`
+  defines it and publishes `apps/api/rating-display.json`. apps/web's
+  `formatRating` and the prompt are both checked against it, so changing one
+  side alone fails CI. Derived figures (`rating_diff`, breakdown credits)
+  are still open (#108).
 
 **Still tracked:**
 
