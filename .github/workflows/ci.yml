@@ -78,6 +78,19 @@ jobs:
       - name: pytest
         run: uv run pytest -q
 
+      # Architecture Brief §8's persona smoke eval (issue #109): the seven
+      # golden years through the real persona pipeline and a real Claude call.
+      # It runs as its own step so its status is visible on every PR.
+      #
+      # NAMED GAP (founder decision, 2026-09-13): this repo holds no
+      # ANTHROPIC_API_KEY Actions secret, so in CI the eval is SKIPPED, and
+      # `-rs` prints the reason. It is enforced only when run locally with a
+      # key. If a secret is ever added, pass it to this step via `env:` and
+      # the same command becomes a real gate. pytest exits 5 when it collects
+      # no tests, so deleting or renaming the eval file fails this step.
+      - name: persona smoke eval (skipped in CI - no API key secret, see #109)
+        run: uv run pytest -q -rs tests/test_persona_smoke_eval.py
+
       - name: mypy --strict
         run: uv run mypy --strict src/api tests
 
