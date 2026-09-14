@@ -138,9 +138,14 @@ def test_prompt_version_is_past_the_argue_with_the_ranking_prompt() -> None:
 
 
 def test_config_exposes_contested_years() -> None:
+    """Issue #151: contested years are per league. Only CFB has disputed
+    seasons; the NFL entry is explicitly empty."""
     config = _reimport_config()
 
-    assert config.CONTESTED_YEARS == {2003, 2017}  # type: ignore[attr-defined]
+    assert config.CONTESTED_YEARS == {  # type: ignore[attr-defined]  # _reimport_config() -> object
+        "cfb": frozenset({2003, 2017}),
+        "nfl": frozenset(),
+    }
 
 
 def test_config_app_test_mode_true_only_for_exact_string_one(
