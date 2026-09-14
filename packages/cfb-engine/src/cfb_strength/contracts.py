@@ -242,8 +242,10 @@ class RatingBreakdown:
     default-constructed `RatingBreakdown()` (no entries, zero residual)
     alongside a real rating of ~1500, so the sum is 0.0 and the identity is
     simply false there. Elo is a path through per-game K-scaled updates, not
-    a sum of per-opponent contributions; there is no decomposition to
-    report, and inventing one would be fabrication rather than evidence.
+    a sum of per-opponent contributions; there is no per-opponent
+    decomposition to report, and inventing one would be fabrication rather
+    than evidence. Elo's shown work is the path itself: `EloLedger`
+    (issue #183), carried alongside this field, not squeezed into it.
 
     So an empty breakdown means "this method does not decompose", never
     "this team had no opponents". A consumer rendering a receipts panel must
@@ -270,6 +272,97 @@ class RatingBreakdown:
 
     entries: list[OpponentCredit] = field(default_factory=list)
     residual_contribution: float = 0.0
+
+
+@dataclass(frozen=True)
+class EloGameStep:
+    """One game's Elo update, from one team's side: a single line of the
+    shown work behind an Elo rating (issue #183).
+
+    Every numeric field is the value `ratings/elo.py::_walk` actually used or
+    produced while computing the rating, recorded as it happened, never a
+    recomputation after the fact. From this team's side:
+
+    - `home_field_adjustment` is `+hfa` at home, `-hfa` away, and `0.0` on a
+      neutral field (`venue == "neutral"`).
+    - `rating_gap == rating_before - opponent_rating_before +
+      home_field_adjustment`: the engine's `elo_diff`, turned to face this
+      team.
+    - `win_expectancy` is this team's expected score before kickoff,
+      `expected_score(rating_gap, cfg)`. The walk only evaluates the home
+      side's, so the away side's is `1.0 -` the home side's and may differ
+      from a direct evaluation in the last bit.
+    - `mov_multiplier == mov_multiplier(team_points - opponent_points,
+      rating_gap, result_score, cfg)`, where `result_score` is 1.0 / 0.5 /
+      0.0 for "W" / "T" / "L". Both teams in a game carry the same value.
+    - `shift == cfg.k * mov_multiplier * (result_score - win_expectancy)`,
+      and is the exact negation of the opponent's shift for that game.
+    - `rating_after == rating_before + shift`, bit for bit: it is the walk's
+      own addition.
+
+    Those formulas re-derive `win_expectancy`, `mov_multiplier` and `shift`
+    from the step's own fields and its ledger's constants, within float
+    tolerance. That property is what makes the panel checkable rather than
+    decorative, and it is tested.
+
+    `game_number` is 1-based, in the walk's order (the chronological total
+    order `RatingMethod` guarantees). `opponent_name` defaults to `""` for
+    the same reason as `OpponentCredit.opponent_name`: the ratings layer
+    sees ids only, and the evidence layer fills it from `teams`.
+    """
+
+    game_number: int
+    opponent_team_id: int
+    venue: Literal["home", "away", "neutral"]
+    team_points: int
+    opponent_points: int
+    result: Literal["W", "L", "T"]
+    rating_before: float
+    opponent_rating_before: float
+    home_field_adjustment: float
+    rating_gap: float
+    win_expectancy: float
+    mov_multiplier: float
+    shift: float
+    rating_after: float
+    week: int | None = None
+    season_type: str = "regular"
+    start_date: str | None = None
+    opponent_name: str = ""
+
+
+@dataclass(frozen=True)
+class EloLedger:
+    """The shown work behind one team's season Elo rating (issue #183): the
+    rule's constants, the starting point, and every game's update in order.
+
+    Identity, exact by construction: `steps[0].rating_before ==
+    starting_rating`, each `steps[i + 1].rating_before ==
+    steps[i].rating_after`, and `steps[-1].rating_after` is the team's
+    rating. So `starting_rating + sum(step.shift for step in steps)` is the
+    rating to float tolerance (the walk adds one shift at a time).
+
+    It is not a per-opponent split like `RatingBreakdown` and does not
+    pretend to be. Elo has none; it has a path, and the path is the evidence.
+
+    The constants are the `EloConfig` fields the walk actually ran with,
+    stored (`elo_ledger_configs`) rather than re-read from `ELO_CONFIGS` at
+    display time, so a consumer can never print a tuning other than the one
+    that produced the number. `mean` and `revert` are absent on purpose:
+    season-isolated Elo never reverts.
+
+    Produced only by `EloRating`. Keener has `RatingBreakdown` instead, and
+    `EloCareerRating` produces none: a career ledger would also need
+    offseason-reversion steps, which #183 leaves out of scope.
+    """
+
+    starting_rating: float
+    k: float
+    hfa: float
+    scale: float
+    mov_scale: float
+    mov_autocorr: float
+    steps: list[EloGameStep] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -302,6 +395,9 @@ class TeamRating:
     losses: int
     ties: int
     rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
+    # Issue #183: set by `EloRating` for every team it rates, None for every
+    # other method. See `EloLedger`.
+    elo_ledger: EloLedger | None = None
 
 
 class RatingMethod(Protocol):
@@ -402,6 +498,11 @@ class TeamCase:
     games: list[OpponentResult] = field(default_factory=list)
     quality_wins: list[OpponentResult] = field(default_factory=list)
     worst_loss: OpponentResult | None = None
+    # Issue #183: read back from `elo_ledger_steps`/`elo_ledger_configs`,
+    # with every `opponent_name` filled. None when the method writes no
+    # ledger (keener, elo_career); never an empty-steps ledger for a rated
+    # team, since every rated team played at least one game.
+    elo_ledger: EloLedger | None = None
 
 
 @dataclass(frozen=True)
@@ -418,6 +519,8 @@ class ComparisonTeamSummary:
     rating_breakdown: RatingBreakdown = field(default_factory=RatingBreakdown)
     quality_wins: list[OpponentResult] = field(default_factory=list)
     worst_loss: OpponentResult | None = None
+    # Issue #183: the same ledger as `TeamCase.elo_ledger`.
+    elo_ledger: EloLedger | None = None
 
 
 @dataclass(frozen=True)

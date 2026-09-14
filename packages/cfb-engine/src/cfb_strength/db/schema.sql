@@ -108,6 +108,59 @@ CREATE TABLE IF NOT EXISTS rating_breakdowns (
 CREATE INDEX IF NOT EXISTS idx_rating_breakdowns_year_method_team
     ON rating_breakdowns(year, method, team_id);
 
+-- Issue #183: the shown work behind a season Elo rating (contracts.EloLedger).
+-- One row per (displayed team, game), in the walk's order; every numeric
+-- column is the value `ratings/elo.py::_walk` actually used or produced, from
+-- that team's side. Written only for a method that produces a ledger
+-- (`elo`); keener and elo_career write no rows here, so absence is visible in
+-- the database, the same convention `rating_breakdowns` follows for Elo.
+CREATE TABLE IF NOT EXISTS elo_ledger_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    year INTEGER NOT NULL,
+    method TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    team_id INTEGER NOT NULL REFERENCES teams(id),
+    game_number INTEGER NOT NULL,
+    week INTEGER,
+    season_type TEXT NOT NULL,
+    start_date TEXT,
+    opponent_team_id INTEGER NOT NULL REFERENCES teams(id),
+    venue TEXT NOT NULL CHECK (venue IN ('home', 'away', 'neutral')),
+    team_points INTEGER NOT NULL,
+    opponent_points INTEGER NOT NULL,
+    result TEXT NOT NULL CHECK (result IN ('W', 'L', 'T')),
+    rating_before REAL NOT NULL,
+    opponent_rating_before REAL NOT NULL,
+    home_field_adjustment REAL NOT NULL,
+    rating_gap REAL NOT NULL,
+    win_expectancy REAL NOT NULL,
+    mov_multiplier REAL NOT NULL,
+    shift REAL NOT NULL,
+    rating_after REAL NOT NULL,
+    computed_at TEXT NOT NULL,
+    UNIQUE (year, method, sport, team_id, game_number)
+);
+CREATE INDEX IF NOT EXISTS idx_elo_ledger_steps_year_method_sport_team
+    ON elo_ledger_steps(year, method, sport, team_id);
+
+-- Issue #183: the EloConfig constants a (year, method, sport) ledger was
+-- computed with -- stored rather than re-read from ELO_CONFIGS at display
+-- time, so the panel can never print a tuning other than the one that
+-- produced the number.
+CREATE TABLE IF NOT EXISTS elo_ledger_configs (
+    year INTEGER NOT NULL,
+    method TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    starting_rating REAL NOT NULL,
+    k REAL NOT NULL,
+    hfa REAL NOT NULL,
+    scale REAL NOT NULL,
+    mov_scale REAL NOT NULL,
+    mov_autocorr REAL NOT NULL,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (year, method, sport)
+);
+
 -- sport is part of the PK here (unlike the tables above): year/season_type
 -- alone would collide between a CFB and an NFL ingest run of the same
 -- year/season_type, and team_id-based disambiguation (which is what lets the
