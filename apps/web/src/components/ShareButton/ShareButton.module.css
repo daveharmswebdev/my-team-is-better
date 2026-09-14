@@ -1,0 +1,75 @@
+/* Issue #184: sits at the foot of the verdict card, under the receipts --
+   a quiet secondary action, never competing with "Get the verdict". */
+.share {
+  margin-top: var(--sp-6);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--rule);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* The outlined chip look `VerdictError`'s pills use, in navy. */
+.shareButton {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: var(--radius);
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  background: transparent;
+  border: 1.5px solid var(--navy);
+  color: var(--navy);
+}
+
+.shareButton:hover {
+  background: var(--navy);
+  color: var(--on-leather);
+}
+
+.status {
+  margin: 0;
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  color: var(--hunter);
+}
+
+.status:empty {
+  display: none;
+}
+
+/* The manual-copy fallback is guidance, not a success -- so not green. */
+.statusManual {
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
+.manual {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.manualLabel {
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
+.manualField {
+  width: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--surface-alt);
+  color: var(--ink);
+}

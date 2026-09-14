@@ -1,0 +1,63 @@
+{
+  "$comment": [
+    "Who may edit what. The one source for .claude/hooks/guard_edit_scope.py (PreToolUse),",
+    "delegation.py's brief and return checks, and CLAUDE.md's Roles table (kept in step by",
+    ".claude/hooks/tests/test_ownership.py). Globs are repo-relative: `dir/**` covers",
+    "everything under dir; other patterns match segment by segment.",
+    "Anything no agent owns is coordinator-owned: CLAUDE.md, .claude/, .github/, docs/,",
+    "render.yaml, root config, contracts.py, db/, cli.py, config.py and credit_math.py",
+    "(shared by ratings and evidence).",
+    "packages/cfb-engine/tests/ is shared by the engine spokes on purpose: the suite is",
+    "split by file name, not by directory, so the hook can't partition it further.",
+    "edit_scope_mode: `warn` adds a note to the spoke's context and logs to",
+    "<git-common-dir>/claude-hooks/scope-warnings.jsonl; `block` denies the edit."
+  ],
+  "edit_scope_mode": "warn",
+  "agents": {
+    "api-agent": {
+      "kind": "implementation",
+      "owns": ["apps/api/**"]
+    },
+    "web-agent": {
+      "kind": "implementation",
+      "owns": ["apps/web/**"]
+    },
+    "ingest-agent": {
+      "kind": "implementation",
+      "owns": [
+        "packages/cfb-engine/src/cfb_strength/ingest/**",
+        "packages/cfb-engine/data/raw/**",
+        "packages/cfb-engine/tests/**"
+      ]
+    },
+    "ratings-agent": {
+      "kind": "implementation",
+      "owns": [
+        "packages/cfb-engine/src/cfb_strength/ratings/**",
+        "packages/cfb-engine/tests/**"
+      ]
+    },
+    "evidence-agent": {
+      "kind": "implementation",
+      "owns": [
+        "packages/cfb-engine/src/cfb_strength/evidence/**",
+        "packages/cfb-engine/tests/**"
+      ]
+    },
+    "mcp-agent": {
+      "kind": "implementation",
+      "owns": [
+        "packages/cfb-engine/src/cfb_strength/mcp_server/**",
+        "packages/cfb-engine/tests/test_mcp_server_integration.py"
+      ]
+    },
+    "reviewer": {
+      "kind": "read-only",
+      "owns": []
+    },
+    "validator": {
+      "kind": "read-only",
+      "owns": []
+    }
+  }
+}

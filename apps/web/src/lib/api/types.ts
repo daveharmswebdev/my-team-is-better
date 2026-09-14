@@ -373,7 +373,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function isSport(value: unknown): value is Sport {
+/**
+ * Whether `value` is one of `SPORTS`. Exported so every check of a league
+ * that arrived from outside the app -- an API body, a share link's `sport`
+ * param (issue #184) -- uses this one guard.
+ */
+export function isSport(value: unknown): value is Sport {
   // Widened to `readonly unknown[]` so `includes` accepts an unvalidated value.
   return (SPORTS as readonly unknown[]).includes(value)
 }

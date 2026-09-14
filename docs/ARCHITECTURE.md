@@ -365,6 +365,44 @@ backend and data model:
   for guests. No password handling, no session infrastructure to build, and
   no feature is unreachable without an account.
 
+### 5.1 Share links are a public, append-only URL contract (#184)
+
+Sharing a verdict (PRD §5.4a) needs no server state either. The link is the
+question, as a query string on `/`:
+
+```
+/?q=champion|team_case|compare&sport=cfb|nfl&year=YYYY&engine=keener|elo&team=…&a=…&b=…&for=…
+```
+
+`apps/web/src/pages/HomePage/shareLink.ts` owns `toShareSearch` /
+`fromShareSearch`. Opening a link re-asks the ordinary `/api/verdict/*`
+route. Every run also writes the query back to the address bar, so the
+browser URL is always the current question's link.
+
+- **Public once sent.** Links live on in texts and posts, so the param names
+  and wire values are append-only. A rename must keep the old name parseable,
+  and a test in `shareLink.test.ts` pins links as #184 minted them. Removing
+  an engine from `DISPLAYED_METHODS` silently turns its old links into a
+  plain home page. Decide that on purpose.
+- **Untrusted input.** A link is written by a third party, not by the reader,
+  and `for` becomes `user_team` in the persona system prompt. `fromShareSearch`
+  is all-or-nothing:
+  - team values must be at most 64 characters and match a plain team-name
+    charset
+  - `year` must be exactly 4 digits
+  - the engine must be displayed
+  - anything else yields no fetch
+
+  The API does not yet enforce the same bounds for direct requests (#188,
+  #189).
+- **Never writes the recipient's storage.** A link's `for` seeds the "Your
+  team" field without touching `localStorage`, until the visitor edits it.
+- **Re-asks, so the text can change.** The narration cache usually returns
+  the same text (the key includes `user_team` byte for byte). A
+  `PROMPT_VERSION` bump or an uncached fallback (#187) gives a fresh
+  generation. Stored copies (#186) and per-verdict Open Graph previews (#185)
+  are deferred.
+
 ## 6. The engine: the second method seam, now used
 
 **Status: the seam described below was used. Keener is no longer the only

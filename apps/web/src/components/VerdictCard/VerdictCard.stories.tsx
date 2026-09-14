@@ -160,15 +160,35 @@ export const Loading: Story = {
   },
 }
 
+/**
+ * A success card ends with "Share this verdict" (issue #184) whenever the
+ * page hands it a share link, as `HomePage` does for every verdict.
+ */
 export const TeamCaseSuccess: Story = {
   args: {
     state: { status: 'success', envelope: teamCaseEnvelope },
+    shareUrl:
+      'https://my-team-is-better.lol/?q=team_case&sport=cfb&year=2005&engine=keener&team=Texas',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('button', { name: 'Share this verdict' }),
+    ).toBeVisible()
   },
 }
 
 export const ComparisonSuccess: Story = {
   args: {
     state: { status: 'success', envelope: comparisonEnvelope },
+    shareUrl:
+      'https://my-team-is-better.lol/?q=compare&sport=cfb&year=2005&engine=keener&a=Texas&b=USC',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('button', { name: 'Share this verdict' }),
+    ).toBeVisible()
   },
 }
 

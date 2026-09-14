@@ -179,6 +179,24 @@ stateless per request even though the *conversation* has turns (the "case
 facts block resent each turn" pattern, not server-side session state). A
 guest never loses this mid-argument just because they didn't sign in.
 
+### 5.4a Sharing a verdict — by link, nothing more
+
+A verdict is something people want to send to a rival (a text, a Facebook
+post), so the verdict card has a **Share** button (#184). The link carries
+the *question*, not a stored copy of the answer: league, year, engine, the
+question's team(s), and the narrator's side (`for`). Opening it re-asks the
+same question, which the narration cache normally answers with the same text
+at no new model cost, and it never overwrites the recipient's own saved
+team. It needs no account and no server-side record. A browser with a share
+sheet uses it; otherwise the link is copied. Because the link carries `for`,
+"your team" is no longer strictly on-device once you share (or copy the
+address bar), and §5.3's hint says so.
+
+Accepted trade-off: a prompt-version bump can change the text an old link
+shows. Saved exact-copy links (#186) and per-verdict link previews (#185)
+are deferred until that trade-off or the plain previews become a real
+complaint.
+
 ### 5.5 Explicitly out of scope for MVP
 
 - Open-ended CFB chat unanchored to a specific verdict (no "just chat with
@@ -190,7 +208,8 @@ guest never loses this mid-argument just because they didn't sign in.
 - Server-persisted, unbounded multi-turn memory — the pushback exchange
   (§5.1a) is scoped and client-carried, not a general session the backend
   remembers indefinitely
-- Public sharing/social features, comments, leaderboards
+- Social features beyond §5.4a's share link: comments, leaderboards,
+  public profiles or feeds
 - Mobile app (responsive web only)
 - Monetization (ads, subscriptions) — hobby budget, cost-controlled infra
   instead (see Architecture Brief)

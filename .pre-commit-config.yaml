@@ -85,3 +85,15 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      # Mirrors the `claude-process` CI job: the hooks that enforce the
+      # coordinator/spoke process (.claude/hooks/).
+      - id: claude-process
+        name: .claude/hooks — pytest + mypy --strict + ruff
+        entry: >-
+          bash -c 'uv run --no-project --quiet --python 3.12 --with pytest==9.1.1 --with jsonschema==4.26.0 pytest -q .claude/hooks/tests
+          && MYPYPATH=.claude/hooks uv run --no-project --quiet --python 3.12 --with mypy==2.3.1 --with pytest==9.1.1 --with jsonschema==4.26.0 --with types-jsonschema==4.26.0.20260518 mypy --strict --explicit-package-bases .claude/hooks
+          && uv run --no-project --quiet --with ruff==0.16.6 ruff check .claude/hooks
+          && uv run --no-project --quiet --with ruff==0.16.6 ruff format --check .claude/hooks'
+        language: system
+        pass_filenames: false
+        always_run: true

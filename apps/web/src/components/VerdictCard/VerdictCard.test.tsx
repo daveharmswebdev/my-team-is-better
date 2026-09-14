@@ -101,6 +101,66 @@ describe('VerdictCard', () => {
     expect(screen.queryByText(/Texas was better\./)).not.toBeInTheDocument()
   })
 
+  /** Issue #184: a verdict can be shared by link, from the foot of the card. */
+  describe('the share button', () => {
+    const SHARE_URL =
+      'https://my-team-is-better.lol/?q=champion&sport=cfb&year=2005&engine=keener'
+
+    it.each([
+      ['team-case', teamCaseEnvelope],
+      ['compare', comparisonEnvelope],
+    ] as const)(
+      'renders "Share this verdict" at the foot of a %s success card when shareUrl is set',
+      (_kind, envelope) => {
+        render(
+          <VerdictCard
+            state={{ status: 'success', envelope }}
+            shareUrl={SHARE_URL}
+          />,
+        )
+
+        const button = screen.getByRole('button', {
+          name: 'Share this verdict',
+        })
+        const article = screen.getByRole('article')
+        expect(article).toContainElement(button)
+        expect(article.lastElementChild).toContainElement(button)
+      },
+    )
+
+    it('renders no share button on a success card without shareUrl', () => {
+      render(
+        <VerdictCard
+          state={{ status: 'success', envelope: teamCaseEnvelope }}
+        />,
+      )
+
+      expect(
+        screen.queryByRole('button', { name: 'Share this verdict' }),
+      ).not.toBeInTheDocument()
+    })
+
+    it.each([
+      ['loading', { status: 'loading' }],
+      [
+        'error',
+        {
+          status: 'error',
+          error: { kind: 'network_error', message: 'Could not reach the API.' },
+        },
+      ],
+    ] as const)(
+      'renders no share button in the %s state, even with shareUrl',
+      (_kind, state) => {
+        render(<VerdictCard state={state} shareUrl={SHARE_URL} />)
+
+        expect(
+          screen.queryByRole('button', { name: 'Share this verdict' }),
+        ).not.toBeInTheDocument()
+      },
+    )
+  })
+
   /**
    * Issue #154: the card names the engine that actually answered, read off the
    * response envelope -- never off the form, whose toggle may already have

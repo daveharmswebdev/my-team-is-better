@@ -1,9 +1,16 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { StrictMode } from 'react'
+import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { YEAR_DEBOUNCE_MS } from '../../components/QuestionForm/QuestionForm'
 import { VerdictApiError, VerdictNetworkError } from '../../lib/api/client'
-import type { TeamCaseEnvelope, TeamsOut } from '../../lib/api/types'
+import type {
+  ComparisonEnvelope,
+  ComparisonTeamSummaryOut,
+  TeamCaseEnvelope,
+  TeamsOut,
+} from '../../lib/api/types'
 import { HomePage } from './HomePage'
 
 vi.mock('../../lib/api/client', async () => {
@@ -134,6 +141,70 @@ async function expectThroughout(assertion: () => void) {
   assertion()
 }
 
+/** A minimal successful compare envelope, answered by Elo. */
+function comparisonEnvelopeFor(
+  teamA: string,
+  teamB: string,
+  narration: string,
+): ComparisonEnvelope {
+  const summary = (
+    teamId: number,
+    teamName: string,
+    rating: number,
+  ): ComparisonTeamSummaryOut => ({
+    team_id: teamId,
+    team_name: teamName,
+    rank: teamId,
+    rating,
+    wins: 12,
+    losses: 1,
+    ties: 0,
+    rating_breakdown: { entries: [], residual_contribution: 0 },
+    quality_wins: [],
+    worst_loss: null,
+  })
+  return {
+    evidence: {
+      year: 2005,
+      method: 'elo',
+      team_a: summary(1, teamA, 1933.19),
+      team_b: summary(2, teamB, 1891.83),
+      head_to_head: { played: false, meetings: [] },
+      common_opponents: [],
+      rating_diff: 41.36,
+      verdict: `${teamA} was better.`,
+    },
+    narration: { text: narration, contested: false, cached: false },
+  }
+}
+
+/** What the address bar says, and how it last changed (issue #184). */
+function LocationProbe() {
+  const location = useLocation()
+  const navigationType = useNavigationType()
+  return (
+    <div hidden>
+      <span data-testid="location-search">{location.search}</span>
+      <span data-testid="navigation-type">{navigationType}</span>
+    </div>
+  )
+}
+
+/**
+ * `HomePage` reads and writes the URL (issue #184), so every render needs a
+ * router. `strict` wraps it in `StrictMode`, as `main.tsx` renders the app,
+ * for the tests where a double effect run could re-fire a share-link landing.
+ */
+function renderHomePage(initialEntry = '/', { strict = false } = {}) {
+  const tree = (
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <HomePage />
+      <LocationProbe />
+    </MemoryRouter>
+  )
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree)
+}
+
 describe('HomePage', () => {
   beforeEach(() => {
     window.localStorage.clear()
@@ -144,6 +215,282 @@ describe('HomePage', () => {
     mockedFetchTeams.mockReset()
     mockedFetchYears.mockResolvedValue({ years: [2004, 2005, 2018] })
     mockedFetchTeams.mockResolvedValue(TEAMS)
+  })
+
+  /**
+   * Issue #184: a verdict is shared as a link to its *question*. Landing on
+   * one fills in the form and re-asks the API exactly once, with no click;
+   * every run keeps the address bar on the link of the question just asked.
+   */
+  describe('share links (issue #184)', () => {
+    const TEXAS_USC_LINK =
+      '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC&for=Texas'
+    /** "Texas St" is ambiguous, so this landing answers with a pill. */
+    const AMBIGUOUS_LINK =
+      '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas+St&b=USC&for=Texas'
+    const AMBIGUOUS_TEXAS_ST = new VerdictApiError(422, {
+      error: 'ambiguous_team',
+      query: 'Texas St',
+      candidates: ['Texas State'],
+    })
+
+    afterEach(() => {
+      Reflect.deleteProperty(window.navigator, 'clipboard')
+    })
+
+    it('answers a share link on landing, exactly once even under StrictMode, with no interaction', async () => {
+      mockedFetchCompare.mockResolvedValue(
+        comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+      )
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+
+      expect(await screen.findByText('Texas edges USC.')).toBeInTheDocument()
+      expect(mockedFetchCompare).toHaveBeenCalledWith({
+        year: 2005,
+        team_a: 'Texas',
+        team_b: 'USC',
+        user_team: 'Texas',
+        sport: 'cfb',
+        method: 'elo',
+      })
+      await expectThroughout(() =>
+        expect(mockedFetchCompare).toHaveBeenCalledTimes(1),
+      )
+      expect(mockedFetchChampion).not.toHaveBeenCalled()
+      expect(mockedFetchTeamCase).not.toHaveBeenCalled()
+      // The visible form agrees with the question the link asked.
+      expect(screen.getByLabelText(/what do you want to know/i)).toHaveValue(
+        'compare',
+      )
+      expect(screen.getByLabelText(/year/i)).toHaveValue(2005)
+      expect(screen.getByLabelText(/team a/i)).toHaveValue('Texas')
+      expect(screen.getByLabelText(/team b/i)).toHaveValue('USC')
+      expect(
+        screen.getByRole('radio', { name: 'Elo (second opinion)' }),
+      ).toBeChecked()
+    })
+
+    it('shows the link\'s "for" team in "your team" without saving it as yours', async () => {
+      mockedFetchCompare.mockResolvedValue(
+        comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+      )
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+
+      expect(await screen.findByText('Texas edges USC.')).toBeInTheDocument()
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBeNull()
+    })
+
+    it('leaves a different saved team untouched, too', async () => {
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
+      mockedFetchCompare.mockResolvedValue(
+        comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+      )
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+
+      expect(await screen.findByText('Texas edges USC.')).toBeInTheDocument()
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe('USC')
+    })
+
+    it.each([
+      ['no params at all', '/'],
+      [
+        'a compare link missing b',
+        '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&for=Texas',
+      ],
+      ['an unknown engine', '/?q=champion&sport=cfb&year=2005&engine=massey'],
+      [
+        'a non-integer year',
+        '/?q=champion&sport=cfb&year=2005.5&engine=keener',
+      ],
+    ])(
+      'asks nothing and shows the ordinary empty page for %s',
+      async (_description, entry) => {
+        renderHomePage(entry, { strict: true })
+
+        await waitForDefaultYear()
+        await expectThroughout(() => {
+          expect(mockedFetchChampion).not.toHaveBeenCalled()
+          expect(mockedFetchTeamCase).not.toHaveBeenCalled()
+          expect(mockedFetchCompare).not.toHaveBeenCalled()
+        })
+        expect(screen.queryByRole('article')).not.toBeInTheDocument()
+        expect(screen.getByLabelText(/what do you want to know/i)).toHaveValue(
+          'champion',
+        )
+      },
+    )
+
+    it('offers to share a verdict asked through the form, as a link to that exact question', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion.mockResolvedValue(
+        envelopeFor('Texas', 'Texas, full stop.'),
+      )
+
+      renderHomePage()
+      await waitForDefaultYear()
+      await user.clear(screen.getByLabelText(/year/i))
+      await user.type(screen.getByLabelText(/year/i), '2005')
+      // Not in the catalog, so a stale-team notice appears -- which is why
+      // the field is not queried again by label below.
+      await user.type(screen.getByLabelText(/your team/i), 'Texas A&M')
+      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+      expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
+
+      // After `userEvent.setup()`, which installs its own clipboard stub.
+      const writeText = vi
+        .fn<(text: string) => Promise<void>>()
+        .mockResolvedValue(undefined)
+      Object.defineProperty(window.navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+        writable: true,
+      })
+      await user.click(
+        screen.getByRole('button', { name: 'Share this verdict' }),
+      )
+
+      await waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith(
+          `${window.location.origin}/?q=champion&sport=cfb&year=2005&engine=keener&for=Texas+A%26M`,
+        ),
+      )
+      expect(await screen.findByText('Link copied')).toBeInTheDocument()
+    })
+
+    it('keeps the address bar on the share link of the question just asked, replacing history rather than pushing', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion.mockResolvedValue(
+        envelopeFor('Texas', 'Texas, full stop.'),
+      )
+
+      renderHomePage()
+      await waitForDefaultYear()
+      await user.clear(screen.getByLabelText(/year/i))
+      await user.type(screen.getByLabelText(/year/i), '2005')
+      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+
+      await waitFor(() =>
+        expect(screen.getByTestId('location-search').textContent).toBe(
+          '?q=champion&sport=cfb&year=2005&engine=keener',
+        ),
+      )
+      expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE')
+      expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
+    })
+
+    it("mounts the form once on a link landing, so its first catalog requests already use the link's league and engine", async () => {
+      mockedFetchChampion.mockResolvedValue(
+        envelopeFor('Kansas City Chiefs', 'Chiefs, easy.'),
+      )
+
+      renderHomePage('/?q=champion&sport=nfl&year=2018&engine=elo', {
+        strict: true,
+      })
+
+      expect(await screen.findByText('Chiefs, easy.')).toBeInTheDocument()
+      expect(mockedFetchYears.mock.calls[0]).toEqual(['nfl', 'elo'])
+      expect(mockedFetchTeams.mock.calls[0]).toEqual(['nfl', 'elo', 2018])
+      // No request ever went out for the defaults (College, Keener) first.
+      expect(
+        mockedFetchYears.mock.calls.every(
+          ([sport, method]) => sport === 'nfl' && method === 'elo',
+        ),
+      ).toBe(true)
+      expect(
+        mockedFetchTeams.mock.calls.every(
+          ([sport, method]) => sport === 'nfl' && method === 'elo',
+        ),
+      ).toBe(true)
+      expect(mockedFetchChampion).toHaveBeenCalledTimes(1)
+    })
+
+    /**
+     * Issue #184 review (G3): a link's "for" team is never the visitor's, so
+     * clearing it before they edit the field must leave their saved team.
+     */
+    it.each([
+      [
+        'the stale-team notice\'s "Clear this team"',
+        async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(
+            await screen.findByRole('button', { name: 'Clear this team' }),
+          )
+        },
+      ],
+      [
+        'a league switch',
+        async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(screen.getByRole('radio', { name: /nfl/i }))
+        },
+      ],
+    ])(
+      "never deletes the visitor's saved team through %s after a link landing",
+      async (_description, clearTheTeam) => {
+        window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
+        const user = userEvent.setup()
+        mockedFetchCompare.mockResolvedValue(
+          comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+        )
+
+        // Gonzaga is not in this file's team catalog, so the notice shows.
+        renderHomePage(
+          '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC&for=Gonzaga',
+          { strict: true },
+        )
+        expect(await screen.findByText('Texas edges USC.')).toBeInTheDocument()
+        await screen.findByRole('button', { name: 'Clear this team' })
+
+        await clearTheTeam(user)
+
+        expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+        expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+          'USC',
+        )
+      },
+    )
+
+    it("re-asks a pill correction after a link landing with the link's user team, while the remounted field shows the visitor's saved team", async () => {
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
+      const user = userEvent.setup()
+      mockedFetchCompare
+        .mockRejectedValueOnce(AMBIGUOUS_TEXAS_ST)
+        .mockResolvedValueOnce(
+          comparisonEnvelopeFor('Texas State', 'USC', 'Texas State, somehow.'),
+        )
+
+      renderHomePage(AMBIGUOUS_LINK, { strict: true })
+      await user.click(
+        await screen.findByRole('button', { name: 'Texas State' }),
+      )
+
+      expect(
+        await screen.findByText('Texas State, somehow.'),
+      ).toBeInTheDocument()
+      expect(mockedFetchCompare).toHaveBeenCalledTimes(2)
+      // The pill re-asks the question as it was asked (issue #38), so the
+      // request still carries the link's team.
+      expect(mockedFetchCompare).toHaveBeenLastCalledWith({
+        year: 2005,
+        team_a: 'Texas State',
+        team_b: 'USC',
+        user_team: 'Texas',
+        sport: 'cfb',
+        method: 'elo',
+      })
+      expect(screen.getByLabelText(/team a/i)).toHaveValue('Texas State')
+      // The accepted edge case: a correction remounts the form the ordinary
+      // way, re-reading the saved team, and the link never wrote over it.
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('USC')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe('USC')
+      expect(screen.getByTestId('location-search').textContent).toBe(
+        '?q=compare&sport=cfb&year=2005&engine=elo&a=Texas+State&b=USC&for=Texas',
+      )
+    })
   })
 
   it('submits a champion question and renders the resulting verdict', async () => {
@@ -168,7 +515,7 @@ describe('HomePage', () => {
       narration: { text: 'Texas, full stop.', contested: false, cached: false },
     })
 
-    render(<HomePage />)
+    renderHomePage()
     await waitForDefaultYear()
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
@@ -217,7 +564,7 @@ describe('HomePage', () => {
         },
       })
 
-    render(<HomePage />)
+    renderHomePage()
     await user.selectOptions(
       screen.getByLabelText(/what do you want to know/i),
       'team_case',
@@ -251,7 +598,7 @@ describe('HomePage', () => {
       new VerdictNetworkError('Could not reach the API.'),
     )
 
-    render(<HomePage />)
+    renderHomePage()
     await waitForDefaultYear()
     await user.clear(screen.getByLabelText(/year/i))
     await user.type(screen.getByLabelText(/year/i), '2005')
@@ -273,7 +620,7 @@ describe('HomePage', () => {
       }),
     )
 
-    render(<HomePage />)
+    renderHomePage()
     await user.selectOptions(
       screen.getByLabelText(/what do you want to know/i),
       'team_case',
@@ -351,7 +698,7 @@ describe('HomePage', () => {
         mockedFetchTeamCase.mockReturnValue(new Promise(() => {}))
         mockedFetchCompare.mockReturnValue(new Promise(() => {}))
 
-        render(<HomePage />)
+        renderHomePage()
         await user.selectOptions(
           screen.getByLabelText(/what do you want to know/i),
           questionType,
@@ -376,7 +723,7 @@ describe('HomePage', () => {
         .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
 
-      render(<HomePage />)
+      renderHomePage()
       await waitForDefaultYear()
       await user.click(eloRadio())
       const submit = screen.getByRole('button', { name: /get the verdict/i })
@@ -403,7 +750,7 @@ describe('HomePage', () => {
         envelopeFor('Texas', 'Texas, full stop.'),
       )
 
-      render(<HomePage />)
+      renderHomePage()
       const submit = screen.getByRole('button', { name: /get the verdict/i })
       await waitFor(() => expect(submit).not.toBeDisabled())
       await user.click(submit)
@@ -428,7 +775,7 @@ describe('HomePage', () => {
         .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
 
-      render(<HomePage />)
+      renderHomePage()
       // The Year field defaults to the newest catalog season (issue #136),
       // so the submit button only enables once `/api/years` has landed.
       const submit = screen.getByRole('button', { name: /get the verdict/i })
@@ -462,7 +809,7 @@ describe('HomePage', () => {
           envelopeFor('Texas State', 'Texas State had a mediocre year.'),
         )
 
-      render(<HomePage />)
+      renderHomePage()
       await user.selectOptions(
         screen.getByLabelText(/what do you want to know/i),
         'team_case',
@@ -501,7 +848,7 @@ describe('HomePage', () => {
         new VerdictNetworkError('Could not reach the API.'),
       )
 
-      render(<HomePage />)
+      renderHomePage()
       await user.selectOptions(
         screen.getByLabelText(/what do you want to know/i),
         'compare',
@@ -537,7 +884,7 @@ describe('HomePage', () => {
         .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
 
-      render(<HomePage />)
+      renderHomePage()
       await user.click(screen.getByRole('radio', { name: /nfl/i }))
       // Wait for the NFL catalog's newest season to fill the Year field
       // (issue #136) -- until then the submit button is disabled.
@@ -614,7 +961,7 @@ describe('HomePage', () => {
         return held.promise
       })
 
-      render(<HomePage />)
+      renderHomePage()
       const submit = screen.getByRole('button', { name: /get the verdict/i })
       await waitFor(() => expect(submit).not.toBeDisabled())
       await user.click(submit)

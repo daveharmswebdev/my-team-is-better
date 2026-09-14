@@ -1,37 +1,110 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://my-team-is-better.lol/schemas/brief.schema.json",
-  "title": "Delegation brief (coordinator -> spoke)",
-  "description": "Every delegation from the coordinator to a spoke agent is constructed against this shape before the Agent call is made. It is not sent to the spoke as literal JSON in the prompt -- it's the coordinator's own checklist for writing a self-contained brief, and the fields map 1:1 onto the corresponding prose sections of the brief text.",
+  "title": "Delegation brief, v2 (coordinator -> spoke)",
+  "description": "The coordinator writes every brief as JSON against this schema, then renders it with `uv run --script .claude/hooks/delegation.py render-brief <file>`. That checks the schema and the semantic rules (scope inside the agent's ownership, a unique scratch dir) and prints the prompt to hand to the Agent tool. Rendering makes every brief the same shape. See the /delegate skill and .claude/schemas/examples/brief.*.json.",
   "type": "object",
-  "required": ["objective", "contract", "scope", "negative", "rubric"],
   "additionalProperties": false,
+  "required": [
+    "agent",
+    "issue",
+    "base_sha",
+    "scratch_dir",
+    "objective",
+    "contract",
+    "scope",
+    "negative",
+    "rubric",
+    "concurrency",
+    "gate"
+  ],
   "properties": {
+    "agent": {
+      "type": "string",
+      "description": "The spoke this brief is for; must be an agent in .claude/ownership.json."
+    },
+    "issue": {
+      "type": ["integer", "null"],
+      "description": "The GitHub issue this round works on, or null for untracked work (rare: file one first)."
+    },
+    "round": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Review round, starting at 1. Omit for a one-shot task."
+    },
+    "base_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "The commit the spoke must start from. Commit contract changes before delegating: a worktree spoke branches from the coordinator's HEAD (worktree.baseRef = head), never from uncommitted work."
+    },
+    "scratch_dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "This spoke's own scratch subdirectory, e.g. <scratchpad>/183-web-r2/. Never the bare scratchpad root: parallel spokes' sabotage runners collided there."
+    },
     "objective": {
       "type": "string",
-      "description": "What to produce, concretely. Not a vague goal -- a description specific enough that success/failure is unambiguous."
+      "minLength": 1,
+      "description": "What to produce, specific enough that success or failure is unambiguous. State goals and quality criteria, not a step-by-step procedure."
     },
     "contract": {
       "type": ["string", "null"],
-      "description": "The relevant slice of a shared interface (contracts.py, an API schema, a component prop type) pasted verbatim, or null if this task needs none. The spoke cannot see anything the brief doesn't contain."
+      "description": "The relevant slice of a shared interface pasted verbatim, plus any measured numbers the rubric depends on (compute them over real data first: a hand-checked example row proves nothing). null if the task needs none. The spoke sees nothing the brief doesn't contain."
     },
     "scope": {
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
-      "description": "File paths/globs this agent owns for this task. Must match (or be a subset of) the owning agent's ownership map entry in CLAUDE.md."
+      "description": "Repo-relative paths or globs this round may change. Must sit inside the agent's `owns` in .claude/ownership.json (checked). Read-only agents may scope anything."
     },
     "negative": {
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
-      "description": "Explicitly out of scope: another agent's territory, forbidden actions (e.g. 'do not run git commands', 'do not edit main branch protection'), or things that look tempting but aren't this task's job."
+      "description": "Explicitly out of scope: other agents' territory, forbidden actions, tempting side quests."
     },
     "rubric": {
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1,
-      "description": "How this will be judged: named tests that must pass, lint/type/modularity checks that must be clean, specific behaviors to verify. TDD tasks: the rubric names the test(s) written first."
+      "description": "How the work is judged: the tests written first (TDD), checks that must be clean, behaviours to verify, sabotage expectations."
+    },
+    "concurrency": {
+      "type": ["string", "null"],
+      "description": "Other rounds running right now and the files they touch, so the spoke can report a collision instead of racing it. null only if nothing else runs."
+    },
+    "gate": {
+      "description": "Required shape for any round that builds or tightens an enforcement gate (a lint rule, an a11y check, grounding, a currency check). null otherwise. #90 took five review rounds because round 1 had no threat model or stopping rule.",
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["threat_model", "blocking_definition", "out_of_scope", "max_review_rounds"],
+          "properties": {
+            "threat_model": {
+              "type": "string",
+              "minLength": 1,
+              "description": "What the gate must stop, e.g. 'accidental erosion; deliberate evasion must leave a visible trace'."
+            },
+            "blocking_definition": {
+              "type": "string",
+              "minLength": 1,
+              "description": "What counts as a blocking review finding, e.g. 'an ordinary accidental escape, a false positive on legitimate code, or a vacuous check'."
+            },
+            "out_of_scope": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Deliberate-evasion routes that become their own issues, not more rounds."
+            },
+            "max_review_rounds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5
+            }
+          }
+        }
+      ]
     }
   }
 }
