@@ -224,8 +224,22 @@ in the same sentence owns it.
   the top level and inside `team_a` / `team_b`). A response number is
   *rating-only* when the membership rules accept it but it is not a number
   token of the block with the `rating` / `opponent_rating` literals blanked
-  out: "1892", "1933", "4.74", "5.04" and the exact literal
-  `1933.1932908945062` are; "13", "0", "2005", "41" never are. Each
+  out and, on a comparison, the whole top-level `verdict` string blanked
+  too: "1892", "1933", "4.74", "5.04", the exact literal
+  `1933.1932908945062` and the verdict's own "1933.2" / "1891.8" are; "13",
+  "0", "2005", "41" never are. The verdict is blanked because it restates
+  both subjects' ratings rounded ("Texas rates higher overall (1933.2 vs
+  1891.8, rank 1 vs 2)"), which made each rounding a plain token of every
+  comparison block, never rating-only, so "Elo has Texas at 1891.8" passed
+  there while the same sentence on Texas's team case was caught. Blanking
+  the whole string rather than the rating pair is safe because the verdict
+  is a derived summary of facts the block states elsewhere as rows (the
+  head-to-head scores and weeks in `head_to_head.meetings`, the
+  common-opponent scores in `common_opponents[*]`, the ranks in
+  `team_a.rank` / `team_b.rank`): removing it changes rating-only-ness for
+  nothing but the rounded rating pair, and it keeps grounding independent
+  of the verdict's prose. The record and score rules still read the verdict
+  (a hyphen pair quoted there is still a string-value exemption). Each
   rating-only token in a sentence naming a team is attributed like a bare
   or parenthetical claim, and is grounded if it is the attributed name's
   rating exactly, rounded (#162) or as displayed (#165); a bare token is
@@ -240,14 +254,36 @@ in the same sentence owns it.
   the name carries more than one distinct rating, only "1892 is not Texas's
   rating".
 
-Accepted trade-offs, both shared with #26's score rule: a two-team swap in
+* **A name is a mention only when it stands on its own.** The sentence's
+  name mentions (`_name_occurrences`, shared by the score rule, the record
+  rule and the rating pass) are the known names not glued to a word
+  character on either side (a possessive "Texas's" / "Texas'" counts, and so
+  do "Miami (OH)" and "Texas A&M") and not inside another known name's
+  occurrence: in "Florida State" only Florida State is mentioned, never a
+  phantom Florida. Matching raw substrings had registered that phantom, and
+  the bare rescue then accepted its rating: "Keener has Florida State at
+  2.99" passed on the 2013 Florida State case because 2.99 is Florida's
+  `opponent_rating` as displayed. The membership check on the whole response
+  (`name in response_text`) is unchanged and still matches substrings.
+
+Accepted trade-offs, all shared with #26's score rule: a two-team swap in
 one sentence ("Texas went 12-1 and USC went 13-0"; "Elo has USC at 1933 and
 Texas at 1892") is rescued, because the bare phrasing itself cannot say
 which of the two names each number belongs to, and the rescue is what keeps
 "USC lost only to Texas, finishing 12-1" and "beat USC 41-38, and Elo has
-them at 1,933" grounded. And only rating-only tokens are attributed: a
-rating that also happens to be an id, a rank, a year or a week token of the
-block is grounded by membership and never reaches this check (epic #199).
+them at 1,933" grounded. A sentence naming one team while quoting both
+ratings ("Texas rates higher, 1933.2 vs 1891.8", and so the verdict's own
+rating sentence quoted verbatim, which names only `team_a`) is flagged,
+because nearest-name attribution has only one name to give the second
+rating to; naming the other team ("Texas rates higher than USC, 1933.2 vs
+1891.8") is rescued, and the retry feedback names that fix. A wrong-team
+two-part record that equals, in order, a game score the block states
+("Michigan State went 14-0" in Michigan State's 13-1-0 season, after a 14-0
+win over Purdue) is grounded by the game-score rule, the same kind of
+trade-off as #107's; the three-part form ("14-0-0") is caught. And only
+rating-only tokens are attributed: a rating that also happens to be an id, a
+rank, a year or a week token of the block is grounded by membership and
+never reaches this check (epic #199).
 
 Sentence-scoping (splitting `response_text` naively on `.`/`!`/`?`) keeps
 all of these checks from reaching across unrelated sentences to grab a team
@@ -296,6 +332,21 @@ _ROUNDABLE_KEYS = frozenset({"rating", "opponent_rating"})
 _RATING_LITERAL_RE = re.compile(
     r'("(?:rating|opponent_rating)":\s*)(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)'
 )
+
+# A comparison's `verdict` key with its whole JSON string value (issue #166,
+# round 2): the verdict restates both subjects' ratings rounded ("1933.2 vs
+# 1891.8"), so it is blanked along with the rating literals when deciding
+# whether a token is grounded only as a rating. Applied to the JSON text, so
+# it matches the key wherever it sits; `ComparisonResultOut.verdict` is the
+# only such key any fact block carries, and a JSON string value can't contain
+# an unescaped `"verdict":`. Everything the verdict quotes besides the rating
+# pair is a row of the block, so the blank costs nothing (module docstring).
+_VERDICT_STRING_RE = re.compile(r'("verdict":\s*)"(?:[^"\\]|\\.)*"')
+
+# A known team name standing on its own in a sentence (issue #166, round 2):
+# not glued to a word character on either side. A possessive ("Texas's",
+# "Texas'") still counts, and so do "Miami (OH)" and "Texas A&M".
+_NAME_BOUNDARY = (r"(?<!\w)", r"(?!\w)")
 
 # A hyphen-joined score pair or record, e.g. "34-31", "34 - 31" or "8-8-1".
 # Reuses this module's hyphen-as-separator convention (see `_NUMBER_RE`
@@ -449,7 +500,7 @@ def _extract_number_facts(fact_block_json: str) -> _NumberFacts:
     display_values = (
         set() if method is None else {display_value(rating, method) for rating in rating_values}
     )
-    blanked = _RATING_LITERAL_RE.sub(r"\1null", fact_block_json)
+    blanked = _VERDICT_STRING_RE.sub(r"\1null", _RATING_LITERAL_RE.sub(r"\1null", fact_block_json))
     return _NumberFacts(
         fact_numbers=set(_NUMBER_RE.findall(fact_block_json)),
         rating_values=rating_values,
@@ -788,11 +839,29 @@ def _find_relational_mismatches(
 
 
 def _name_occurrences(sentence: str, known_team_names: list[str]) -> list[_NameOccurrence]:
-    return [
+    """Every known name mentioned in `sentence`, with its span, for the score
+    rule (#26), the record rule and the rating pass (#166). A name counts
+    only when it stands on its own (issue #166, round 2): not glued to a word
+    character (`_NAME_BOUNDARY`), and not inside another known name's
+    occurrence -- the longer name wins, so "Florida State" is one mention of
+    Florida State and never also a phantom "Florida", whose rating the bare
+    rescue would otherwise accept for Florida State.
+    """
+    before, after = _NAME_BOUNDARY
+    found = [
         (name, match.span())
         for name in known_team_names
-        for match in re.finditer(re.escape(name), sentence)
+        for match in re.finditer(f"{before}{re.escape(name)}{after}", sentence)
     ]
+    return [
+        (name, span)
+        for name, span in found
+        if not any(_lies_inside(span, other) for _, other in found if other != span)
+    ]
+
+
+def _lies_inside(span: tuple[int, int], other: tuple[int, int]) -> bool:
+    return other[0] <= span[0] and span[1] <= other[1]
 
 
 def _check_claim(

@@ -37,6 +37,29 @@ Real values these tests lean on, pinned in
 * NFL Keener: Kilo Kings `0.25` (shown "250.00"), Mike Mustangs `0.15`
   ("150.00"), Lima Lions `0.35` ("350.00"), November Nomads `0.05`
   ("50.00").
+
+Round 2 (sections C and D below) closes two escapes the round-1 rules left:
+
+* A comparison's top-level `verdict` string restates both subjects' ratings
+  rounded ("Texas rates higher overall (1933.2 vs 1891.8, rank 1 vs 2)"), so
+  on a comparison block "1891.8" used to be a plain number token, never
+  rating-only, never attributed. Pinned in
+  `test_fixture_verdict_states_both_ratings_rounded_and_nowhere_else`: the
+  verdict-rounded pair per block is 2005 Elo `1933.2` / `1891.8`, Keener
+  `0.005044` / `0.004736`; 2013 Florida State vs Michigan State Elo `1990.4` /
+  `1924.0`, Keener `0.004567` / `0.004277`; NFL 2023 Kilo Kings vs Mike
+  Mustangs Keener `0.250000` / `0.150000` (the raw literals there are `0.25`
+  and `0.15`, so the message gives the exact literal, not a rounding).
+* Known names used to be matched as raw substrings, so "Florida State" also
+  registered a phantom "Florida" mention whose rating the bare rescue then
+  accepted. On the 2013 Florida State case Florida's `opponent_rating` is
+  `0.00299...` (shown "2.99") / `1409.59...` ("1410") against Florida
+  State's `0.004567` ("4.57") / `1990.43` ("1990"); on the 2013 Michigan
+  State case Michigan's is `1535.12` ("1535") against `1923.96` ("1924"); on
+  the 2019 LSU case Georgia's is `1821.19` ("1821"), Georgia Southern's
+  `1518.88` ("1519"), against LSU's `2044.43` ("2044"). 2005 Ohio State beat
+  Miami (OH) 34-14 (Elo `1547.04`, "1547"); 2013 Michigan State beat Purdue
+  14-0 (its record is 13-1-0).
 """
 
 from __future__ import annotations
@@ -45,6 +68,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterator
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pytest
@@ -120,6 +144,16 @@ def _block(
         return _comparison_block(cfb_conn, 2005, "Texas", "USC", "cfb", "keener"), "cfb", cfb_conn
     if name == "usc_case_elo":
         return _team_case_block(cfb_conn, 2005, "USC", "cfb", "elo"), "cfb", cfb_conn
+    if name == "compare_2013_elo":
+        block = _comparison_block(cfb_conn, 2013, "Florida State", "Michigan State", "cfb", "elo")
+        return block, "cfb", cfb_conn
+    if name == "compare_2013_keener":
+        block = _comparison_block(
+            cfb_conn, 2013, "Florida State", "Michigan State", "cfb", "keener"
+        )
+        return block, "cfb", cfb_conn
+    if name == "compare_2019_elo":
+        return _comparison_block(cfb_conn, 2019, "LSU", "Clemson", "cfb", "elo"), "cfb", cfb_conn
     if name == "kilo_case":
         return _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl", "keener"), "nfl", nfl_conn
     if name == "kilo_compare":
@@ -598,3 +632,534 @@ def test_correct_narration_is_fully_grounded(
 def test_every_block_has_at_least_eight_probes() -> None:
     for name in CFB_BLOCKS + NFL_BLOCKS:
         assert len(CORRECT_NARRATIONS[name]) >= 8, name
+
+
+# ---------------------------------------------------------------------------
+# C. a comparison's `verdict` string restates both ratings rounded (#166
+# round 2): those roundings are rating-only tokens too, so they are
+# attributed like any other rating.
+# ---------------------------------------------------------------------------
+
+_VERDICT_STRING_RE = re.compile(r'("verdict":\s*)"(?:[^"\\]|\\.)*"')
+
+# (block, team_a, team_b, a's rating as the verdict states it, b's likewise,
+#  a's rating as the message gives it, b's likewise). For CFB the message
+#  form is the same rounding; for NFL the literals `0.25` / `0.15` have fewer
+#  places than the verdict's `0.250000` / `0.150000`, so the token matches the
+#  exact value, not a rounding, and the message gives the exact literal.
+VERDICT_RATINGS = [
+    pytest.param(
+        "compare_elo", "Texas", "USC", "1933.2", "1891.8", "1933.2", "1891.8", id="2005-elo"
+    ),
+    pytest.param(
+        "compare_keener",
+        "Texas",
+        "USC",
+        "0.005044",
+        "0.004736",
+        "0.005044",
+        "0.004736",
+        id="2005-keener",
+    ),
+    pytest.param(
+        "compare_2013_elo",
+        "Florida State",
+        "Michigan State",
+        "1990.4",
+        "1924.0",
+        "1990.4",
+        "1924.0",
+        id="2013-elo",
+    ),
+    pytest.param(
+        "compare_2013_keener",
+        "Florida State",
+        "Michigan State",
+        "0.004567",
+        "0.004277",
+        "0.004567",
+        "0.004277",
+        id="2013-keener",
+    ),
+    pytest.param(
+        "kilo_compare",
+        "Kilo Kings",
+        "Mike Mustangs",
+        "0.250000",
+        "0.150000",
+        "0.25",
+        "0.15",
+        id="nfl-keener",
+    ),
+]
+_VERDICT_PARAMS = ("block", "team_a", "team_b", "a_stated", "b_stated", "a_own", "b_own")
+
+
+def _rating_word(fact_block: str) -> str:
+    return "Keener" if json.loads(fact_block)["method"] == "keener" else "Elo"
+
+
+@pytest.mark.parametrize(_VERDICT_PARAMS, VERDICT_RATINGS, indirect=["block"])
+def test_fixture_verdict_states_both_ratings_rounded_and_nowhere_else(
+    block: tuple[str, Sport, sqlite3.Connection],
+    team_a: str,
+    team_b: str,
+    a_stated: str,
+    b_stated: str,
+    a_own: str,
+    b_own: str,
+) -> None:
+    """The round-2 premise: each verdict-rounded rating is a number token of
+    the block only because the verdict states it. With the rating literals
+    blanked (round 1) it is still a plain token; with the verdict blanked too
+    it is gone, so only a rating grounds it."""
+    fact_block, _, _ = block
+    data = json.loads(fact_block, parse_float=Decimal)
+
+    assert (data["team_a"]["team_name"], data["team_b"]["team_name"]) == (team_a, team_b)
+    assert a_stated in data["verdict"] and b_stated in data["verdict"]
+    assert fact_block.count('"verdict"') == 1
+    without_ratings = _RATING_LITERAL_RE.sub(r"\1null", fact_block)
+    assert {a_stated, b_stated} <= set(_NUMBER_RE.findall(without_ratings))
+    without_verdict = _VERDICT_STRING_RE.sub(r"\1null", without_ratings)
+    assert not {a_stated, b_stated} & set(_NUMBER_RE.findall(without_verdict))
+    for stated, own, rating in (
+        (a_stated, a_own, data["team_a"]["rating"]),
+        (b_stated, b_own, data["team_b"]["rating"]),
+    ):
+        assert rating.quantize(Decimal(stated), rounding=ROUND_HALF_UP) == Decimal(stated)
+        # The message form (round 1): the owner's rating rounded to the
+        # token's places when the token is a rounding of the literal, else
+        # the exact literal (NFL's `0.25` has fewer places than `0.250000`).
+        stated_places = -int(Decimal(stated).as_tuple().exponent)
+        literal_places = -int(rating.as_tuple().exponent)
+        assert own == (stated if stated_places < literal_places else format(rating, "f"))
+
+
+@pytest.mark.parametrize(_VERDICT_PARAMS, VERDICT_RATINGS, indirect=["block"])
+def test_other_compared_teams_verdict_rounded_rating_is_flagged(
+    block: tuple[str, Sport, sqlite3.Connection],
+    team_a: str,
+    team_b: str,
+    a_stated: str,
+    b_stated: str,
+    a_own: str,
+    b_own: str,
+) -> None:
+    """The reviewer's escape: on a comparison block, the other team's rating
+    rounded as the verdict rounds it, said about the named team, bare and
+    parenthetical, in both directions. Round 1's message shape."""
+    fact_block, sport, conn = block
+    word = _rating_word(fact_block)
+    about_a = [f"{b_stated} is not {team_a}'s rating; {team_a}'s rating is {a_own}"]
+    about_b = [f"{a_stated} is not {team_b}'s rating; {team_b}'s rating is {b_own}"]
+
+    assert _check(conn, f"{word} has {team_a} at {b_stated}.", fact_block, sport) == about_a
+    assert _check(conn, f"{team_a} ({b_stated}) is rated.", fact_block, sport) == about_a
+    assert _check(conn, f"{word} has {team_b} at {a_stated}.", fact_block, sport) == about_b
+    assert _check(conn, f"{team_b} ({a_stated}) is rated.", fact_block, sport) == about_b
+
+
+@pytest.mark.parametrize(_VERDICT_PARAMS, VERDICT_RATINGS, indirect=["block"])
+def test_verdict_rounded_ratings_beside_their_own_names_stay_grounded(
+    block: tuple[str, Sport, sqlite3.Connection],
+    team_a: str,
+    team_b: str,
+    a_stated: str,
+    b_stated: str,
+    a_own: str,
+    b_own: str,
+) -> None:
+    fact_block, sport, conn = block
+    word = _rating_word(fact_block)
+    responses = [
+        f"{team_a} rates higher than {team_b}, {a_stated} vs {b_stated}.",
+        f"{word} has {team_a} at {a_stated} and {team_b} at {b_stated}.",
+        f"{team_b} ({b_stated}) trails {team_a} ({a_stated}).",
+    ]
+
+    for response in responses:
+        assert _check(conn, response, fact_block, sport) == [], response
+
+
+@pytest.mark.parametrize(_VERDICT_PARAMS, VERDICT_RATINGS, indirect=["block"])
+def test_verdict_quoted_verbatim(
+    block: tuple[str, Sport, sqlite3.Connection],
+    team_a: str,
+    team_b: str,
+    a_stated: str,
+    b_stated: str,
+    a_own: str,
+    b_own: str,
+) -> None:
+    """The engine's verdict quoted as-is. Every sentence of it that names both
+    teams (the head-to-head and common-opponent sentences) stays grounded.
+    Its last sentence, "<team_a> rates higher overall (<a> vs <b>, rank ...)",
+    names only `team_a` once the response is split into sentences, so it is
+    the one-name limit pinned in
+    `test_single_name_sentence_quoting_both_ratings_is_the_documented_limit`:
+    the retry feedback names the fix (say whose the second rating is)."""
+    fact_block, sport, conn = block
+    verdict: str = json.loads(fact_block)["verdict"]
+    *both_named, rating_sentence = re.split(r"(?<=[.!?])\s+", verdict)
+    limit = [f"{b_stated} is not {team_a}'s rating; {team_a}'s rating is {a_own}"]
+
+    assert team_a in rating_sentence and team_b not in rating_sentence
+    assert a_stated in rating_sentence and b_stated in rating_sentence
+    for sentence in both_named:
+        assert team_a in sentence and team_b in sentence, sentence
+        assert _check(conn, sentence, fact_block, sport) == [], sentence
+    assert _check(conn, rating_sentence, fact_block, sport) == limit
+    assert _check(conn, verdict, fact_block, sport) == limit
+
+
+@pytest.mark.parametrize("block", ["compare_elo", "compare_keener"], indirect=True)
+def test_single_name_sentence_quoting_both_ratings_is_the_documented_limit(
+    block: tuple[str, Sport, sqlite3.Connection],
+) -> None:
+    """Accepted trade-off, the same limit as #26's score rule and the
+    two-team swap above: nearest-name attribution has one name to give a
+    rating to, so a sentence naming one team while quoting both ratings
+    hands the second rating to that team and flags it. Naming the other
+    team rescues it (the bare rescue), which is what the retry feedback
+    tells the narrator to do. Asserted so a future change is deliberate."""
+    fact_block, sport, conn = block
+    elo = _rating_word(fact_block) == "Elo"
+    a_stated, b_stated = ("1933.2", "1891.8") if elo else ("0.005044", "0.004736")
+
+    assert _check(conn, f"Texas rates higher, {a_stated} vs {b_stated}.", fact_block, sport) == [
+        f"{b_stated} is not Texas's rating; Texas's rating is {a_stated}"
+    ]
+    assert (
+        _check(conn, f"Texas rates higher than USC, {a_stated} vs {b_stated}.", fact_block, sport)
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("block", "response"),
+    [
+        pytest.param("compare_elo", "Texas beat USC 41-38 in week 1.", id="2005-h2h"),
+        pytest.param(
+            "compare_keener", "Texas (41-38) beat USC in the Rose Bowl.", id="2005-h2h-paren"
+        ),
+        pytest.param("compare_2019_elo", "LSU beat Clemson 42-25 in week 1.", id="2019-h2h"),
+        pytest.param(
+            "compare_2019_elo",
+            "LSU beat Texas A&M 50-7 in week 14 and Clemson beat Texas A&M 24-10 in week 2.",
+            id="2019-common-opponent",
+        ),
+        pytest.param(
+            "compare_2019_elo",
+            "LSU rates higher than Clemson, 2044.4 vs 1915.4, rank 1 vs 3.",
+            id="2019-ratings-and-ranks",
+        ),
+        pytest.param(
+            "kilo_compare",
+            "Kilo Kings tied Mike Mustangs 17-17 in week 2 and beat them 31-14 in week 4.",
+            id="nfl-h2h",
+        ),
+        pytest.param(
+            "kilo_compare",
+            "Kilo Kings lost to Lima Lions 13-20 and Mike Mustangs lost to Lima Lions 10-27.",
+            id="nfl-common-opponent",
+        ),
+    ],
+    indirect=["block"],
+)
+def test_scores_the_verdict_also_states_stay_grounded(
+    block: tuple[str, Sport, sqlite3.Connection], response: str
+) -> None:
+    """Blanking the whole verdict string loses nothing but the rounded rating
+    pair: every score, week and rank it quotes is a row of the block."""
+    fact_block, sport, conn = block
+
+    assert _check(conn, response, fact_block, sport) == []
+
+
+# ---------------------------------------------------------------------------
+# D. a name is a mention only when it stands on its own (#166 round 2): not
+# glued to a word character, and not inside a longer known name.
+# ---------------------------------------------------------------------------
+
+
+def test_fixture_values_the_name_mention_tests_rely_on(cfb_conn: sqlite3.Connection) -> None:
+    fsu_keener = _team_case_block(cfb_conn, 2013, "Florida State", "cfb", "keener")
+    fsu_elo = _team_case_block(cfb_conn, 2013, "Florida State", "cfb", "elo")
+    msu_elo = _team_case_block(cfb_conn, 2013, "Michigan State", "cfb", "elo")
+    lsu_elo = _team_case_block(cfb_conn, 2019, "LSU", "cfb", "elo")
+    osu_elo = _team_case_block(cfb_conn, 2005, "Ohio State", "cfb", "elo")
+    known = set(list_all_team_names(cfb_conn, "cfb"))
+
+    assert {"Florida", "Michigan", "Georgia", "Ohio", "Miami", "Texas"} <= known
+    assert {"Florida State", "Western Michigan", "Georgia Southern", "Miami (OH)"} <= known
+    assert {"Texas Tech", "Texas A&M", "Ohio State", "Michigan State"} <= known
+    for block, own_rating, opponent, opponent_rating in (
+        (fsu_keener, '"rating":0.004566992948687425', "Florida", "0.0029902972687814067"),
+        (fsu_elo, '"rating":1990.4284849870103', "Florida", "1409.5921933737932"),
+        (msu_elo, '"rating":1923.9553514326844', "Michigan", "1535.1193570414061"),
+        (lsu_elo, '"rating":2044.432081520423', "Georgia", "1821.1921941233863"),
+        (lsu_elo, '"rating":2044.432081520423', "Georgia Southern", "1518.8766007827535"),
+        (osu_elo, '"rating":1858.4141852412133', "Miami (OH)", "1547.0423918950503"),
+    ):
+        assert own_rating in block
+        assert f'"opponent_rating":{opponent_rating}' in block
+        rows = [game for game in json.loads(block)["games"] if game["opponent_name"] == opponent]
+        assert [str(row["opponent_rating"]) for row in rows] == [opponent_rating]
+    for block, tokens in (
+        (fsu_keener, {"2.99", "4.57"}),
+        (fsu_elo, {"1410", "1990"}),
+        (msu_elo, {"1535", "1924"}),
+        (lsu_elo, {"1821", "1519", "2044"}),
+        (osu_elo, {"1547"}),
+    ):
+        assert not tokens & _blanked_number_tokens(block)
+    games = {
+        (game["opponent_name"], game["team_score"], game["opponent_score"])
+        for block in (fsu_elo, msu_elo, lsu_elo, osu_elo)
+        for game in json.loads(block)["games"]
+    }
+    assert {
+        ("Florida", 37, 7),
+        ("Michigan", 29, 6),
+        ("Western Michigan", 26, 13),
+        ("Purdue", 14, 0),
+        ("Georgia Southern", 55, 3),
+        ("Georgia", 37, 10),
+        ("Miami (OH)", 34, 14),
+    } <= games
+    msu = json.loads(msu_elo)
+    assert (msu["wins"], msu["losses"], msu["ties"]) == (13, 1, 0)
+
+
+@pytest.mark.parametrize(
+    ("year", "team", "method", "response", "expected"),
+    [
+        pytest.param(
+            2013,
+            "Florida State",
+            "keener",
+            "Keener has Florida State at 2.99.",
+            "2.99 is not Florida State's rating; Florida State's rating is 4.57",
+            id="florida-inside-florida-state-keener",
+        ),
+        pytest.param(
+            2013,
+            "Florida State",
+            "elo",
+            "Elo has Florida State at 1410.",
+            "1410 is not Florida State's rating; Florida State's rating is 1990",
+            id="florida-inside-florida-state-elo",
+        ),
+        pytest.param(
+            2013,
+            "Michigan State",
+            "elo",
+            "Elo has Michigan State at 1535.",
+            "1535 is not Michigan State's rating; Michigan State's rating is 1924",
+            id="michigan-inside-michigan-state",
+        ),
+        pytest.param(
+            2019,
+            "LSU",
+            "elo",
+            "LSU beat Georgia Southern 55-3 and Elo has LSU at 1821.",
+            "1821 is not LSU's rating; LSU's rating is 2044",
+            id="georgia-inside-georgia-southern",
+        ),
+    ],
+)
+def test_rating_of_a_team_named_only_inside_a_longer_name_is_flagged(
+    cfb_conn: sqlite3.Connection,
+    year: int,
+    team: str,
+    method: Method,
+    response: str,
+    expected: str,
+) -> None:
+    """The validator's escape (67 of 7,764 narrations): the sentence never
+    names Florida, Michigan or Georgia, but a substring match registered a
+    phantom mention of each inside the longer name, and the bare rescue then
+    accepted the phantom's rating for the team the sentence does name."""
+    block = _team_case_block(cfb_conn, year, team, "cfb", method)
+
+    assert _check(cfb_conn, response, block, "cfb") == [expected]
+
+
+@pytest.mark.parametrize(
+    ("year", "team", "method", "response"),
+    [
+        pytest.param(
+            2013,
+            "Florida State",
+            "elo",
+            "Florida State beat Florida 37-7 in 2013.",
+            id="fsu-florida",
+        ),
+        pytest.param(
+            2013,
+            "Florida State",
+            "keener",
+            "Florida State beat Florida 37-7, and Keener had Florida at 2.99.",
+            id="fsu-florida-rating",
+        ),
+        pytest.param(
+            2013,
+            "Florida State",
+            "elo",
+            "Florida (37-7) lost to Florida State, and Elo had Florida at 1410.",
+            id="fsu-florida-paren",
+        ),
+        pytest.param(
+            2013,
+            "Michigan State",
+            "elo",
+            "Michigan State beat Michigan 29-6, and Elo had Michigan at 1535.",
+            id="msu-michigan-rating",
+        ),
+        pytest.param(
+            2013,
+            "Michigan State",
+            "elo",
+            "Michigan State beat Western Michigan 26-13 and Michigan 29-6.",
+            id="msu-western-michigan-and-michigan",
+        ),
+        pytest.param(
+            2019,
+            "LSU",
+            "elo",
+            "LSU beat Georgia Southern 55-3 and Georgia 37-10.",
+            id="lsu-georgias",
+        ),
+        pytest.param(
+            2019,
+            "LSU",
+            "elo",
+            "LSU beat Georgia Southern 55-3, and Elo had Georgia Southern at 1519.",
+            id="lsu-georgia-southern-rating",
+        ),
+        pytest.param(
+            2019,
+            "LSU",
+            "elo",
+            "LSU beat Georgia 37-10, and Elo had Georgia at 1821.",
+            id="lsu-georgia-rating",
+        ),
+        pytest.param(
+            2005,
+            "Texas",
+            "elo",
+            "Texas beat Texas Tech 52-17 and Texas A&M 40-29.",
+            id="texas-texases",
+        ),
+        pytest.param(
+            2005,
+            "Texas",
+            "elo",
+            "Texas beat Texas Tech 52-17, and Elo had Texas Tech at 1659.",
+            id="texas-texas-tech-rating",
+        ),
+        pytest.param(
+            2005,
+            "Texas",
+            "elo",
+            "Texas beat Texas A&M 40-29, and Elo had Texas A&M at 1471.",
+            id="texas-texas-am-rating",
+        ),
+        pytest.param(
+            2005,
+            "Texas",
+            "elo",
+            "Texas's record was 13-0, and Texas' Elo rating is 1933.",
+            id="possessives",
+        ),
+        pytest.param(
+            2005,
+            "Ohio State",
+            "elo",
+            "Ohio State beat Miami (OH) 34-14, and Elo had Miami (OH) at 1547.",
+            id="ohio-state-miami-oh",
+        ),
+        pytest.param(
+            2005,
+            "Ohio State",
+            "elo",
+            "Miami (OH) (34-14) lost to Ohio State.",
+            id="miami-oh-paren",
+        ),
+    ],
+)
+def test_short_and_long_names_standing_on_their_own_stay_grounded(
+    cfb_conn: sqlite3.Connection, year: int, team: str, method: Method, response: str
+) -> None:
+    """Both names are real mentions when each stands on its own, possessives
+    included, and a parenthesized or ampersand name is one mention."""
+    block = _team_case_block(cfb_conn, year, team, "cfb", method)
+
+    assert _check(cfb_conn, response, block, "cfb") == []
+
+
+@pytest.mark.parametrize(
+    ("year", "team", "response", "expected"),
+    [
+        pytest.param(
+            2019,
+            "LSU",
+            "LSU beat Georgia Southern 3-55 and Georgia 37-10.",
+            "Georgia Southern's score should be stated 55-3, not 3-55",
+            id="long-name-swapped",
+        ),
+        pytest.param(
+            2019,
+            "LSU",
+            "LSU beat Georgia Southern 55-3 and Georgia 10-37.",
+            "Georgia's score should be stated 37-10, not 10-37",
+            id="short-name-swapped",
+        ),
+        pytest.param(
+            2005,
+            "Texas",
+            "Texas beat Texas Tech 17-52.",
+            "Texas Tech's score should be stated 52-17, not 17-52",
+            id="texas-tech-swapped",
+        ),
+        pytest.param(
+            2013,
+            "Michigan State",
+            "Michigan State beat Michigan 6-29.",
+            "Michigan's score should be stated 29-6, not 6-29",
+            id="michigan-swapped",
+        ),
+        pytest.param(
+            2005,
+            "Ohio State",
+            "Ohio State beat Miami (OH) 14-34.",
+            "Miami (OH)'s score should be stated 34-14, not 14-34",
+            id="miami-oh-swapped",
+        ),
+    ],
+)
+def test_score_rule_is_unchanged_when_a_short_and_a_long_name_each_stand_on_their_own(
+    cfb_conn: sqlite3.Connection, year: int, team: str, response: str, expected: str
+) -> None:
+    """#26's behaviour, pinned across the mention change: a swapped score
+    beside either name is still that name's."""
+    block = _team_case_block(cfb_conn, year, team, "cfb", "elo")
+
+    assert _check(cfb_conn, response, block, "cfb") == [expected]
+
+
+def test_wrong_record_equal_to_a_game_score_is_the_documented_limit(
+    cfb_conn: sqlite3.Connection,
+) -> None:
+    """Accepted trade-off (reviewer nit on round 1): a two-part record claim
+    about a subject is grounded when it is, in order, a game score the block
+    states, so a wrong record that equals one goes uncaught. 2013 Michigan
+    State (13-1-0) beat Purdue 14-0. The three-part form has no score to
+    hide behind and is caught."""
+    block = _team_case_block(cfb_conn, 2013, "Michigan State", "cfb", "elo")
+
+    assert _check(cfb_conn, "Michigan State went 14-0 this year.", block, "cfb") == []
+    assert _check(cfb_conn, "Michigan State went 14-0-0.", block, "cfb") == [
+        "14-0-0 is not Michigan State's record; Michigan State's record is 13-1-0"
+    ]
