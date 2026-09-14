@@ -160,6 +160,7 @@ function comparisonEnvelopeFor(
     losses: 1,
     ties: 0,
     rating_breakdown: { entries: [], residual_contribution: 0 },
+    elo_ledger: null,
     quality_wins: [],
     worst_loss: null,
   })
