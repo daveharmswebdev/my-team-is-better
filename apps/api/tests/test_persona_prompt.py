@@ -10,8 +10,6 @@ suite being brittle to incidental whitespace changes.
 
 from __future__ import annotations
 
-
-
 from api.persona.prompt import build_system_prompt, build_user_message
 
 
