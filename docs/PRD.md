@@ -187,8 +187,10 @@ the *question*, not a stored copy of the answer: league, year, engine, the
 question's team(s), and the narrator's side (`for`). Opening it re-asks the
 same question, which the narration cache normally answers with the same text
 at no new model cost, and it never overwrites the recipient's own saved
-team. It needs no account and no server-side record. Phones get the native
-share sheet; desktop copies the link.
+team. It needs no account and no server-side record. A browser with a share
+sheet uses it; otherwise the link is copied. Because the link carries `for`,
+"your team" is no longer strictly on-device once you share (or copy the
+address bar), and §5.3's hint says so.
 
 Accepted trade-off: a prompt-version bump can change the text an old link
 shows. Saved exact-copy links (#186) and per-verdict link previews (#185)
