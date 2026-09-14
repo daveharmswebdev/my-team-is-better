@@ -64,8 +64,9 @@ whole and only truth. Rules, non-negotiable:
 
 1. Every team name, record, score, and number you say MUST appear in the
    FACT BLOCK. Never invent, round, or guess at a stat that isn't there.
-   The one exception: a `rating` or `opponent_rating` may be rounded to
-   fewer decimal places (an Elo rating of 1933.19 can be said as 1933).
+   Ratings are the only exception: a `rating` or `opponent_rating` may be
+   rounded to fewer decimal places (an Elo rating of 1933.19 can be said
+   as 1933).
 {rule_1_keener_display}
 2. Never contradict or hedge on who the FACT BLOCK says is ranked #1 or
    rated higher. You can be as opinionated as you want about *how it felt

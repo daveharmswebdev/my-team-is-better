@@ -45,8 +45,9 @@ def test_prompt_carries_the_non_negotiable_grounding_rules_verbatim() -> None:
 _RULE_1_WITH_RATING_ROUNDING = (
     "1. Every team name, record, score, and number you say MUST appear in the\n"
     "   FACT BLOCK. Never invent, round, or guess at a stat that isn't there.\n"
-    "   The one exception: a `rating` or `opponent_rating` may be rounded to\n"
-    "   fewer decimal places (an Elo rating of 1933.19 can be said as 1933).\n"
+    "   Ratings are the only exception: a `rating` or `opponent_rating` may be\n"
+    "   rounded to fewer decimal places (an Elo rating of 1933.19 can be said\n"
+    "   as 1933).\n"
 )
 
 
@@ -62,7 +63,7 @@ def test_rule_1_permits_rounding_ratings_and_nothing_else() -> None:
 
 
 _RULE_1_KEENER_DISPLAY = (
-    "   fewer decimal places (an Elo rating of 1933.19 can be said as 1933).\n"
+    "   as 1933).\n"
     "   A Keener rating may also be quoted the way the site displays it:\n"
     "   multiplied by 1000 and shown to 2 decimal places (0.005044 is 5.04).\n"
     "2. Never contradict"

@@ -11,12 +11,16 @@ against one definition rather than each typing its own scale:
    contract alias, in order.
 2. **The committed file is current.** `rating-display.json` is byte-identical
    to `render()`; on mismatch the message prints the regenerate command.
-3. **`display_value` is the card's rounding.** Worked examples, half cases
-   and signed zero here; and across every `rating`/`opponent_rating` literal
-   in the real fixture fact blocks, it equals Python's
-   `format(float(literal) * scale, f".{decimals}f")` -- a faithful proxy for
-   apps/web's `(value * scale).toFixed(decimals)`, which formats the same
-   binary double.
+3. **`display_value` matches the card's rounding on real ratings.** Worked
+   examples, half cases and signed zero here; and across every
+   `rating`/`opponent_rating` literal in the real fixture fact blocks, it
+   equals Python's `format(float(literal) * scale, f".{decimals}f")`, which
+   rounds the same binary double apps/web's `(value * scale).toFixed(decimals)`
+   does. That is a proxy, not an identity: on a short decimal tie such as
+   `0.003505`, the Decimal half-up here gives `3.51` while the card prints
+   `3.50`. Real ratings are full-precision doubles, where the two agree (0
+   mismatches on the fixture; the #165 review also found 0 in 300,000 random
+   doubles).
 4. **No redeclared scale.** No module under `src/api/` spells out the Keener
    scale anywhere except `RATING_DISPLAY` itself.
 """
@@ -37,6 +41,7 @@ from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_team_case
 
 from api.models import Method, TeamCaseOut
+from api.rating_display import RATING_DISPLAY
 
 API_ROOT = Path(__file__).resolve().parents[1]
 SRC_API = API_ROOT / "src" / "api"
@@ -129,7 +134,9 @@ def test_main_writes_the_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -
         ("0.005044108672990355", "keener", "5.04"),
         ("0.004736299273644764", "keener", "4.74"),
         ("1933.1932908945062", "elo", "1933"),
-        # Exact half cases round away from zero, per method.
+        # Exact decimal half cases round away from zero, per method. This is
+        # the Decimal rule on a short literal; the card's `toFixed` works on the
+        # binary double and can differ on such ties (see the module docstring).
         ("0.005045", "keener", "5.05"),
         ("1933.5", "elo", "1934"),
         ("1500.5", "elo_career", "1501"),
@@ -214,8 +221,13 @@ def test_display_value_matches_the_cards_float_formatting_on_real_fact_blocks(
 # ---------------------------------------------------------------------------
 
 # The Keener scale as a number, or as text ("1000", "1,000") inside a string
-# such as the prompt template.
-_SCALE_TEXT_RE = re.compile(r"(?<![\d.,])1,?000(?![\d,]|\.\d)")
+# such as the prompt template. Read from the definition itself, so after a
+# legitimate scale change the scan still catches hand-typed copies of the new
+# value rather than of the old one.
+_KEENER_SCALE = RATING_DISPLAY["keener"].scale
+_SCALE_TEXT_RE = re.compile(
+    rf"(?<![\d.,])(?:{re.escape(format(_KEENER_SCALE, ','))}|{_KEENER_SCALE})(?![\d,]|\.\d)"
+)
 
 
 def _rating_display_definition_nodes(tree: ast.Module) -> set[int]:
@@ -242,7 +254,7 @@ def _scale_redeclarations(path: Path, *, allow_definition: bool) -> list[str]:
         value = sub.value
         if isinstance(value, bool):
             continue
-        if isinstance(value, int | float) and value == 1000:
+        if isinstance(value, int | float) and value == _KEENER_SCALE:
             found.append(f"{path.name}:{sub.lineno} numeric literal {value!r}")
         elif isinstance(value, str) and _SCALE_TEXT_RE.search(value):
             found.append(f"{path.name}:{sub.lineno} string spells out the scale: {value[:60]!r}")
@@ -264,11 +276,12 @@ def test_no_module_under_src_api_redeclares_the_keener_scale() -> None:
 
 def test_scale_redeclaration_scan_is_not_vacuous(tmp_path: Path) -> None:
     sample = tmp_path / "prompt.py"
+    scale = _KEENER_SCALE
     sample.write_text(
-        'TEMPLATE = """multiplied by 1000 and shown to 2 decimal places"""\n'
-        "SCALE = 1_000\n"
-        "OTHER = 1e3\n"
-        'FINE = "10000 and 2001 and 1000.5"\n'
+        f'TEMPLATE = """multiplied by {scale} and shown to 2 decimal places"""\n'
+        f"SCALE = {scale:_}\n"
+        f"OTHER = {float(scale)!r}\n"
+        f'FINE = "{scale}0 and 2001 and {scale}.5"\n'
     )
 
     found = _scale_redeclarations(sample, allow_definition=False)
