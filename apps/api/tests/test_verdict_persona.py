@@ -16,9 +16,24 @@ import anthropic
 import httpx2
 from fastapi.testclient import TestClient
 
+from api.config import PROMPT_VERSION
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
-from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore
+from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore, cache_key
+
+
+def _usc_2005_team_case_key() -> str:
+    """The cache key `/api/verdict/team-case {"year": 2005, "team": "USC"}`
+    uses with the request's default method and sport."""
+    return cache_key(
+        question_type="team_case",
+        year=2005,
+        teams=("USC",),
+        user_team=None,
+        method="keener",
+        sport="cfb",
+        prompt_version=PROMPT_VERSION,
+    )
 
 
 class FakeNarrator:
@@ -183,7 +198,7 @@ def test_grounding_failure_retries_once_with_the_mismatch_fed_back(
         ]
     )
 
-    with _wired(narrator):
+    with _wired(narrator) as cache:
         response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
 
     assert response.status_code == 200
@@ -191,6 +206,11 @@ def test_grounding_failure_retries_once_with_the_mismatch_fed_back(
     assert len(narrator.calls) == 2
     retry_feedback = narrator.calls[1][-1]["content"]
     assert "Alabama" in retry_feedback
+    # A successful retry is cached under the key the fallback test below
+    # checks, so that test's "not cached" can't pass on a wrong key.
+    cached = cache.get(_usc_2005_team_case_key())
+    assert cached is not None
+    assert cached.text == "USC put together a real season in 2005."
 
 
 def test_two_grounding_failures_serve_the_fallback_and_never_make_a_third_call(
@@ -203,7 +223,7 @@ def test_two_grounding_failures_serve_the_fallback_and_never_make_a_third_call(
         ]
     )
 
-    with _wired(narrator):
+    with _wired(narrator) as cache:
         response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
 
     assert response.status_code == 200
@@ -211,6 +231,9 @@ def test_two_grounding_failures_serve_the_fallback_and_never_make_a_third_call(
     assert "USC" in body["narration"]["text"]
     assert "12" in body["narration"]["text"]  # USC's real 2005 win count
     assert len(narrator.calls) == 2
+    # Issue #65: the fallback is served, but never cached as if it were real.
+    assert body["narration"]["cached"] is False
+    assert cache.get(_usc_2005_team_case_key()) is None
 
 
 def test_claude_api_error_falls_back_safely_instead_of_500ing(client: TestClient) -> None:
