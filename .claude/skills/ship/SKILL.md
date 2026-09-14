@@ -53,9 +53,8 @@ Add the attribution lines your session's instructions give you.
 
 ## 3. Merge
 
-1. `gh pr ready <pr>`, then `gh pr checks <pr> --watch`. Every job must be green; the
-   `e2e` job is the only one not yet treated as blocking (see ci.yml). Red means fix,
-   never merge.
+1. `gh pr ready <pr>`, then `gh pr checks <pr> --watch`. Every job must be green,
+   `e2e` included. Red means fix, never merge.
 2. Check for dependents: `gh pr list --base <branch>`.
    - **None:** `gh pr merge <pr> --squash --delete-branch`.
    - **Some:** retarget each dependent first (`gh pr edit <dep> --base main`), then merge
