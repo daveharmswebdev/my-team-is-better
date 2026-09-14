@@ -75,11 +75,42 @@
 
 .gameline {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.55em;
+  gap: var(--sp-1) 0.9em;
   font-size: 0.92rem;
   padding-bottom: var(--sp-2);
   border-bottom: 1px dotted var(--rule);
+}
+
+/* Issue #130: one team's meetings with the shared opponent, however many,
+   under that team's name. A group wraps as a unit before its meetings do. */
+.gamelineSide {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) 0.4em;
+}
+
+.gamelineSideTeam {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.gamelineMeeting {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.gamelineSep {
+  color: var(--ink-muted);
 }
 
 .gameline:last-child {

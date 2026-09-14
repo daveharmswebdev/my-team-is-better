@@ -1,9 +1,11 @@
+import { useId } from 'react'
 import { displayRatingPair, formatRating } from '../../lib/formatRating'
 import { formatRecord } from '../../lib/formatRecord'
 import { resultLabel } from '../../lib/resultLabel'
 import type {
   ComparisonResultOut,
   ComparisonTeamSummaryOut,
+  CommonOpponentMeetingOut,
   CommonOpponentOut,
   GameResult,
   HeadToHeadMeetingOut,
@@ -103,22 +105,95 @@ function MeetingRow({ meeting }: { meeting: HeadToHeadMeetingOut }) {
   )
 }
 
-/** A common-opponent row: both teams' W/L/T tag and score against the shared opponent. */
-function CommonOpponentLine({ opponent }: { opponent: CommonOpponentOut }) {
+/**
+ * When a common-opponent meeting happened, as a parenthetical: "(wk 8)", or
+ * "(postseason)" for a bowl/playoff/title game (whose `week` restarts from 1
+ * and would mislead), or nothing when the API has neither.
+ */
+function meetingWhen(meeting: CommonOpponentMeetingOut): string {
+  if (meeting.season_type === 'postseason') return ' (postseason)'
+  return meeting.week !== null ? ` (wk ${meeting.week})` : ''
+}
+
+/**
+ * One side's meeting with the shared opponent: its W/L/T tag, score and week.
+ * The "·" before every meeting but the first lives inside the meeting, so a
+ * narrow screen wraps "· T 26-26 (wk 12)" as one unit instead of leaving the
+ * dot dangling at the end of the previous line.
+ */
+function Meeting({
+  meeting,
+  separated,
+}: {
+  meeting: CommonOpponentMeetingOut
+  separated: boolean
+}) {
+  return (
+    <span className={styles.gamelineMeeting}>
+      {separated && (
+        <span aria-hidden="true" className={styles.gamelineSep}>
+          ·
+        </span>
+      )}
+      <ResultTag result={meeting.result} />
+      <span>
+        {meeting.team_score}-{meeting.opponent_score}
+        {meetingWhen(meeting)}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * One side's meetings with the shared opponent, every one of them in the API's
+ * chronological order (issue #130), under that side's team name. The name is
+ * the group's accessible label as well as its visible one: with one side
+ * possibly listing two meetings and the other one, column position no longer
+ * says whose results these are, for sighted or screen-reader users.
+ */
+function MeetingGroup({
+  teamName,
+  meetings,
+}: {
+  teamName: string
+  meetings: CommonOpponentMeetingOut[]
+}) {
+  const labelId = useId()
+  return (
+    <span
+      role="group"
+      aria-labelledby={labelId}
+      className={styles.gamelineSide}
+    >
+      <span id={labelId} className={styles.gamelineSideTeam}>
+        {teamName}
+      </span>
+      {meetings.map((meeting, index) => (
+        // Index-as-key: meetings have no stable id and the list is render-only.
+        <Meeting key={index} meeting={meeting} separated={index > 0} />
+      ))}
+    </span>
+  )
+}
+
+/** A common-opponent row: every meeting each team had with the shared opponent. */
+function CommonOpponentLine({
+  opponent,
+  teamAName,
+  teamBName,
+}: {
+  opponent: CommonOpponentOut
+  teamAName: string
+  teamBName: string
+}) {
   return (
     <li className={styles.gameline}>
       <span className={styles.gamelineOpp}>
         vs {opponent.opponent_name}
         {opponent.opponent_rank !== null ? ` (#${opponent.opponent_rank})` : ''}
       </span>
-      <ResultTag result={opponent.team_a_result} />
-      <span>
-        {opponent.team_a_score}-{opponent.team_a_opponent_score}
-      </span>
-      <ResultTag result={opponent.team_b_result} />
-      <span>
-        {opponent.team_b_score}-{opponent.team_b_opponent_score}
-      </span>
+      <MeetingGroup teamName={teamAName} meetings={opponent.team_a_meetings} />
+      <MeetingGroup teamName={teamBName} meetings={opponent.team_b_meetings} />
     </li>
   )
 }
@@ -190,6 +265,8 @@ export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
             <CommonOpponentLine
               key={opponent.opponent_team_id}
               opponent={opponent}
+              teamAName={team_a.team_name}
+              teamBName={team_b.team_name}
             />
           ))}
         </ul>
