@@ -83,6 +83,15 @@ from pydantic import BaseModel, ConfigDict, Field
 # requests
 # ---------------------------------------------------------------------------
 
+# Issue #188: `user_team` is interpolated into the persona system prompt, and
+# since share links (#184) a third party can set it. This bound is the request
+# boundary's half of the fix: it matches `apps/web`'s `MAX_TEAM_NAME_LENGTH`
+# (`HomePage/shareLink.ts`) and is more than double the longest stored team
+# name (27 chars for CFB, 21 for NFL). The other half is in `api.verdict`:
+# every route resolves the value against the team catalog, so only a real,
+# canonically spelled team name ever reaches the prompt or the cache key.
+USER_TEAM_MAX_LENGTH = 64
+
 
 class ChampionRequest(BaseModel):
     """'Who was the best team in <year>?' -- no team named."""
@@ -91,7 +100,7 @@ class ChampionRequest(BaseModel):
 
     year: int
     method: Method = "keener"
-    user_team: str | None = None
+    user_team: str | None = Field(default=None, max_length=USER_TEAM_MAX_LENGTH)
     # Issue #59: threaded through to the evidence-layer calls in
     # `cfb_strength.evidence.proof` (all default to "cfb" themselves, so an
     # existing client that never sends this gets today's exact behavior).
@@ -106,7 +115,7 @@ class TeamCaseRequest(BaseModel):
     year: int
     team: str
     method: Method = "keener"
-    user_team: str | None = None
+    user_team: str | None = Field(default=None, max_length=USER_TEAM_MAX_LENGTH)
     sport: Sport = "cfb"
 
 
@@ -119,7 +128,7 @@ class ComparisonRequest(BaseModel):
     team_a: str
     team_b: str
     method: Method = "keener"
-    user_team: str | None = None
+    user_team: str | None = Field(default=None, max_length=USER_TEAM_MAX_LENGTH)
     sport: Sport = "cfb"
 
 

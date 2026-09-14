@@ -48,7 +48,7 @@ import sqlite3
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi import APIRouter, Depends
 
-from api.deps import get_db_conn, get_narration_cache, get_narrator
+from api.deps import get_db_conn, get_narration_cache, get_narrator, list_all_team_names
 from api.errors import COMPARISON_ERROR_RESPONSES, TEAM_CASE_ERROR_RESPONSES
 from api.models import (
     ChampionRequest,
@@ -64,6 +64,39 @@ from api.persona.claude_client import Narrator
 from api.persona.service import narrate_comparison, narrate_team_case
 
 router = APIRouter(prefix="/api/verdict", tags=["verdict"])
+
+
+def resolve_user_team(conn: sqlite3.Connection, user_team: str | None, sport: str) -> str | None:
+    """The only `user_team` a route may hand the persona layer (issue #188).
+
+    `user_team` is interpolated into the Claude system prompt and is part of
+    the narration cache key, and since share links (#184) a third party can
+    set it. So it is resolved against the sport's team catalog,
+    `list_all_team_names(conn, sport)` (the grounding check's own known-name
+    universe): surrounding whitespace is stripped, case is ignored, and a
+    match comes back in the catalog's canonical spelling, so `"  texas "`
+    narrates and caches exactly as `"Texas"`. Anything else becomes `None`:
+    empty or whitespace-only text, typos, injection text, another sport's
+    team. Aliases (`teams.alternate_names`) are deliberately not matched.
+
+    Unknown is `None`, never a 422: the web client keeps one saved team across
+    seasons and sports, so a stale or out-of-scope team must still get a
+    verdict, just with no-team narration. For the same reason the lookup is
+    scoped to the sport, not the year.
+
+    Matching is unambiguous on the committed data: no two stored names within
+    a sport are equal after strip + casefold. If that ever stopped being true,
+    the first name in catalog order would win.
+    """
+    if user_team is None:
+        return None
+    wanted = user_team.strip().casefold()
+    if not wanted:
+        return None
+    for name in list_all_team_names(conn, sport):
+        if name.strip().casefold() == wanted:
+            return name
+    return None
 
 
 def _resolve_champion_name(
@@ -103,7 +136,7 @@ def champion(
     narration = narrate_team_case(
         conn,
         case_out,
-        user_team=payload.user_team,
+        user_team=resolve_user_team(conn, payload.user_team, payload.sport),
         question_type="champion",
         method=payload.method,
         sport=payload.sport,
@@ -128,7 +161,7 @@ def team_case(
     narration = narrate_team_case(
         conn,
         case_out,
-        user_team=payload.user_team,
+        user_team=resolve_user_team(conn, payload.user_team, payload.sport),
         question_type="team_case",
         method=payload.method,
         sport=payload.sport,
@@ -158,7 +191,7 @@ def compare(
     narration = narrate_comparison(
         conn,
         comparison_out,
-        user_team=payload.user_team,
+        user_team=resolve_user_team(conn, payload.user_team, payload.sport),
         method=payload.method,
         sport=payload.sport,
         cache=cache,
