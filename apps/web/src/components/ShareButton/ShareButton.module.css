@@ -43,6 +43,12 @@
   display: none;
 }
 
+/* The manual-copy fallback is guidance, not a success -- so not green. */
+.statusManual {
+  font-weight: 400;
+  color: var(--ink-muted);
+}
+
 .manual {
   flex-basis: 100%;
   display: flex;

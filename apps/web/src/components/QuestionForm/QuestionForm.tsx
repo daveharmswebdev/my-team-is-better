@@ -177,8 +177,13 @@ const TEAM_FETCH_FAILED_HINT =
   "Couldn't load the team list -- you can still type any name."
 const YEAR_FETCH_FAILED_HINT =
   "Couldn't load the list of available years -- you can still enter one."
-/** Privacy note testers have already seen -- it survives every other state. */
-const USER_TEAM_PRIVACY_HINT = 'Stays on this device only.'
+/**
+ * Privacy note testers have already seen -- it survives every other state.
+ * Since issue #184 a shared link carries "your team" as its `for` param, so
+ * the note says so rather than promising it never leaves the device.
+ */
+const USER_TEAM_PRIVACY_HINT =
+  'Saved on this device. Included in links you share.'
 
 /**
  * The widest range of values `parseYear` accepts as a year at all: four
@@ -459,6 +464,16 @@ export function QuestionForm({
       ? getStoredUserTeam()
       : (initialUserTeam ?? ''),
   )
+  /**
+   * Whether "your team" still holds the parent's seed (a share link's `for`,
+   * issue #184), unedited. While it does, the stored team is the visitor's
+   * own -- one this page never showed them -- so clearing the field through
+   * the stale-team notice or a league switch leaves storage alone (PRD
+   * §5.4a). The first real edit, typing or a suggestion pick, ends it.
+   */
+  const [userTeamIsSeeded, setUserTeamIsSeeded] = useState(
+    initialUserTeam !== undefined,
+  )
   const [loadedYearCatalog, setYearCatalog] =
     useState<YearCatalogState>(EMPTY_YEAR_CATALOG)
   const [teamCatalog, setTeamCatalog] =
@@ -563,9 +578,24 @@ export function QuestionForm({
     // too: the previous engine's in-flight response is discarded.
   }, [sport, method, teamScopeYear])
 
+  /** A real edit to "your team" -- typing or a suggestion pick -- which is always saved. */
   function handleUserTeamChange(value: string) {
     setUserTeam(value)
+    setUserTeamIsSeeded(false)
     setStoredUserTeam(value)
+  }
+
+  /**
+   * Empties "your team" for the stale-team notice's Clear and a league
+   * switch. A seeded, unedited team is reset in the field only, leaving the
+   * visitor's stored team alone: see `userTeamIsSeeded`.
+   */
+  function clearUserTeam() {
+    if (userTeamIsSeeded) {
+      setUserTeam('')
+      return
+    }
+    handleUserTeamChange('')
   }
 
   /** Issue #137: a real league change empties every team field. Re-selecting
@@ -578,7 +608,7 @@ export function QuestionForm({
     setTeam('')
     setTeamA('')
     setTeamB('')
-    handleUserTeamChange('')
+    clearUserTeam()
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -826,10 +856,14 @@ export function QuestionForm({
         />
         {isOutOfScope(userTeam) && (
           <StaleTeamNotice
-            clearLabel="Clear your saved team"
+            // A seeded team was never saved here, so the label must not
+            // promise to forget a saved one (issue #184).
+            clearLabel={
+              userTeamIsSeeded ? 'Clear this team' : 'Clear your saved team'
+            }
             value={userTeam.trim()}
             scope={catalogScope}
-            onClear={() => handleUserTeamChange('')}
+            onClear={clearUserTeam}
           />
         )}
       </div>

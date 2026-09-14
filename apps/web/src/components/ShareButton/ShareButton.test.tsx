@@ -117,7 +117,7 @@ describe('ShareButton (issue #184)', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('shows the url in a read-only "Copy this link" field when the clipboard rejects', async () => {
+  it('shows the url in a read-only "Copy this link" field, and says so in the status, when the clipboard rejects', async () => {
     stubNavigator('clipboard', {
       writeText: vi.fn().mockRejectedValue(new Error('denied')),
     })
@@ -128,10 +128,13 @@ describe('ShareButton (issue #184)', () => {
     const field = await screen.findByRole('textbox', { name: 'Copy this link' })
     expect(field).toHaveValue(URL_TO_SHARE)
     expect(field).toHaveAttribute('readonly')
+    expect(screen.getByRole('status')).toHaveTextContent(
+      "Couldn't copy automatically -- the link is in the field below.",
+    )
     expect(screen.queryByText('Link copied')).not.toBeInTheDocument()
   })
 
-  it('shows the manual-copy field when there is no clipboard at all', async () => {
+  it('shows the manual-copy field and the status message when there is no clipboard at all', async () => {
     render(<ShareButton url={URL_TO_SHARE} />)
 
     clickShare()
@@ -139,5 +142,39 @@ describe('ShareButton (issue #184)', () => {
     expect(
       await screen.findByRole('textbox', { name: 'Copy this link' }),
     ).toHaveValue(URL_TO_SHARE)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      "Couldn't copy automatically -- the link is in the field below.",
+    )
+  })
+
+  it('clears the status before each attempt, so a second copy re-announces "Link copied"', async () => {
+    let releaseSecondCopy = () => {}
+    const writeText = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolveCopy) => {
+            releaseSecondCopy = () => resolveCopy()
+          }),
+      )
+    stubNavigator('clipboard', { writeText })
+    render(<ShareButton url={URL_TO_SHARE} />)
+
+    clickShare()
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied'),
+    )
+
+    clickShare()
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('status')).toBeEmptyDOMElement()
+
+    await act(async () => {
+      releaseSecondCopy()
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied'),
+    )
   })
 })

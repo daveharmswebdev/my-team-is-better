@@ -382,6 +382,77 @@ describe('HomePage', () => {
       expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
     })
 
+    it("mounts the form once on a link landing, so its first catalog requests already use the link's league and engine", async () => {
+      mockedFetchChampion.mockResolvedValue(
+        envelopeFor('Kansas City Chiefs', 'Chiefs, easy.'),
+      )
+
+      renderHomePage('/?q=champion&sport=nfl&year=2018&engine=elo', {
+        strict: true,
+      })
+
+      expect(await screen.findByText('Chiefs, easy.')).toBeInTheDocument()
+      expect(mockedFetchYears.mock.calls[0]).toEqual(['nfl', 'elo'])
+      expect(mockedFetchTeams.mock.calls[0]).toEqual(['nfl', 'elo', 2018])
+      // No request ever went out for the defaults (College, Keener) first.
+      expect(
+        mockedFetchYears.mock.calls.every(
+          ([sport, method]) => sport === 'nfl' && method === 'elo',
+        ),
+      ).toBe(true)
+      expect(
+        mockedFetchTeams.mock.calls.every(
+          ([sport, method]) => sport === 'nfl' && method === 'elo',
+        ),
+      ).toBe(true)
+      expect(mockedFetchChampion).toHaveBeenCalledTimes(1)
+    })
+
+    /**
+     * Issue #184 review (G3): a link's "for" team is never the visitor's, so
+     * clearing it before they edit the field must leave their saved team.
+     */
+    it.each([
+      [
+        'the stale-team notice\'s "Clear this team"',
+        async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(
+            await screen.findByRole('button', { name: 'Clear this team' }),
+          )
+        },
+      ],
+      [
+        'a league switch',
+        async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(screen.getByRole('radio', { name: /nfl/i }))
+        },
+      ],
+    ])(
+      "never deletes the visitor's saved team through %s after a link landing",
+      async (_description, clearTheTeam) => {
+        window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
+        const user = userEvent.setup()
+        mockedFetchCompare.mockResolvedValue(
+          comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+        )
+
+        // Gonzaga is not in this file's team catalog, so the notice shows.
+        renderHomePage(
+          '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC&for=Gonzaga',
+          { strict: true },
+        )
+        expect(await screen.findByText('Texas edges USC.')).toBeInTheDocument()
+        await screen.findByRole('button', { name: 'Clear this team' })
+
+        await clearTheTeam(user)
+
+        expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+        expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+          'USC',
+        )
+      },
+    )
+
     it("re-asks a pill correction after a link landing with the link's user team, while the remounted field shows the visitor's saved team", async () => {
       window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
       const user = userEvent.setup()

@@ -1756,13 +1756,19 @@ describe('QuestionForm', () => {
       ).toHaveLength(3)
     })
 
-    it('keeps the "stays on this device" privacy note on the user-team field', async () => {
+    it('keeps the privacy note on the user-team field, saying shared links include it (issue #184)', async () => {
       render(<QuestionForm onSubmit={vi.fn()} />)
       await waitForInitialCatalog()
 
       expect(
-        await screen.findByText(/stays on this device only/i),
+        await screen.findByText(
+          /saved on this device\. included in links you share\./i,
+        ),
       ).toBeInTheDocument()
+      // The old note stopped being true once a share link could carry it.
+      expect(
+        screen.queryByText(/stays on this device only/i),
+      ).not.toBeInTheDocument()
     })
 
     it('offers league-appropriate team examples', async () => {
@@ -1915,6 +1921,101 @@ describe('QuestionForm', () => {
         expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
           'USC',
         )
+      })
+
+      /**
+       * Issue #184 review (G3): a seeded team is the link's, not the visitor's.
+       * Until the visitor edits the field, clearing it -- through the
+       * stale-team notice or a league switch -- must not delete the team they
+       * saved, which they never saw on this page (PRD §5.4a).
+       */
+      describe('clearing a seeded team never touches the saved one', () => {
+        beforeEach(() => {
+          window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
+          mockedFetchTeams.mockResolvedValue(teamsOut(CFB_DETAILS))
+        })
+
+        async function waitForUserTeamCombobox() {
+          await waitFor(() =>
+            expect(screen.getByLabelText(/your team/i)).toHaveAttribute(
+              'role',
+              'combobox',
+            ),
+          )
+          return screen.getByLabelText(/your team/i)
+        }
+
+        it('"Clear this team" on an out-of-catalog seeded team empties only the field', async () => {
+          const user = userEvent.setup()
+          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Gonzaga" />)
+
+          const clear = await screen.findByRole('button', {
+            name: 'Clear this team',
+          })
+          expect(clear).toHaveTextContent('Clear')
+          expect(
+            screen.queryByRole('button', { name: 'Clear your saved team' }),
+          ).not.toBeInTheDocument()
+          await user.click(clear)
+
+          expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+          expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+            'USC',
+          )
+        })
+
+        it('a league switch empties only the field', async () => {
+          const user = userEvent.setup()
+          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+          await waitForUserTeamCombobox()
+
+          await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+          expect(screen.getByLabelText(/your team/i)).toHaveValue('')
+          expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+            'USC',
+          )
+        })
+
+        it('ends at the first real edit, after which Clear forgets the stored team as always', async () => {
+          const user = userEvent.setup()
+          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+          const yourTeam = await waitForUserTeamCombobox()
+
+          await user.clear(yourTeam)
+          await user.type(yourTeam, 'Gonzaga')
+          expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+            'Gonzaga',
+          )
+          await user.click(
+            await screen.findByRole('button', {
+              name: 'Clear your saved team',
+            }),
+          )
+
+          expect(yourTeam).toHaveValue('')
+          expect(
+            window.localStorage.getItem('myTeamIsBetter.userTeam'),
+          ).toBeNull()
+        })
+
+        it('ends at the first real edit, after which a league switch forgets the stored team as always', async () => {
+          const user = userEvent.setup()
+          render(<QuestionForm onSubmit={vi.fn()} initialUserTeam="Texas" />)
+          const yourTeam = await waitForUserTeamCombobox()
+
+          await user.clear(yourTeam)
+          await user.type(yourTeam, 'Baylor')
+          expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe(
+            'Baylor',
+          )
+          await user.click(screen.getByRole('radio', { name: /nfl/i }))
+
+          expect(yourTeam).toHaveValue('')
+          expect(
+            window.localStorage.getItem('myTeamIsBetter.userTeam'),
+          ).toBeNull()
+        })
       })
     })
   })

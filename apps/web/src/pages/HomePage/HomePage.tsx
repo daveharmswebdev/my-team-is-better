@@ -28,7 +28,7 @@ import { fromShareSearch, toShareSearch } from './shareLink'
  * state, so re-running the API call against a corrected submission used to
  * leave the visible form disagreeing with the question that was actually
  * just asked -- showing 2026 next to a 2018 verdict. A share-link landing
- * (issue #184) seeds the form the same way.
+ * (issue #184) seeds the form the same way, from its first mount.
  *
  * `generation` is the remount counter: it is spent as `QuestionForm`'s
  * `key`, which is React's standard way to reset a child's internal state
@@ -48,7 +48,7 @@ interface FormSeed {
   teamA?: string
   teamB?: string
   /**
-   * The "your team" to remount the form with: a share link's `for` team on
+   * The "your team" to mount the form with: a share link's `for` team on
    * landing (issue #184), or `undefined` -- every pill correction -- to have
    * the form re-read `localStorage` exactly as it always has. So after a
    * correction, the field shows the visitor's saved team while the question
@@ -95,7 +95,15 @@ export function HomePage() {
   const landedRef = useRef(false)
   const [submission, setSubmission] = useState<QuestionSubmission | null>(null)
   const [state, setState] = useState<VerdictCardState | null>(null)
-  const [formSeed, setFormSeed] = useState<FormSeed | null>(null)
+  /**
+   * Seeded from a share link from the start, so the form mounts once with
+   * the link's question -- and its first catalog requests use the link's
+   * league and engine -- rather than mounting with the defaults and being
+   * remounted by the landing effect.
+   */
+  const [formSeed, setFormSeed] = useState<FormSeed | null>(() =>
+    landing === null ? null : seedFrom(landing, 1, landing.userTeam),
+  )
 
   async function runSubmission(next: QuestionSubmission) {
     setSubmission(next)
@@ -134,29 +142,19 @@ export function HomePage() {
     }
   }
 
-  /**
-   * Re-asks `next` *and* re-seeds the visible form with it, so the two can't
-   * disagree (issue #38). `userTeam` seeds "your team"; `undefined` keeps the
-   * form's own `localStorage` read.
-   */
-  function reseedAndAsk(
-    next: QuestionSubmission,
-    userTeam: string | null | undefined,
-  ) {
-    setFormSeed((previous) =>
-      seedFrom(next, (previous?.generation ?? 0) + 1, userTeam),
-    )
-    void runSubmission(next)
-  }
-
-  /** A pill correction (issue #38). */
+  /** Re-asks the corrected question *and* re-seeds the visible form with it,
+   * so the two can't disagree (issue #38). "Your team" is re-read from
+   * `localStorage`, as it always has been. */
   function applyCorrection(corrected: QuestionSubmission) {
-    reseedAndAsk(corrected, undefined)
+    setFormSeed((previous) =>
+      seedFrom(corrected, (previous?.generation ?? 0) + 1, undefined),
+    )
+    void runSubmission(corrected)
   }
 
-  /** A share-link landing (issue #184): the form shows the link's team, unsaved. */
-  const answerShareLink = useEffectEvent((linked: QuestionSubmission) => {
-    reseedAndAsk(linked, linked.userTeam)
+  /** A share-link landing (issue #184): the form is already seeded, so this only asks. */
+  const askSharedQuestion = useEffectEvent((linked: QuestionSubmission) => {
+    void runSubmission(linked)
   })
 
   useEffect(() => {
@@ -164,7 +162,7 @@ export function HomePage() {
       return
     }
     landedRef.current = true
-    answerShareLink(landing)
+    askSharedQuestion(landing)
   }, [landing])
 
   function handleSelectYear(year: number) {
@@ -202,9 +200,9 @@ export function HomePage() {
     <main className={styles.wrap}>
       <h1 className={styles.title}>My Team Is Better</h1>
       <QuestionForm
-        // Remount-to-reset: the only things that ever change this key are an
-        // accepted pill correction and a share-link landing, so ordinary
-        // typing is never disturbed.
+        // Remount-to-reset: the only thing that ever changes this key is an
+        // accepted pill correction (a share-link landing starts at 1), so
+        // ordinary typing is never disturbed.
         key={formSeed?.generation ?? 0}
         onSubmit={(next) => void runSubmission(next)}
         isSubmitting={state?.status === 'loading'}
