@@ -4,6 +4,7 @@ import {
   roundsToPrintedShift,
   withinATenthOfPrintedShift,
 } from './eloWorkedStep.ts'
+import { fillYear } from './fillYear.ts'
 import { pickTeam } from './pickTeam.ts'
 
 // Issues #154 and #183 (epic #147): the Engine toggle end to end, against the
@@ -68,7 +69,7 @@ test('asking Elo for the 2005 champion shows Texas’s Elo rating game by game, 
   await page
     .getByLabel('What do you want to know?')
     .selectOption({ label: 'Who was the best team in a year?' })
-  await page.getByLabel('Year').fill('2005')
+  await fillYear(page, '2005')
   await page.getByRole('button', { name: 'Get the verdict' }).click()
 
   const verdict = page.getByRole('article')
@@ -119,7 +120,7 @@ test('an Elo comparison of Texas and USC in 2005 shows each team’s own ledger,
   await page
     .getByLabel('What do you want to know?')
     .selectOption({ label: 'Was one team better than another?' })
-  await page.getByLabel('Year').fill('2005')
+  await fillYear(page, '2005')
   await pickTeam(page, 'Team A', 'Texas')
   await pickTeam(page, 'Team B', 'USC')
   await page.getByRole('button', { name: 'Get the verdict' }).click()

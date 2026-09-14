@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
+import { fillYear } from './fillYear.ts'
 
 // Issue #183: a rating's show-your-work panel has to be readable wherever the
 // rating sits on screen, not only near the top. The trigger is scrolled to
@@ -81,12 +82,7 @@ async function askForThe2005Champion(
   await page
     .getByLabel('What do you want to know?')
     .selectOption({ label: 'Who was the best team in a year?' })
-  // The field fills in the newest season once the year list loads; typing
-  // before that lands can leave both in the field ("20192005").
-  const year = page.getByLabel('Year')
-  await expect(year).not.toHaveValue('')
-  await year.fill('2005')
-  await expect(year).toHaveValue('2005')
+  await fillYear(page, '2005')
   await page.getByRole('button', { name: 'Get the verdict' }).click()
   const verdict = verdictIn(page)
   await expect(verdict).toBeVisible()

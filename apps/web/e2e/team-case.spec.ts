@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { fillYear } from './fillYear.ts'
 import { pickTeam } from './pickTeam.ts'
 
 // Golden-path smoke spec (issue #39) for the "team_case" question type,
@@ -12,7 +13,7 @@ test('submitting a team-case question renders a verdict for USC in 2005', async 
   await page
     .getByLabel('What do you want to know?')
     .selectOption({ label: 'How good was a team in a year?' })
-  await page.getByLabel('Year').fill('2005')
+  await fillYear(page, '2005')
   // `pickTeam` matches the label exactly -- a substring match would also hit
   // the "Your team (optional)" field, which team_case shows (champion alone
   // doesn't, since issue #198).
