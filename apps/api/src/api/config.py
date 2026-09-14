@@ -73,7 +73,10 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # persona-v6 (issue #180): the prompt changed -- rule 1 no longer describes how
 # the site displays a Keener rating. Asked to compute that value, the narrator
 # invented wrong ones and fell back, and #65 cached those fallbacks under v5.
-PROMPT_VERSION = "persona-v6"
+# persona-v7 (issue #231): the prompt changed -- the persona's attitude is now
+# "the numbers are the numbers": rule 2, both allegiance clauses and rule 4 no
+# longer let a grounded narration argue against the ranking.
+PROMPT_VERSION = "persona-v7"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
 

@@ -116,7 +116,25 @@ def test_prompt_version_is_past_the_keener_display_prompt() -> None:
     stop being served."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v6"  # type: ignore[attr-defined]
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+        "persona-v4",
+        "persona-v5",
+    }
+
+
+def test_prompt_version_is_past_the_argue_with_the_ranking_prompt() -> None:
+    """Issue #231 changed the persona's attitude: the numbers are the numbers.
+    persona-v6 served grounded narrations that argued against the ranking
+    ("higher-rated on paper, but Texas already proved who shows up"). The
+    cache key doesn't cover the prompt text, so narrations cached under
+    `persona-v6` carry the old attitude and would keep being served unless the
+    version moves."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v7"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:
