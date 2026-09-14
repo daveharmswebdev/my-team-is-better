@@ -113,15 +113,71 @@ against Oklahoma's score, and "Texas went 10-3 and Texas A&M went 11-2"
 checked each record against its own team's head-to-head score. (An earlier
 version of this docstring claimed a record was safe because its nearest
 name had no game data; that was only true when the nearest name was a
-team-case subject.) A W-L-T record needs no separate handling: the pair
-regex reads "8-8" out of "8-8-1", and the membership check grounds the
-trailing tie count against `ties`. Only subject records are skipped -- a
+team-case subject.) Only subject records are skipped -- a
 `rating_breakdown` entry's per-opponent `wins`/`losses` is not, so "beat
 Georgia 2-0" is still checked against Georgia's real scores.
 
 Accepted trade-off: a fabricated score that happens to equal a subject
 team's record (e.g. "beat Oklahoma 13-1" in LSU's 13-1 season) is no longer
 caught relationally. Its numbers still have to pass the membership check.
+
+**Records read in order, and pairs in sentences that name no team (issue
+#181).** Two fabrications passed every rule above: a subject record stated
+backwards ("Texas went 0-13" or "0-13-0" for a 13-0-0 team -- every digit is
+in the block), and a score pair in a sentence naming no team, whose numbers
+come from different rows ("They beat them 42-25."), which the attribution
+branches never saw because they need a name to attribute to. So the response
+is scanned for claims with a regex that reads a W-L-T record as one
+three-part claim (never also as a two-part pair, as the earlier pair regex
+did with "8-8" out of "8-8-1"), and each claim, sentence by sentence, goes
+through these rules in order:
+
+* **A three-part claim** is grounded only if it is, in order, a subject
+  team's `(wins, losses, ties)` (the same subjects as #107). Which subject it
+  is said about is not checked (#166).
+* **A two-part claim equal to a subject `(wins, losses)`** is skipped (#107).
+* **A two-part claim that is a subject `(wins, losses)` backwards** is
+  flagged, whether or not the sentence names a team and before either
+  attribution branch, so it yields one message -- unless the pair is, in
+  that order, a real game score for some name (a 3-1 team's 1-3 loss is that
+  game, not the record reversed), or is a hyphen pair inside some string
+  value, in either order. That last exemption exists because an
+  `explanation` quotes scores that are not always a game tuple of the block:
+  2013 Michigan State's breakdown quotes a 14-0 win, and "That one ended
+  0-14." in the 2013 Florida State (14-0) comparison is that score, not
+  Florida State's record backwards. An exempted pair falls through to the
+  two rules below, as any other pair does. Accepted trade-off, the same kind
+  as #107's: a record stated backwards goes uncaught when some string value
+  quotes a score equal to that record.
+* **A two-part claim in a sentence that names a team** goes through the
+  parenthetical/bare attribution above, unchanged.
+* **A two-part claim in a sentence that names no team** can't be held to an
+  attribution, so it only has to be *some* pair the block states: a game
+  score from any recognized shape, in either order; a hyphen pair inside
+  any string value, in either order (an `explanation` quotes scores that
+  are not always a game tuple of this block); or, in order, the
+  `(wins, losses)` of any object (a `rating_breakdown` series record).
+
+A record mismatch says the claim "is not a stated record". When exactly one
+subject team's record is the claim's reverse (wins and losses swapped, ties
+kept, same number of parts), it also names whose record that is: "0-13 is
+not a stated record; Texas's record is 13-0", "0-13-0 is not a stated
+record; Texas's record is 13-0-0". The owner is the subject's `team_name`
+(a team case's top level, or a comparison's `team_a` / `team_b`). The
+message deliberately does not say the claim "should be stated" as the
+reverse: in a comparison the sentence may be about the other team, and
+which team a sentence is about is attribution (#166), which this check does
+not settle -- whose record the reverse is, though, is simply true. When no
+subject's record is the reverse, or more than one subject's is, no owner is
+named ("7-1-1 is not a stated record"). An unattributed pair that is none of
+the above is reported as "42-25 is not a score from any game in the facts".
+These rules are stricter than the independent smoke-eval checker's
+(`tests/test_persona_smoke_eval.py`), which production must never import.
+That checker accepts any object's W-L or W-L-T in its stated order and any
+game score in either order, and has no rule of its own for a reversed
+record. Production grounds a three-part claim only as a subject's record,
+and flags a subject's `(wins, losses)` stated backwards unless it is a game
+score in that order or a hyphen pair inside some string value.
 
 Sentence-scoping (splitting `response_text` naively on `.`/`!`/`?`) keeps
 both checks from reaching across unrelated sentences to grab a team name
@@ -137,7 +193,8 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
@@ -162,10 +219,15 @@ _RESPONSE_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d)|\d+(?:\.\d
 # arithmetic (see module docstring for why the allowance is scoped by name).
 _ROUNDABLE_KEYS = frozenset({"rating", "opponent_rating"})
 
-# A hyphen-joined pair of whole-number scores, e.g. "34-31" or "34 - 31".
+# A hyphen-joined score pair or record, e.g. "34-31", "34 - 31" or "8-8-1".
 # Reuses this module's hyphen-as-separator convention (see `_NUMBER_RE`
-# above) rather than treating the hyphen as a negative sign.
-_SCORE_PAIR_RE = re.compile(r"(\d+)\s*-\s*(\d+)")
+# above) rather than treating the hyphen as a negative sign. A W-L-T record
+# is one three-part claim (group 3 set), never also read as a two-part pair,
+# and no part may be glued to a neighbouring digit or decimal (issue #181;
+# the same shape as the independent smoke-eval checker's regex).
+_SCORE_OR_RECORD_RE = re.compile(
+    r"(?<!\d)(?<!\d\.)(\d+)\s*-\s*(\d+)(?:\s*-\s*(\d+))?(?!\d)(?!\.\d)"
+)
 
 # Naive sentence splitting (deliberately not real NLP -- see module
 # docstring) so a score pair and a team-name mention several sentences
@@ -188,6 +250,28 @@ _ScoreTuplesByName = dict[str, set[tuple[int, int]]]
 # A team name's mention and its character span within whatever string
 # (response text or a single sentence of it) it was found in.
 _NameOccurrence = tuple[str, tuple[int, int]]
+
+
+@dataclass(frozen=True)
+class _ClaimFacts:
+    """What the fact block states that a score or record claim can match
+    (see the module docstring's #181 rules for which rule reads which)."""
+
+    # `name -> {(own_score, other_score)}`, for the attribution branches.
+    valid_tuples: _ScoreTuplesByName
+    # Every real game score, ordered as recorded for some name.
+    game_scores: frozenset[tuple[int, int]]
+    # Subject teams' `(wins, losses)` and `(wins, losses, ties)`.
+    subject_records: frozenset[tuple[int, int]]
+    subject_w_l_t_records: frozenset[tuple[int, int, int]]
+    # `(wins, losses)` of any object in the block, e.g. a breakdown entry.
+    object_records: frozenset[tuple[int, int]]
+    # Two-part hyphen pairs inside any string value, stored `(low, high)`.
+    string_value_pairs: frozenset[tuple[int, int]]
+    # A subject record, `(wins, losses)` or `(wins, losses, ties)`, to the
+    # `team_name` of every subject whose record it is (`None` for a subject
+    # with no string `team_name`), for naming whose record a reverse is.
+    record_owners: Mapping[tuple[int, ...], tuple[str | None, ...]]
 
 
 def find_ungrounded_tokens(
@@ -215,10 +299,8 @@ def find_ungrounded_tokens(
     fact_teams = {name for name in names if name in fact_block_json}
     ungrounded_teams = mentioned_teams - fact_teams
 
-    valid_tuples = _extract_valid_score_tuples(fact_block_json)
-    subject_records = _extract_subject_records(fact_block_json)
     relational_mismatches = _find_relational_mismatches(
-        response_text, names, valid_tuples, subject_records
+        response_text, names, _extract_claim_facts(fact_block_json)
     )
 
     return sorted(ungrounded_numbers | ungrounded_teams | relational_mismatches)
@@ -346,6 +428,71 @@ def _extract_subject_records(fact_block_json: str) -> frozenset[tuple[int, int]]
     return frozenset(records)
 
 
+def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
+    """Everything a score or record claim is checked against (issue #181):
+    the existing name-keyed game tuples and subject `(wins, losses)`, plus
+    each subject's `(wins, losses, ties)`, every game score regardless of
+    name, every object's `(wins, losses)`, and every two-part hyphen pair
+    inside a string value.
+    """
+    valid_tuples = _extract_valid_score_tuples(fact_block_json)
+    game_scores = frozenset(score for scores in valid_tuples.values() for score in scores)
+    subject_records = _extract_subject_records(fact_block_json)
+    try:
+        data: Any = json.loads(fact_block_json)
+    except json.JSONDecodeError:
+        data = None
+
+    subject_w_l_t_records: set[tuple[int, int, int]] = set()
+    record_owners: defaultdict[tuple[int, ...], list[str | None]] = defaultdict(list)
+    if isinstance(data, dict):
+        for subject in (data, data.get("team_a"), data.get("team_b")):
+            if not isinstance(subject, dict):
+                continue
+            wins, losses, ties = subject.get("wins"), subject.get("losses"), subject.get("ties")
+            if not (isinstance(wins, int) and isinstance(losses, int)):
+                continue
+            team_name = subject.get("team_name")
+            owner = team_name if isinstance(team_name, str) else None
+            record_owners[(wins, losses)].append(owner)
+            if isinstance(ties, int):
+                subject_w_l_t_records.add((wins, losses, ties))
+                record_owners[(wins, losses, ties)].append(owner)
+
+    object_records: set[tuple[int, int]] = set()
+    string_value_pairs: set[tuple[int, int]] = set()
+    _collect_records_and_string_pairs(data, object_records, string_value_pairs)
+    return _ClaimFacts(
+        valid_tuples=valid_tuples,
+        game_scores=game_scores,
+        subject_records=subject_records,
+        subject_w_l_t_records=frozenset(subject_w_l_t_records),
+        object_records=frozenset(object_records),
+        string_value_pairs=frozenset(string_value_pairs),
+        record_owners={record: tuple(owners) for record, owners in record_owners.items()},
+    )
+
+
+def _collect_records_and_string_pairs(
+    node: Any, object_records: set[tuple[int, int]], string_value_pairs: set[tuple[int, int]]
+) -> None:
+    if isinstance(node, dict):
+        wins, losses = node.get("wins"), node.get("losses")
+        if isinstance(wins, int) and isinstance(losses, int):
+            object_records.add((wins, losses))
+        for value in node.values():
+            _collect_records_and_string_pairs(value, object_records, string_value_pairs)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_records_and_string_pairs(item, object_records, string_value_pairs)
+    elif isinstance(node, str):
+        for match in _SCORE_OR_RECORD_RE.finditer(node):
+            first, second, third = match.groups()
+            if third is None:
+                low, high = sorted((int(first), int(second)))
+                string_value_pairs.add((low, high))
+
+
 def _walk_fact_block(node: Any, valid: _ScoreTuplesByName) -> None:
     if isinstance(node, dict):
         if _is_opponent_result_shape(node):
@@ -423,17 +570,15 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _find_relational_mismatches(
-    response_text: str,
-    known_team_names: list[str],
-    valid_tuples: _ScoreTuplesByName,
-    subject_records: frozenset[tuple[int, int]],
+    response_text: str, known_team_names: list[str], facts: _ClaimFacts
 ) -> set[str]:
-    """For every hyphen-joined score pair in `response_text`, decide which
-    team(s) it's plausibly claiming a score for and check that claim
-    against the fact block, sentence by sentence (see module docstring for
-    why: sentence-scoping first, then a parenthetical-vs-bare split within
-    each sentence). A pair equal to a subject team's own record is not a
-    score claim at all and is skipped before either branch (issue #107).
+    """For every score or record claim in `response_text`, sentence by
+    sentence, apply the module docstring's rules in order (issue #181): a
+    three-part record must be a subject's; a subject's own `(wins, losses)`
+    is skipped (#107); a subject's `(wins, losses)` backwards is flagged; a
+    pair in a sentence naming a team goes through the parenthetical-vs-bare
+    attribution (#26); a pair in a sentence naming none must be some pair
+    the block states.
     """
     mismatches: set[str] = set()
     for sentence in _split_sentences(response_text):
@@ -442,24 +587,93 @@ def _find_relational_mismatches(
             for name in known_team_names
             for match in re.finditer(re.escape(name), sentence)
         ]
-        if not name_occurrences:
-            continue
-
-        for pair_match in _SCORE_PAIR_RE.finditer(sentence):
-            claimed = (int(pair_match.group(1)), int(pair_match.group(2)))
-            if claimed in subject_records:
-                continue
-            if _is_parenthesized(sentence, pair_match.span()):
-                mismatch = _check_parenthetical_pair(
-                    pair_match.span(), claimed, name_occurrences, valid_tuples
-                )
-            else:
-                mismatch = _check_bare_pair(
-                    pair_match.span(), claimed, name_occurrences, valid_tuples
-                )
+        for claim_match in _SCORE_OR_RECORD_RE.finditer(sentence):
+            mismatch = _check_claim(sentence, claim_match, name_occurrences, facts)
             if mismatch is not None:
                 mismatches.add(mismatch)
     return mismatches
+
+
+def _check_claim(
+    sentence: str,
+    claim_match: re.Match[str],
+    name_occurrences: list[_NameOccurrence],
+    facts: _ClaimFacts,
+) -> str | None:
+    first, second, third = claim_match.groups()
+    if third is not None:
+        return _check_w_l_t_record((int(first), int(second), int(third)), facts)
+
+    claimed = (int(first), int(second))
+    if claimed in facts.subject_records:
+        return None
+    reversed_record = _check_reversed_record(claimed, facts)
+    if reversed_record is not None:
+        return reversed_record
+    if not name_occurrences:
+        return _check_unattributed_pair(claimed, facts)
+    if _is_parenthesized(sentence, claim_match.span()):
+        return _check_parenthetical_pair(
+            claim_match.span(), claimed, name_occurrences, facts.valid_tuples
+        )
+    return _check_bare_pair(claim_match.span(), claimed, name_occurrences, facts.valid_tuples)
+
+
+def _check_w_l_t_record(claimed: tuple[int, int, int], facts: _ClaimFacts) -> str | None:
+    """A three-part claim is grounded only as a subject's `(wins, losses,
+    ties)`, in order. Its reverse swaps wins and losses and keeps ties."""
+    if claimed in facts.subject_w_l_t_records:
+        return None
+    wins, losses, ties = claimed
+    return _record_mismatch_message(claimed, (losses, wins, ties), facts)
+
+
+def _check_reversed_record(claimed: tuple[int, int], facts: _ClaimFacts) -> str | None:
+    """A two-part claim (already known not to be a subject record) that is a
+    subject's `(wins, losses)` backwards -- unless it is a real game score in
+    that order, or a hyphen pair inside some string value in either order,
+    which fall through to the attribution / unattributed rules instead."""
+    swapped = (claimed[1], claimed[0])
+    if (
+        swapped not in facts.subject_records
+        or claimed in facts.game_scores
+        or (min(claimed), max(claimed)) in facts.string_value_pairs
+    ):
+        return None
+    return _record_mismatch_message(claimed, swapped, facts)
+
+
+def _check_unattributed_pair(claimed: tuple[int, int], facts: _ClaimFacts) -> str | None:
+    """A two-part claim in a sentence naming no team: grounded if the block
+    states it anywhere, as a game score (either order), as a pair inside a
+    string value (either order), or as some object's `(wins, losses)` (in
+    order)."""
+    swapped = (claimed[1], claimed[0])
+    if claimed in facts.game_scores or swapped in facts.game_scores:
+        return None
+    if (min(claimed), max(claimed)) in facts.string_value_pairs:
+        return None
+    if claimed in facts.object_records:
+        return None
+    return f"{claimed[0]}-{claimed[1]} is not a score from any game in the facts"
+
+
+def _record_mismatch_message(
+    claimed: tuple[int, ...], reverse: tuple[int, ...], facts: _ClaimFacts
+) -> str:
+    """Retry feedback for a record claim (issue #181). Names whose record
+    `reverse` is only when exactly one named subject owns it; never says the
+    claim "should be stated" as the reverse, since which team the sentence
+    is about is attribution (#166), not settled here."""
+    stated = _hyphenated(claimed)
+    owners = facts.record_owners.get(reverse, ())
+    if len(owners) == 1 and owners[0] is not None:
+        return f"{stated} is not a stated record; {owners[0]}'s record is {_hyphenated(reverse)}"
+    return f"{stated} is not a stated record"
+
+
+def _hyphenated(parts: tuple[int, ...]) -> str:
+    return "-".join(str(part) for part in parts)
 
 
 def _is_parenthesized(sentence: str, pair_span: tuple[int, int]) -> bool:
