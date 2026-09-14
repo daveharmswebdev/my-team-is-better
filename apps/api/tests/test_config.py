@@ -134,7 +134,27 @@ def test_prompt_version_is_past_the_argue_with_the_ranking_prompt() -> None:
     version moves."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v7"  # type: ignore[attr-defined]  # _reimport_config() -> object
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+        "persona-v4",
+        "persona-v5",
+        "persona-v6",
+    }
+
+
+def test_prompt_version_is_past_the_backwards_head_to_head_score() -> None:
+    """Issue #122: the compare fact block's verdict printed the home score
+    first after "X beat Y", so every away-team head-to-head win read backwards
+    ("Seattle Seahawks beat Denver Broncos head-to-head 8-43"). Grounding
+    checks narration against the fact block, so `persona-v7` narrations that
+    repeated those scores were cached as grounded. The cache key doesn't cover
+    the fact block (#145), so the version must move for them to stop being
+    served."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v8"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:

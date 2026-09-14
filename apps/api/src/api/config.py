@@ -84,7 +84,11 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # persona-v7 (issue #231): the prompt changed -- the persona's attitude is now
 # "the numbers are the numbers": rule 2, both allegiance clauses and rule 4 no
 # longer let a grounded narration argue against the ranking.
-PROMPT_VERSION = "persona-v7"
+# persona-v8 (issue #122): prompt unchanged; the compare fact block's verdict
+# put the home score first after "X beat Y", so every away-team head-to-head
+# win read backwards ("Seattle Seahawks beat Denver Broncos head-to-head
+# 8-43"). v7 narrations were written, and grounded, against those scores.
+PROMPT_VERSION = "persona-v8"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),
