@@ -149,8 +149,13 @@ through these rules in order:
   0-14." in the 2013 Florida State (14-0) comparison is that score, not
   Florida State's record backwards. An exempted pair falls through to the
   two rules below, as any other pair does. Accepted trade-off, the same kind
-  as #107's: a record stated backwards goes uncaught when some string value
-  quotes a score equal to that record.
+  as #107's, and since #166's round 4 confined to a claim no subject is
+  attributed to: a record stated backwards in a sentence naming no subject
+  goes uncaught when some string value quotes a score equal to that record.
+  A sentence that attributes the claim to a subject takes the #166 rules
+  below, which grant no string-value exemption, so "Florida State ended that
+  one 0-14." on that comparison is flagged as Florida State's record
+  backwards.
 * **A two-part claim in a sentence that names a team** goes through the
   parenthetical/bare attribution above, unchanged.
 * **A two-part claim in a sentence that names no team** can't be held to an
@@ -207,8 +212,14 @@ in the same sentence owns it.
   subject's record with the same number of parts; grounded (bare only) if
   it is another named subject's record; grounded (two-part only) if it is a
   game score -- one of the nearest name's tuples, bare and one of another
-  named team's, in order a game score from any row, or in either order a
-  hyphen pair inside a string value; otherwise flagged. The message, in
+  named team's, or in order a game score from any row; otherwise flagged.
+  A hyphen pair inside a string value grounds nothing here (round 4): the
+  first version of this rule also accepted one in either order, which let a
+  swapped score beside the opponent's name ("Texas beat Oklahoma 12-45")
+  pass on every Keener block, whose `explanation` strings quote every game
+  score -- #26's own case, regressed. Every score an explanation quotes is
+  also a `games[]` row, so the in-order branch covers a legitimate quote;
+  the either-order string branch only ever rescued a swap. The message, in
   this order: a subject record backwards keeps #181's wording ("0-13 is not
   a stated record; Texas's record is 13-0"); a two-part claim whose nearest
   name is a non-subject opponent with game data is that opponent's score,
@@ -260,19 +271,27 @@ in the same sentence owns it.
   is also grounded when it is the rating (exact, rounded or as displayed)
   of the subject that is *not* its nearest name, and another bare
   rating-only token in the same sentence is the other subject's rating,
-  that other subject being the nearest subject mention to it. The engine's
+  that other subject being the nearest subject mention to it, and (round
+  4) the token is credited to that named subject rather than to some
+  non-subject: its own nearest name is the named subject, or is also the
+  partner's nearest name among all the sentence's mentions. The engine's
   own verdict sentence handed to the narrator, "Texas rates higher overall
   (1933.2 vs 1891.8, rank 1 vs 2)", names only `team_a`, and it and its
   voiced forms ("Texas rates higher, 1933 to 1892"; "USC rates lower,
-  1933.2 vs 1891.8") are grounded: a sentence quoting both compared teams'
-  ratings is a comparison statement, and the rating that is not the named
-  team's can only be the other team's. A lone bare token gets no such
-  rescue, so "Elo has Texas at 1892" on the comparison is still flagged;
-  a parenthetical token never uses it and never counts as the partner
-  ("Texas (1892) sits above 1933" and "Texas sits at 1892 (1933)" are
-  flagged); a sentence naming neither subject has no named subject to
-  hold the partner to; and a team case has one subject, so the rule never
-  applies there.
+  1933.2 vs 1891.8"; "Texas beat Oklahoma 45-12, and Elo has it 1933 to
+  1892", where Oklahoma stands nearest both figures) are grounded: a
+  sentence quoting both compared teams' ratings is a comparison statement,
+  and the rating that is not the named team's can only be the other
+  team's. A rating beside a non-subject's own name is that non-subject's
+  claim, whatever else the sentence quotes: "Elo has Ohio State at 1892,
+  while Texas sits at 1933" credits USC's rating to Ohio State (whose
+  `opponent_rating` is 1858) and is flagged as such, as round 1 flagged
+  it. A lone bare token gets no such rescue, so "Elo has Texas at 1892" on
+  the comparison is still flagged; a parenthetical token never uses it and
+  never counts as the partner ("Texas (1892) sits above 1933" and "Texas
+  sits at 1892 (1933)" are flagged); a sentence naming neither subject has
+  no named subject to hold the partner to; and a team case has one
+  subject, so the rule never applies there.
 
 * **A name is a mention only when it stands on its own.** The sentence's
   name mentions (`_name_occurrences`, shared by the score rule, the record
@@ -1052,9 +1071,14 @@ def _is_stated_game_score(
 ) -> bool:
     """A two-part claim attributed to a subject may still be a game score:
     one of the nearest name's tuples; bare, one of another named team's; in
-    order, any row's game score; in either order, a hyphen pair inside some
-    string value (an `explanation` quotes scores that are not always a game
-    tuple of the block).
+    order, any row's game score. Not, any more, a hyphen pair inside some
+    string value in either order (round 4): every score a Keener
+    `explanation` quotes is also a `games[]` row of the block, so the
+    in-order branch already covers a legitimate quote, and the either-order
+    string branch only ever rescued a swapped score beside the opponent's
+    name ("Texas beat Oklahoma 12-45"), #26's own case, on every Keener
+    block. The string-value exemptions of `_check_reversed_record` and
+    `_check_unattributed_pair` (#181) are unchanged.
     """
     nearest = attribution.nearest
     if nearest is not None and claimed in facts.valid_tuples.get(nearest, set()):
@@ -1065,9 +1089,7 @@ def _is_stated_game_score(
         if other != nearest
     ):
         return True
-    if claimed in facts.game_scores:
-        return True
-    return (min(claimed), max(claimed)) in facts.string_value_pairs
+    return claimed in facts.game_scores
 
 
 def _check_w_l_t_record(claimed: tuple[int, int, int], facts: _ClaimFacts) -> str | None:
@@ -1356,7 +1378,14 @@ def _is_comparison_statement(
     3; see the module docstring): on a block with two rated subjects, it
     states the rating of the subject S2 that is *not* its nearest name, and
     another bare rating-only token in the sentence states the other subject
-    S1's rating, where S1 is that token's nearest subject mention. Never for
+    S1's rating, where S1 is that token's nearest subject mention -- and
+    (round 4) the token is credited to S1 rather than to some non-subject:
+    its own nearest name (`nearest_name`) is S1, or is also the partner's
+    nearest name among *all* the sentence's mentions. So "Texas beat
+    Oklahoma 45-12, and Elo has it 1933 to 1892" holds (Oklahoma stands
+    nearest both figures) and the verdict sentence holds (Texas is nearest
+    both), while "Elo has Ohio State at 1892, while Texas sits at 1933"
+    credits 1892 to Ohio State and is not a comparison statement. Never for
     a parenthetical token (the caller's check), never with a parenthetical
     partner (`bare_tokens` excludes them), and never on a one-subject block
     (`compared_ratings` is empty there). A lone token has no partner, so
@@ -1380,7 +1409,12 @@ def _is_comparison_statement(
             ):
                 continue
             partner_subject = _nearest_name(partner_span, subject_mentions)
-            if partner_subject is not None and partner_subject[0] == named_subject:
+            if partner_subject is None or partner_subject[0] != named_subject:
+                continue
+            partner_nearest = _nearest_name(partner_span, name_occurrences)
+            if nearest_name == named_subject or (
+                partner_nearest is not None and partner_nearest[0] == nearest_name
+            ):
                 return True
     return False
 

@@ -76,6 +76,20 @@ vs Clemson (Elo `2044.43` / `1915.36`, verdict "2044.4 vs 1915.4") and 2001
 Miami vs Florida (Elo `1932.55` / `1850.35`, verdict "1932.5 vs 1850.3")
 comparisons to the verdict blocks; the 2001 verdict's common-opponent
 sentence names Florida State, so round 2's name rule runs on it too.
+
+Round 4 (section F below) fixes the round-2 review's three blocking findings.
+The record-attribution path no longer grants a two-part claim the either-order
+string-value exemption (#181 gave it only to sentences naming no team), which
+had let a swapped score beside an opponent pass on every Keener block (the
+#26 pins for that live in `test_persona_grounding.py`); the one consequence
+pinned here is that "Florida State ended that one 0-14" is now read as Florida
+State's 14-0 backwards. The comparison-statement rule now also requires the
+token's own nearest name to be the named subject, or to be the partner's
+nearest name too, so "Elo has Ohio State at 1892, while Texas sits at 1933"
+credits 1892 to Ohio State and is flagged (2019 LSU vs Ohio State: Clemson's
+`opponent_rating` is `1915.36`, Ohio State's rating `1948.00`; NFL: November
+Nomads's `0.05`, "50.00"). And the word-boundary half of round 2's mention
+rule has its negative test: "Oklahomans" is no mention of Oklahoma.
 """
 
 from __future__ import annotations
@@ -94,7 +108,7 @@ from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.deps import list_all_team_names
 from api.models import ComparisonResultOut, Method, Sport, TeamCaseOut
-from api.persona.grounding import find_ungrounded_tokens
+from api.persona.grounding import _name_occurrences, find_ungrounded_tokens
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
@@ -170,6 +184,9 @@ def _block(
         return block, "cfb", cfb_conn
     if name == "compare_2019_elo":
         return _comparison_block(cfb_conn, 2019, "LSU", "Clemson", "cfb", "elo"), "cfb", cfb_conn
+    if name == "compare_2019_osu_elo":
+        block = _comparison_block(cfb_conn, 2019, "LSU", "Ohio State", "cfb", "elo")
+        return block, "cfb", cfb_conn
     if name == "compare_2001_elo":
         return _comparison_block(cfb_conn, 2001, "Miami", "Florida", "cfb", "elo"), "cfb", cfb_conn
     if name == "kilo_case":
@@ -1343,3 +1360,215 @@ def test_wrong_team_rating_stays_flagged_beside_the_comparison_rule(
     fact_block, sport, conn = block
 
     assert _check(conn, response, fact_block, sport) == expected
+
+
+# ---------------------------------------------------------------------------
+# F. round 4: the round-2 review's three blocking findings. The #26 Keener
+# swapped-score pins themselves live beside the other #26 pins in
+# `test_persona_grounding.py`; here are fix 1's one consequence, fix 2's flags
+# and controls, and the boundary half of the mention rule.
+# ---------------------------------------------------------------------------
+
+
+def _string_values(value: object) -> Iterator[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _string_values(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _string_values(item)
+
+
+def _string_values_naming_scores(data: object) -> set[str]:
+    """Names that the block registers `(own_score, other_score)` tuples under:
+    every `opponent_name`, `home_team` and `away_team`."""
+    names: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key in ("opponent_name", "home_team", "away_team"):
+                if isinstance(node.get(key), str):
+                    names.add(node[key])
+            for item in node.values():
+                walk(item)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    return names
+
+
+def test_reversed_record_said_about_its_owner_is_flagged_even_when_a_string_quotes_it(
+    cfb_conn: sqlite3.Connection,
+) -> None:
+    """Fix 1's consequence. 2013 Florida State (team_a, 14-0-0) vs Michigan
+    State (team_b, 13-1-0), Keener: Michigan State's breakdown explanation
+    quotes its 14-0 win over Purdue, so (0, 14) is a string pair of the block.
+    A sentence naming no team keeps #181's exemption ("That one ended 0-14" is
+    that score from the other side). A sentence attributing the pair to
+    Florida State gets no such exemption any more: it is not a game score for
+    any name, in order, and it is Florida State's record backwards, so it
+    takes the record path's reversed-record message (#181's wording, since
+    whose record the reverse is, is simply true)."""
+    block = _comparison_block(cfb_conn, 2013, "Florida State", "Michigan State", "cfb", "keener")
+    data = json.loads(block)
+    assert (data["team_a"]["team_name"], data["team_a"]["wins"], data["team_a"]["losses"]) == (
+        "Florida State",
+        14,
+        0,
+    )
+    assert any("14-0" in text for text in _string_values(data))
+    assert "Florida State" not in _string_values_naming_scores(data)
+
+    assert _check(cfb_conn, "That one ended 0-14.", block, "cfb") == []
+    assert _check(cfb_conn, "Florida State ended that one 0-14.", block, "cfb") == [
+        "0-14 is not a stated record; Florida State's record is 14-0"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("block", "response", "expected"),
+    [
+        pytest.param(
+            "compare_elo",
+            "Elo has Ohio State at 1892, while Texas sits at 1933.",
+            ["1892 is not Ohio State's rating; Ohio State's rating is 1858"],
+            id="2005-elo-non-subject-credited",
+        ),
+        pytest.param(
+            "compare_keener",
+            "Keener has Ohio State at 4.74, while Texas sits at 5.04.",
+            ["4.74 is not Ohio State's rating; Ohio State's rating is 4.55"],
+            id="2005-keener-non-subject-credited",
+        ),
+        pytest.param(
+            "compare_2019_osu_elo",
+            "Elo has Clemson at 1948, while LSU sits at 2044.",
+            ["1948 is not Clemson's rating; Clemson's rating is 1915"],
+            id="2019-elo-non-subject-credited",
+        ),
+        pytest.param(
+            "kilo_compare",
+            "Keener has November Nomads at 150.00, while Kilo Kings sits at 250.00.",
+            ["150.00 is not November Nomads's rating; November Nomads's rating is 50.00"],
+            id="nfl-non-subject-credited",
+        ),
+        pytest.param(
+            "compare_elo",
+            "Texas is #1, and Elo has Ohio State at 1892.",
+            ["1892 is not Ohio State's rating; Ohio State's rating is 1858"],
+            id="2005-elo-lone-token-control",
+        ),
+        pytest.param(
+            "compare_elo",
+            "Texas beat Oklahoma 45-12, and Elo has it 1933 to 1892.",
+            [],
+            id="2005-elo-opponent-nearest-both-figures-control",
+        ),
+        pytest.param(
+            "compare_elo",
+            "Texas rates higher overall (1933.2 vs 1891.8, rank 1 vs 2).",
+            [],
+            id="2005-elo-verdict-sentence-control",
+        ),
+        pytest.param(
+            "compare_2019_osu_elo",
+            "LSU rates higher overall (2044.4 vs 1948.0, rank 1 vs 2).",
+            [],
+            id="2019-elo-verdict-sentence-control",
+        ),
+    ],
+    indirect=["block"],
+)
+def test_other_compared_teams_rating_credited_to_a_non_subject_is_flagged(
+    block: tuple[str, Sport, sqlite3.Connection], response: str, expected: list[str]
+) -> None:
+    """Fix 2. The comparison-statement rule grounds the *other* compared
+    team's rating only when the token is credited to the named subject: its
+    nearest name is that subject, or is also the partner's nearest name (a
+    non-subject standing nearest both figures, as Oklahoma does in the
+    control). A rating credited to a non-subject with its own rating in the
+    block (Ohio State's 1858, Clemson's 1915, November Nomads's 50.00) is
+    that non-subject's claim and is held to it, whatever else the sentence
+    quotes. The verdict sentence names only `team_a`, so both figures are
+    credited to it, and it stays grounded."""
+    fact_block, sport, conn = block
+
+    assert _check(conn, response, fact_block, sport) == expected
+
+
+def test_verdict_quoted_verbatim_on_the_2019_ohio_state_comparison(
+    cfb_conn: sqlite3.Connection,
+) -> None:
+    """The fix-2 control on the block the reviewer measured: the engine's own
+    verdict, whole and by sentence."""
+    block = _comparison_block(cfb_conn, 2019, "LSU", "Ohio State", "cfb", "elo")
+    verdict: str = json.loads(block)["verdict"]
+    assert "2044.4 vs 1948.0" in verdict
+
+    assert _check(cfb_conn, verdict, block, "cfb") == []
+    for sentence in re.split(r"(?<=[.!?])\s+", verdict):
+        assert _check(cfb_conn, sentence, block, "cfb") == [], sentence
+
+
+@pytest.mark.parametrize(
+    ("year", "team", "glued", "own", "response", "score"),
+    [
+        pytest.param(
+            2005,
+            "Texas",
+            "Oklahomans",
+            "Oklahoma",
+            "The Oklahomans saw a 12-45 loss.",
+            (45, 12),
+            id="oklahomans",
+        ),
+        pytest.param(
+            2019,
+            "LSU",
+            "Georgians",
+            "Georgia",
+            "The Georgians lost 10-37.",
+            (37, 10),
+            id="georgians",
+        ),
+        pytest.param(
+            2013,
+            "Michigan State",
+            "Michiganders",
+            "Michigan",
+            "Michiganders remember 6-29.",
+            (29, 6),
+            id="michiganders",
+        ),
+    ],
+)
+def test_name_glued_to_a_word_character_is_no_mention(
+    cfb_conn: sqlite3.Connection,
+    year: int,
+    team: str,
+    glued: str,
+    own: str,
+    response: str,
+    score: tuple[int, int],
+) -> None:
+    """The word-boundary half of round 2's mention rule (`_NAME_BOUNDARY`),
+    which no test had turned red: a known name glued to a word character is
+    not a mention, while its possessive is. So the sentence names no team,
+    and its swapped score is checked as an unattributed pair, which a real
+    game score grounds in either order. With the boundary blanked, the
+    phantom mention makes the pair the opponent's score, said backwards, and
+    the sentence is flagged."""
+    block = _team_case_block(cfb_conn, year, team, "cfb", "elo")
+    known = list_all_team_names(cfb_conn, "cfb")
+    rows = [game for game in json.loads(block)["games"] if game["opponent_name"] == own]
+    assert [(row["team_score"], row["opponent_score"]) for row in rows] == [score]
+    assert glued in response and glued.startswith(own)
+
+    assert _name_occurrences(response, known) == []
+    assert [name for name, _ in _name_occurrences(f"{own}'s day ended.", known)] == [own]
+    assert [name for name, _ in _name_occurrences(f"{own}' day ended.", known)] == [own]
+    assert _check(cfb_conn, response, block, "cfb") == []

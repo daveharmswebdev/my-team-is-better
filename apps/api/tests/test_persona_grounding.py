@@ -6,6 +6,7 @@ persona's response must be a subset of what's in the fact block.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -275,6 +276,102 @@ def test_relational_mismatch_message_states_the_correct_order_explicitly() -> No
     mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
 
     assert any("should be stated 34-31" in m and "not 31-34" in m for m in mismatches)
+
+
+# ---------------------------------------------------------------------------
+# issue #26 on a Keener block (#166 round 4): a Keener `rating_breakdown`
+# explanation quotes every game score ("Beat them, 45-12"), so each score is a
+# hyphen pair inside a string value, in either order. #166's record-attribution
+# path took over "Texas beat Oklahoma 12-45" (the sentence names a subject, so
+# the pair is a record claim first) and granted it the either-order
+# string-value exemption #181 gave only to sentences naming no team -- so the
+# swapped score beside the opponent passed on every Keener block (282 of 1,126
+# swapped-score probes at round 3, 20 before #166). The blocks here are the
+# real Keener ones (`_team_case_block` / `_comparison_block` default to Keener),
+# and each test first pins the premise: the swapped pair is a string pair of
+# the block and not, in order, a game score of it.
+# ---------------------------------------------------------------------------
+
+
+def _string_pairs(fact_block: str) -> set[tuple[int, int]]:
+    """Every two-part hyphen pair inside a string value of the block, as
+    `(low, high)`, the way the module's string-value exemption reads them."""
+    pairs: set[tuple[int, int]] = set()
+    for text in _string_values(json.loads(fact_block)):
+        for match in re.finditer(r"(?<!\d)(\d+)\s*-\s*(\d+)(?!\s*-\s*\d)(?!\d)", text):
+            low, high = sorted((int(match.group(1)), int(match.group(2))))
+            pairs.add((low, high))
+    return pairs
+
+
+def _in_order_game_scores(fact_block: str) -> set[tuple[int, int]]:
+    scores: set[tuple[int, int]] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            if "opponent_name" in node and "team_score" in node and "opponent_score" in node:
+                scores.add((node["team_score"], node["opponent_score"]))
+            if "team_a_meetings" in node and "team_b_meetings" in node:
+                for meeting in (*node["team_a_meetings"], *node["team_b_meetings"]):
+                    scores.add((meeting["team_score"], meeting["opponent_score"]))
+            if "home_points" in node and "away_points" in node:
+                scores.add((node["home_points"], node["away_points"]))
+                scores.add((node["away_points"], node["home_points"]))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(json.loads(fact_block))
+    return scores
+
+
+@pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
+def test_swapped_score_beside_the_opponent_is_flagged_on_a_keener_block(
+    cfb_conn: sqlite3.Connection, block_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    """The #26 regression #166 introduced: 2005 Texas beat Oklahoma 45-12, and
+    the Keener explanation quotes it, so (12, 45) is a string pair of the
+    block. The swapped score beside Oklahoma is still Oklahoma's score, said
+    backwards, on the team case and on the comparison alike."""
+    block: str = request.getfixturevalue(block_fixture)
+    assert (12, 45) in _string_pairs(block)
+    assert (12, 45) not in _in_order_game_scores(block)
+
+    assert _check(cfb_conn, "Texas beat Oklahoma 12-45.", block, "cfb") == [
+        "Oklahoma's score should be stated 45-12, not 12-45"
+    ]
+    assert _check(cfb_conn, "Texas beat Oklahoma 45-12.", block, "cfb") == []
+
+
+def test_swapped_score_beside_the_other_compared_teams_opponent_is_flagged_on_a_keener_block(
+    cfb_conn: sqlite3.Connection, texas_usc_2005: str
+) -> None:
+    """USC beat Notre Dame 34-31; Notre Dame is `team_b`'s opponent, and the
+    comparison's Keener explanations quote the score."""
+    assert (31, 34) in _string_pairs(texas_usc_2005)
+    assert (31, 34) not in _in_order_game_scores(texas_usc_2005)
+
+    assert _check(cfb_conn, "USC beat Notre Dame 31-34.", texas_usc_2005, "cfb") == [
+        "Notre Dame's score should be stated 34-31, not 31-34"
+    ]
+    assert _check(cfb_conn, "USC beat Notre Dame 34-31.", texas_usc_2005, "cfb") == []
+
+
+def test_swapped_score_beside_the_opponent_is_flagged_on_another_keener_block(
+    cfb_conn: sqlite3.Connection,
+) -> None:
+    """The reviewer's other measured escape: 2019 Kansas State (8-5-0) beat
+    Kansas 38-10."""
+    block = _team_case_block(cfb_conn, 2019, "Kansas State", "cfb")
+    assert (10, 38) in _string_pairs(block)
+    assert (10, 38) not in _in_order_game_scores(block)
+
+    assert _check(cfb_conn, "Kansas State beat Kansas 10-38.", block, "cfb") == [
+        "Kansas's score should be stated 38-10, not 10-38"
+    ]
+    assert _check(cfb_conn, "Kansas State beat Kansas 38-10.", block, "cfb") == []
 
 
 # ---------------------------------------------------------------------------
