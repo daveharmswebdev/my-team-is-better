@@ -250,6 +250,7 @@ def _bengals_fact_block(*, with_tie_game: bool) -> str:
         losses=9,
         ties=1,
         rating_breakdown=RatingBreakdownOut(entries=[], residual_contribution=0.0),
+        elo_ledger=None,
         games=games,
         quality_wins=[],
         worst_loss=None,

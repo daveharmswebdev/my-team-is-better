@@ -8,8 +8,9 @@ number must not fall back.
 
 Every fact block here is the real one `api.persona.service` hands Claude,
 built the way the routes build it (`build_team_case`/`build_comparison` ->
-`TeamCaseOut`/`ComparisonResultOut.from_dataclass(...).model_dump_json()`)
-against the committed `cfb_verdict_fixture.sqlite3`. The one derived block
+`TeamCaseOut`/`ComparisonResultOut.from_dataclass(...)` -> the service's own
+`team_case_fact_block_json`/`comparison_fact_block_json`, which leave out
+`elo_ledger`, #183) against the committed `cfb_verdict_fixture.sqlite3`. The one derived block
 (method removed) is constructed from a real one.
 
 Where `method` sits in the real fact blocks of all three shapes (inspected,
@@ -59,6 +60,7 @@ from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
 from api.persona.grounding import find_ungrounded_tokens
+from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
@@ -75,7 +77,7 @@ def conn() -> Iterator[sqlite3.Connection]:
 
 def _team_case_block(conn: sqlite3.Connection, team: str, method: str, year: int = 2005) -> str:
     case = build_team_case(conn, year, team, method=method, sport="cfb")
-    return TeamCaseOut.from_dataclass(case).model_dump_json()
+    return team_case_fact_block_json(TeamCaseOut.from_dataclass(case))
 
 
 def _champion_block(conn: sqlite3.Connection, method: str, year: int = 2005) -> str:
@@ -89,7 +91,7 @@ def _champion_block(conn: sqlite3.Connection, method: str, year: int = 2005) -> 
 
 def _compare_block(conn: sqlite3.Connection, method: str) -> str:
     comparison = build_comparison(conn, 2005, "Texas", "USC", method=method, sport="cfb")
-    return ComparisonResultOut.from_dataclass(comparison).model_dump_json()
+    return comparison_fact_block_json(ComparisonResultOut.from_dataclass(comparison))
 
 
 def _check(conn: sqlite3.Connection, response: str, fact_block: str) -> list[str]:
