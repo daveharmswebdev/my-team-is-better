@@ -8,7 +8,9 @@ import { QuestionForm } from '../../components/QuestionForm/QuestionForm'
 import { VerdictCard } from '../../components/VerdictCard/VerdictCard'
 import { VerdictModal } from '../../components/VerdictModal/VerdictModal'
 import {
+  SERVER_ERROR_COPY,
   VerdictApiError,
+  VerdictHttpError,
   VerdictNetworkError,
   fetchChampion,
   fetchCompare,
@@ -130,7 +132,26 @@ export function HomePage() {
         ),
   )
 
+  /**
+   * The verdict request in flight, if any (issue #214). It is aborted, not
+   * just ignored, when a new question supersedes it, when the modal closes,
+   * and when the page unmounts. `latestQuestionRef` stays as the second line
+   * of defence, for a request that answers despite its abort.
+   */
+  const inFlightRef = useRef<AbortController | null>(null)
+  /** Whether the page is mounted, so the unmount abort can tell StrictMode's rehearsal apart. */
+  const mountedRef = useRef(false)
+
+  function abortInFlight() {
+    inFlightRef.current?.abort()
+    inFlightRef.current = null
+  }
+
   async function runSubmission(next: QuestionSubmission) {
+    abortInFlight()
+    const controller = new AbortController()
+    inFlightRef.current = controller
+    const { signal } = controller
     latestQuestionRef.current += 1
     const question = latestQuestionRef.current
     setSubmission(next)
@@ -141,46 +162,80 @@ export function HomePage() {
     try {
       const envelope =
         next.questionType === 'champion'
-          ? await fetchChampion({
-              year: next.year,
-              user_team: next.userTeam,
-              sport: next.sport,
-              method: next.method,
-            })
+          ? await fetchChampion(
+              {
+                year: next.year,
+                user_team: next.userTeam,
+                sport: next.sport,
+                method: next.method,
+              },
+              { signal },
+            )
           : next.questionType === 'team_case'
-            ? await fetchTeamCase({
-                year: next.year,
-                team: next.team,
-                user_team: next.userTeam,
-                sport: next.sport,
-                method: next.method,
-              })
-            : await fetchCompare({
-                year: next.year,
-                team_a: next.teamA,
-                team_b: next.teamB,
-                user_team: next.userTeam,
-                sport: next.sport,
-                method: next.method,
-              })
-      if (question === latestQuestionRef.current) {
+            ? await fetchTeamCase(
+                {
+                  year: next.year,
+                  team: next.team,
+                  user_team: next.userTeam,
+                  sport: next.sport,
+                  method: next.method,
+                },
+                { signal },
+              )
+            : await fetchCompare(
+                {
+                  year: next.year,
+                  team_a: next.teamA,
+                  team_b: next.teamB,
+                  user_team: next.userTeam,
+                  sport: next.sport,
+                  method: next.method,
+                },
+                { signal },
+              )
+      if (!signal.aborted && question === latestQuestionRef.current) {
         setState({ status: 'success', envelope })
       }
     } catch (error) {
-      if (question === latestQuestionRef.current) {
+      // An aborted request was superseded or dismissed: nothing to show.
+      if (!signal.aborted && question === latestQuestionRef.current) {
         setState({ status: 'error', error: toErrorState(error) })
+      }
+    } finally {
+      if (inFlightRef.current === controller) {
+        inFlightRef.current = null
       }
     }
   }
 
   /**
+   * Aborts whatever is still in flight when the page goes away. StrictMode's
+   * rehearsal unmount runs this cleanup and then the setup again at once, and
+   * a share link's landing request is never re-asked, so the abort waits a
+   * microtask and happens only if the page didn't come straight back.
+   */
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      queueMicrotask(() => {
+        if (!mountedRef.current) {
+          inFlightRef.current?.abort()
+          inFlightRef.current = null
+        }
+      })
+    }
+  }, [])
+
+  /**
    * Dismisses the verdict and returns to the form, which still holds the
-   * question that was asked. Any answer still on its way is dropped, and the
+   * question that was asked. Any request still on its way is aborted, and the
    * address bar drops the share query (`replace`, no new history entry). The
    * address bar is the share link of the verdict on screen, and now there
    * isn't one, so a reload shows the plain form rather than a dismissed verdict.
    */
   function closeVerdict() {
+    abortInFlight()
     latestQuestionRef.current += 1
     setState(null)
     setSearchParams(new URLSearchParams(), { replace: true })
@@ -323,11 +378,13 @@ function toErrorState(error: unknown): VerdictErrorState {
         return { kind: 'same_team_comparison', body: error.body }
     }
   }
-  if (error instanceof VerdictNetworkError) {
+  // `network_error` is the plain system-error display bucket: both classes
+  // carry user-facing copy only, never a raw HTTP status (issue #215).
+  if (
+    error instanceof VerdictNetworkError ||
+    error instanceof VerdictHttpError
+  ) {
     return { kind: 'network_error', message: error.message }
   }
-  return {
-    kind: 'network_error',
-    message: 'Something went wrong. Please try again.',
-  }
+  return { kind: 'network_error', message: SERVER_ERROR_COPY }
 }

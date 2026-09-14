@@ -1,10 +1,24 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { StrictMode } from 'react'
 import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { YEAR_DEBOUNCE_MS } from '../../components/QuestionForm/QuestionForm'
-import { VerdictApiError, VerdictNetworkError } from '../../lib/api/client'
+import {
+  CLIENT_ERROR_COPY,
+  NETWORK_ERROR_COPY,
+  SERVER_ERROR_COPY,
+  VERDICT_TIMEOUT_MS,
+  VerdictApiError,
+  VerdictNetworkError,
+} from '../../lib/api/client'
 import type {
   ComparisonEnvelope,
   ComparisonTeamSummaryOut,
@@ -73,6 +87,12 @@ function envelopeFor(teamName: string, narration: string): TeamCaseEnvelope {
     narration: { text: narration, contested: false, cached: false },
   }
 }
+
+/**
+ * Every verdict call carries the page's abort signal as its second argument
+ * (issue #214), so a superseded or dismissed question can be cancelled.
+ */
+const WITH_SIGNAL = { signal: expect.any(AbortSignal) as AbortSignal }
 
 const UNKNOWN_YEAR_ERROR = new VerdictApiError(404, {
   error: 'unknown_year',
@@ -247,14 +267,17 @@ describe('HomePage', () => {
       renderHomePage(TEXAS_USC_LINK, { strict: true })
 
       expect(await screen.findByText('Texas edges USC.')).toBeInTheDocument()
-      expect(mockedFetchCompare).toHaveBeenCalledWith({
-        year: 2005,
-        team_a: 'Texas',
-        team_b: 'USC',
-        user_team: 'Texas',
-        sport: 'cfb',
-        method: 'elo',
-      })
+      expect(mockedFetchCompare).toHaveBeenCalledWith(
+        {
+          year: 2005,
+          team_a: 'Texas',
+          team_b: 'USC',
+          user_team: 'Texas',
+          sport: 'cfb',
+          method: 'elo',
+        },
+        WITH_SIGNAL,
+      )
       await expectThroughout(() =>
         expect(mockedFetchCompare).toHaveBeenCalledTimes(1),
       )
@@ -482,14 +505,17 @@ describe('HomePage', () => {
       expect(mockedFetchCompare).toHaveBeenCalledTimes(2)
       // The pill re-asks the question as it was asked (issue #38), so the
       // request still carries the link's team.
-      expect(mockedFetchCompare).toHaveBeenLastCalledWith({
-        year: 2005,
-        team_a: 'Texas State',
-        team_b: 'USC',
-        user_team: 'Texas',
-        sport: 'cfb',
-        method: 'elo',
-      })
+      expect(mockedFetchCompare).toHaveBeenLastCalledWith(
+        {
+          year: 2005,
+          team_a: 'Texas State',
+          team_b: 'USC',
+          user_team: 'Texas',
+          sport: 'cfb',
+          method: 'elo',
+        },
+        WITH_SIGNAL,
+      )
       expect(screen.getByLabelText(/team a/i)).toHaveValue('Texas State')
       // The accepted edge case: a correction remounts the form the ordinary
       // way, re-reading the saved team, and the link never wrote over it.
@@ -718,7 +744,7 @@ describe('HomePage', () => {
               comparisonEnvelopeFor('Texas', 'USC', 'The first answer.'),
             )
           } else {
-            first.reject(new VerdictNetworkError('Could not reach the API.'))
+            first.reject(new VerdictNetworkError(NETWORK_ERROR_COPY))
           }
         })
 
@@ -766,12 +792,15 @@ describe('HomePage', () => {
         await within(dialog).findByText('Texas, full stop.'),
       ).toBeInTheDocument()
       expect(verdictDialog()).toBe(dialog)
-      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
-        year: CORRECTED_YEAR,
-        user_team: null,
-        sport: 'cfb',
-        method: 'keener',
-      })
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith(
+        {
+          year: CORRECTED_YEAR,
+          user_team: null,
+          sport: 'cfb',
+          method: 'keener',
+        },
+        WITH_SIGNAL,
+      )
       expect(screen.getByLabelText(/year/i)).toHaveValue(CORRECTED_YEAR)
     })
 
@@ -794,12 +823,15 @@ describe('HomePage', () => {
           await screen.findByRole('dialog', { name: 'The verdict' }),
         ).findByText('Texas, full stop.'),
       ).toBeInTheDocument()
-      expect(mockedFetchChampion).toHaveBeenCalledWith({
-        year: 2005,
-        user_team: null,
-        sport: 'cfb',
-        method: 'keener',
-      })
+      expect(mockedFetchChampion).toHaveBeenCalledWith(
+        {
+          year: 2005,
+          user_team: null,
+          sport: 'cfb',
+          method: 'keener',
+        },
+        WITH_SIGNAL,
+      )
       await waitFor(() =>
         expect(screen.getByTestId('location-search').textContent).toBe(
           '?q=champion&sport=cfb&year=2005&engine=keener',
@@ -850,12 +882,15 @@ describe('HomePage', () => {
     await user.click(screen.getByRole('button', { name: /get the verdict/i }))
 
     expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
-    expect(mockedFetchChampion).toHaveBeenCalledWith({
-      year: 2005,
-      user_team: null,
-      sport: 'cfb',
-      method: 'keener',
-    })
+    expect(mockedFetchChampion).toHaveBeenCalledWith(
+      {
+        year: 2005,
+        user_team: null,
+        sport: 'cfb',
+        method: 'keener',
+      },
+      WITH_SIGNAL,
+    )
   })
 
   it('re-submits with the exact candidate name after an ambiguous_team error', async () => {
@@ -911,19 +946,22 @@ describe('HomePage', () => {
     expect(
       await screen.findByText('Texas State had a mediocre year.'),
     ).toBeInTheDocument()
-    expect(mockedFetchTeamCase).toHaveBeenLastCalledWith({
-      year: 2005,
-      team: 'Texas State',
-      user_team: null,
-      sport: 'cfb',
-      method: 'keener',
-    })
+    expect(mockedFetchTeamCase).toHaveBeenLastCalledWith(
+      {
+        year: 2005,
+        team: 'Texas State',
+        user_team: null,
+        sport: 'cfb',
+        method: 'keener',
+      },
+      WITH_SIGNAL,
+    )
   })
 
   it('renders a generic failure state on a network error', async () => {
     const user = userEvent.setup()
     mockedFetchChampion.mockRejectedValue(
-      new VerdictNetworkError('Could not reach the API.'),
+      new VerdictNetworkError(NETWORK_ERROR_COPY),
     )
 
     renderHomePage()
@@ -933,7 +971,7 @@ describe('HomePage', () => {
     await user.click(screen.getByRole('button', { name: /get the verdict/i }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /could not reach the api/i,
+      NETWORK_ERROR_COPY,
     )
   })
 
@@ -980,12 +1018,15 @@ describe('HomePage', () => {
         questionType: 'champion' as const,
         fill: async () => {},
         assertCalled: () =>
-          expect(mockedFetchChampion).toHaveBeenCalledWith({
-            year: 2005,
-            user_team: null,
-            sport: 'cfb',
-            method: 'elo',
-          }),
+          expect(mockedFetchChampion).toHaveBeenCalledWith(
+            {
+              year: 2005,
+              user_team: null,
+              sport: 'cfb',
+              method: 'elo',
+            },
+            WITH_SIGNAL,
+          ),
       },
       {
         questionType: 'team_case' as const,
@@ -993,13 +1034,16 @@ describe('HomePage', () => {
           await user.type(screen.getByLabelText(/^team$/i), 'USC')
         },
         assertCalled: () =>
-          expect(mockedFetchTeamCase).toHaveBeenCalledWith({
-            year: 2005,
-            team: 'USC',
-            user_team: null,
-            sport: 'cfb',
-            method: 'elo',
-          }),
+          expect(mockedFetchTeamCase).toHaveBeenCalledWith(
+            {
+              year: 2005,
+              team: 'USC',
+              user_team: null,
+              sport: 'cfb',
+              method: 'elo',
+            },
+            WITH_SIGNAL,
+          ),
       },
       {
         questionType: 'compare' as const,
@@ -1008,14 +1052,17 @@ describe('HomePage', () => {
           await user.type(screen.getByLabelText(/team b/i), 'USC')
         },
         assertCalled: () =>
-          expect(mockedFetchCompare).toHaveBeenCalledWith({
-            year: 2005,
-            team_a: 'Texas',
-            team_b: 'USC',
-            user_team: null,
-            sport: 'cfb',
-            method: 'elo',
-          }),
+          expect(mockedFetchCompare).toHaveBeenCalledWith(
+            {
+              year: 2005,
+              team_a: 'Texas',
+              team_b: 'USC',
+              user_team: null,
+              sport: 'cfb',
+              method: 'elo',
+            },
+            WITH_SIGNAL,
+          ),
       },
     ])(
       'sends method "elo" in the $questionType request',
@@ -1063,12 +1110,15 @@ describe('HomePage', () => {
       )
 
       expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
-      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
-        year: CORRECTED_YEAR,
-        user_team: null,
-        sport: 'cfb',
-        method: 'elo',
-      })
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith(
+        {
+          year: CORRECTED_YEAR,
+          user_team: null,
+          sport: 'cfb',
+          method: 'elo',
+        },
+        WITH_SIGNAL,
+      )
       expect(eloRadio()).toBeChecked()
     })
 
@@ -1113,12 +1163,15 @@ describe('HomePage', () => {
       await user.click(await screen.findByRole('button', { name: '2018' }))
 
       expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
-      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
-        year: 2018,
-        user_team: null,
-        sport: 'cfb',
-        method: 'keener',
-      })
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith(
+        {
+          year: 2018,
+          user_team: null,
+          sport: 'cfb',
+          method: 'keener',
+        },
+        WITH_SIGNAL,
+      )
       // The point of the issue: the form must agree with what was asked.
       expect(screen.getByLabelText(/year/i)).toHaveValue(2018)
     })
@@ -1173,7 +1226,7 @@ describe('HomePage', () => {
         }),
       )
       mockedFetchCompare.mockRejectedValueOnce(
-        new VerdictNetworkError('Could not reach the API.'),
+        new VerdictNetworkError(NETWORK_ERROR_COPY),
       )
 
       renderHomePage()
@@ -1193,14 +1246,17 @@ describe('HomePage', () => {
       )
 
       await waitFor(() =>
-        expect(mockedFetchCompare).toHaveBeenLastCalledWith({
-          year: 2005,
-          team_a: 'USC',
-          team_b: 'Texas State',
-          user_team: null,
-          sport: 'cfb',
-          method: 'keener',
-        }),
+        expect(mockedFetchCompare).toHaveBeenLastCalledWith(
+          {
+            year: 2005,
+            team_a: 'USC',
+            team_b: 'Texas State',
+            user_team: null,
+            sport: 'cfb',
+            method: 'keener',
+          },
+          WITH_SIGNAL,
+        ),
       )
       expect(screen.getByLabelText(/team a/i)).toHaveValue('USC')
       expect(screen.getByLabelText(/team b/i)).toHaveValue('Texas State')
@@ -1247,13 +1303,16 @@ describe('HomePage', () => {
       // after the submit button was pressed. So the re-ask carries the
       // submitted `user_team` (none), while the field keeps what the user
       // has since typed for their next submission.
-      expect(mockedFetchTeamCase).toHaveBeenLastCalledWith({
-        year: CORRECTED_YEAR,
-        team: 'Bengals',
-        user_team: null,
-        sport: 'nfl',
-        method: 'keener',
-      })
+      expect(mockedFetchTeamCase).toHaveBeenLastCalledWith(
+        {
+          year: CORRECTED_YEAR,
+          team: 'Bengals',
+          user_team: null,
+          sport: 'nfl',
+          method: 'keener',
+        },
+        WITH_SIGNAL,
+      )
     })
 
     /**
@@ -1347,12 +1406,227 @@ describe('HomePage', () => {
           screen.queryByText(/no teams found for/i),
         ).not.toBeInTheDocument()
       })
-      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
-        year: CORRECTED_YEAR,
-        user_team: null,
-        sport: 'cfb',
-        method: 'keener',
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith(
+        {
+          year: CORRECTED_YEAR,
+          user_team: null,
+          sport: 'cfb',
+          method: 'keener',
+        },
+        WITH_SIGNAL,
+      )
+    })
+  })
+
+  /**
+   * Issues #214 and #215, through the real API client: only `fetch` itself
+   * is faked, so these cover the page and the client together.
+   */
+  describe('verdict request failures (issues #214, #215)', () => {
+    const TEXAS_USC_LINK =
+      '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC&for=Texas'
+
+    function submitButton() {
+      return screen.getByRole('button', { name: /get the verdict/i })
+    }
+
+    function verdictDialog() {
+      return screen.getByRole('dialog', { name: 'The verdict' })
+    }
+
+    /**
+     * A `fetch` that never answers on its own, and rejects with an
+     * `AbortError` as soon as its signal aborts, as a browser's does. Keeps
+     * the signal each call was given.
+     */
+    function neverAnsweringFetch() {
+      const signals: (AbortSignal | undefined)[] = []
+      const fetchMock = vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal ?? undefined
+            signals.push(signal)
+            signal?.addEventListener('abort', () => {
+              reject(
+                new DOMException('The operation was aborted.', 'AbortError'),
+              )
+            })
+          }),
+      )
+      return { fetchMock, signals }
+    }
+
+    beforeEach(async () => {
+      const actual = await vi.importActual<
+        typeof import('../../lib/api/client')
+      >('../../lib/api/client')
+      mockedFetchChampion.mockImplementation(actual.fetchChampion)
+      mockedFetchTeamCase.mockImplementation(actual.fetchTeamCase)
+      mockedFetchCompare.mockImplementation(actual.fetchCompare)
+      // The client logs every unmapped HTTP error for developers.
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.unstubAllGlobals()
+      vi.restoreAllMocks()
+    })
+
+    it.each([
+      [
+        'a FastAPI request-validation 422',
+        () =>
+          new Response(
+            JSON.stringify({
+              detail: [
+                {
+                  loc: ['body', 'year'],
+                  msg: 'Input should be a valid integer',
+                  type: 'int_parsing',
+                },
+              ],
+            }),
+            { status: 422, headers: { 'Content-Type': 'application/json' } },
+          ),
+        CLIENT_ERROR_COPY,
+      ],
+      [
+        'an empty 500',
+        () => new Response(null, { status: 500 }),
+        SERVER_ERROR_COPY,
+      ],
+      [
+        "a proxy's HTML 503",
+        () =>
+          new Response('<html>Service Unavailable</html>', {
+            status: 503,
+            headers: { 'Content-Type': 'text/html' },
+          }),
+        SERVER_ERROR_COPY,
+      ],
+    ])(
+      'shows plain copy, and never the status, for %s',
+      async (_description, respond, copy) => {
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(() => Promise.resolve(respond())),
+        )
+        const user = userEvent.setup()
+
+        renderHomePage()
+        await waitFor(() => expect(submitButton()).not.toBeDisabled())
+        await user.click(submitButton())
+
+        const alert = await within(
+          await screen.findByRole('dialog', { name: 'The verdict' }),
+        ).findByRole('alert')
+        expect(alert).toHaveTextContent(copy)
+        expect(alert).not.toHaveTextContent(/status/i)
+      },
+    )
+
+    it('shows the 5xx copy for an error the client never classified', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion.mockRejectedValue(new Error('something odd'))
+
+      renderHomePage()
+      await waitFor(() => expect(submitButton()).not.toBeDisabled())
+      await user.click(submitButton())
+
+      expect(
+        await within(
+          await screen.findByRole('dialog', { name: 'The verdict' }),
+        ).findByRole('alert'),
+      ).toHaveTextContent(SERVER_ERROR_COPY)
+    })
+
+    it('shows the network copy once a request that never settles reaches VERDICT_TIMEOUT_MS', async () => {
+      vi.useFakeTimers()
+      const { fetchMock } = neverAnsweringFetch()
+      vi.stubGlobal('fetch', fetchMock)
+
+      renderHomePage(TEXAS_USC_LINK)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(VERDICT_TIMEOUT_MS - 1)
       })
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(within(verdictDialog()).getByRole('status')).toBeInTheDocument()
+      expect(within(verdictDialog()).queryByRole('alert')).toBeNull()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1)
+      })
+
+      expect(within(verdictDialog()).getByRole('alert')).toHaveTextContent(
+        NETWORK_ERROR_COPY,
+      )
+    })
+
+    it("aborts the first request's signal when a second question is asked, and the aborted one never lands", async () => {
+      const { fetchMock, signals } = neverAnsweringFetch()
+      vi.stubGlobal('fetch', fetchMock)
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+      await screen.findByRole('dialog', { name: 'The verdict' })
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      // StrictMode's rehearsal unmount must not abort the landing's request.
+      expect(signals[0]?.aborted).toBe(false)
+
+      // In a browser the page behind the modal is inert and the button is
+      // disabled while loading, so this is the second line of defence: a
+      // direct submit reaches the same `onSubmit` the button does.
+      const form = screen
+        .getByLabelText(/what do you want to know/i)
+        .closest('form')
+      if (form === null) {
+        throw new Error('the question form is missing')
+      }
+      fireEvent.submit(form)
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+      expect(signals[0]?.aborted).toBe(true)
+      expect(signals[1]?.aborted).toBe(false)
+      await expectThroughout(() => {
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+        expect(within(verdictDialog()).getByRole('status')).toBeInTheDocument()
+      })
+    })
+
+    it('aborts the in-flight request when the verdict is closed', async () => {
+      const user = userEvent.setup()
+      const { fetchMock, signals } = neverAnsweringFetch()
+      vi.stubGlobal('fetch', fetchMock)
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+      const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      expect(signals[0]?.aborted).toBe(false)
+
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Close the verdict' }),
+      )
+
+      expect(signals[0]?.aborted).toBe(true)
+      await expectThroughout(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      })
+    })
+
+    it('aborts the in-flight request when the page unmounts', async () => {
+      const { fetchMock, signals } = neverAnsweringFetch()
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { unmount } = renderHomePage(TEXAS_USC_LINK, { strict: true })
+      await screen.findByRole('dialog', { name: 'The verdict' })
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      expect(signals[0]?.aborted).toBe(false)
+
+      unmount()
+
+      await waitFor(() => expect(signals[0]?.aborted).toBe(true))
     })
   })
 })
