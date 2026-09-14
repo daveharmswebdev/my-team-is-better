@@ -721,16 +721,21 @@ def _build_verdict(
 
     if meetings:
         for m in meetings:
+            # A decided meeting's winner scored more, so its points are the
+            # larger of the two whoever was home (#122). Derived from the
+            # scores, not from neutral_site or home/away order.
+            winner_points = max(m.home_points, m.away_points)
+            loser_points = min(m.home_points, m.away_points)
             if m.winner == case_a.team_name:
                 parts.append(
                     f"{case_a.team_name} beat {case_b.team_name} head-to-head "
-                    f"{m.home_points}-{m.away_points} "
+                    f"{winner_points}-{loser_points} "
                     f"({m.home_team} vs {m.away_team}, week {m.week})."
                 )
             elif m.winner == case_b.team_name:
                 parts.append(
                     f"{case_b.team_name} beat {case_a.team_name} head-to-head "
-                    f"{m.home_points}-{m.away_points} "
+                    f"{winner_points}-{loser_points} "
                     f"({m.home_team} vs {m.away_team}, week {m.week})."
                 )
             else:

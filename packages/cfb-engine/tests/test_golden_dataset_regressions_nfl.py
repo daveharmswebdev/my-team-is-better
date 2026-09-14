@@ -479,7 +479,7 @@ def test_2013_packers_vikings_comparison_verdict_names_the_tie(
     assert (comparison.team_a.wins, comparison.team_a.losses, comparison.team_a.ties) == (8, 8, 1)
     assert (comparison.team_b.wins, comparison.team_b.losses, comparison.team_b.ties) == (5, 10, 1)
     assert (
-        "Green Bay Packers beat Minnesota Vikings head-to-head 31-44 "
+        "Green Bay Packers beat Minnesota Vikings head-to-head 44-31 "
         "(Minnesota Vikings vs Green Bay Packers, week 8)."
     ) in comparison.verdict
     assert (
