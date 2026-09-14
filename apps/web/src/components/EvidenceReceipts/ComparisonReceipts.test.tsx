@@ -65,6 +65,7 @@ const evidence: ComparisonResultOut = {
       ],
       residual_contribution: 0.00427,
     },
+    elo_ledger: null,
     quality_wins: [
       {
         opponent_team_id: 555,
@@ -107,6 +108,7 @@ const evidence: ComparisonResultOut = {
       ],
       residual_contribution: 0.005,
     },
+    elo_ledger: null,
     quality_wins: [],
     worst_loss: null,
   },

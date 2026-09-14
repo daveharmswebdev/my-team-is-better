@@ -45,6 +45,7 @@ const evidence: ComparisonResultOut = {
       // team's rating.
       residual_contribution: 0.0045,
     },
+    elo_ledger: null,
     quality_wins: [],
     worst_loss: null,
   },
@@ -72,6 +73,7 @@ const evidence: ComparisonResultOut = {
       ],
       residual_contribution: 0.005,
     },
+    elo_ledger: null,
     quality_wins: [],
     worst_loss: null,
   },

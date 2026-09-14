@@ -30,6 +30,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
       ],
       residual_contribution: 0.00634,
     },
+    elo_ledger: null,
     games: [],
     quality_wins: [
       {
@@ -82,6 +83,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
         ],
         residual_contribution: 0.00664,
       },
+      elo_ledger: null,
       quality_wins: [],
       worst_loss: null,
     },
@@ -109,6 +111,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
         ],
         residual_contribution: 0.00697,
       },
+      elo_ledger: null,
       quality_wins: [],
       worst_loss: null,
     },

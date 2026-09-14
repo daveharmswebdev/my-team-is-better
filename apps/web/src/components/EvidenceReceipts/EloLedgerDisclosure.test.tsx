@@ -27,8 +27,8 @@ afterEach(() => {
 
 /**
  * What each Texas row must print, written out by hand from the fixture's own
- * fields at display precision (ratings/gap/shift 1 decimal, expectancy 3,
- * multiplier 2). Hard-coded on purpose: the test must not share the
+ * fields at display precision (ratings/gap/shift 1 decimal, expectancy 4,
+ * multiplier 3). Hard-coded on purpose: the test must not share the
  * component's formatting code, and nothing here is an Elo computation.
  */
 const TEXAS_ROWS = [
@@ -36,33 +36,96 @@ const TEXAS_ROWS = [
     header: 'Wk 2 · vs Ohio State · W 25–22',
     shift: '+22.8',
     total: 'now 1,522.8',
-    work: '1,500.0 − 1,544.9 + 100 = gap +55.1 → win expectancy 0.579 → won by 3, multiplier 1.35 → 40 × 1.35 × (1 − 0.579) = +22.8',
+    work: '1,500.0 − 1,544.9 + 100 = gap +55.1 → win expectancy 0.5787 → won by 3, multiplier 1.352 → 40 × 1.352 × (1 − 0.5787) = +22.8',
   },
   {
     header: 'Wk 4 · at Texas Tech · W 52–17',
     shift: '+79.1',
     total: 'now 1,601.9',
-    work: '1,522.8 − 1,453.6 − 100 = gap −30.8 → win expectancy 0.456 → won by 35, multiplier 3.63 → 40 × 3.63 × (1 − 0.456) = +79.1',
+    work: '1,522.8 − 1,453.6 − 100 = gap −30.8 → win expectancy 0.4557 → won by 35, multiplier 3.634 → 40 × 3.634 × (1 − 0.4557) = +79.1',
   },
   {
     header: 'Wk 5 · vs Oklahoma (neutral) · W 45–12',
     shift: '+48.2',
     total: 'now 1,650.1',
-    work: '1,601.9 − 1,500.0 = gap +101.9 → win expectancy 0.643 → won by 33, multiplier 3.37 → 40 × 3.37 × (1 − 0.643) = +48.2',
+    work: '1,601.9 − 1,500.0 = gap +101.9 → win expectancy 0.6426 → won by 33, multiplier 3.370 → 40 × 3.370 × (1 − 0.6426) = +48.2',
   },
   {
     header: 'Wk 6 · at Baylor · T 21–21',
     shift: '−8.1',
     total: 'now 1,642.0',
-    work: '1,650.1 − 1,455.1 − 100 = gap +95.0 → win expectancy 0.633 → tied, multiplier 1.52 → 40 × 1.52 × (½ − 0.633) = −8.1',
+    work: '1,650.1 − 1,455.1 − 100 = gap +95.0 → win expectancy 0.6334 → tied, multiplier 1.525 → 40 × 1.525 × (½ − 0.6334) = −8.1',
   },
   {
     header: 'Postseason · vs USC (neutral) · W 41–38',
     shift: '+19.4',
     total: 'now 1,661.4',
-    work: '1,642.0 − 1,546.4 = gap +95.6 → win expectancy 0.634 → won by 3, multiplier 1.33 → 40 × 1.33 × (1 − 0.634) = +19.4',
+    work: '1,642.0 − 1,546.4 = gap +95.6 → win expectancy 0.6342 → won by 3, multiplier 1.329 → 40 × 1.329 × (1 − 0.6342) = +19.4',
   },
 ] as const
+
+/** A printed decimal held exactly: "1.352" is `{ digits: 1352n, places: 3 }`. */
+interface Printed {
+  digits: bigint
+  places: number
+}
+
+/** Reads a number as the panel printed it ("1,500", "+22.8", "−8.1", "½"). */
+function printed(text: string): Printed {
+  const plain = text.replace(/[,+]/g, '').replace('−', '-').replace('½', '0.5')
+  const [whole = '', fraction = ''] = plain.split('.')
+  return { digits: BigInt(`${whole}${fraction}`), places: fraction.length }
+}
+
+function atPlaces(value: Printed, places: number): bigint {
+  return value.digits * 10n ** BigInt(places - value.places)
+}
+
+/** "→ 40 × 1.352 × (1 − 0.5787) = +22.8", the worked step's last clause. */
+const OPERANDS =
+  /→ ([\d,.]+) × ([\d.]+) × \((1|½|0) − ([\d.]+)\) = ([+−]?[\d,.]+)$/
+
+/**
+ * What a fan with a calculator gets from a row's printed operands: the
+ * printed k × multiplier × (result − win expectancy), in exact decimal
+ * arithmetic, beside the printed shift. Test-side only: the component
+ * computes none of this.
+ */
+function calculatorCheck(work: string): { product: Printed; shift: Printed } {
+  const match = OPERANDS.exec(work)
+  if (match === null) {
+    throw new Error(`no operands in worked step: ${work}`)
+  }
+  const [, k = '', multiplier = '', result = '', expectancy = '', shift = ''] =
+    match
+  const outcome = printed(result)
+  const winExpectancy = printed(expectancy)
+  const places = Math.max(outcome.places, winExpectancy.places)
+  const kValue = printed(k)
+  const multiplierValue = printed(multiplier)
+  return {
+    product: {
+      digits:
+        kValue.digits *
+        multiplierValue.digits *
+        (atPlaces(outcome, places) - atPlaces(winExpectancy, places)),
+      places: kValue.places + multiplierValue.places + places,
+    },
+    shift: printed(shift),
+  }
+}
+
+/** Rounds half away from zero, the way the panel's Intl formatter rounds the shift. */
+function roundedTo(value: Printed, places: number): bigint {
+  if (value.places <= places) {
+    return atPlaces(value, places)
+  }
+  const divisor = 10n ** BigInt(value.places - places)
+  const magnitude = value.digits < 0n ? -value.digits : value.digits
+  const rounded =
+    magnitude / divisor + ((magnitude % divisor) * 2n >= divisor ? 1n : 0n)
+  return value.digits < 0n ? -rounded : rounded
+}
 
 function renderTexas(ledger: EloLedgerOut = TEXAS_ELO.elo_ledger) {
   return render(
@@ -143,7 +206,7 @@ describe('EloLedgerDisclosure', () => {
     ).toBeInTheDocument()
     expect(
       within(dialog).getByText(
-        "Figures are rounded for display; the engine keeps full precision, and every row's math checks out at full precision.",
+        "Figures are rounded for display, so multiplying a row's rounded numbers can land a tenth away from its change; the engine keeps full precision, and every row's math checks out at full precision.",
       ),
     ).toBeInTheDocument()
   })
@@ -176,7 +239,7 @@ describe('EloLedgerDisclosure', () => {
     expect(within(dialog).queryByText(/40 ×/)).not.toBeInTheDocument()
     expect(
       within(gameItems(dialog)[0] as HTMLElement).getByText(
-        /→ 20 × 1\.35 × \(1 − 0\.579\) = \+22\.8$/,
+        /→ 20 × 1\.352 × \(1 − 0\.5787\) = \+22\.8$/,
       ),
     ).toBeInTheDocument()
   })
@@ -263,7 +326,7 @@ describe('EloLedgerDisclosure', () => {
     expect(within(awayTie).getByText(/at Baylor/)).toBeInTheDocument()
     const awayTieWork = within(awayTie).getByText(/= gap/).textContent ?? ''
     expect(awayTieWork).toContain('− 100 = gap')
-    expect(awayTieWork).toContain('→ tied, multiplier 1.52 →')
+    expect(awayTieWork).toContain('→ tied, multiplier 1.525 →')
 
     const postseason = items[4] as HTMLElement
     expect(
@@ -291,9 +354,44 @@ describe('EloLedgerDisclosure', () => {
     const item = gameItems(dialog)[0] as HTMLElement
     expect(within(item).getByText(/· L 17–24$/)).toBeInTheDocument()
     expect(
-      within(item).getByText(/→ lost by 7, multiplier 1\.35 →/),
+      within(item).getByText(/→ lost by 7, multiplier 1\.352 →/),
     ).toBeInTheDocument()
-    expect(within(item).getByText(/× \(0 − 0\.579\)/)).toBeInTheDocument()
+    expect(within(item).getByText(/× \(0 − 0\.5787\)/)).toBeInTheDocument()
+  })
+
+  describe('a fan with a calculator (issue #183)', () => {
+    /** Every row's printed worked step, in game order. */
+    async function printedWork(): Promise<string[]> {
+      mockMatchMedia(false)
+      renderTexas()
+      const { dialog } = await openOnDesktop()
+      return gameItems(dialog).map(
+        (item) => within(item).getByText(/= gap/).textContent ?? '',
+      )
+    }
+
+    it("multiplying a row's printed operands rounds to its printed change, on every Texas row", async () => {
+      const rows = await printedWork()
+      expect(rows).toHaveLength(TEXAS_ELO.elo_ledger.steps.length)
+      const off = rows.flatMap((work, index) => {
+        const { product, shift } = calculatorCheck(work)
+        return roundedTo(product, 1) === atPlaces(shift, 1)
+          ? []
+          : [`game ${index + 1}: ${work}`]
+      })
+      expect(off).toEqual([])
+    })
+
+    it("a row's printed operands never land more than a tenth from its printed change", async () => {
+      const rows = await printedWork()
+      expect(rows).toHaveLength(TEXAS_ELO.elo_ledger.steps.length)
+      for (const work of rows) {
+        const { product, shift } = calculatorCheck(work)
+        const gap = product.digits - atPlaces(shift, product.places)
+        const tenth = 10n ** BigInt(product.places - 1)
+        expect(gap <= tenth && gap >= -tenth, work).toBe(true)
+      }
+    })
   })
 
   it('links the provenance line through the router when there is one', async () => {

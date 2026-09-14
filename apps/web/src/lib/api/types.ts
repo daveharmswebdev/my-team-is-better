@@ -102,11 +102,9 @@ export interface TeamCaseOut {
   rating_breakdown: RatingBreakdownOut
   /**
    * Issue #183: the Elo ledger under `elo`; `null` under `keener` and
-   * `elo_career`. The API always sends the key. It is optional here only so
-   * fixtures written before #183 still type-check; readers treat a missing
-   * value exactly like `null`.
+   * `elo_career`. Required: the API always sends the key.
    */
-  elo_ledger?: EloLedgerOut | null
+  elo_ledger: EloLedgerOut | null
   games: OpponentResultOut[]
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
@@ -123,7 +121,7 @@ export interface ComparisonTeamSummaryOut {
   ties: number
   rating_breakdown: RatingBreakdownOut
   /** Same as `TeamCaseOut.elo_ledger`. */
-  elo_ledger?: EloLedgerOut | null
+  elo_ledger: EloLedgerOut | null
   quality_wins: OpponentResultOut[]
   worst_loss: OpponentResultOut | null
 }

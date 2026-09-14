@@ -103,9 +103,11 @@ function homeFieldTerm(adjustment: number): string {
  */
 function workedStep(k: number, step: EloGameStepOut): string {
   // Named with the rule lines' own words ("gap", "win expectancy",
-  // "multiplier"), so every number maps to the line it came from.
-  const winExpectancy = step.win_expectancy.toFixed(3)
-  const multiplier = step.mov_multiplier.toFixed(2)
+  // "multiplier"), so every number maps to the line it came from. Expectancy
+  // at 4 decimals and multiplier at 3, so a fan multiplying the printed
+  // operands almost always lands on the printed shift (issue #183).
+  const winExpectancy = step.win_expectancy.toFixed(4)
+  const multiplier = step.mov_multiplier.toFixed(3)
   return (
     `${oneDecimal(step.rating_before)} ${MINUS} ${oneDecimal(step.opponent_rating_before)}` +
     `${homeFieldTerm(step.home_field_adjustment)} = gap ${signedOneDecimal(step.rating_gap)}` +
@@ -210,8 +212,9 @@ export function EloLedgerDisclosure({
           {`The card rounds this to ${formatRating(rating, 'elo')}.`}
         </p>
         <p className={styles.footnote}>
-          Figures are rounded for display; the engine keeps full precision, and
-          every row&apos;s math checks out at full precision.
+          Figures are rounded for display, so multiplying a row&apos;s rounded
+          numbers can land a tenth away from its change; the engine keeps full
+          precision, and every row&apos;s math checks out at full precision.
         </p>
       </div>
     </RatingDisclosureShell>

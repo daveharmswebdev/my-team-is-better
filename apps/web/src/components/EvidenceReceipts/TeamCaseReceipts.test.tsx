@@ -91,6 +91,7 @@ const evidence: TeamCaseOut = {
   // `quality_wins` here on purpose -- a real API response includes every
   // quality win (and the worst loss, if any) in the full game list too, so
   // the fixture should exercise that overlap rather than avoid it.
+  elo_ledger: null,
   games: [bowlGame, tennesseeGame, lsuGame, baseOpponent],
   quality_wins: [baseOpponent],
   worst_loss: null,

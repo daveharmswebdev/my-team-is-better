@@ -101,6 +101,7 @@ const undefeated: TeamCaseOut = {
     ],
     residual_contribution: 0.00734,
   },
+  elo_ledger: null,
   games: [openerWin, qualityWin, midseasonWin, lateSeasonWin, bowlWin],
   quality_wins: [qualityWin],
   worst_loss: null,

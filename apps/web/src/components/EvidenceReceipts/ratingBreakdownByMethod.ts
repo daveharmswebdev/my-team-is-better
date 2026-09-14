@@ -55,7 +55,7 @@ export type RatingWork =
 
 export function ratingWorkFor(
   method: Method,
-  eloLedger: EloLedgerOut | null | undefined,
+  eloLedger: EloLedgerOut | null,
 ): RatingWork {
   const support = RATING_BREAKDOWN_BY_METHOD[method]
   switch (support.kind) {
@@ -63,7 +63,7 @@ export function ratingWorkFor(
     case 'no-disclosure':
       return support
     case 'elo-ledger':
-      if (eloLedger === null || eloLedger === undefined) {
+      if (eloLedger === null) {
         return { kind: 'ledger-unavailable', note: ELO_LEDGER_UNAVAILABLE }
       }
       return { kind: 'elo-ledger', ledger: eloLedger }
