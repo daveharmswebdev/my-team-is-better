@@ -86,8 +86,10 @@ jobs:
       # ANTHROPIC_API_KEY Actions secret, so in CI the eval is SKIPPED, and
       # `-rs` prints the reason. It is enforced only when run locally with a
       # key. If a secret is ever added, pass it to this step via `env:` and
-      # the same command becomes a real gate. pytest exits 5 when it collects
-      # no tests, so deleting or renaming the eval file fails this step.
+      # the same command becomes a real gate. The step can't pass by accident:
+      # pytest exits 4 if the eval file is deleted or renamed, and 5 if it
+      # collects no tests. The eval's check functions themselves are unit
+      # tested offline in the ordinary pytest step above.
       - name: persona smoke eval (skipped in CI - no API key secret, see #109)
         run: uv run pytest -q -rs tests/test_persona_smoke_eval.py
 
