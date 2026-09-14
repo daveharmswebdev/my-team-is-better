@@ -15,6 +15,20 @@ an arbitrary capitalized word) used to live here as a private
 `_all_team_names` helper; issue #13 promoted it to `api.deps.
 list_all_team_names` so `api.catalog`'s `/api/teams` route can share the
 same query instead of forking it.
+
+**The templated fallback is never cached (issue #65).** When `narrate()`
+degrades to the fallback (a Claude transport error, or two grounding
+failures), the fallback is returned to the user with `cached=False` and
+nothing is written, so the next identical request asks Claude again instead
+of being served the fallback forever. Cache rows written before that fix
+may still hold fallback text. The fallback is a pure template of the
+evidence, so it is computed before the lookup, and a cached entry whose text
+equals it is treated as a miss; a later successful narration overwrites the
+row through the cache's upsert.
+
+Accepted trade-off: a key whose fact block fails grounding persistently now
+costs up to two Claude calls on every request, instead of being pinned to
+the fallback after the first failure.
 """
 
 from __future__ import annotations
@@ -48,7 +62,6 @@ def narrate_team_case(
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
-    contested = is_contested(case.year)
     key = cache_key(
         question_type=question_type,
         year=case.year,
@@ -58,23 +71,16 @@ def narrate_team_case(
         sport=sport,
         prompt_version=PROMPT_VERSION,
     )
-
-    cached = cache.get(key)
-    if cached is not None:
-        return NarrationOut(text=cached.text, contested=cached.contested, cached=True)
-
-    fact_block_json = case.model_dump_json()
-    text = narrate(
-        fact_block_json=fact_block_json,
-        user_team=user_team,
-        contested=contested,
-        known_team_names=list_all_team_names(conn, sport),
-        narrator=narrator,
+    return _cached_narration(
+        conn,
+        case,
+        key=key,
         fallback_text=team_case_fallback_text(case),
+        user_team=user_team,
+        sport=sport,
+        cache=cache,
+        narrator=narrator,
     )
-
-    cache.set(key, CachedNarration(text=text, contested=contested))
-    return NarrationOut(text=text, contested=contested, cached=False)
 
 
 def narrate_comparison(
@@ -87,32 +93,58 @@ def narrate_comparison(
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
-    contested = is_contested(comparison.year)
-    team_a_name = comparison.team_a.team_name
-    team_b_name = comparison.team_b.team_name
     key = cache_key(
         question_type="compare",
         year=comparison.year,
-        teams=(team_a_name, team_b_name),
+        teams=(comparison.team_a.team_name, comparison.team_b.team_name),
         user_team=user_team,
         method=method,
         sport=sport,
         prompt_version=PROMPT_VERSION,
     )
+    return _cached_narration(
+        conn,
+        comparison,
+        key=key,
+        fallback_text=comparison_fallback_text(comparison),
+        user_team=user_team,
+        sport=sport,
+        cache=cache,
+        narrator=narrator,
+    )
+
+
+def _cached_narration(
+    conn: sqlite3.Connection,
+    evidence: TeamCaseOut | ComparisonResultOut,
+    *,
+    key: str,
+    fallback_text: str,
+    user_team: str | None,
+    sport: str,
+    cache: NarrationCacheStore,
+    narrator: Narrator,
+) -> NarrationOut:
+    """Serve a real cached narration, or narrate and cache the result unless
+    it is the fallback. A cached entry whose text is this request's
+    `fallback_text` is a legacy fallback row and counts as a miss (see the
+    module docstring, issue #65).
+    """
+    contested = is_contested(evidence.year)
 
     cached = cache.get(key)
-    if cached is not None:
+    if cached is not None and cached.text != fallback_text:
         return NarrationOut(text=cached.text, contested=cached.contested, cached=True)
 
-    fact_block_json = comparison.model_dump_json()
-    text = narrate(
-        fact_block_json=fact_block_json,
+    result = narrate(
+        fact_block_json=evidence.model_dump_json(),
         user_team=user_team,
         contested=contested,
         known_team_names=list_all_team_names(conn, sport),
         narrator=narrator,
-        fallback_text=comparison_fallback_text(comparison),
+        fallback_text=fallback_text,
     )
 
-    cache.set(key, CachedNarration(text=text, contested=contested))
-    return NarrationOut(text=text, contested=contested, cached=False)
+    if not result.is_fallback:
+        cache.set(key, CachedNarration(text=result.text, contested=contested))
+    return NarrationOut(text=result.text, contested=contested, cached=False)

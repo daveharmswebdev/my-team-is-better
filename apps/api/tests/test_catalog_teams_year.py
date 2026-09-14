@@ -254,11 +254,13 @@ def test_grounding_is_handed_the_whole_unscoped_team_universe(
     re-calling the helper with default args: whatever the route did to
     `/api/teams`, the list handed to the grounding check is still every
     CFB team name in the db, in the pre-#78 order."""
+    from api.persona.narrate import NarrationResult
+
     captured: dict[str, Any] = {}
 
-    def _spy_narrate(**kwargs: Any) -> str:
+    def _spy_narrate(**kwargs: Any) -> NarrationResult:
         captured.update(kwargs)
-        return "Solid case, no notes."
+        return NarrationResult(text="Solid case, no notes.", is_fallback=False)
 
     monkeypatch.setattr("api.persona.service.narrate", _spy_narrate)
 
