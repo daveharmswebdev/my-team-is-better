@@ -2,6 +2,10 @@
 retry-then-fallback orchestration, Architecture Brief §4.3). Uses a fake
 `Narrator` (never the real `anthropic` SDK) so this file needs neither
 `ANTHROPIC_API_KEY` nor network access.
+
+Issue #65: `narrate()` returns a `NarrationResult` that says whether it
+degraded to the fallback, so its caller can refuse to cache a fallback. Every
+path below asserts that flag, not just the text.
 """
 
 from __future__ import annotations
@@ -9,7 +13,7 @@ from __future__ import annotations
 import anthropic
 import httpx2
 
-from api.persona.narrate import narrate
+from api.persona.narrate import NarrationResult, narrate
 
 FACT_BLOCK = (
     '{"team_name": "Texas", "year": 2005, "wins": 13, "losses": 0, "rank": 1, '
@@ -39,10 +43,25 @@ class _RaisingNarrator:
         raise self.error
 
 
+class _RaisesOnRetryNarrator:
+    """Answers the first call with `first`, then raises `error` on the retry."""
+
+    def __init__(self, first: str, error: Exception) -> None:
+        self.first = first
+        self.error = error
+        self.calls: list[list[dict[str, str]]] = []
+
+    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        if len(self.calls) == 1:
+            return self.first
+        raise self.error
+
+
 def test_grounded_first_response_is_returned_with_a_single_call() -> None:
     narrator = _ScriptedNarrator(["Texas ran the table at 13-0 in 2005, beating USC 41-38."])
 
-    text = narrate(
+    result = narrate(
         fact_block_json=FACT_BLOCK,
         user_team=None,
         contested=False,
@@ -51,7 +70,9 @@ def test_grounded_first_response_is_returned_with_a_single_call() -> None:
         fallback_text=FALLBACK_TEXT,
     )
 
-    assert text == "Texas ran the table at 13-0 in 2005, beating USC 41-38."
+    assert result == NarrationResult(
+        text="Texas ran the table at 13-0 in 2005, beating USC 41-38.", is_fallback=False
+    )
     assert len(narrator.calls) == 1
 
 
@@ -63,7 +84,7 @@ def test_ungrounded_first_response_retries_once_with_feedback_then_succeeds() ->
         ]
     )
 
-    text = narrate(
+    result = narrate(
         fact_block_json=FACT_BLOCK,
         user_team=None,
         contested=False,
@@ -72,7 +93,9 @@ def test_ungrounded_first_response_retries_once_with_feedback_then_succeeds() ->
         fallback_text=FALLBACK_TEXT,
     )
 
-    assert text == "Texas ran the table at 13-0 in 2005, beating USC 41-38."
+    assert result == NarrationResult(
+        text="Texas ran the table at 13-0 in 2005, beating USC 41-38.", is_fallback=False
+    )
     assert len(narrator.calls) == 2
     # The retry's follow-up message must quote the offending token.
     retry_messages = narrator.calls[1]
@@ -88,7 +111,7 @@ def test_two_ungrounded_responses_serve_the_fallback_and_never_make_a_third_call
         ]
     )
 
-    text = narrate(
+    result = narrate(
         fact_block_json=FACT_BLOCK,
         user_team=None,
         contested=False,
@@ -97,7 +120,7 @@ def test_two_ungrounded_responses_serve_the_fallback_and_never_make_a_third_call
         fallback_text=FALLBACK_TEXT,
     )
 
-    assert text == FALLBACK_TEXT
+    assert result == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 2
 
 
@@ -105,7 +128,7 @@ def test_claude_api_connection_error_falls_back_without_crashing() -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     narrator = _RaisingNarrator(anthropic.APIConnectionError(request=request))
 
-    text = narrate(
+    result = narrate(
         fact_block_json=FACT_BLOCK,
         user_team=None,
         contested=False,
@@ -114,8 +137,28 @@ def test_claude_api_connection_error_falls_back_without_crashing() -> None:
         fallback_text=FALLBACK_TEXT,
     )
 
-    assert text == FALLBACK_TEXT
+    assert result == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 1
+
+
+def test_claude_api_error_on_the_grounding_retry_falls_back_without_crashing() -> None:
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    narrator = _RaisesOnRetryNarrator(
+        "Texas would have smoked Alabama too, probably.",
+        anthropic.APIConnectionError(request=request),
+    )
+
+    result = narrate(
+        fact_block_json=FACT_BLOCK,
+        user_team=None,
+        contested=False,
+        known_team_names=KNOWN_TEAMS,
+        narrator=narrator,
+        fallback_text=FALLBACK_TEXT,
+    )
+
+    assert result == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
+    assert len(narrator.calls) == 2
 
 
 def test_relational_score_order_mismatch_retries_then_succeeds() -> None:
@@ -136,7 +179,7 @@ def test_relational_score_order_mismatch_retries_then_succeeds() -> None:
         ]
     )
 
-    text = narrate(
+    result = narrate(
         fact_block_json=swapped_fact_block,
         user_team=None,
         contested=False,
@@ -145,7 +188,10 @@ def test_relational_score_order_mismatch_retries_then_succeeds() -> None:
         fallback_text=FALLBACK_TEXT,
     )
 
-    assert text == "Vanderbilt had a great year, falling to Texas (31-34) along the way."
+    assert result == NarrationResult(
+        text="Vanderbilt had a great year, falling to Texas (31-34) along the way.",
+        is_fallback=False,
+    )
     assert len(narrator.calls) == 2
     retry_messages = narrator.calls[1]
     feedback = retry_messages[-1]["content"]
@@ -163,7 +209,7 @@ def test_claude_api_status_error_falls_back_without_crashing() -> None:
     error = anthropic.APIStatusError("overloaded", response=response, body=None)
     narrator = _RaisingNarrator(error)
 
-    text = narrate(
+    result = narrate(
         fact_block_json=FACT_BLOCK,
         user_team=None,
         contested=False,
@@ -172,5 +218,5 @@ def test_claude_api_status_error_falls_back_without_crashing() -> None:
         fallback_text=FALLBACK_TEXT,
     )
 
-    assert text == FALLBACK_TEXT
+    assert result == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 1

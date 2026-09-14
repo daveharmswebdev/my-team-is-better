@@ -99,11 +99,29 @@ alone:
   (a swapped pair for one team is, in a two-team meeting, mathematically
   identical to the other team's correct pair), but that ambiguity is
   inherent to the bare phrasing itself, not a gap this checker can close
-  without also risking the false positive it just fixed. Bare numbers
-  that aren't a game score at all (e.g. a team's own season record, "went
-  13-0") are unaffected: their nearest name has no recorded opponent data
-  to begin with, so they're skipped before any rescue check runs, exactly
-  like the parenthetical case.
+  without also risking the false positive it just fixed.
+
+**A subject team's own season record is not a game score (issue #107).**
+Before a pair is attributed to any name, bare or parenthetical, it is
+skipped if it equals `(wins, losses)` of *any* subject team in the fact
+block: the top-level `wins`/`losses` of a team case (`TeamCaseOut`), and
+both `team_a`'s and `team_b`'s of a comparison (`ComparisonResultOut`).
+Which name is nearest does not matter. Without the skip, a record was
+attributed like any other pair and flagged whenever its nearest name had
+game data: "going 13-1 with wins over Oklahoma 21-14" checked LSU's 13-1
+against Oklahoma's score, and "Texas went 10-3 and Texas A&M went 11-2"
+checked each record against its own team's head-to-head score. (An earlier
+version of this docstring claimed a record was safe because its nearest
+name had no game data; that was only true when the nearest name was a
+team-case subject.) A W-L-T record needs no separate handling: the pair
+regex reads "8-8" out of "8-8-1", and the membership check grounds the
+trailing tie count against `ties`. Only subject records are skipped -- a
+`rating_breakdown` entry's per-opponent `wins`/`losses` is not, so "beat
+Georgia 2-0" is still checked against Georgia's real scores.
+
+Accepted trade-off: a fabricated score that happens to equal a subject
+team's record (e.g. "beat Oklahoma 13-1" in LSU's 13-1 season) is no longer
+caught relationally. Its numbers still have to pass the membership check.
 
 Sentence-scoping (splitting `response_text` naively on `.`/`!`/`?`) keeps
 both checks from reaching across unrelated sentences to grab a team name
@@ -198,7 +216,10 @@ def find_ungrounded_tokens(
     ungrounded_teams = mentioned_teams - fact_teams
 
     valid_tuples = _extract_valid_score_tuples(fact_block_json)
-    relational_mismatches = _find_relational_mismatches(response_text, names, valid_tuples)
+    subject_records = _extract_subject_records(fact_block_json)
+    relational_mismatches = _find_relational_mismatches(
+        response_text, names, valid_tuples, subject_records
+    )
 
     return sorted(ungrounded_numbers | ungrounded_teams | relational_mismatches)
 
@@ -299,6 +320,30 @@ def _extract_valid_score_tuples(fact_block_json: str) -> _ScoreTuplesByName:
     return valid
 
 
+def _extract_subject_records(fact_block_json: str) -> frozenset[tuple[int, int]]:
+    """Every subject team's own `(wins, losses)` (issue #107): the top-level
+    record of a team case (`TeamCaseOut`), and `team_a`'s and `team_b`'s of
+    a comparison (`ComparisonResultOut`). Deliberately not a recursive walk:
+    `rating_breakdown` entries also carry `wins`/`losses`, but those are
+    per-opponent series records, not a subject's season record.
+    """
+    try:
+        data: Any = json.loads(fact_block_json)
+    except json.JSONDecodeError:
+        return frozenset()
+    if not isinstance(data, dict):
+        return frozenset()
+
+    records: set[tuple[int, int]] = set()
+    for subject in (data, data.get("team_a"), data.get("team_b")):
+        if not isinstance(subject, dict):
+            continue
+        wins, losses = subject.get("wins"), subject.get("losses")
+        if isinstance(wins, int) and isinstance(losses, int):
+            records.add((wins, losses))
+    return frozenset(records)
+
+
 def _walk_fact_block(node: Any, valid: _ScoreTuplesByName) -> None:
     if isinstance(node, dict):
         if _is_opponent_result_shape(node):
@@ -357,13 +402,17 @@ def _split_sentences(text: str) -> list[str]:
 
 
 def _find_relational_mismatches(
-    response_text: str, known_team_names: list[str], valid_tuples: _ScoreTuplesByName
+    response_text: str,
+    known_team_names: list[str],
+    valid_tuples: _ScoreTuplesByName,
+    subject_records: frozenset[tuple[int, int]],
 ) -> set[str]:
     """For every hyphen-joined score pair in `response_text`, decide which
     team(s) it's plausibly claiming a score for and check that claim
     against the fact block, sentence by sentence (see module docstring for
     why: sentence-scoping first, then a parenthetical-vs-bare split within
-    each sentence).
+    each sentence). A pair equal to a subject team's own record is not a
+    score claim at all and is skipped before either branch (issue #107).
     """
     mismatches: set[str] = set()
     for sentence in _split_sentences(response_text):
@@ -377,6 +426,8 @@ def _find_relational_mismatches(
 
         for pair_match in _SCORE_PAIR_RE.finditer(sentence):
             claimed = (int(pair_match.group(1)), int(pair_match.group(2)))
+            if claimed in subject_records:
+                continue
             if _is_parenthesized(sentence, pair_match.span()):
                 mismatch = _check_parenthetical_pair(
                     pair_match.span(), claimed, name_occurrences, valid_tuples

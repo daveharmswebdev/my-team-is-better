@@ -8,12 +8,15 @@ verdict request.
 
 Cache lookups happen one layer up, in `api.persona.service` -- this module
 always makes at least one Claude call (or returns the fallback), never
-inspects a cache itself.
+inspects a cache itself. It does tell that caller whether it degraded to
+the fallback (`NarrationResult.is_fallback`, issue #65), because a fallback
+must not be cached as if it were a real narration.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 import anthropic
 
@@ -27,6 +30,17 @@ logger = logging.getLogger(__name__)
 # retries transparently -- this is a separate, app-level concern: what to
 # do once the SDK gives up (or a non-retryable APIStatusError comes back).
 _TRANSPORT_ERRORS = (anthropic.APIStatusError, anthropic.APIConnectionError)
+
+
+@dataclass(frozen=True)
+class NarrationResult:
+    """What `narrate()` served. `is_fallback` is true exactly when `text` is
+    the caller's `fallback_text` because of a transport error on either call
+    or two grounding failures (issue #65), never for a real narration.
+    """
+
+    text: str
+    is_fallback: bool
 
 
 def _grounding_feedback(mismatches: list[str]) -> str:
@@ -55,23 +69,25 @@ def narrate(
     known_team_names: list[str],
     narrator: Narrator,
     fallback_text: str,
-) -> str:
+) -> NarrationResult:
     """Narrate `fact_block_json` in-character. Never raises: a Claude
-    outage or two grounding failures both degrade to `fallback_text`.
+    outage or two grounding failures both degrade to `fallback_text`, with
+    `is_fallback=True` so the caller knows not to cache it.
     """
     system_prompt = build_system_prompt(user_team)
     user_message = build_user_message(fact_block_json, contested=contested)
     messages: list[dict[str, str]] = [{"role": "user", "content": user_message}]
+    fallback = NarrationResult(text=fallback_text, is_fallback=True)
 
     try:
         text = narrator.complete(system=system_prompt, messages=messages)
     except _TRANSPORT_ERRORS as exc:
         logger.warning("Claude API call failed, serving fallback narration: %s", exc)
-        return fallback_text
+        return fallback
 
     mismatches = find_ungrounded_tokens(text, fact_block_json, known_team_names)
     if not mismatches:
-        return text
+        return NarrationResult(text=text, is_fallback=False)
 
     messages.append({"role": "assistant", "content": text})
     messages.append({"role": "user", "content": _grounding_feedback(mismatches)})
@@ -80,11 +96,11 @@ def narrate(
         retry_text = narrator.complete(system=system_prompt, messages=messages)
     except _TRANSPORT_ERRORS as exc:
         logger.warning("Claude API call failed on grounding retry, serving fallback: %s", exc)
-        return fallback_text
+        return fallback
 
     retry_mismatches = find_ungrounded_tokens(retry_text, fact_block_json, known_team_names)
     if not retry_mismatches:
-        return retry_text
+        return NarrationResult(text=retry_text, is_fallback=False)
 
     logger.warning(
         "Grounding check failed twice (first mismatches=%s, retry mismatches=%s); "
@@ -92,4 +108,4 @@ def narrate(
         mismatches,
         retry_mismatches,
     )
-    return fallback_text
+    return fallback
