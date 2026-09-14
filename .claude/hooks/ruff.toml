@@ -1,0 +1,6 @@
+# Same lint selection and line length as apps/api (apps/api/pyproject.toml).
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP"]

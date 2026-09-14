@@ -159,6 +159,44 @@ jobs:
       - name: Storybook tests (a11y enforced)
         run: npm run test-storybook
 
+  # The coordinator/spoke process itself (CLAUDE.md): the hooks in .claude/hooks/
+  # enforce the ownership map, main protection and the delegation contract, so
+  # they get the same gates as product code. They run as standalone
+  # `uv run --script` files outside the uv workspace, so tools are pinned with
+  # --with (versions match uv.lock) instead of a lockfile.
+  claude-process:
+    name: "claude-process (hooks + delegation contract: pytest, mypy --strict, ruff, conflict markers)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.12.11"
+
+      - name: pytest
+        run: uv run --no-project --python 3.12 --with pytest==9.1.1 --with jsonschema==4.26.0 pytest -q .claude/hooks/tests
+
+      - name: mypy --strict
+        env:
+          MYPYPATH: .claude/hooks
+        run: uv run --no-project --python 3.12 --with mypy==2.3.1 --with pytest==9.1.1 --with jsonschema==4.26.0 --with types-jsonschema==4.26.0.20260518 mypy --strict --explicit-package-bases .claude/hooks
+
+      - name: ruff check + format --check
+        run: |
+          uv run --no-project --with ruff==0.16.6 ruff check .claude/hooks
+          uv run --no-project --with ruff==0.16.6 ruff format --check .claude/hooks
+
+      # #118 landed a rebase commit with raw conflict markers, and nothing
+      # noticed. Markers at the start of a line never belong in a tracked file.
+      - name: no merge-conflict markers
+        run: |
+          if git grep -nE '^(<<<<<<<|>>>>>>>)( |$)'; then
+            echo "Merge-conflict markers found above."
+            exit 1
+          fi
+
   e2e:
     name: e2e (Playwright, apps/api + apps/web)
     runs-on: ubuntu-latest

@@ -26,6 +26,9 @@ build/
 storybook-static/
 .vite/
 
+# Claude Code: worktrees it creates for isolated subagents and sessions.
+.claude/worktrees/
+
 # Editors / OS
 .DS_Store
 .vscode/

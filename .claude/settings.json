@@ -1,0 +1,40 @@
+{
+  "worktree": {
+    "baseRef": "head"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_edit_scope.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\"",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_bash.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/delegation.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\" subagent-stop",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

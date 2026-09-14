@@ -1,0 +1,15 @@
+{
+  "status": "failure",
+  "agent": "web-agent",
+  "base_sha": "e5aeddc95b2438e338d6e7afddc1fc2e5da7029d",
+  "head_sha": null,
+  "failure_type": "contract-insufficient",
+  "retryable": false,
+  "attempted": "Wrote TeamCaseReceipts.test.tsx cases for the Elo worked-steps panel (red, as expected). Implementing them needs each game's pre-game Elo for both teams. TeamCaseOut in apps/web/src/lib/api/types.ts has only the final rating, and GET /api/verdict/team-case against the committed fixture (npm run e2e:api) returns no per-game fields either.",
+  "partial_results": [
+    { "path": "apps/web/src/components/TeamCaseReceipts/TeamCaseReceipts.test.tsx", "usable": true },
+    { "path": "apps/web/src/components/TeamCaseReceipts/EloSteps.tsx", "usable": false }
+  ],
+  "alternatives": "Add an elo_ledger field (per game: opponent, pre-game ratings, expected score, shift) to TeamCaseOut in apps/api, then re-brief web-agent with that field pasted into CONTRACT.",
+  "findings": []
+}
