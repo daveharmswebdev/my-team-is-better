@@ -8,22 +8,22 @@ import type {
   Vitest,
 } from 'vitest/node'
 import { A11Y_GUARD_META_KEY, STORY_FILE_PATTERN } from './a11yPolicy.ts'
+import { readStaticPreviewTags, staticStoryIndex } from './storyIndex.ts'
 
 /**
- * Run-completeness half of the Storybook a11y gate (issue #90).
+ * Run-completeness layer of the Storybook a11y gate (issue #90): dropped or
+ * partial stories. The a11y checks only protect stories that actually run, and
+ * several changes drop stories while `npm run test-storybook` stays green:
+ * `storybookTest` tag filters, meta `excludeStories` / `includeStories`,
+ * static tags that disagree with runtime tags, re-exported stories
+ * (`export { X } from`) that addon-vitest cannot turn into tests, and story
+ * files outside the collected globs.
  *
- * The a11y checks only protect stories that actually run. Several one-line
- * changes silently drop stories while `npm run test-storybook` stays green:
- * - `storybookTest({ tags: { exclude } })` skips a whole file
- * - `tags: { skip }` skips a test
- * - meta `excludeStories` / `includeStories` leaves a file with no stories
- * - a static `!test` tag with the tags fixed up at run time, which
- *   addon-vitest's static parse never collects
- * - a story file outside the collected globs
- *
- * This reporter fails the run if, after all tests finish:
+ * After all tests finish, this reporter fails the run if:
  * - any story test was skipped, or did not pass or fail;
- * - any collected story file ran no story test;
+ * - any collected story file ran a different set of story tests than its
+ *   static CSF index says it exports (`.storybook/storyIndex.ts`), including
+ *   none at all;
  * - any story test was not checked by `.storybook/a11y-guard.setup.ts` (the
  *   guard is unregistered);
  * - on an unfiltered run, any `src/**` story file was never collected.
@@ -36,6 +36,9 @@ import { A11Y_GUARD_META_KEY, STORY_FILE_PATTERN } from './a11yPolicy.ts'
 // is marked @internal, so it is absent from Vitest's public types.
 type VitestWithFilters = Vitest & { filenamePattern?: string[] }
 
+const sameNames = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((name, index) => name === b[index])
+
 class StoryRunGuardReporter implements Reporter {
   private vitest: VitestWithFilters | undefined
 
@@ -43,15 +46,16 @@ class StoryRunGuardReporter implements Reporter {
     this.vitest = vitest
   }
 
-  onTestRunEnd(
+  async onTestRunEnd(
     testModules: ReadonlyArray<TestModule>,
     _unhandledErrors: unknown,
     reason: TestRunEndReason,
-  ): void {
+  ): Promise<void> {
     if (reason === 'interrupted' || this.vitest === undefined) {
       return
     }
     const root = this.vitest.config.root
+    const previewTags = await readStaticPreviewTags(resolve(root, '.storybook'))
     const problems: string[] = []
     const collected = new Set<string>()
 
@@ -59,11 +63,37 @@ class StoryRunGuardReporter implements Reporter {
       const file = relative(root, testModule.moduleId).split(sep).join('/')
       collected.add(file)
       const tests = [...testModule.children.allTests()]
+
+      let expected: string[] = []
+      try {
+        const index = staticStoryIndex(testModule.moduleId, previewTags)
+        expected = index
+          .filter((entry) => entry.collected)
+          .map((entry) => entry.name)
+          .sort()
+        for (const entry of index) {
+          if (entry.collected && !entry.transformable) {
+            problems.push(
+              `${file} > ${entry.exportName}: addon-vitest cannot turn this story into a test (re-exported from another file?)`,
+            )
+          }
+        }
+      } catch (error) {
+        problems.push(
+          `${file}: could not index its stories statically: ${String(error)}`,
+        )
+      }
+      const ran = tests.map((test) => test.name).sort()
       if (tests.length === 0) {
         problems.push(
           `${file}: ran no story test (file skipped, or every story excluded or untagged)`,
         )
+      } else if (!sameNames(ran, expected)) {
+        problems.push(
+          `${file}: ran story tests ${JSON.stringify(ran)} but exports ${JSON.stringify(expected)}`,
+        )
       }
+
       for (const test of tests) {
         const state = test.result().state
         if (state !== 'passed' && state !== 'failed') {

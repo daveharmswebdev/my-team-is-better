@@ -1,17 +1,19 @@
 {
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.storybook.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
-    "types": ["node"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "types": ["vite/client"],
     "skipLibCheck": true,
 
     /* Bundler mode */
-    "module": "nodenext",
+    "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "jsx": "react-jsx",
 
     /* Strict mode */
     "strict": true,
@@ -22,12 +24,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": [
-    "vite.config.ts",
-    "vitest.storybook.config.ts",
-    ".storybook/*.ts",
-    "playwright.config.ts",
-    "e2e"
-  ],
-  "exclude": [".storybook/*.setup.ts"]
+  "include": [".storybook/*.tsx", ".storybook/*.setup.ts"]
 }

@@ -1,44 +1,48 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
-import { isDeepStrictEqual } from 'node:util'
 import * as a11yAddonAnnotations from '@storybook/addon-a11y/preview'
 import {
   composeStories,
   composeStory,
   setProjectAnnotations,
 } from '@storybook/react-vite'
-import { combineTags } from 'storybook/internal/csf'
-import { loadCsf } from 'storybook/internal/csf-tools'
+import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
 import {
   A11Y_KNOBS,
   STORYBOOK_TEST_OPTIONS,
   STORY_A11Y_EXEMPTIONS,
   STORY_FILE_PATTERN,
-  type A11yKnob,
+  findA11yKnobs,
+  type A11yState,
 } from '../../.storybook/a11yPolicy'
 import storybookMain from '../../.storybook/main'
 import previewAnnotations from '../../.storybook/preview'
+import {
+  readStaticPreviewTags,
+  staticStoryIndex,
+} from '../../.storybook/storyIndex'
 
 /**
- * Static half of the Storybook a11y gate (issue #90), in `npm run test`.
+ * Static layer of the Storybook a11y gate (issue #90), in `npm run test`.
  *
- * What this test covers:
- * - each story's annotations, literal or computed, as Storybook composes them
- *   (the a11y addon's annotations, then `.storybook/preview.tsx`, then meta,
- *   then story);
- * - addon-vitest's static CSF parse of each file, compared with the runtime
- *   composed tags;
- * - that `.storybook/main.ts` still loads addon-a11y;
- * - that `storybookTest` gets only the default tag filters.
- * It fails on every knob listed in `.storybook/a11yPolicy.ts` unless an
- * exemption there waives that exact knob. Nothing can waive the `test` tag.
+ * What this test catches:
+ * - literal and composed story annotations (the a11y addon's annotations,
+ *   then `.storybook/preview.tsx`, then meta, then story), for every knob in
+ *   `.storybook/a11yPolicy.ts` not waived by an exemption; nothing waives the
+ *   `test` tag;
+ * - addon-vitest's static view of each file (`.storybook/storyIndex.ts`,
+ *   preview tags read statically) against the runtime composed tags, and
+ *   re-exported stories it cannot turn into tests;
+ * - that `.storybook/main.ts` loads addon-a11y, that `storybookTest` gets only
+ *   the default tag filters, and that the `eslint.config.js` a11y rule still
+ *   exists and rejects forgery and mutation syntax.
  *
- * What it does NOT cover: anything that changes a story while it runs
- * (loaders, `beforeEach`, decorators, play functions), since composing never
- * runs them. `.storybook/a11y-guard.setup.ts` covers that in
- * `npm run test-storybook`. Stories skipped or never collected by that run
- * are covered by `.storybook/storyRunGuard.ts`.
+ * What it does NOT catch: anything that changes a story while it runs, since
+ * composing never runs loaders, beforeEach, decorators or play functions.
+ * `.storybook/a11y-guard.setup.ts` covers run-time skips and narrowing, the
+ * lint rule covers the syntax for them, and `.storybook/storyRunGuard.ts`
+ * covers dropped or partial stories.
  */
 
 setProjectAnnotations([a11yAddonAnnotations, previewAnnotations])
@@ -63,7 +67,11 @@ const storyModules = import.meta.glob<StoryModule>(
 
 // Vite rewrites `import.meta.url` under test, so resolve from Vitest's cwd
 // (`apps/web`), as `src/lib/api/vocabularies.test.ts` does.
-const SRC_DIR = resolve(process.cwd(), 'src')
+const WEB_DIR = process.cwd()
+const SRC_DIR = resolve(WEB_DIR, 'src')
+const staticPreviewTags = await readStaticPreviewTags(
+  resolve(WEB_DIR, '.storybook'),
+)
 
 interface ComposedStoryShape {
   id: string
@@ -77,8 +85,7 @@ interface CollectedStory {
   exportName: string
   id: string
   tags: string[]
-  a11y: unknown
-  globals: Record<string, unknown>
+  state: A11yState
 }
 
 interface CollectedModule {
@@ -88,6 +95,8 @@ interface CollectedModule {
   staticTestExports: string[]
   /** Exports whose runtime composed tags include `test`. */
   runtimeTestExports: string[]
+  /** Collected exports addon-vitest cannot generate a test for. */
+  untransformable: string[]
 }
 
 function collectStory(
@@ -100,30 +109,8 @@ function collectStory(
     exportName,
     id: story.id,
     tags: story.tags,
-    a11y: story.parameters.a11y,
-    globals: story.globals,
+    state: { a11y: story.parameters.a11y, globals: story.globals },
   }
-}
-
-/** Mirrors addon-vitest's `vitestTransform` with the default tag filters. */
-function staticTestExports(file: string): string[] {
-  const fileName = resolve(SRC_DIR, file.replace(/^\.\.\//, ''))
-  const csf = loadCsf(readFileSync(fileName, 'utf8'), {
-    fileName,
-    makeTitle: (userTitle?: string) => userTitle ?? 'untitled',
-  }).parse()
-  return Object.entries(csf._stories)
-    .filter(([, story]) =>
-      combineTags(
-        'test',
-        'dev',
-        ...(previewAnnotations.tags ?? []),
-        ...(csf.meta?.tags ?? []),
-        ...(story.tags ?? []),
-      ).includes('test'),
-    )
-    .map(([exportName]) => exportName)
-    .sort()
 }
 
 const collectedModules: CollectedModule[] = Object.entries(storyModules).map(
@@ -131,14 +118,21 @@ const collectedModules: CollectedModule[] = Object.entries(storyModules).map(
     const stories = Object.entries(
       composeStories(storyModule) as Record<string, ComposedStoryShape>,
     ).map(([exportName, story]) => collectStory(file, exportName, story))
+    const index = staticStoryIndex(
+      resolve(SRC_DIR, file.replace(/^\.\.\//, '')),
+      staticPreviewTags,
+    ).filter((entry) => entry.collected)
     return {
       file,
       stories,
-      staticTestExports: staticTestExports(file),
+      staticTestExports: index.map((entry) => entry.exportName).sort(),
       runtimeTestExports: stories
         .filter((story) => story.tags.includes('test'))
         .map((story) => story.exportName)
         .sort(),
+      untransformable: index
+        .filter((entry) => !entry.transformable)
+        .map((entry) => entry.exportName),
     }
   },
 )
@@ -155,153 +149,101 @@ const baseline = collectStory(
   ) as unknown as ComposedStoryShape,
 )
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** Drops `undefined`, empty objects and empty arrays, recursively. */
-function prune(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    const items = value.map(prune).filter((item) => item !== undefined)
-    return items.length > 0 ? items : undefined
-  }
-  if (isRecord(value)) {
-    const entries = Object.entries(value)
-      .map(([key, item]) => [key, prune(item)] as const)
-      .filter(([, item]) => item !== undefined)
-    return entries.length > 0 ? Object.fromEntries(entries) : undefined
-  }
-  return value
-}
-
-/** `{ id, enabled: true }` only: turns an extra rule on, narrows nothing. */
-function isEnablingConfigRule(rule: unknown): boolean {
-  return (
-    isRecord(rule) &&
-    typeof rule.id === 'string' &&
-    isDeepStrictEqual(Object.keys(rule).sort(), ['enabled', 'id']) &&
-    rule.enabled === true
-  )
-}
-
-interface KnobFinding {
-  knob: A11yKnob
-  detail: string
-}
-
-/** The a11y parameters left after removing every key a named knob covers. */
-function a11yRemainder(a11y: unknown): unknown {
-  if (!isRecord(a11y)) {
-    return prune(a11y)
-  }
-  const rest: Record<string, unknown> = { ...a11y }
-  delete rest.test
-  delete rest.disable
-  delete rest.context
-  if (isRecord(rest.config)) {
-    rest.config = { ...rest.config, rules: undefined }
-  }
-  if (isRecord(rest.options)) {
-    rest.options = { ...rest.options, runOnly: undefined, rules: undefined }
-  }
-  return prune(rest)
-}
-
-function globalsA11yRemainder(globals: Record<string, unknown>): unknown {
-  const a11yGlobals = globals.a11y
-  return isRecord(a11yGlobals)
-    ? prune({ ...a11yGlobals, manual: undefined })
-    : prune(a11yGlobals)
-}
-
 const show = (value: unknown) => JSON.stringify(value)
 
-/** Every knob this story uses to weaken the gate, with what it set. */
-function findA11yKnobs(story: CollectedStory): KnobFinding[] {
-  const findings: KnobFinding[] = []
-  const a11y = isRecord(story.a11y) ? story.a11y : {}
-  const config = isRecord(a11y.config) ? a11y.config : {}
-  const options = isRecord(a11y.options) ? a11y.options : {}
-  const a11yGlobals = isRecord(story.globals.a11y) ? story.globals.a11y : {}
+/**
+ * Story code the `eslint.config.js` a11y rule must reject: each is a form
+ * that forges a passed a11y report or changes a11y settings at run time.
+ */
+const FORBIDDEN_STORY_CODE: [string, string][] = [
+  ['imports vitest', "import { afterEach } from 'vitest'\nvoid afterEach\n"],
+  [
+    'imports an @vitest package',
+    "import { page } from '@vitest/browser/context'\nvoid page\n",
+  ],
+  [
+    'dynamically imports vitest',
+    "export const load = () => import('vitest')\n",
+  ],
+  [
+    'destructures reporting from a story context',
+    'export const S = { play: async ({ reporting }: { reporting: unknown }) => { void reporting } }\n',
+  ],
+  [
+    'reads context.reporting',
+    'export const S = { play: async (context: { reporting: unknown }) => { void context.reporting } }\n',
+  ],
+  [
+    'assigns parameters.a11y (N1)',
+    'export const S = { beforeEach: ({ parameters }: { parameters: Record<string, unknown> }) => { parameters.a11y = { context: { exclude: ["img"] } } } }\n',
+  ],
+  [
+    'assigns under parameters.a11y through a cast',
+    'export const S = { play: async ({ parameters }: { parameters: Record<string, unknown> }) => { (parameters.a11y as { disable?: boolean }).disable = true } }\n',
+  ],
+  [
+    "assigns parameters['a11y']",
+    "export const S = { play: async ({ parameters }: { parameters: Record<string, unknown> }) => { parameters['a11y'] = {} } }\n",
+  ],
+  [
+    'aliases parameters.a11y',
+    'export const S = { play: async ({ parameters }: { parameters: Record<string, unknown> }) => { const settings = parameters.a11y; void settings } }\n',
+  ],
+  [
+    'destructures a11y',
+    'export const S = { play: async ({ parameters }: { parameters: Record<string, unknown> }) => { const { a11y } = parameters; void a11y } }\n',
+  ],
+  [
+    'assigns ctx.globals.a11y (decorator)',
+    'export const S = { decorators: [(Story: () => null, ctx: { globals: Record<string, unknown> }) => { ctx.globals.a11y = { manual: true }; return Story() }] }\n',
+  ],
+  [
+    'assigns globals.ghostStories',
+    'export const S = { loaders: [async ({ globals }: { globals: Record<string, unknown> }) => { globals.ghostStories = true }] }\n',
+  ],
+  [
+    'Object.assign on parameters with a11y',
+    'export const S = { play: async ({ parameters }: { parameters: Record<string, unknown> }) => { Object.assign(parameters, { a11y: { test: "off" } }) } }\n',
+  ],
+  [
+    'Object.assign on ctx.globals',
+    'export const S = { play: async (ctx: { globals: Record<string, unknown> }) => { Object.assign(ctx.globals, { manual: true }) } }\n',
+  ],
+  [
+    'reassigns ctx.parameters',
+    'export const S = { play: async (ctx: { parameters: Record<string, unknown> }) => { ctx.parameters = { ...ctx.parameters } } }\n',
+  ],
+  [
+    'deletes under parameters.a11y',
+    'export const S = { play: async ({ parameters }: { parameters: { a11y: { test?: string } } }) => { delete parameters.a11y.test } }\n',
+  ],
+]
 
-  if (a11y.test !== 'error') {
-    findings.push({
-      knob: 'test',
-      detail: `parameters.a11y.test is ${show(a11y.test)}, must be 'error'`,
-    })
-  }
-  if (a11y.disable !== undefined && a11y.disable !== false) {
-    findings.push({
-      knob: 'disable',
-      detail: `parameters.a11y.disable is ${show(a11y.disable)}`,
-    })
-  }
-  if (a11yGlobals.manual === true) {
-    findings.push({ knob: 'manual', detail: 'globals.a11y.manual is true' })
-  }
-  if (story.globals.ghostStories) {
-    findings.push({
-      knob: 'ghostStories',
-      detail: `globals.ghostStories is ${show(story.globals.ghostStories)}`,
-    })
-  }
-  const configRules = prune(config.rules)
-  if (
-    configRules !== undefined &&
-    !(Array.isArray(configRules) && configRules.every(isEnablingConfigRule))
-  ) {
-    findings.push({
-      knob: 'rules',
-      detail: `parameters.a11y.config.rules ${show(configRules)} does more than enable extra rules`,
-    })
-  }
-  const optionRules = prune(options.rules)
-  if (
-    optionRules !== undefined &&
-    !(
-      isRecord(optionRules) &&
-      Object.values(optionRules).every((rule) =>
-        isDeepStrictEqual(rule, { enabled: true }),
-      )
-    )
-  ) {
-    findings.push({
-      knob: 'rules',
-      detail: `parameters.a11y.options.rules ${show(optionRules)} does more than enable extra rules`,
-    })
-  }
-  const context = prune(a11y.context)
-  if (context !== undefined) {
-    findings.push({
-      knob: 'context',
-      detail: `parameters.a11y.context is ${show(context)}`,
-    })
-  }
-  const runOnly = prune(options.runOnly)
-  if (runOnly !== undefined) {
-    findings.push({
-      knob: 'runOnly',
-      detail: `parameters.a11y.options.runOnly is ${show(runOnly)}`,
-    })
-  }
-  const remainder = a11yRemainder(story.a11y)
-  if (!isDeepStrictEqual(remainder, a11yRemainder(baseline.a11y))) {
-    findings.push({
-      knob: 'other',
-      detail: `parameters.a11y differs from the project's: ${show(remainder)}`,
-    })
-  }
-  const globalsRemainder = globalsA11yRemainder(story.globals)
-  if (
-    !isDeepStrictEqual(globalsRemainder, globalsA11yRemainder(baseline.globals))
-  ) {
-    findings.push({
-      knob: 'other',
-      detail: `globals.a11y differs from the project's: ${show(globalsRemainder)}`,
-    })
-  }
-  return findings
+/** Ordinary story code the rule must leave alone. */
+const ORDINARY_STORY_CODE = `import type { Meta, StoryObj } from '@storybook/react-vite'
+import { createElement } from 'react'
+import { expect, fn, userEvent, within } from 'storybook/test'
+
+const meta = {
+  title: 'probe/Ordinary',
+  args: { onClick: fn() },
+  parameters: { a11y: { config: { rules: [{ id: 'p-as-heading', enabled: true }] } } },
+  render: (args) => createElement('button', { type: 'button', onClick: args.onClick }, 'Go'),
+} satisfies Meta<{ onClick: () => void }>
+
+export default meta
+
+export const Default: StoryObj<typeof meta> = {
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByRole('button', { name: 'Go' }))
+    await expect(args.onClick).toHaveBeenCalled()
+  },
 }
+`
+
+const A11Y_LINT_RULES = ['no-restricted-syntax', 'no-restricted-imports']
+const PROBE_FILE = 'src/zzlintprobe/Probe.stories.ts'
 
 describe('Storybook a11y policy (issue #90)', () => {
   it('covers every story file Storybook collects', () => {
@@ -337,9 +279,13 @@ describe('Storybook a11y policy (issue #90)', () => {
     })
   })
 
+  it("the preview's static tags (what addon-vitest reads) equal its runtime tags", () => {
+    expect(staticPreviewTags).toEqual(previewAnnotations.tags ?? [])
+  })
+
   it('project annotations enforce axe for every story by default', () => {
     expect(baseline.tags).toContain('test')
-    expect(findA11yKnobs(baseline)).toEqual([])
+    expect(findA11yKnobs(baseline.state, baseline.state)).toEqual([])
   })
 
   it('story ids are unique, so exemptions are unambiguous', () => {
@@ -361,18 +307,23 @@ describe('Storybook a11y policy (issue #90)', () => {
           .map((knob) => `${id}: unknown knob ${show(knob)}`),
       ],
     )
-    expect(problems, '.storybook/a11yPolicy.ts STORY_A11Y_EXEMPTIONS').toEqual(
-      [],
-    )
+    expect(
+      problems,
+      `.storybook/a11yPolicy.ts STORY_A11Y_EXEMPTIONS: ${problems.join('; ')}`,
+    ).toEqual([])
   })
 
   it.each(collectedModules)(
-    '$file composes at least one story, and its static tags agree with runtime tags',
+    '$file composes at least one story, every one addon-vitest can test, with static tags matching runtime tags',
     (module) => {
       expect(
         module.stories.length,
         `${module.file}: composes no story (excludeStories/includeStories?)`,
       ).toBeGreaterThan(0)
+      expect(
+        module.untransformable,
+        `${module.file}: addon-vitest cannot turn these stories into tests (re-exported with \`export { X } from\`? define them in the story file)`,
+      ).toEqual([])
       expect(
         module.staticTestExports,
         `${module.file}: addon-vitest's static CSF parse would collect different stories than the runtime tags say`,
@@ -388,13 +339,61 @@ describe('Storybook a11y policy (issue #90)', () => {
         `${story.id}: composed tags must include "test" (addon-vitest skips it otherwise; no exemption can waive this)`,
       ).toContain('test')
       const waived = STORY_A11Y_EXEMPTIONS[story.id]?.waives ?? []
-      const unwaived = findA11yKnobs(story)
+      const unwaived = findA11yKnobs(story.state, baseline.state)
         .filter((finding) => !waived.includes(finding.knob))
         .map((finding) => `${finding.knob}: ${finding.detail}`)
       expect(
         unwaived,
-        `${story.id}: a11y opt-outs with no exemption in .storybook/a11yPolicy.ts`,
+        `${story.id}: a11y opt-outs with no exemption in .storybook/a11yPolicy.ts: ${unwaived.join('; ')}`,
       ).toEqual([])
     },
   )
+
+  describe('eslint.config.js a11y rule', () => {
+    const eslint = new ESLint({ cwd: WEB_DIR })
+
+    it('is configured as an error for story files, including new directories', async () => {
+      for (const file of [
+        'src/components/AppShell/AppShell.stories.tsx',
+        PROBE_FILE,
+      ]) {
+        const config = (await eslint.calculateConfigForFile(file)) as {
+          rules?: Record<string, unknown>
+        }
+        for (const rule of A11Y_LINT_RULES) {
+          const setting = config.rules?.[rule]
+          const severity = Array.isArray(setting) ? setting[0] : setting
+          expect(
+            severity,
+            `${file}: ${rule} must be an error (eslint.config.js)`,
+          ).toBe(2)
+        }
+      }
+    })
+
+    it.each(FORBIDDEN_STORY_CODE)(
+      'rejects story code that %s',
+      async (_description, code) => {
+        const [result] = await eslint.lintText(code, { filePath: PROBE_FILE })
+        const hits = (result?.messages ?? []).filter((message) =>
+          A11Y_LINT_RULES.includes(message.ruleId ?? ''),
+        )
+        expect(
+          hits.length,
+          `no ${A11Y_LINT_RULES.join('/')} error for:\n${code}\nmessages: ${show(result?.messages)}`,
+        ).toBeGreaterThan(0)
+      },
+    )
+
+    it('leaves ordinary story code alone', async () => {
+      const [result] = await eslint.lintText(ORDINARY_STORY_CODE, {
+        filePath: PROBE_FILE,
+      })
+      expect(
+        (result?.messages ?? []).filter((message) =>
+          A11Y_LINT_RULES.includes(message.ruleId ?? ''),
+        ),
+      ).toEqual([])
+    })
+  })
 })
