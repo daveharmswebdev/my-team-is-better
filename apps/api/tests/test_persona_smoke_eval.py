@@ -268,11 +268,11 @@ def _fact_block_claims(fact_block_json: str) -> tuple[set[tuple[int, ...]], set[
     """
     scores: set[tuple[int, ...]] = set()
     records: set[tuple[int, ...]] = set()
+    # `("team_score", "opponent_score")` covers both a game (`OpponentResultOut`)
+    # and a common-opponent meeting (`CommonOpponentMeetingOut`, #130).
     score_keys = (
         ("team_score", "opponent_score"),
         ("home_points", "away_points"),
-        ("team_a_score", "team_a_opponent_score"),
-        ("team_b_score", "team_b_opponent_score"),
     )
 
     def walk(node: Any) -> None:

@@ -84,7 +84,11 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # persona-v7 (issue #231): the prompt changed -- the persona's attitude is now
 # "the numbers are the numbers": rule 2, both allegiance clauses and rule 4 no
 # longer let a grounded narration argue against the ranking.
-PROMPT_VERSION = "persona-v7"
+# persona-v8 (issue #130): prompt unchanged; the compare fact block's
+# `common_opponents` now carry every meeting per side (`team_a_meetings` /
+# `team_b_meetings`) and the engine's verdict prose lists them, so v7
+# comparison narrations were grounded against facts that hid earlier meetings.
+PROMPT_VERSION = "persona-v8"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

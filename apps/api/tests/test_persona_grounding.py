@@ -130,8 +130,14 @@ COMPARISON_FACT_BLOCK = (
     '"home_points": 34, "away_points": 31, "winner": "Texas"}'
     "]}, "
     '"common_opponents": ['
-    '{"opponent_name": "LSU", "team_a_score": 31, "team_a_opponent_score": 24, '
-    '"team_b_score": 20, "team_b_opponent_score": 17}'
+    '{"opponent_name": "LSU", "opponent_rank": 12, '
+    '"team_a_meetings": ['
+    '{"result": "W", "team_score": 31, "opponent_score": 24, "week": 5, "season_type": "regular"}, '
+    '{"result": "L", "team_score": 17, "opponent_score": 20, "week": 11, "season_type": "regular"}'
+    "], "
+    '"team_b_meetings": ['
+    '{"result": "W", "team_score": 20, "opponent_score": 17, "week": 9, "season_type": "regular"}'
+    "]}"
     '], "rating_diff": 3.1, "verdict": "Texas"}'
 )
 COMPARISON_KNOWN_TEAMS = ["Vanderbilt", "Texas", "LSU"]
@@ -167,6 +173,57 @@ def test_common_opponent_correct_order_is_not_flagged() -> None:
     mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
 
     assert mismatches == []
+
+
+# ---------------------------------------------------------------------------
+# issue #130: a common opponent carries EVERY meeting per side
+# (`team_a_meetings` / `team_b_meetings`, each a list of
+# `CommonOpponentMeetingOut`), so a side that met the shared opponent twice
+# no longer has its earlier meeting hidden. A serialized meeting has
+# `team_score`/`opponent_score` but no `opponent_name` of its own -- the name
+# sits on the enclosing row -- so the walker must register every meeting's
+# pair under that row's `opponent_name`, not just the last one.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        "Vanderbilt beat LSU (31-24) early in the year, for what it's worth.",
+        "Vanderbilt then lost to LSU (17-20) in the rematch, for what it's worth.",
+        "Texas beat LSU (20-17) the one time they met, for what it's worth.",
+    ],
+)
+def test_every_common_opponent_meeting_score_is_grounded_in_correct_order(response: str) -> None:
+    mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
+
+    assert mismatches == []
+
+
+def test_common_opponent_meeting_swapped_order_is_still_flagged() -> None:
+    response = "Vanderbilt handled LSU (24-31) as a common opponent, for what it's worth."
+
+    mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
+
+    # LSU has three real tuples, so the plainer multi-tuple message form.
+    assert "LSU 24-31" in mismatches
+
+
+def test_earlier_common_opponent_meeting_is_grounded_the_issue_130_regression() -> None:
+    """The first of two meetings, not the last: exactly the fact the old
+    one-pair-per-side shape hid, and the one a walker that only kept each
+    list's last element would drop."""
+    response = "Vanderbilt beat LSU (31-24) in week 5 before dropping the rematch."
+
+    mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
+
+    assert mismatches == []
+    # The same claim, swapped, is a real mismatch and not a silently
+    # unchecked pair: the walker did register (31, 24) for LSU.
+    swapped = "Vanderbilt beat LSU (24-31) in week 5 before dropping the rematch."
+    assert "LSU 24-31" in find_ungrounded_tokens(
+        swapped, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -447,44 +504,44 @@ TIE_TEAM_CASE = "The Kilo Kings tied the Mike Mustangs {tie_score} and went {rec
 
 def test_w_l_t_record_next_to_a_tied_opponent_is_grounded(nfl_conn: sqlite3.Connection) -> None:
     """#107's first comment ("went 8-8-1 ... tied the Minnesota Vikings
-    26-26"), on the fixture's Kilo Kings (1-1-1), who tied the Mike Mustangs
-    17-17. The regex reads "1-1" out of "1-1-1"; `ties` grounds the last 1."""
+    26-26"), on the fixture's Kilo Kings (2-1-1 since #130's rematch), who
+    tied the Mike Mustangs 17-17. The regex reads "2-1" out of "2-1-1";
+    `ties` grounds the last 1."""
     block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
-    response = TIE_TEAM_CASE.format(tie_score="17-17", record="1-1-1")
+    response = TIE_TEAM_CASE.format(tie_score="17-17", record="2-1-1")
 
     assert _check(nfl_conn, response, block, "nfl") == []
 
 
 def test_w_l_t_fabricated_record_is_still_flagged(nfl_conn: sqlite3.Connection) -> None:
+    """Mike Mustangs carry two real tuples (the 17-17 tie and the 31-14
+    rematch, #130), so the mismatch takes the plainer multi-tuple form."""
     block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
     response = TIE_TEAM_CASE.format(tie_score="17-17", record="7-1-1")
 
-    assert _check(nfl_conn, response, block, "nfl") == [
-        "Mike Mustangs's score should be stated 17-17, not 7-1"
-    ]
+    assert _check(nfl_conn, response, block, "nfl") == ["Mike Mustangs 7-1"]
 
 
 def test_w_l_t_fabricated_tie_score_beside_a_real_record_is_still_flagged(
     nfl_conn: sqlite3.Connection,
 ) -> None:
     block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
-    response = TIE_TEAM_CASE.format(tie_score="17-7", record="1-1-1")
+    response = TIE_TEAM_CASE.format(tie_score="17-7", record="2-1-1")
 
-    assert _check(nfl_conn, response, block, "nfl") == [
-        "Mike Mustangs's score should be stated 17-17, not 17-7"
-    ]
+    assert _check(nfl_conn, response, block, "nfl") == ["Mike Mustangs 17-7"]
 
 
 TIE_COMPARISON = (
-    "Kilo Kings went {record} and Mike Mustangs went 0-1-1 after they tied 17-17 in 2023."
+    "Kilo Kings went {record} and Mike Mustangs went 0-2-1 after they tied 17-17 in 2023."
 )
 
 
 def test_w_l_t_records_of_both_compared_teams_are_grounded(nfl_conn: sqlite3.Connection) -> None:
-    """Both compared teams have a tie and met each other, so both names carry
-    a 17-17 head-to-head tuple: the comparison shape, with W-L-T records."""
+    """Both compared teams have a tie and met each other (twice, #130), so
+    both names carry a 17-17 head-to-head tuple: the comparison shape, with
+    W-L-T records."""
     block = _comparison_block(nfl_conn, 2023, "Kilo Kings", "Mike Mustangs", "nfl")
-    response = TIE_COMPARISON.format(record="1-1-1")
+    response = TIE_COMPARISON.format(record="2-1-1")
 
     assert _check(nfl_conn, response, block, "nfl") == []
 
@@ -492,9 +549,9 @@ def test_w_l_t_records_of_both_compared_teams_are_grounded(nfl_conn: sqlite3.Con
 def test_w_l_t_fabricated_record_in_a_comparison_is_still_flagged(
     nfl_conn: sqlite3.Connection,
 ) -> None:
+    """Kilo Kings carry two head-to-head tuples against Mike Mustangs (#130),
+    so the mismatch takes the plainer multi-tuple form."""
     block = _comparison_block(nfl_conn, 2023, "Kilo Kings", "Mike Mustangs", "nfl")
     response = TIE_COMPARISON.format(record="1-0-1")
 
-    assert _check(nfl_conn, response, block, "nfl") == [
-        "Kilo Kings's score should be stated 17-17, not 1-0"
-    ]
+    assert _check(nfl_conn, response, block, "nfl") == ["Kilo Kings 1-0"]

@@ -85,7 +85,7 @@ def _team_case(client: TestClient) -> Any:
 def test_team_case_carries_the_tie_as_a_tie(sport_client: TestClient) -> None:
     evidence = _team_case(sport_client)["evidence"]
 
-    assert evidence["wins"] == 1
+    assert evidence["wins"] == 2
     assert evidence["losses"] == 1
     assert evidence["ties"] == 1
 
@@ -95,15 +95,35 @@ def test_team_case_carries_the_tie_as_a_tie(sport_client: TestClient) -> None:
     assert tie["opponent_name"] == TIE_OPPONENT
     assert (tie["team_score"], tie["opponent_score"]) == (17, 17)
 
-    # Mike Mustangs is rank 8: a tie mistaken for a win would be a quality
-    # win, and mistaken for a loss would out-rank the real loss (rank 5).
+    # Mike Mustangs is rank 8: a tie mistaken for a win would be a third
+    # quality win (the real rematch win over them is one, #130), and mistaken
+    # for a loss would out-rank the real loss (rank 5).
     assert all(g["result"] == "W" for g in evidence["quality_wins"])
-    assert [g["opponent_name"] for g in evidence["quality_wins"]] == [TIE_WIN_OPPONENT]
+    assert [g["opponent_name"] for g in evidence["quality_wins"]] == [
+        TIE_OPPONENT,
+        TIE_WIN_OPPONENT,
+    ]
+    assert all(g["team_score"] != g["opponent_score"] for g in evidence["quality_wins"])
     assert evidence["worst_loss"]["opponent_name"] == TIE_RIVAL
     assert evidence["worst_loss"]["result"] == "L"
 
 
-def test_comparison_reports_a_tied_common_opponent_as_t(sport_client: TestClient) -> None:
+_OLD_COMMON_OPPONENT_KEYS = (
+    "team_a_result",
+    "team_a_score",
+    "team_a_opponent_score",
+    "team_b_result",
+    "team_b_score",
+    "team_b_opponent_score",
+)
+
+
+def test_comparison_carries_every_meeting_with_a_common_opponent(
+    sport_client: TestClient,
+) -> None:
+    """Issue #130: a side that met the shared opponent twice publishes both
+    meetings, chronologically, not just the last one. Kilo Kings tied Mike
+    Mustangs in week 2 and beat them in week 4; Lima Lions beat them once."""
     response = sport_client.post(
         "/api/verdict/compare",
         json={"year": YEAR, "team_a": TIE_TEAM, "team_b": TIE_RIVAL, "sport": "nfl"},
@@ -116,9 +136,29 @@ def test_comparison_reports_a_tied_common_opponent_as_t(sport_client: TestClient
 
     (common,) = evidence["common_opponents"]
     assert common["opponent_name"] == TIE_OPPONENT
-    assert common["team_a_result"] == "T"
-    assert (common["team_a_score"], common["team_a_opponent_score"]) == (17, 17)
-    assert common["team_b_result"] == "W"
+    assert not any(key in common for key in _OLD_COMMON_OPPONENT_KEYS)
+
+    assert len(common["team_a_meetings"]) == 2
+    tie, rematch = common["team_a_meetings"]
+    assert tie == {
+        "result": "T",
+        "team_score": 17,
+        "opponent_score": 17,
+        "week": 2,
+        "season_type": "regular",
+    }
+    assert rematch == {
+        "result": "W",
+        "team_score": 31,
+        "opponent_score": 14,
+        "week": 4,
+        "season_type": "regular",
+    }
+
+    assert len(common["team_b_meetings"]) == 1
+    (only,) = common["team_b_meetings"]
+    assert only["result"] == "W"
+    assert (only["team_score"], only["opponent_score"]) == (27, 10)
 
 
 def test_openapi_schema_carries_ties_and_the_t_result() -> None:
@@ -127,8 +167,11 @@ def test_openapi_schema_carries_ties_and_the_t_result() -> None:
     assert "ties" in schemas["TeamCaseOut"]["required"]
     assert "ties" in schemas["ComparisonTeamSummaryOut"]["required"]
     assert schemas["OpponentResultOut"]["properties"]["result"]["enum"] == ["W", "L", "T"]
-    for field in ("team_a_result", "team_b_result"):
-        assert schemas["CommonOpponentOut"]["properties"][field]["enum"] == ["W", "L", "T"]
+    assert schemas["CommonOpponentMeetingOut"]["properties"]["result"]["enum"] == ["W", "L", "T"]
+    for field in ("team_a_meetings", "team_b_meetings"):
+        assert field in schemas["CommonOpponentOut"]["required"]
+    published = schemas["CommonOpponentOut"]["properties"]
+    assert not any(key in published for key in _OLD_COMMON_OPPONENT_KEYS)
 
 
 # ---------------------------------------------------------------------------
@@ -139,19 +182,20 @@ def test_openapi_schema_carries_ties_and_the_t_result() -> None:
 def test_fact_block_given_to_claude_describes_the_tie_as_a_tie(
     sport_client: TestClient,
 ) -> None:
-    narrator = _RecordingNarrator(responses=[f"{TIE_TEAM} went 1-1-1 in {YEAR}."])
+    narrator = _RecordingNarrator(responses=[f"{TIE_TEAM} went 2-1-1 in {YEAR}."])
 
     with _wired(narrator):
         body = _team_case(sport_client)
 
     facts = _fact_block(narrator.calls[0][0]["content"])
     assert facts["ties"] == 1
-    results = {g["opponent_name"]: g["result"] for g in facts["games"]}
-    assert results[TIE_OPPONENT] == "T"
+    # Kilo Kings met Mike Mustangs twice (#130); the week-2 tie is still a tie.
+    mustangs_results = [g["result"] for g in facts["games"] if g["opponent_name"] == TIE_OPPONENT]
+    assert mustangs_results == ["T", "W"]
     assert facts["worst_loss"]["opponent_name"] != TIE_OPPONENT
 
     # The W-L-T record grounds on the first try: served verbatim, one call.
-    assert body["narration"]["text"] == f"{TIE_TEAM} went 1-1-1 in {YEAR}."
+    assert body["narration"]["text"] == f"{TIE_TEAM} went 2-1-1 in {YEAR}."
     assert len(narrator.calls) == 1
 
 
@@ -164,4 +208,4 @@ def test_fallback_narration_for_a_tied_team_states_its_w_l_t_record(
     with _wired(narrator):
         body = _team_case(sport_client)
 
-    assert f"{TIE_TEAM} finished 1-1-1 in {YEAR}" in body["narration"]["text"]
+    assert f"{TIE_TEAM} finished 2-1-1 in {YEAR}" in body["narration"]["text"]

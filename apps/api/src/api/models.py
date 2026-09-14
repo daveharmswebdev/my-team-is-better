@@ -22,6 +22,7 @@ from typing import Literal
 
 from cfb_strength.contracts import (
     CommonOpponent,
+    CommonOpponentMeeting,
     ComparisonResult,
     ComparisonTeamSummary,
     Credits,
@@ -414,16 +415,47 @@ class HeadToHeadOut(BaseModel):
         )
 
 
+class CommonOpponentMeetingOut(BaseModel):
+    """One game a compared side played against a shared opponent (issue
+    #130), faithful to `cfb_strength.contracts.CommonOpponentMeeting`.
+
+    Team-relative, like `OpponentResultOut`: `result` and the score pair are
+    from that side's perspective, so `team_score` is always the compared
+    team's own points -- the order the persona grounding check accepts.
+    """
+
+    result: Literal["W", "L", "T"]
+    team_score: int
+    opponent_score: int
+    week: int | None
+    season_type: str
+
+    @classmethod
+    def from_dataclass(cls, meeting: CommonOpponentMeeting) -> CommonOpponentMeetingOut:
+        return cls(
+            result=meeting.result,
+            team_score=meeting.team_score,
+            opponent_score=meeting.opponent_score,
+            week=meeting.week,
+            season_type=meeting.season_type,
+        )
+
+
 class CommonOpponentOut(BaseModel):
+    """A team both compared sides played, with EVERY meeting per side (issue
+    #130), faithful to `cfb_strength.contracts.CommonOpponent`.
+
+    Each list is non-empty and chronological (regular season by week, then
+    postseason), copied in the engine's order: never reordered or deduped.
+    No per-side W-L-T aggregate -- derivable from the list, and one more
+    thing that could disagree with it (founder decision on #130).
+    """
+
     opponent_team_id: int
     opponent_name: str
     opponent_rank: int | None
-    team_a_result: Literal["W", "L", "T"]
-    team_a_score: int
-    team_a_opponent_score: int
-    team_b_result: Literal["W", "L", "T"]
-    team_b_score: int
-    team_b_opponent_score: int
+    team_a_meetings: list[CommonOpponentMeetingOut]
+    team_b_meetings: list[CommonOpponentMeetingOut]
 
     @classmethod
     def from_dataclass(cls, common_opponent: CommonOpponent) -> CommonOpponentOut:
@@ -431,12 +463,12 @@ class CommonOpponentOut(BaseModel):
             opponent_team_id=common_opponent.opponent_team_id,
             opponent_name=common_opponent.opponent_name,
             opponent_rank=common_opponent.opponent_rank,
-            team_a_result=common_opponent.team_a_result,
-            team_a_score=common_opponent.team_a_score,
-            team_a_opponent_score=common_opponent.team_a_opponent_score,
-            team_b_result=common_opponent.team_b_result,
-            team_b_score=common_opponent.team_b_score,
-            team_b_opponent_score=common_opponent.team_b_opponent_score,
+            team_a_meetings=[
+                CommonOpponentMeetingOut.from_dataclass(m) for m in common_opponent.team_a_meetings
+            ],
+            team_b_meetings=[
+                CommonOpponentMeetingOut.from_dataclass(m) for m in common_opponent.team_b_meetings
+            ],
         )
 
 

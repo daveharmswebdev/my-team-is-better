@@ -307,7 +307,9 @@ def _extract_valid_score_tuples(fact_block_json: str) -> _ScoreTuplesByName:
     """Recursively walk the parsed fact block, pattern-matching dict shapes
     by field name (never importing the Pydantic response models -- see
     `api.models` for `OpponentResultOut` / `HeadToHeadMeetingOut` /
-    `CommonOpponentOut`, the three shapes recognized here) to build every
+    `CommonOpponentOut`, the three shapes recognized here; the last carries
+    its `CommonOpponentMeetingOut` lists, whose pairs are registered under
+    the enclosing row's `opponent_name`, #130) to build every
     `name -> {(own_score, other_score), ...}` fact this fact block states.
     """
     try:
@@ -352,8 +354,15 @@ def _walk_fact_block(node: Any, valid: _ScoreTuplesByName) -> None:
             valid[node["home_team"]].add((node["home_points"], node["away_points"]))
             valid[node["away_team"]].add((node["away_points"], node["home_points"]))
         elif _is_common_opponent_shape(node):
-            valid[node["opponent_name"]].add((node["team_a_score"], node["team_a_opponent_score"]))
-            valid[node["opponent_name"]].add((node["team_b_score"], node["team_b_opponent_score"]))
+            # Every meeting in both lists (issue #130), not just the last:
+            # a serialized meeting carries no `opponent_name` of its own, so
+            # the plain descent below can't attribute it and would lose the
+            # fact if it weren't registered here under the row's name.
+            for meeting in (*node["team_a_meetings"], *node["team_b_meetings"]):
+                if _is_common_opponent_meeting_shape(meeting):
+                    valid[node["opponent_name"]].add(
+                        (meeting["team_score"], meeting["opponent_score"])
+                    )
         for value in node.values():
             _walk_fact_block(value, valid)
     elif isinstance(node, list):
@@ -382,14 +391,26 @@ def _is_head_to_head_meeting_shape(node: dict[Any, Any]) -> bool:
 
 def _is_common_opponent_shape(node: dict[Any, Any]) -> bool:
     """`CommonOpponentOut`: an opponent both compared teams played, with
-    each team's own score against it.
+    every meeting each team had against it (issue #130) as
+    `team_a_meetings` / `team_b_meetings` lists of
+    `CommonOpponentMeetingOut`.
     """
     return (
         isinstance(node.get("opponent_name"), str)
-        and isinstance(node.get("team_a_score"), int)
-        and isinstance(node.get("team_a_opponent_score"), int)
-        and isinstance(node.get("team_b_score"), int)
-        and isinstance(node.get("team_b_opponent_score"), int)
+        and isinstance(node.get("team_a_meetings"), list)
+        and isinstance(node.get("team_b_meetings"), list)
+    )
+
+
+def _is_common_opponent_meeting_shape(node: Any) -> bool:
+    """`CommonOpponentMeetingOut`: one compared team's own `(team_score,
+    opponent_score)` against the common opponent. Has no `opponent_name` of
+    its own, which is why `_is_opponent_result_shape` never matches it.
+    """
+    return (
+        isinstance(node, dict)
+        and isinstance(node.get("team_score"), int)
+        and isinstance(node.get("opponent_score"), int)
     )
 
 

@@ -217,14 +217,23 @@ def build_sport_fixture(conn: sqlite3.Connection, year: int = YEAR) -> None:
 # HTTP layer. Kept disjoint from the win cycle above -- separate ids, ranks
 # below every existing NFL row -- so no pre-existing assertion moves.
 #
-#   Lima Lions   20-13 Kilo Kings      (Kilo's only loss, to rank 5)
-#   Kilo Kings   17-17 Mike Mustangs   (the tie, against rank 8)
-#   Kilo Kings   24-7  November Nomads (Kilo's only win, over rank 9)
-#   Lima Lions   27-10 Mike Mustangs   (so Mike is a common opponent)
+#   Lima Lions   20-13 Kilo Kings      (week 1: Kilo's only loss, to rank 5)
+#   Kilo Kings   17-17 Mike Mustangs   (week 2: the tie, against rank 8)
+#   Kilo Kings   24-7  November Nomads (week 3: a win over rank 9)
+#   Lima Lions   27-10 Mike Mustangs   (week 2: so Mike is a common opponent)
+#   Kilo Kings   31-14 Mike Mustangs   (week 4: the rematch, issue #130)
 #
 # The ranks are chosen so a tie mistaken for a loss would *become*
 # `worst_loss` (rank 8 is worse than rank 5), and a tie mistaken for a win
-# would join `quality_wins` (rank 8 is inside the top-25 threshold).
+# would join `quality_wins` (rank 8 is inside the top-25 threshold) as a
+# third entry with equal scores.
+#
+# The week-4 rematch (issue #130) makes Kilo Kings meet the common opponent
+# twice, so `CommonOpponent.team_a_meetings` for a Kilo-vs-Lima comparison
+# is [T 17-17, W 31-14] in that order while Lima's is the single 27-10 win.
+# A decisive win rather than a loss keeps `worst_loss` on Lima Lions, so the
+# tie-mistaken-for-a-loss check above still has a single real loss to compare
+# against. Kilo Kings are 2-1-1; Mike Mustangs 0-2-1.
 TIE_TEAM_ID = 106
 TIE_TEAM = "Kilo Kings"
 TIE_RIVAL_ID = 107
@@ -287,10 +296,23 @@ def build_tie_cluster(conn: sqlite3.Connection, year: int = YEAR) -> None:
         week=2,
         sport="nfl",
     )
+    _insert_game(
+        conn,
+        108,
+        year,
+        TIE_TEAM_ID,
+        TIE_OPPONENT_ID,
+        TIE_TEAM,
+        TIE_OPPONENT,
+        31,
+        14,
+        week=4,
+        sport="nfl",
+    )
 
     _insert_rating(conn, year, METHOD, TIE_RIVAL_ID, 0.35, 5, 2, 0, sport="nfl")
-    _insert_rating(conn, year, METHOD, TIE_TEAM_ID, 0.25, 6, 1, 1, sport="nfl", ties=1)
-    _insert_rating(conn, year, METHOD, TIE_OPPONENT_ID, 0.15, 8, 0, 1, sport="nfl", ties=1)
+    _insert_rating(conn, year, METHOD, TIE_TEAM_ID, 0.25, 6, 2, 1, sport="nfl", ties=1)
+    _insert_rating(conn, year, METHOD, TIE_OPPONENT_ID, 0.15, 8, 0, 2, sport="nfl", ties=1)
     _insert_rating(conn, year, METHOD, TIE_WIN_OPPONENT_ID, 0.05, 9, 0, 1, sport="nfl")
     for tid in names:
         _insert_breakdown(conn, year, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
