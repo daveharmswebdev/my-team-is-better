@@ -110,6 +110,7 @@ Then act on what came back:
 | contract_gaps / contract-insufficient | amend the contract yourself, commit, re-delegate every affected spoke |
 | failure, `retryable: true` | one retry, with the failure's `attempted` and `alternatives` appended |
 | scope-collision | split the round, or route that part to its owner |
+| brief-mis-scoped | do that part yourself (often diagnosis or a decision), then re-brief a specific change |
 | blocked-by-missing-input / tool-or-environment-failure | supply the input or fix the environment, or substitute an agent; otherwise proceed with a named gap |
 
 Never abort a whole round because one spoke failed, and never treat an empty result as

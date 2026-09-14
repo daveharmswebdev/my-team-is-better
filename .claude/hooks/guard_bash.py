@@ -83,14 +83,49 @@ def _tokenize(text: str) -> list[list[str]] | None:
     return [c for c in commands if c]
 
 
+def _strip_comments(text: str) -> str:
+    """Drop bash comments: a `#` that starts a word outside quotes, up to the newline."""
+    out: list[str] = []
+    quote: str | None = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            out.append(char)
+            if char == quote:
+                quote = None
+            elif char == "\\" and quote == '"' and index + 1 < len(text):
+                index += 1
+                out.append(text[index])
+        elif char in "'\"":
+            quote = char
+            out.append(char)
+        elif char == "\\" and index + 1 < len(text):
+            out.append(char + text[index + 1])
+            index += 1
+        elif char == "#" and (not out or out[-1][-1] in " \t\n;&|()"):
+            while index < len(text) and text[index] != "\n":
+                index += 1
+            continue
+        else:
+            out.append(char)
+        index += 1
+    return "".join(out)
+
+
 def _simple_commands(command: str) -> list[list[str]]:
-    text = _strip_heredoc_bodies(command)
+    text = _strip_heredoc_bodies(command).replace("\\\n", " ")  # join line continuations
+    text = _strip_comments(text)
     whole = _tokenize(text)
     if whole is not None:
         return whole
     commands: list[list[str]] = []  # unbalanced quotes somewhere: best effort, line by line
     for line in text.split("\n"):
-        commands.extend(_tokenize(line) or [])
+        for closer in ("", "'", '"'):
+            parsed = _tokenize(line + closer)
+            if parsed is not None:
+                commands.extend(parsed)
+                break
     return commands
 
 

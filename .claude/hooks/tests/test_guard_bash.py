@@ -42,6 +42,13 @@ from guard_bash import check_command
         ("nohup git push origin main", "feat/x"),
         # An apostrophe inside a heredoc body used to switch every check off.
         ("cat > /tmp/n.md <<'EOF'\nIt's done\nEOF\ngit push origin main", "feat/x"),
+        # Found by the round-2 review: line continuations and trailing comments.
+        ("git push \\\n  origin main", "feat/x"),
+        ("git push -u origin \\\n  main", "feat/x"),
+        ("uv run pytest -q \\\n  tests && git push origin \\\n  main", "feat/x"),
+        ("git push origin main  # don't forget the PR", "feat/x"),
+        ("git stash pop  # it's mine", "feat/x"),
+        ("git push  # push it's branch", "main"),
     ],
 )
 def test_blocked(command: str, branch: str) -> None:
@@ -74,6 +81,14 @@ def test_blocked(command: str, branch: str) -> None:
         # Text that only mentions the forbidden commands: commit messages and heredocs.
         ("git commit -F - <<'EOF'\nDon't git push origin main\ngit stash pop\nEOF", "feat/x"),
         ('git commit -m "Subject\n\ngit stash pop is dangerous"', "feat/x"),
+        # Found by the round-2 review: line continuations and trailing comments.
+        ("git push \\\n  origin feat/x", "main"),
+        ("git push -u \\\n  origin feat/x", "main"),
+        ("git stash push \\\n  -u -m 'tag'", "feat/x"),
+        ("git push origin feat/x # not main", "feat/x"),
+        ("git push -u origin feat/x  # then open a PR into main", "feat/x"),
+        ("git push origin issue#12-fix", "feat/x"),
+        ('git commit -m "Subject\n\nfixes #12, not main"', "feat/x"),
     ],
 )
 def test_allowed(command: str, branch: str) -> None:
