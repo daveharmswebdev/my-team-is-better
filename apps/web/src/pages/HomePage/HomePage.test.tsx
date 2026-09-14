@@ -328,14 +328,21 @@ describe('HomePage', () => {
 
     it('offers to share a verdict asked through the form, as a link to that exact question', async () => {
       const user = userEvent.setup()
-      mockedFetchChampion.mockResolvedValue(
+      mockedFetchTeamCase.mockResolvedValue(
         envelopeFor('Texas', 'Texas, full stop.'),
       )
 
       renderHomePage()
+      // team_case, not champion: the champion question has no user team to
+      // put in the link (issue #198).
+      await user.selectOptions(
+        screen.getByLabelText(/what do you want to know/i),
+        'team_case',
+      )
       await waitForDefaultYear()
       await user.clear(screen.getByLabelText(/year/i))
       await user.type(screen.getByLabelText(/year/i), '2005')
+      await user.type(screen.getByLabelText(/^team$/i), 'Texas')
       // Not in the catalog, so a stale-team notice appears -- which is why
       // the field is not queried again by label below.
       await user.type(screen.getByLabelText(/your team/i), 'Texas A&M')
@@ -357,7 +364,7 @@ describe('HomePage', () => {
 
       await waitFor(() =>
         expect(writeText).toHaveBeenCalledWith(
-          `${window.location.origin}/?q=champion&sport=cfb&year=2005&engine=keener&for=Texas+A%26M`,
+          `${window.location.origin}/?q=team_case&sport=cfb&year=2005&engine=keener&team=Texas&for=Texas+A%26M`,
         ),
       )
       expect(await screen.findByText('Link copied')).toBeInTheDocument()
@@ -491,6 +498,326 @@ describe('HomePage', () => {
       expect(screen.getByTestId('location-search').textContent).toBe(
         '?q=compare&sport=cfb&year=2005&engine=elo&a=Texas+State&b=USC&for=Texas',
       )
+    })
+  })
+
+  /**
+   * Issue #198: a verdict opened below the whole form, so on a phone a
+   * shared link's verdict was off-screen. Every verdict state -- loading,
+   * error and success -- now shows in a modal over the form.
+   */
+  describe('the verdict modal (issue #198)', () => {
+    const TEXAS_USC_LINK =
+      '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC&for=Texas'
+
+    function verdictDialog() {
+      return screen.getByRole('dialog', { name: 'The verdict' })
+    }
+
+    function submitButton() {
+      return screen.getByRole('button', { name: /get the verdict/i })
+    }
+
+    /** A promise the test settles by hand, for an answer that arrives late. */
+    function deferred<T>() {
+      let resolve: (value: T) => void = () => {}
+      let reject: (reason: unknown) => void = () => {}
+      const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+        resolve = resolvePromise
+        reject = rejectPromise
+      })
+      return { promise, resolve, reject }
+    }
+
+    it('shows a submitted question as loading and then its verdict inside the dialog, not inline below the form', async () => {
+      const user = userEvent.setup()
+      const answer = deferred<TeamCaseEnvelope>()
+      mockedFetchChampion.mockReturnValue(answer.promise)
+
+      renderHomePage()
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await waitForDefaultYear()
+      await user.click(submitButton())
+
+      const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
+      expect(within(dialog).getByRole('status')).toHaveTextContent(
+        /getting the verdict/i,
+      )
+      await act(async () => {
+        answer.resolve(envelopeFor('Texas', 'Texas, full stop.'))
+      })
+
+      const verdict = await within(dialog).findByRole('article')
+      expect(verdict).toHaveTextContent('Texas, full stop.')
+      expect(
+        within(dialog).getByRole('button', { name: 'Share this verdict' }),
+      ).toBeInTheDocument()
+      // The form is behind the dialog, not in it -- and nothing is inline.
+      expect(dialog).not.toContainElement(submitButton())
+      expect(screen.getAllByRole('article')).toEqual([verdict])
+    })
+
+    it('shows an error with its correction pills inside the dialog', async () => {
+      const user = userEvent.setup()
+      mockedFetchChampion.mockRejectedValue(UNKNOWN_YEAR_ERROR)
+
+      renderHomePage()
+      await waitFor(() => expect(submitButton()).not.toBeDisabled())
+      await user.click(submitButton())
+
+      const alert = await within(
+        await screen.findByRole('dialog', { name: 'The verdict' }),
+      ).findByRole('alert')
+      expect(
+        within(alert).getByRole('button', { name: String(CORRECTED_YEAR) }),
+      ).toBeInTheDocument()
+    })
+
+    it('opens the dialog with the verdict on a share-link landing', async () => {
+      mockedFetchCompare.mockResolvedValue(
+        comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+      )
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+
+      const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
+      expect(
+        await within(dialog).findByText('Texas edges USC.'),
+      ).toBeInTheDocument()
+      expect(
+        within(dialog).getByRole('button', { name: 'Close the verdict' }),
+      ).toBeInTheDocument()
+    })
+
+    it('closing leaves the form filled in with the question asked, drops the share query without a new history entry, and focuses the submit button', async () => {
+      const user = userEvent.setup()
+      mockedFetchCompare.mockResolvedValue(
+        comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+      )
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+      await within(
+        await screen.findByRole('dialog', { name: 'The verdict' }),
+      ).findByText('Texas edges USC.')
+
+      await user.click(
+        within(verdictDialog()).getByRole('button', {
+          name: 'Close the verdict',
+        }),
+      )
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByText('Texas edges USC.')).not.toBeInTheDocument()
+      expect(screen.getByLabelText(/what do you want to know/i)).toHaveValue(
+        'compare',
+      )
+      expect(screen.getByLabelText(/year/i)).toHaveValue(2005)
+      expect(screen.getByLabelText(/team a/i)).toHaveValue('Texas')
+      expect(screen.getByLabelText(/team b/i)).toHaveValue('USC')
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('Texas')
+      expect(
+        screen.getByRole('radio', { name: 'Elo (second opinion)' }),
+      ).toBeChecked()
+      await waitFor(() =>
+        expect(screen.getByTestId('location-search').textContent).toBe(''),
+      )
+      expect(screen.getByTestId('navigation-type')).toHaveTextContent('REPLACE')
+      await waitFor(() => expect(submitButton()).toHaveFocus())
+      // Nothing re-asked.
+      expect(mockedFetchCompare).toHaveBeenCalledTimes(1)
+    })
+
+    it('closes on Escape the same way', async () => {
+      const user = userEvent.setup()
+      mockedFetchCompare.mockResolvedValue(
+        comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+      )
+
+      renderHomePage(TEXAS_USC_LINK)
+      await within(
+        await screen.findByRole('dialog', { name: 'The verdict' }),
+      ).findByText('Texas edges USC.')
+
+      await user.keyboard('{Escape}')
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByTestId('location-search').textContent).toBe(''),
+      )
+      await waitFor(() => expect(submitButton()).toHaveFocus())
+    })
+
+    it('never lets a response that arrives after the dialog was closed reopen it', async () => {
+      const user = userEvent.setup()
+      const answer = deferred<ComparisonEnvelope>()
+      mockedFetchCompare.mockReturnValue(answer.promise)
+
+      renderHomePage(TEXAS_USC_LINK, { strict: true })
+      const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
+      expect(within(dialog).getByRole('status')).toBeInTheDocument()
+
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Close the verdict' }),
+      )
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      // Closing an in-flight question frees the form to ask again.
+      await waitFor(() => expect(submitButton()).not.toBeDisabled())
+
+      await act(async () => {
+        answer.resolve(
+          comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
+        )
+      })
+
+      await expectThroughout(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(screen.queryByText('Texas edges USC.')).not.toBeInTheDocument()
+        expect(screen.getByTestId('location-search').textContent).toBe('')
+      })
+    })
+
+    /**
+     * Also issue #217: only the latest question's answer is ever shown. A
+     * question closed while in flight and then asked again overlaps the new
+     * one; the older answer landing (or failing) last must not replace it.
+     */
+    it.each([
+      ['resolves', 'resolve'],
+      ['fails', 'reject'],
+    ] as const)(
+      "shows the latest question's verdict when a superseded request %s after it",
+      async (_description, settleFirst) => {
+        const user = userEvent.setup()
+        const first = deferred<ComparisonEnvelope>()
+        const second = deferred<ComparisonEnvelope>()
+        mockedFetchCompare
+          .mockReturnValueOnce(first.promise)
+          .mockReturnValueOnce(second.promise)
+
+        renderHomePage(TEXAS_USC_LINK, { strict: true })
+        await user.click(
+          within(
+            await screen.findByRole('dialog', { name: 'The verdict' }),
+          ).getByRole('button', { name: 'Close the verdict' }),
+        )
+        await waitFor(() => expect(submitButton()).not.toBeDisabled())
+        await user.click(submitButton())
+        await screen.findByRole('dialog', { name: 'The verdict' })
+
+        await act(async () => {
+          second.resolve(
+            comparisonEnvelopeFor('Texas', 'USC', 'The second answer.'),
+          )
+        })
+        expect(
+          await within(verdictDialog()).findByText('The second answer.'),
+        ).toBeInTheDocument()
+        await act(async () => {
+          if (settleFirst === 'resolve') {
+            first.resolve(
+              comparisonEnvelopeFor('Texas', 'USC', 'The first answer.'),
+            )
+          } else {
+            first.reject(new VerdictNetworkError('Could not reach the API.'))
+          }
+        })
+
+        await expectThroughout(() => {
+          expect(
+            within(verdictDialog()).getByText('The second answer.'),
+          ).toBeInTheDocument()
+          expect(
+            screen.queryByText('The first answer.'),
+          ).not.toBeInTheDocument()
+          expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+        })
+      },
+    )
+
+    it('re-asks a pill correction inside the still-open dialog, and re-seeds the form behind it', async () => {
+      const user = userEvent.setup()
+      const corrected = deferred<TeamCaseEnvelope>()
+      mockedFetchChampion
+        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockReturnValueOnce(corrected.promise)
+
+      renderHomePage()
+      await waitFor(() => expect(submitButton()).not.toBeDisabled())
+      await user.click(submitButton())
+      const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
+
+      await user.click(
+        await within(dialog).findByRole('button', {
+          name: String(CORRECTED_YEAR),
+        }),
+      )
+
+      // The same dialog stays open across the re-ask: loading, then the verdict.
+      expect(verdictDialog()).toBe(dialog)
+      expect(within(dialog).getByRole('status')).toHaveTextContent(
+        /getting the verdict/i,
+      )
+      // Focus stays inside the dialog even though the pill it was on is gone.
+      expect(dialog).toContainElement(document.activeElement as HTMLElement)
+      await act(async () => {
+        corrected.resolve(envelopeFor('Texas', 'Texas, full stop.'))
+      })
+      expect(
+        await within(dialog).findByText('Texas, full stop.'),
+      ).toBeInTheDocument()
+      expect(verdictDialog()).toBe(dialog)
+      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
+        year: CORRECTED_YEAR,
+        user_team: null,
+        sport: 'cfb',
+        method: 'keener',
+      })
+      expect(screen.getByLabelText(/year/i)).toHaveValue(CORRECTED_YEAR)
+    })
+
+    it('ignores "for" on a champion link, and the visitor\'s saved team is still there for the other questions', async () => {
+      window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
+      const user = userEvent.setup()
+      mockedFetchChampion.mockResolvedValue(
+        envelopeFor('Texas', 'Texas, full stop.'),
+      )
+
+      renderHomePage(
+        '/?q=champion&sport=cfb&year=2005&engine=keener&for=Texas',
+        {
+          strict: true,
+        },
+      )
+
+      expect(
+        await within(
+          await screen.findByRole('dialog', { name: 'The verdict' }),
+        ).findByText('Texas, full stop.'),
+      ).toBeInTheDocument()
+      expect(mockedFetchChampion).toHaveBeenCalledWith({
+        year: 2005,
+        user_team: null,
+        sport: 'cfb',
+        method: 'keener',
+      })
+      await waitFor(() =>
+        expect(screen.getByTestId('location-search').textContent).toBe(
+          '?q=champion&sport=cfb&year=2005&engine=keener',
+        ),
+      )
+      expect(screen.queryByLabelText(/your team/i)).not.toBeInTheDocument()
+
+      await user.click(
+        within(verdictDialog()).getByRole('button', {
+          name: 'Close the verdict',
+        }),
+      )
+      await user.selectOptions(
+        screen.getByLabelText(/what do you want to know/i),
+        'team_case',
+      )
+      expect(screen.getByLabelText(/your team/i)).toHaveValue('USC')
+      expect(window.localStorage.getItem('myTeamIsBetter.userTeam')).toBe('USC')
     })
   })
 
@@ -881,12 +1208,19 @@ describe('HomePage', () => {
 
     it('keeps an unsubmitted user team, the league, and the corrected year across the correction', async () => {
       const user = userEvent.setup()
-      mockedFetchChampion
+      mockedFetchTeamCase
         .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
-        .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
+        .mockResolvedValueOnce(envelopeFor('Bengals', 'Bengals, full stop.'))
 
       renderHomePage()
       await user.click(screen.getByRole('radio', { name: /nfl/i }))
+      // team_case, not champion: only the questions that name teams have a
+      // "your team" field (issue #198).
+      await user.selectOptions(
+        screen.getByLabelText(/what do you want to know/i),
+        'team_case',
+      )
+      await user.type(screen.getByLabelText(/^team$/i), 'Bengals')
       // Wait for the NFL catalog's newest season to fill the Year field
       // (issue #136) -- until then the submit button is disabled.
       const submit = screen.getByRole('button', { name: /get the verdict/i })
@@ -904,7 +1238,7 @@ describe('HomePage', () => {
         await screen.findByRole('button', { name: String(CORRECTED_YEAR) }),
       )
 
-      expect(await screen.findByText('Texas, full stop.')).toBeInTheDocument()
+      expect(await screen.findByText('Bengals, full stop.')).toBeInTheDocument()
       expect(screen.getByLabelText(/year/i)).toHaveValue(CORRECTED_YEAR)
       expect(screen.getByRole('radio', { name: /nfl/i })).toBeChecked()
       expect(screen.getByLabelText(/your team/i)).toHaveValue('Bengals')
@@ -913,8 +1247,9 @@ describe('HomePage', () => {
       // after the submit button was pressed. So the re-ask carries the
       // submitted `user_team` (none), while the field keeps what the user
       // has since typed for their next submission.
-      expect(mockedFetchChampion).toHaveBeenLastCalledWith({
+      expect(mockedFetchTeamCase).toHaveBeenLastCalledWith({
         year: CORRECTED_YEAR,
+        team: 'Bengals',
         user_team: null,
         sport: 'nfl',
         method: 'keener',

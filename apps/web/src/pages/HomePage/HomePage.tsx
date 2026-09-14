@@ -6,6 +6,7 @@ import type {
 } from '../../components/QuestionForm/QuestionForm'
 import { QuestionForm } from '../../components/QuestionForm/QuestionForm'
 import { VerdictCard } from '../../components/VerdictCard/VerdictCard'
+import { VerdictModal } from '../../components/VerdictModal/VerdictModal'
 import {
   VerdictApiError,
   VerdictNetworkError,
@@ -48,11 +49,12 @@ interface FormSeed {
   teamA?: string
   teamB?: string
   /**
-   * The "your team" to mount the form with: a share link's `for` team on
-   * landing (issue #184), or `undefined` -- every pill correction -- to have
-   * the form re-read `localStorage` exactly as it always has. So after a
-   * correction, the field shows the visitor's saved team while the question
-   * keeps the link's.
+   * The "your team" to mount the form with: a share link's `for` team on a
+   * team_case or compare landing (issue #184), or `undefined` -- every pill
+   * correction, and a champion landing, whose link has no user team (issue
+   * #198) -- to have the form re-read `localStorage` exactly as it always
+   * has. So after a correction, the field shows the visitor's saved team
+   * while the question keeps the link's.
    */
   userTeam: string | null | undefined
 }
@@ -82,6 +84,11 @@ function seedFrom(
 /**
  * Pages own composition/data-fetching; components do not import from pages
  * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
+ *
+ * Every verdict state -- loading, an error with its correction pills, a
+ * verdict -- shows in `VerdictModal` over the form, never inline below it
+ * (issue #198): a verdict under the whole form was off-screen on a phone,
+ * which is where shared links get opened.
  */
 export function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -96,16 +103,36 @@ export function HomePage() {
   const [submission, setSubmission] = useState<QuestionSubmission | null>(null)
   const [state, setState] = useState<VerdictCardState | null>(null)
   /**
+   * The latest question's number. Every run takes the next one, and closing
+   * the modal spends one too. An answer only reaches the page if its number is
+   * still the latest, so a response to a question that was dismissed (issue
+   * #198) or superseded (issue #217) can never reopen the modal or replace
+   * the verdict on screen.
+   */
+  const latestQuestionRef = useRef(0)
+  /** Where focus goes when the modal closes: the form's submit button. */
+  const submitButtonRef = useRef<HTMLButtonElement>(null)
+  /** Bumped on every close, so focus moves only after the closed state is on screen. */
+  const [closeCount, setCloseCount] = useState(0)
+  /**
    * Seeded from a share link from the start, so the form mounts once with
    * the link's question -- and its first catalog requests use the link's
    * league and engine -- rather than mounting with the defaults and being
    * remounted by the landing effect.
    */
   const [formSeed, setFormSeed] = useState<FormSeed | null>(() =>
-    landing === null ? null : seedFrom(landing, 1, landing.userTeam),
+    landing === null
+      ? null
+      : seedFrom(
+          landing,
+          1,
+          landing.questionType === 'champion' ? undefined : landing.userTeam,
+        ),
   )
 
   async function runSubmission(next: QuestionSubmission) {
+    latestQuestionRef.current += 1
+    const question = latestQuestionRef.current
     setSubmission(next)
     setState({ status: 'loading' })
     // The address bar is always the share link of the question on screen
@@ -136,15 +163,39 @@ export function HomePage() {
                 sport: next.sport,
                 method: next.method,
               })
-      setState({ status: 'success', envelope })
+      if (question === latestQuestionRef.current) {
+        setState({ status: 'success', envelope })
+      }
     } catch (error) {
-      setState({ status: 'error', error: toErrorState(error) })
+      if (question === latestQuestionRef.current) {
+        setState({ status: 'error', error: toErrorState(error) })
+      }
     }
   }
 
+  /**
+   * Dismisses the verdict and returns to the form, which still holds the
+   * question that was asked. Any answer still on its way is dropped, and the
+   * address bar drops the share query (`replace`, no new history entry). The
+   * address bar is the share link of the verdict on screen, and now there
+   * isn't one, so a reload shows the plain form rather than a dismissed verdict.
+   */
+  function closeVerdict() {
+    latestQuestionRef.current += 1
+    setState(null)
+    setSearchParams(new URLSearchParams(), { replace: true })
+    setCloseCount((count) => count + 1)
+  }
+
+  useEffect(() => {
+    if (closeCount > 0) {
+      submitButtonRef.current?.focus()
+    }
+  }, [closeCount])
+
   /** Re-asks the corrected question *and* re-seeds the visible form with it,
    * so the two can't disagree (issue #38). "Your team" is re-read from
-   * `localStorage`, as it always has been. */
+   * `localStorage`, as it always has been. The modal stays open throughout. */
   function applyCorrection(corrected: QuestionSubmission) {
     setFormSeed((previous) =>
       seedFrom(corrected, (previous?.generation ?? 0) + 1, undefined),
@@ -206,6 +257,7 @@ export function HomePage() {
         key={formSeed?.generation ?? 0}
         onSubmit={(next) => void runSubmission(next)}
         isSubmitting={state?.status === 'loading'}
+        submitButtonRef={submitButtonRef}
         initialQuestionType={formSeed?.questionType}
         initialSport={formSeed?.sport}
         initialMethod={formSeed?.method}
@@ -215,18 +267,25 @@ export function HomePage() {
         initialTeamB={formSeed?.teamB}
         initialUserTeam={formSeed?.userTeam}
       />
-      {state && (
-        <VerdictCard
-          state={state}
-          onSelectYear={handleSelectYear}
-          onSelectCandidate={handleSelectCandidate}
-          shareUrl={
-            state.status === 'success' && submission !== null
-              ? `${window.location.origin}/?${toShareSearch(submission)}`
-              : undefined
-          }
-        />
-      )}
+      <VerdictModal
+        open={state !== null}
+        title="The verdict"
+        closeLabel="Close the verdict"
+        onClose={closeVerdict}
+      >
+        {state && (
+          <VerdictCard
+            state={state}
+            onSelectYear={handleSelectYear}
+            onSelectCandidate={handleSelectCandidate}
+            shareUrl={
+              state.status === 'success' && submission !== null
+                ? `${window.location.origin}/?${toShareSearch(submission)}`
+                : undefined
+            }
+          />
+        )}
+      </VerdictModal>
     </main>
   )
 }

@@ -27,6 +27,14 @@ async function chooseElo(page: Page) {
     .check()
 }
 
+/**
+ * The verdict, inside the verdict modal (issue #198). The modal is a dialog
+ * too, so rating panels are counted inside the verdict, not across the page.
+ */
+function verdictIn(page: Page): Locator {
+  return page.getByRole('dialog', { name: 'The verdict' }).getByRole('article')
+}
+
 /** Hovers a rating trigger and returns the ledger dialog named for `teamName`. */
 async function openLedger(
   page: Page,
@@ -34,11 +42,11 @@ async function openLedger(
   teamName: string,
 ): Promise<Locator> {
   await trigger.hover()
-  const dialog = page.getByRole('dialog', {
+  const dialog = verdictIn(page).getByRole('dialog', {
     name: `${teamName} Elo rating, game by game`,
   })
   await expect(dialog).toBeVisible()
-  await expect(page.getByRole('dialog')).toHaveCount(1)
+  await expect(verdictIn(page).getByRole('dialog')).toHaveCount(1)
   return dialog
 }
 
@@ -139,6 +147,6 @@ test('an Elo comparison of Texas and USC in 2005 shows each team’s own ledger,
 
     // Pointer away, so this popover can't cover the next team's trigger.
     await page.mouse.move(0, 0)
-    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect(verdictIn(page).getByRole('dialog')).toHaveCount(0)
   }
 })

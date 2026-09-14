@@ -52,7 +52,13 @@ export function toShareSearch(submission: QuestionSubmission): string {
     params.set('a', submission.teamA)
     params.set('b', submission.teamB)
   }
-  if (submission.userTeam !== null && submission.userTeam.trim() !== '') {
+  // Issue #198: the champion question has no user team, so its link never
+  // carries one, whatever the submission holds.
+  if (
+    submission.questionType !== 'champion' &&
+    submission.userTeam !== null &&
+    submission.userTeam.trim() !== ''
+  ) {
     params.set('for', submission.userTeam)
   }
   return params.toString()
@@ -85,13 +91,30 @@ export function fromShareSearch(search: string): QuestionSubmission | null {
   const sport = read('sport')
   const method = read('engine')
   const rawYear = read('year')
-  const forTeam = read('for')
   if (
     !isSport(sport) ||
     !isDisplayedMethod(method) ||
-    !FOUR_DIGIT_YEAR.test(rawYear) ||
-    (forTeam !== '' && !isPlainTeamName(forTeam))
+    !FOUR_DIGIT_YEAR.test(rawYear)
   ) {
+    return null
+  }
+
+  // Issue #198: the champion question has no user team. `for` on a champion
+  // link -- #184 minted them -- is ignored outright, not validated, so every
+  // such link still opens, and a malformed `for` can't reach the narrator
+  // through it.
+  if (questionType === 'champion') {
+    return {
+      questionType,
+      year: Number(rawYear),
+      userTeam: null,
+      sport,
+      method,
+    }
+  }
+
+  const forTeam = read('for')
+  if (forTeam !== '' && !isPlainTeamName(forTeam)) {
     return null
   }
   const base = {
@@ -101,9 +124,6 @@ export function fromShareSearch(search: string): QuestionSubmission | null {
     method,
   }
 
-  if (questionType === 'champion') {
-    return { questionType, ...base }
-  }
   if (questionType === 'team_case') {
     const team = read('team')
     return isPlainTeamName(team) ? { questionType, team, ...base } : null

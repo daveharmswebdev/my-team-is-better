@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, Ref } from 'react'
 import { fetchTeams, fetchYears } from '../../lib/api/client'
 import { SPORTS } from '../../lib/api/types'
 import type { Method, Sport, TeamDetail } from '../../lib/api/types'
@@ -81,6 +81,11 @@ export interface QuestionFormProps {
    * stored team exactly as before.
    */
   initialUserTeam?: string | null
+  /**
+   * The "Get the verdict" button, for a parent that has to put focus back
+   * on it: `HomePage` does, when its verdict modal closes (issue #198).
+   */
+  submitButtonRef?: Ref<HTMLButtonElement>
 }
 
 /**
@@ -431,6 +436,7 @@ export function QuestionForm({
   initialTeamA,
   initialTeamB,
   initialUserTeam,
+  submitButtonRef,
 }: QuestionFormProps) {
   const questionTypeId = useId()
   const sportName = useId()
@@ -626,7 +632,10 @@ export function QuestionForm({
       onSubmit({
         questionType: 'champion',
         year: parsedYear,
-        userTeam: submissionUserTeam,
+        // Issue #198: the best-team question has no "your team" field. A
+        // saved or seeded team stays in state for the other two questions,
+        // and is never sent with this one.
+        userTeam: null,
         sport,
         method,
       })
@@ -845,30 +854,37 @@ export function QuestionForm({
         </div>
       )}
 
-      <div className={styles.casual}>
-        <TeamCombobox
-          label="Your team (optional)"
-          teams={teamCatalog.teams}
-          value={userTeam}
-          onChange={handleUserTeamChange}
-          placeholder={teamPlaceholder}
-          hint={`${USER_TEAM_PRIVACY_HINT} ${teamHint}`}
-        />
-        {isOutOfScope(userTeam) && (
-          <StaleTeamNotice
-            // A seeded team was never saved here, so the label must not
-            // promise to forget a saved one (issue #184).
-            clearLabel={
-              userTeamIsSeeded ? 'Clear this team' : 'Clear your saved team'
-            }
-            value={userTeam.trim()}
-            scope={catalogScope}
-            onClear={clearUserTeam}
+      {/* Issue #198: not on the best-team question, whose fact block holds
+          only the #1 team -- the allegiance it would set has nothing to show.
+          Hidden, not cleared: the value (saved or seeded) comes back with the
+          field on team_case and compare. */}
+      {questionType !== 'champion' && (
+        <div className={styles.casual}>
+          <TeamCombobox
+            label="Your team (optional)"
+            teams={teamCatalog.teams}
+            value={userTeam}
+            onChange={handleUserTeamChange}
+            placeholder={teamPlaceholder}
+            hint={`${USER_TEAM_PRIVACY_HINT} ${teamHint}`}
           />
-        )}
-      </div>
+          {isOutOfScope(userTeam) && (
+            <StaleTeamNotice
+              // A seeded team was never saved here, so the label must not
+              // promise to forget a saved one (issue #184).
+              clearLabel={
+                userTeamIsSeeded ? 'Clear this team' : 'Clear your saved team'
+              }
+              value={userTeam.trim()}
+              scope={catalogScope}
+              onClear={clearUserTeam}
+            />
+          )}
+        </div>
+      )}
 
       <button
+        ref={submitButtonRef}
         className={`${styles.btn} ${styles.btnPrimary}`}
         type="submit"
         // The live year, not the debounced one: the button must never be
