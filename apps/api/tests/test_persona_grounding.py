@@ -498,3 +498,153 @@ def test_w_l_t_fabricated_record_in_a_comparison_is_still_flagged(
     assert _check(nfl_conn, response, block, "nfl") == [
         "Kilo Kings's score should be stated 17-17, not 1-0"
     ]
+
+
+# ---------------------------------------------------------------------------
+# issue #181: two fabrications that passed production grounding but not the
+# independent smoke-eval checker. (1) A score pair in a sentence naming no
+# team, whose numbers each occur somewhere in the block but never as one game
+# ("They beat them 42-25."). (2) A subject record stated out of order, as a
+# W-L-T ("0-13-0") or a W-L ("0-13") for a 13-0-0 team. Every block here is
+# the real one the service hands Claude, from the committed fixture. 2005
+# Texas is 13-0-0 and USC 12-1-0; 42 and 25 both occur in each block, but
+# neither 42-25 nor 25-42 is a game (2019 LSU-Clemson was 42-25, so 2019 is
+# not used). Each "stays grounded" probe is a real fact-block claim that one
+# of the new rules could otherwise misread as a fabrication.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def texas_2005_case(cfb_conn: sqlite3.Connection) -> str:
+    return _team_case_block(cfb_conn, 2005, "Texas", "cfb")
+
+
+@pytest.fixture
+def texas_usc_2005(cfb_conn: sqlite3.Connection) -> str:
+    return _comparison_block(cfb_conn, 2005, "Texas", "USC", "cfb")
+
+
+# --- (1) a score pair in a sentence that names no team ----------------------
+
+
+@pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
+def test_unnamed_sentence_score_mixing_numbers_from_different_rows_is_flagged(
+    cfb_conn: sqlite3.Connection, block_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    block: str = request.getfixturevalue(block_fixture)
+    response = "Texas went 13-0 in 2005. They beat them 42-25."
+
+    assert _check(cfb_conn, response, block, "cfb") == [
+        "42-25 is not a score from any game in the facts"
+    ]
+
+
+@pytest.mark.parametrize("score", ["41-38", "38-41"])
+def test_unnamed_sentence_real_game_score_in_either_order_is_grounded(
+    cfb_conn: sqlite3.Connection, texas_2005_case: str, score: str
+) -> None:
+    """The Rose Bowl, 41-38, said from either side: which side is said first
+    is attribution, which a sentence naming no team can't be held to."""
+    response = f"Texas went 13-0 in 2005. They won it {score}."
+
+    assert _check(cfb_conn, response, texas_2005_case, "cfb") == []
+
+
+def test_unnamed_sentence_breakdown_record_in_order_is_grounded(
+    cfb_conn: sqlite3.Connection, texas_2005_case: str
+) -> None:
+    """2005 Texas's `rating_breakdown` carries a 2-0 series record against one
+    opponent. 2-0 is no game score (either order) and no pair in a string
+    value, so only the any-object (wins, losses) allowance grounds it."""
+    response = "Texas went 13-0 in 2005. They went 2-0 against that one opponent."
+
+    assert _check(cfb_conn, response, texas_2005_case, "cfb") == []
+
+
+def test_unnamed_sentence_score_pair_inside_a_string_value_is_grounded(
+    cfb_conn: sqlite3.Connection, texas_usc_2005: str
+) -> None:
+    """The 2005 comparison's explanation strings quote 42-17, which is no game
+    tuple in that block and no (wins, losses): only the string-value
+    allowance grounds it."""
+    response = "Texas went 13-0 in 2005. That one ended 42-17."
+
+    assert _check(cfb_conn, response, texas_usc_2005, "cfb") == []
+
+
+# --- (2) a subject record stated out of order -------------------------------
+
+
+@pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
+def test_w_l_t_subject_record_stated_out_of_order_is_flagged(
+    cfb_conn: sqlite3.Connection, block_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    block: str = request.getfixturevalue(block_fixture)
+    response = "Texas went 0-13-0 in 2005."
+
+    assert _check(cfb_conn, response, block, "cfb") == ["the record 0-13-0 should be stated 13-0-0"]
+
+
+def test_w_l_t_record_matching_no_subject_either_way_is_flagged(
+    cfb_conn: sqlite3.Connection, texas_2005_case: str
+) -> None:
+    response = "Texas went 13-1-0 in 2005."
+
+    assert _check(cfb_conn, response, texas_2005_case, "cfb") == [
+        "the record 13-1-0 does not match a stated record"
+    ]
+
+
+@pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
+def test_w_l_t_subject_record_in_order_is_grounded(
+    cfb_conn: sqlite3.Connection, block_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    block: str = request.getfixturevalue(block_fixture)
+    response = "Texas went 13-0-0 in 2005."
+
+    assert _check(cfb_conn, response, block, "cfb") == []
+
+
+@pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
+def test_w_l_subject_record_stated_out_of_order_is_flagged(
+    cfb_conn: sqlite3.Connection, block_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    """One string, not also the named-sentence relational "Texas 0-13" the
+    comparison block used to produce."""
+    block: str = request.getfixturevalue(block_fixture)
+    response = "Texas went 0-13 in 2005."
+
+    assert _check(cfb_conn, response, block, "cfb") == ["the record 0-13 should be stated 13-0"]
+
+
+def test_second_compared_teams_record_stated_out_of_order_is_flagged(
+    cfb_conn: sqlite3.Connection, texas_usc_2005: str
+) -> None:
+    response = "USC went 1-12 in 2005."
+
+    assert _check(cfb_conn, response, texas_usc_2005, "cfb") == [
+        "the record 1-12 should be stated 12-1"
+    ]
+
+
+@pytest.mark.parametrize("block_fixture", ["texas_2005_case", "texas_usc_2005"])
+def test_w_l_subject_record_out_of_order_in_an_unnamed_sentence_is_flagged(
+    cfb_conn: sqlite3.Connection, block_fixture: str, request: pytest.FixtureRequest
+) -> None:
+    block: str = request.getfixturevalue(block_fixture)
+    response = "They went 0-13 in 2005."
+
+    assert _check(cfb_conn, response, block, "cfb") == ["the record 0-13 should be stated 13-0"]
+
+
+def test_real_game_score_equal_to_a_reversed_record_is_not_read_as_a_record() -> None:
+    """No fixture season has a game whose score is its subject's record
+    reversed, so this is hand-typed: a 3-1 team that lost a game 1-3. "1-3"
+    is that game, said in order, not the record read backwards."""
+    fact_block = (
+        '{"team_name": "Texas", "year": 2005, "wins": 3, "losses": 1, "ties": 0, '
+        '"games": [{"opponent_name": "USC", "team_score": 1, "opponent_score": 3}]}'
+    )
+    response = "Texas went 3-1. They lost one 1-3."
+
+    assert find_ungrounded_tokens(response, fact_block, KNOWN_TEAMS) == []
