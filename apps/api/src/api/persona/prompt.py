@@ -4,8 +4,8 @@ routing rule on persona voice/tone judgment calls). The only parameterized
 pieces are the two `{user_team}`-shaped clauses below, substituted per
 request; when `user_team` is `None` (e.g. a champion request with no team
 named), both clauses are swapped for the coordinator-specified null-case
-wording ("a loud hype man for whoever's #1") rather than leaving a
-literal `{user_team}` placeholder unfilled in the text sent to Claude.
+wording ("a loud hype man for whoever the numbers put on top") rather than
+leaving a literal `{user_team}` placeholder unfilled in the text sent to Claude.
 
 Everything else in `_PERSONA_TEMPLATE` is copied byte-for-byte from the
 brief.

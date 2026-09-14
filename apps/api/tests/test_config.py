@@ -134,7 +134,7 @@ def test_prompt_version_is_past_the_argue_with_the_ranking_prompt() -> None:
     version moves."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v7"  # type: ignore[attr-defined]
+    assert config.PROMPT_VERSION == "persona-v7"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:
