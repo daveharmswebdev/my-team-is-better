@@ -56,7 +56,7 @@
     },
     "tests_run": {
       "type": "array",
-      "description": "Every check you actually executed, in order, with its real result. A TDD red run is recorded with phase red and result fail. On success, every fail or error must be phase red, and an implementation spoke needs at least one passing green or gate run. A read-only agent's success needs at least one entry: an empty list can't be told apart from a run that never happened.",
+      "description": "Every check you actually executed, in order, with its real result. A TDD red run is recorded with phase red and result fail. On an implementation spoke's success, every fail or error must be phase red or sabotage, and it needs at least one passing green or gate run. A read-only agent records each check as it came out, failing ones included, and its success needs at least one entry: an empty list can't be told apart from a run that never happened.",
       "items": {
         "type": "object",
         "required": ["command", "result", "phase"],
@@ -70,8 +70,8 @@
           },
           "phase": {
             "type": "string",
-            "enum": ["red", "green", "gate"],
-            "description": "red = the test written first, expected to fail. green = the same tests after implementing. gate = suite-wide checks (full pytest, mypy, lint, import-linter, dep-cruise, storybook, golden dataset)."
+            "enum": ["red", "green", "sabotage", "gate"],
+            "description": "red = the test written first, expected to fail. green = the same tests after implementing. sabotage = a deliberate break of the implementation that must turn the new tests red (restored afterwards). gate = suite-wide checks (full pytest, mypy, lint, import-linter, dep-cruise, storybook, golden dataset)."
           },
           "detail": {
             "type": "string",
@@ -102,7 +102,8 @@
         "rubric-failed",
         "blocked-by-missing-input",
         "tool-or-environment-failure",
-        "scope-collision"
+        "scope-collision",
+        "brief-mis-scoped"
       ],
       "description": "malformed-return is deliberately absent: only the coordinator assigns it, when a return never validated."
     },

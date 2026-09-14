@@ -131,7 +131,10 @@ def test_claude_md_roles_table_names_only_mapped_agents(real_ownership: Ownershi
     claude_md = (REPO_ROOT / "CLAUDE.md").read_text()
     rows = re.findall(r"^\| `([a-z-]+)` \|", claude_md, re.MULTILINE)
     assert rows, "CLAUDE.md's Roles table has no agent rows"
-    assert set(rows) <= set(real_ownership.agents)
+    assert len(rows) == len(set(rows)), "an agent appears twice in the Roles table"
+    assert set(rows) == set(real_ownership.agents), (
+        "CLAUDE.md's Roles table and .claude/ownership.json must name the same agents"
+    )
 
 
 def test_edit_scope_mode_is_a_known_value(real_ownership: Ownership) -> None:

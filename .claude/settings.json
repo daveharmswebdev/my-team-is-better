@@ -9,7 +9,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --quiet --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_edit_scope.py\"",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_edit_scope.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\"",
             "timeout": 15
           }
         ]
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --quiet --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_bash.py\"",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_bash.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\"",
             "timeout": 15
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --quiet --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/delegation.py\" subagent-stop",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/delegation.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\" subagent-stop",
             "timeout": 60
           }
         ]

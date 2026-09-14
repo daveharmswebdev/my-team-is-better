@@ -318,9 +318,10 @@ def test_hook_blocks_an_invalid_return_with_the_errors_as_feedback(tmp_path: Pat
 
 def test_hook_stops_blocking_after_the_retry_cap(tmp_path: Path) -> None:
     payload = _stop_payload("no json at all", agent_id="agent_stuck")
-    for _ in range(delegation.MAX_RETURN_RETRIES):
+    for retry in range(1, delegation.MAX_RETURN_RETRIES + 1):
         out = delegation.subagent_stop(payload, OWNERSHIP, tmp_path)
         assert out is not None and out["decision"] == "block"
+        assert f"retry {retry} of {delegation.MAX_RETURN_RETRIES}" in out["reason"]
     out = delegation.subagent_stop(payload, OWNERSHIP, tmp_path)
     assert out is not None
     assert "decision" not in out
@@ -339,12 +340,63 @@ def test_hook_surfaces_scope_warnings_without_blocking(tmp_path: Path) -> None:
 # --- CLI ----------------------------------------------------------------------------------
 
 
-def _cli(*args: str) -> subprocess.CompletedProcess[str]:
+def _cli(*args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(HOOKS_DIR / "delegation.py"), *args],
         capture_output=True,
         text=True,
+        input=stdin,
     )
+
+
+def test_cli_validate_return_reads_stdin_so_the_coordinator_needs_no_temp_file() -> None:
+    ok = _cli("validate-return", "--agent", "api-agent", "-", stdin=_fenced(_success()))
+    assert ok.returncode == 0, ok.stderr
+    bad = _cli("validate-return", "--agent", "api-agent", "-", stdin="All done!")
+    assert bad.returncode == 1
+    assert "no fenced" in bad.stderr
+
+
+# --- round-1 review: honest records must validate -----------------------------------
+
+
+def test_implementation_sabotage_runs_may_fail() -> None:
+    data = _success()
+    data["tests_run"].append(
+        {
+            "command": "sabotage: re-raise in get(); uv run pytest -q tests/test_cache_outage.py",
+            "result": "fail",
+            "phase": "sabotage",
+        }
+    )
+    assert _errors(data) == []
+
+
+def test_read_only_success_may_record_a_failing_check() -> None:
+    data = copy.deepcopy(_load("return.validator.success.json"))
+    data["tests_run"].append(
+        {"command": "golden must-match 2019", "result": "fail", "phase": "gate"}
+    )
+    assert _errors(data, agent="validator") == []
+
+
+def test_mis_scoped_brief_is_an_honest_failure() -> None:
+    data = {
+        "status": "failure",
+        "agent": "ratings-agent",
+        "base_sha": "e5aeddc",
+        "head_sha": None,
+        "failure_type": "brief-mis-scoped",
+        "retryable": False,
+        "attempted": "Read the brief: it asks why 2019 ranks wrong with no hypothesis to test.",
+        "partial_results": [],
+        "alternatives": "Coordinator diagnoses first, then briefs a specific change.",
+        "brief_defects": [
+            "No specific hypothesis: open-ended ranking diagnosis is coordinator work."
+        ],
+        "findings": [],
+    }
+    assert _errors(data, agent="ratings-agent") == []
 
 
 def test_cli_render_brief_exits_zero_and_prints_the_prompt() -> None:

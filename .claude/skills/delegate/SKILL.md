@@ -79,9 +79,20 @@ Fix every error it prints. Pass stdout **verbatim** as the Agent prompt, with
 
 ## 6. When the spoke returns
 
-The SubagentStop hook has already validated the return. A "validated" system message
-means the shape is right. A "malformed-return" message means treat the round as failed.
-Shape isn't truth, so before acting:
+The SubagentStop hook has already made the spoke fix an invalid return, up to two
+retries. Its notes go to the user, not to you, so **validate the return yourself** before
+acting. Pipe the spoke's final message in exactly as it came back:
+
+```bash
+uv run --script .claude/hooks/delegation.py validate-return --agent <agent> - <<'RETURN'
+<the spoke's final message>
+RETURN
+```
+
+Exit 1 means the round is `malformed-return`: retry once with a rewritten brief that
+appends the printed errors, or substitute an agent. Printed `warning:` lines are
+`files_changed` outside the spoke's ownership. Exit 0 proves shape, not truth, so before
+acting:
 
 1. Re-run the rubric's gate commands yourself in the checkout that has the change.
 2. Diff against `base_sha`, not `main`, and take only the spoke's own commits or files.

@@ -11,6 +11,7 @@
   "tests_run": [
     { "command": "uv run pytest -q tests/test_persona_cache_outage.py", "result": "fail", "phase": "red" },
     { "command": "uv run pytest -q tests/test_persona_cache_outage.py", "result": "pass", "phase": "green" },
+    { "command": "sabotage: re-raise in the get wrapper; uv run pytest -q tests/test_persona_cache_outage.py", "result": "fail", "phase": "sabotage", "detail": "the 2 get tests red; restored, cmp clean" },
     { "command": "uv run pytest -q", "result": "pass", "phase": "gate", "detail": "414 passed, 8 skipped" },
     { "command": "uv run pytest -q -rs tests/test_persona_smoke_eval.py", "result": "skip", "phase": "gate", "detail": "no ANTHROPIC_API_KEY" },
     { "command": "uv run mypy --strict src/api tests", "result": "pass", "phase": "gate" },

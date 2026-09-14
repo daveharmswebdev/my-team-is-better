@@ -41,7 +41,8 @@ your final message. A hook checks that message when you stop.
 ## Evidence
 
 - **TDD.** Write the failing test first and run it: record that run with `phase: "red"`,
-  `result: "fail"`. Then implement and record the green and gate runs.
+  `result: "fail"`. Then implement and record the green and gate runs. A sabotage run
+  that goes red as intended is recorded with `phase: "sabotage"`, `result: "fail"`.
 - **`tests_run` is a record, not a claim.** Every command you actually executed, in
   order, with its real result. A skipped test is `skip` (e.g. the persona smoke eval
   without a key), not `pass`.
@@ -59,6 +60,7 @@ your final message. A hook checks that message when you stop.
 | You couldn't finish | `status: "failure"` + `failure_type` + `retryable` |
 | The shared interface lacked something | `contract_gaps` (success) or `failure_type: "contract-insufficient"` |
 | The brief itself was wrong (stale count, bad path, false premise) | `brief_defects` — work can still be success |
+| The brief can't be carried out as written (open-ended, self-contradictory, not your job) | `status: "failure"`, `failure_type: "brief-mis-scoped"`, plus `brief_defects` |
 | A defect this round introduced, or a rubric item failing | `findings`, severity `blocking` (if it's in your own work, that's `failure` / `rubric-failed` instead) |
 | A real defect that predates this round | `findings`, severity `pre-existing` |
 | Polish | `findings`, severity `nit` (rarely worth it) |
@@ -66,11 +68,12 @@ your final message. A hook checks that message when you stop.
 `failure_type`: `contract-insufficient` (interface lacks what's needed),
 `rubric-failed` (tried, a rubric check still fails), `blocked-by-missing-input` (data,
 credential, base commit missing), `tool-or-environment-failure` (a tool or env broke),
-`scope-collision` (needs another owner's files). `retryable: true` only if re-running the
-same brief could succeed.
+`scope-collision` (needs another owner's files), `brief-mis-scoped` (the brief can't be
+carried out as written). `retryable: true` only if re-running the same brief could succeed.
 
 Read-only agents (`reviewer`, `validator`): `success` means the checks ran, whatever they
-found — the verdict lives in `findings`, and `tests_run` must list the checks.
+found — the verdict lives in `findings`, and `tests_run` must list the checks. A check
+that fails is recorded as `fail` (phase `gate`) with a matching finding.
 `failure` means you could not check.
 
 ## The final message
@@ -98,5 +101,5 @@ shape:
 ```
 
 If the hook says the return doesn't validate, don't redo the work: fix exactly what it
-lists and send the whole block again. After two failed attempts the coordinator records
-the round as `malformed-return`.
+lists and send the whole block again. You get two retries. If the message after them is
+still invalid, the coordinator records the round as `malformed-return`.

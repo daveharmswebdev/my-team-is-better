@@ -147,10 +147,11 @@ def validate_return(data: object, *, agent_type: str | None, ownership: Ownershi
     if data["status"] == "success":
         runs = data["tests_run"]
         for index, run in enumerate(runs):
-            if run["result"] in ("fail", "error") and run["phase"] != "red":
+            expected_red = run["phase"] in ("red", "sabotage")
+            if not read_only and run["result"] in ("fail", "error") and not expected_red:
                 errors.append(
                     f"tests_run/{index}: result {run['result']!r} in phase {run['phase']!r}. "
-                    "On success only a phase 'red' run may fail: fix it, or return status "
+                    "On success only a red or sabotage run may fail: fix it, or return status "
                     "failure with failure_type rubric-failed"
                 )
         if read_only:
@@ -284,7 +285,7 @@ def subagent_stop(
                 "decision": "block",
                 "reason": (
                     "Your return does not validate against .claude/schemas/return.schema.json "
-                    f"(attempt {attempts} of {MAX_RETURN_RETRIES}). Don't redo the work. Fix "
+                    f"(retry {attempts} of {MAX_RETURN_RETRIES}). Don't redo the work. Fix "
                     "exactly these problems and send the whole return again as one fenced "
                     "```json block with nothing outside it:\n" + _bullets(errors)
                 ),
@@ -343,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         print(render_brief(brief) if args.command == "render-brief" else "brief ok")
         return 0
 
-    text = Path(args.path).read_text()
+    text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
     errors: list[str] = []
     if text.lstrip().startswith("{"):
         data: object = json.loads(text)

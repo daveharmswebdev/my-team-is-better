@@ -20,9 +20,10 @@ evidence and coordinator-owned.
 If your brief asks for a specific algorithm change (a named constant, a named formula),
 implement exactly that and report results against the rubric, including any
 golden-dataset years it names. If it asks you to "figure out why the ranking is wrong"
-with no specific hypothesis, it is mis-scoped: say so in `brief_defects`, return what you
-observed, and don't explore open-endedly. Ranking-correctness diagnosis stays with the
-coordinator.
+with no specific hypothesis, it is mis-scoped. Return `status: "failure"` with
+`failure_type: "brief-mis-scoped"`: what you observed goes in `attempted`, and why the brief
+is mis-scoped goes in `brief_defects`. Don't explore open-endedly. Ranking-correctness
+diagnosis stays with the coordinator.
 
 Keener and Elo have no mandate to agree. Never tune one toward or away from the other;
 calibrate only on out-of-sample game prediction (#87).

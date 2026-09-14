@@ -125,14 +125,19 @@ another (#105).
 | A spoke's edits stay inside its owned paths | PreToolUse `guard_edit_scope.py` | **warn**: a note in the spoke's context plus a log at `<git-common-dir>/claude-hooks/scope-warnings.jsonl`. Flip `edit_scope_mode` to `block` once the log stays clean |
 | No push to `main`; no shared-stash use | PreToolUse `guard_bash.py` | block |
 | Brief shape; scope inside ownership; own scratch dir | `delegation.py render-brief` | block (the brief won't render) |
-| Return shape and its semantic rules | SubagentStop `delegation.py` | block: the spoke gets the errors back, 2 retries, then `malformed-return` |
+| Return shape and its semantic rules | SubagentStop `delegation.py` sends the errors back to the spoke (2 retries); the coordinator re-checks with `delegation.py validate-return` | block; still invalid = `malformed-return` |
 | Agents, ownership map and Roles table agree | `claude-process` CI job | block |
 | No merge-conflict markers land | `claude-process` CI job | block |
 
-What these don't guarantee: Claude Code can't force a subagent's output format, so the
-return check runs after the fact and feeds errors back (retry with feedback). Writes
-through Bash bypass the edit guard; the return check flags `files_changed` outside
-ownership instead. Everything else in this file is prose.
+What these don't guarantee:
+- Claude Code can't force a subagent's output format, so the return check runs after the
+  fact and feeds errors back to the spoke (retry with feedback).
+- A hook's notes reach the user, not the coordinator model, so `/delegate` re-validates
+  every return with the CLI.
+- Writes through Bash bypass the edit guard; the return check flags `files_changed`
+  outside ownership instead.
+
+Everything else in this file is prose.
 
 ---
 
@@ -144,8 +149,10 @@ Use `/delegate`. In short:
    prompt by `delegation.py render-brief`, never hand-written prose. Rendering makes
    every brief the same shape and checks scope, base commit, scratch dir, concurrency
    and, for gate work, the threat model and review-round cap.
-2. **Returns are one fenced JSON block** against `.claude/schemas/return.schema.json`,
-   validated by the SubagentStop hook. Worked examples: `.claude/schemas/examples/`.
+2. **Returns are one fenced JSON block** against `.claude/schemas/return.schema.json`.
+   The SubagentStop hook makes the spoke fix an invalid one, and the coordinator validates
+   it again with `delegation.py validate-return`. Worked examples:
+   `.claude/schemas/examples/`.
 3. **The coordinator tells apart three outcomes:**
    - the round failed: `status: failure` with a `failure_type` and `retryable`;
    - it succeeded: `status: success` with no blocking findings;
@@ -187,6 +194,9 @@ All error handling routes through the coordinator; subagents never retry each ot
 - **`retryable: true`**: one retry with `attempted` and `alternatives` appended.
 - **`contract-insufficient`**: amend the contract, then re-delegate.
 - **`scope-collision`**: split the round by owner.
+- **`brief-mis-scoped`**: the brief asked for something the spoke can't or shouldn't do as
+  written, often diagnosis that belongs with the coordinator. Do that part yourself, then
+  re-brief a specific change.
 - **Review rounds** stop at the gate's `max_review_rounds`; what remains becomes issues.
 
 Silently suppressing a failure (treating an empty result as success) and aborting a whole

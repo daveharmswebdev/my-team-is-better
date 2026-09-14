@@ -28,11 +28,20 @@ from guard_bash import check_command
         ("git push", "main"),
         ("git push origin", "main"),
         ("git push -u origin HEAD", "main"),
+        ("git push --repo=origin main", "feat/x"),
         ("git stash", "feat/x"),
         ("git stash pop", "feat/x"),
         ("git stash push -u", "feat/x"),
         ("git stash drop", "feat/x"),
         ("npm test; git stash pop", "feat/x"),
+        ("npm test\ngit stash pop", "feat/x"),
+        # Found by the round-1 review: keywords and wrappers in front of git.
+        ("if true; then git stash pop; fi", "feat/x"),
+        ("for b in x; do git push origin main; done", "feat/x"),
+        ("timeout 60 git push origin main", "feat/x"),
+        ("nohup git push origin main", "feat/x"),
+        # An apostrophe inside a heredoc body used to switch every check off.
+        ("cat > /tmp/n.md <<'EOF'\nIt's done\nEOF\ngit push origin main", "feat/x"),
     ],
 )
 def test_blocked(command: str, branch: str) -> None:
@@ -52,8 +61,19 @@ def test_blocked(command: str, branch: str) -> None:
         ("git stash drop stash@{2}", "feat/x"),
         ("echo 'git push origin main'", "feat/x"),
         ("gh pr merge 190 --squash", "feat/x"),
+        ("gh pr merge 191 --squash --delete-branch", "feat/x"),
+        ("gh pr create --draft --base main --title 'x'", "feat/x"),
         ("git log --oneline main", "main"),
         ("git fetch origin main", "main"),
+        ("git rebase --onto origin/main 1a2b3c4 feat/x", "feat/x"),
+        ("git worktree add ../wt -b feat/y origin/main", "main"),
+        ("git merge --ff-only bf8b9de", "feat/x"),
+        # Found by the round-1 review: the branch changes earlier in the same command.
+        ("git switch -c feat/new && git push -u origin HEAD", "main"),
+        ("git checkout -b feat/new && git push -u origin HEAD", "main"),
+        # Text that only mentions the forbidden commands: commit messages and heredocs.
+        ("git commit -F - <<'EOF'\nDon't git push origin main\ngit stash pop\nEOF", "feat/x"),
+        ('git commit -m "Subject\n\ngit stash pop is dangerous"', "feat/x"),
     ],
 )
 def test_allowed(command: str, branch: str) -> None:

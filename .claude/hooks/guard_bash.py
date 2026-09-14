@@ -8,13 +8,15 @@ Applies to every session and subagent. `main` can't be protected by GitHub on th
 private repo (CLAUDE.md), and the stash stack is shared by every worktree, so a bare
 `git stash pop` can take another running session's changes.
 
-Threat model: an accidental command written out literally. A command assembled at
-runtime (eval, variables) is out of scope.
+Threat model: an accidental command written out literally, including behind shell
+keywords (`then`, `do`), wrappers (`timeout`, `nohup`, `env`) and after heredocs. A
+command assembled at runtime (eval, variables, aliases) is out of scope.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import subprocess
 import sys
@@ -22,10 +24,17 @@ from pathlib import Path
 
 PROTECTED_BRANCHES = frozenset({"main", "master"})
 
+_SEPARATORS = "();&|\n"
+_PREFIX_WORDS = frozenset(
+    {"!", "{", "builtin", "command", "do", "elif", "else", "env", "exec", "if", "nohup"}
+    | {"sudo", "then", "time", "until", "while"}
+)
 _GIT_OPTIONS_WITH_VALUE = frozenset(
     {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"}
 )
-_PUSH_OPTIONS_WITH_VALUE = frozenset({"-o", "--push-option", "--repo", "--receive-pack", "--exec"})
+_PUSH_OPTIONS_WITH_VALUE = frozenset({"-o", "--push-option", "--receive-pack", "--exec"})
+_CREATE_BRANCH_FLAGS = ("-c", "-C", "-b", "-B", "--create", "--force-create")
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
 
 PUSH_REASON = (
     "Blocked: this pushes to {branch}. main is protected by process on this repo: "
@@ -41,50 +50,68 @@ STASH_REASON = (
 )
 
 
-def _simple_commands(command: str) -> list[list[str]]:
-    commands: list[list[str]] = []
-    for line in command.splitlines() or [command]:
-        lexer = shlex.shlex(line, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        current: list[str] = []
-        try:
-            for token in lexer:
-                if token and all(char in "();&|" for char in token):
-                    commands.append(current)
-                    current = []
-                else:
-                    current.append(token)
-        except ValueError:  # unbalanced quotes: a multi-line string; parse it whole instead
-            return _simple_commands_whole(command)
-        commands.append(current)
-    return [c for c in commands if c]
+def _strip_heredoc_bodies(command: str) -> str:
+    """Drop heredoc bodies: they are data (commit messages, file contents), not commands."""
+    kept: list[str] = []
+    pending: list[tuple[str, bool]] = []
+    for line in command.split("\n"):
+        if pending:
+            delimiter, tabs_allowed = pending[0]
+            if (line.lstrip("\t") if tabs_allowed else line) == delimiter:
+                pending.pop(0)
+            continue
+        kept.append(line)
+        pending.extend((m.group(3), m.group(1) == "-") for m in _HEREDOC.finditer(line))
+    return "\n".join(kept)
 
 
-def _simple_commands_whole(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+def _tokenize(text: str) -> list[list[str]] | None:
+    """Split into simple commands on ; & | ( ) and newlines; None on unbalanced quotes."""
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=_SEPARATORS + "<>")
+    lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
+    lexer.commenters = ""
     commands: list[list[str]] = [[]]
     try:
         for token in lexer:
-            if token and all(char in "();&|" for char in token):
+            if token and all(char in _SEPARATORS for char in token):
                 commands.append([])
             else:
                 commands[-1].append(token)
     except ValueError:
-        return []
+        return None
     return [c for c in commands if c]
+
+
+def _simple_commands(command: str) -> list[list[str]]:
+    text = _strip_heredoc_bodies(command)
+    whole = _tokenize(text)
+    if whole is not None:
+        return whole
+    commands: list[list[str]] = []  # unbalanced quotes somewhere: best effort, line by line
+    for line in text.split("\n"):
+        commands.extend(_tokenize(line) or [])
+    return commands
+
+
+def _is_assignment(token: str) -> bool:
+    name, sep, _ = token.partition("=")
+    return bool(sep) and name.isidentifier()
 
 
 def _strip_prefixes(tokens: list[str]) -> list[str]:
     index = 0
     while index < len(tokens):
         token = tokens[index]
-        if token == "env" or (
-            "=" in token and not token.startswith("-") and token.split("=", 1)[0].isidentifier()
-        ):
+        if token in _PREFIX_WORDS or _is_assignment(token):
             index += 1
-            continue
-        break
+        elif token == "timeout":
+            index += 1
+            while index < len(tokens) and tokens[index].startswith("-"):
+                index += 1
+            index += 1  # the duration
+        else:
+            break
     return tokens[index:]
 
 
@@ -100,20 +127,38 @@ def _git_subcommand(tokens: list[str]) -> tuple[str, list[str]] | None:
     return tokens[index], tokens[index + 1 :]
 
 
+def _branch_after_switch(args: list[str], branch: str | None) -> str | None:
+    if "--" in args:  # `git checkout -- <file>` restores files; the branch is unchanged
+        return branch
+    for flag in _CREATE_BRANCH_FLAGS:
+        if flag in args:
+            position = args.index(flag) + 1
+            return args[position] if position < len(args) else None
+    positional = [arg for arg in args if not arg.startswith("-")]
+    return positional[0] if positional else branch
+
+
 def _push_reason(args: list[str], current_branch: str | None) -> str | None:
     positional: list[str] = []
+    remote_given_as_option = False
     index = 0
     while index < len(args):
         arg = args[index]
         if arg in ("--mirror", "--all"):
             return PUSH_REASON.format(branch=f"every branch ({arg}), including main")
-        if arg in _PUSH_OPTIONS_WITH_VALUE:
+        if arg == "--repo":
+            remote_given_as_option = True
             index += 2
             continue
-        if not arg.startswith("-"):
+        if arg.startswith("--repo="):
+            remote_given_as_option = True
+        elif arg in _PUSH_OPTIONS_WITH_VALUE:
+            index += 2
+            continue
+        elif not arg.startswith("-"):
             positional.append(arg)
         index += 1
-    refspecs = positional[1:]
+    refspecs = positional if remote_given_as_option else positional[1:]
     destinations: list[str | None] = []
     if not refspecs:
         destinations.append(current_branch)
@@ -150,13 +195,16 @@ def _stash_blocked(args: list[str]) -> bool:
 
 def check_command(command: str, current_branch: str | None) -> str | None:
     """The reason to block `command`, or None to let it run."""
+    branch = current_branch
     for tokens in _simple_commands(command):
         parsed = _git_subcommand(tokens)
         if parsed is None:
             continue
         subcommand, args = parsed
-        if subcommand == "push":
-            reason = _push_reason(args, current_branch)
+        if subcommand in ("switch", "checkout"):
+            branch = _branch_after_switch(args, branch)
+        elif subcommand == "push":
+            reason = _push_reason(args, branch)
             if reason:
                 return reason
         elif subcommand == "stash" and _stash_blocked(args):
