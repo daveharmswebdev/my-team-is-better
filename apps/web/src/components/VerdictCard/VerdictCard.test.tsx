@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
 import { VerdictCard } from './VerdictCard'
 
@@ -146,7 +147,7 @@ describe('VerdictCard', () => {
         'error',
         {
           status: 'error',
-          error: { kind: 'network_error', message: 'Could not reach the API.' },
+          error: { kind: 'network_error', message: NETWORK_ERROR_COPY },
         },
       ],
     ] as const)(
@@ -284,13 +285,11 @@ describe('VerdictCard', () => {
       <VerdictCard
         state={{
           status: 'error',
-          error: { kind: 'network_error', message: 'Could not reach the API.' },
+          error: { kind: 'network_error', message: NETWORK_ERROR_COPY },
         }}
       />,
     )
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      /could not reach the api/i,
-    )
+    expect(screen.getByRole('alert')).toHaveTextContent(NETWORK_ERROR_COPY)
   })
 })

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
+import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
 import { TEXAS_ELO, USC_ELO } from '../EvidenceReceipts/eloLedgerFixture'
 import { VerdictCard } from './VerdictCard'
@@ -350,8 +351,7 @@ export const NetworkError: Story = {
       status: 'error',
       error: {
         kind: 'network_error',
-        message:
-          'Could not reach the API. Check your connection and try again.',
+        message: NETWORK_ERROR_COPY,
       },
     },
   },
