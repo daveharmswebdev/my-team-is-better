@@ -416,12 +416,21 @@ browser URL is always the current question's link.
   - the engine must be displayed
   - anything else yields no fetch
 
-  The API does not yet enforce the same bounds for direct requests (#188,
-  #189).
-- **Never writes the recipient's storage.** A link's `for` seeds the "Your
-  team" field without touching `localStorage`, until the visitor edits it.
+  For direct requests, the API caps `user_team` at 64 characters (a 422) and
+  resolves it against the request sport's team catalog, ignoring case and
+  surrounding whitespace. An unknown value becomes `null` rather than a 422,
+  so a stale saved team never breaks a verdict (#188). `year` is not yet
+  bounded (#189), and nothing is rate-limited (#236).
+- **Champion links carry no `for`.** The best-team question has no user team
+  (#198). `toShareSearch` omits `for` from champion links, and
+  `fromShareSearch` ignores it on the champion links #184 minted, without
+  validating it. This is the one deliberate break of the append-only format:
+  those old links still open, but they lose their team.
+- **Never writes the recipient's storage.** On a team-case or compare link,
+  `for` seeds the "Your team" field without touching `localStorage`, until
+  the visitor edits it.
 - **Re-asks, so the text can change.** The narration cache usually returns
-  the same text (the key includes `user_team` byte for byte). A
+  the same text (the key includes the resolved, canonical `user_team`). A
   `PROMPT_VERSION` bump or an uncached fallback (#187) gives a fresh
   generation. Stored copies (#186) and per-verdict Open Graph previews (#185)
   are deferred.
