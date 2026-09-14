@@ -67,7 +67,10 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # persona-v4 (issue #162): the prompt changed -- rule 1 now lets the narrator
 # round a `rating` or `opponent_rating` (and nothing else), matching the
 # grounding check.
-PROMPT_VERSION = "persona-v4"
+# persona-v5 (issue #165): the prompt changed -- rule 1 now says a Keener
+# rating may be quoted the way the site displays it (scaled and rounded, per
+# `api.rating_display.RATING_DISPLAY`), matching the grounding check.
+PROMPT_VERSION = "persona-v5"
 
 CONTESTED_YEARS: set[int] = {2003, 2017}
 

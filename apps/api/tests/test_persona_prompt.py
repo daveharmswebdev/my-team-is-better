@@ -10,6 +10,10 @@ suite being brittle to incidental whitespace changes.
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
+import pytest
+
 from api.persona.prompt import build_system_prompt, build_user_message
 
 
@@ -55,6 +59,40 @@ def test_rule_1_permits_rounding_ratings_and_nothing_else() -> None:
 
         assert _RULE_1_WITH_RATING_ROUNDING in prompt
         assert "round differently" not in prompt
+
+
+_RULE_1_KEENER_DISPLAY = (
+    "   fewer decimal places (an Elo rating of 1933.19 can be said as 1933).\n"
+    "   A Keener rating may also be quoted the way the site displays it:\n"
+    "   multiplied by 1000 and shown to 2 decimal places (0.005044 is 5.04).\n"
+    "2. Never contradict"
+)
+
+
+def test_rule_1_permits_quoting_a_keener_rating_as_the_site_displays_it() -> None:
+    # issue #165: grounding accepts a Keener rating at its display value, but
+    # the narrator only sees the raw rating, so the prompt has to say how the
+    # site displays it -- immediately after #162's rounding exception.
+    for user_team in ("Texas", None):
+        assert _RULE_1_KEENER_DISPLAY in build_system_prompt(user_team)
+
+
+def test_rule_1_keener_display_follows_rating_display(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The scale, precision and example are rendered from RATING_DISPLAY, not
+    # typed into the template.
+    import api.rating_display as rating_display
+
+    patched = dict(rating_display.RATING_DISPLAY)
+    patched["keener"] = rating_display.RatingDisplay(scale=100, decimals=3)
+    monkeypatch.setattr(rating_display, "RATING_DISPLAY", MappingProxyType(patched))
+
+    prompt = build_system_prompt("Texas")
+
+    assert (
+        "   A Keener rating may also be quoted the way the site displays it:\n"
+        "   multiplied by 100 and shown to 3 decimal places (0.005044 is 0.504).\n"
+    ) in prompt
+    assert "1000" not in prompt
 
 
 def test_prompt_includes_the_worked_examples() -> None:
