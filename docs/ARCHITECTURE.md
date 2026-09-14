@@ -434,7 +434,15 @@ never a subclass.
       row from its own stored fields, so the panel can't drift into
       decoration.
     - **Scope.** `elo_career` has no ledger yet (its steps would need
-      offseason reversion). The UI shows it an explainer instead.
+      offseason reversion). The Engine toggle doesn't offer it, so the
+      career explainer in `RATING_BREAKDOWN_BY_METHOD` is typed but
+      unreachable from the UI.
+    - **A missing ledger is never an invented panel.** If an Elo response's
+      `elo_ledger` is null (a stale db or API), the receipts print the plain
+      rating with a per-team "isn't available right now" note.
+    - **Rounding is disclosed.** The panel prints rounded figures, so redoing
+      a row's arithmetic with them can come out a few tenths off. The
+      footnote says so; the engine's values chain exactly.
   - **The persona fact block excludes `elo_ledger`.** Whether a narrator may
     quote ledger figures is the same open question as #175's Keener panel
     figures, so narration inputs and grounding are unchanged.
