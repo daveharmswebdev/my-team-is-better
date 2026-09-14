@@ -1,7 +1,9 @@
 # Architecture Brief — My Team Is Better
 
 Companion to `docs/PRD.md`. Assumes that PRD's scope decisions (structured
-questions with a bounded pushback follow-up, 1998–present, Keener-only for MVP).
+questions, 1998–present, guest-first). The pushback follow-up (§4.6) and
+accounts (§5) are designed here but deferred (#202, #201). Keener was the
+MVP's only rating method; §6 covers the methods added since.
 
 Where a decision is explicitly borrowed from `claude-architect/docs/exam-guide.md`,
 it's cited inline as `(Domain N.M)` — not because the exam matters here, but
@@ -18,10 +20,10 @@ flowchart LR
     API -->|direct Python call, read-only| ENGINE[cfb_strength.evidence<br/>packages/cfb-engine]
     ENGINE --> DB[(SQLite<br/>games/ratings/teams<br/>build-time artifact)]
     API -->|facts + persona prompt, no tools| CLAUDE[Claude API]
-    U -->|2. pushback + resent thread context| API
-    API -->|tool_choice: auto, capped loop| CLAUDE2[Claude API<br/>same model, tools attached]
+    U -.->|2. pushback, deferred - issue 202| API
+    API -.->|tool_choice: auto, capped loop| CLAUDE2[Claude API<br/>same model, tools attached]
     CLAUDE2 -.->|tool_use: get_team_season etc.| ENGINE
-    API <-->|accounts, history, response cache| PG[(Postgres<br/>Render managed)]
+    API <-->|response cache; accounts + history deferred - issue 201| PG[(Postgres<br/>Render managed)]
     AGENT[External agents<br/>Claude Desktop, etc.] -.->|tool + resource calls, unchanged| MCP[cfb-strength MCP server<br/>packages/cfb-engine]
     MCP --> DB
 ```
@@ -123,7 +125,7 @@ suite's own convention of not importing `ratings`/`ingest` is documented in
 | Store | Contents | Lifecycle | Why |
 |---|---|---|---|
 | **SQLite** (`cfb-engine`'s existing schema, unchanged) | `teams`, `team_season`, `games`, `ratings`, `ingestion_log` | Rebuilt fresh by the Render **build command** on every deploy | This is reference data — it doesn't change per-request, doesn't need a network round trip, and paying for a managed Postgres instance just to serve read-mostly rankings would be waste for a hobby-budget app. |
-| **Postgres** (Render managed) | accounts (via auth provider's user id), favorite team, question history, **persona response cache** | Runtime, mutable, grows with usage | This is genuinely dynamic app state — the one thing that has to be a real database. |
+| **Postgres** (Render managed) | **persona response cache** today; accounts (via auth provider's user id), favorite team and question history once accounts are built (deferred, #201) | Runtime, mutable, grows with usage | This is genuinely dynamic app state — the one thing that has to be a real database. |
 
 ### 3.1 Where the SQLite file actually lives (verified against Render's docs)
 
@@ -257,6 +259,21 @@ don't actually improve precision):
   trusting the model's narration (Domain 5.6: preserve the claim-source
   mapping instead of letting the generation step be the only surface).
 
+**Redesign decided (founder, 2026-09-14; epic #199).** The post-generation
+check above is how grounding works today, and matching numbers in free text
+after the fact is the root cause of the grounding issue cluster: it can't tell
+which team a number is said about. The accepted direction is typed claims.
+
+- The narrator returns placeholders or claims (`{kind: score|record|rating|rank,
+  team, ...}`) through tool use, used for structured output only. It still
+  gets no lookup tools, so §4.1's rule stands.
+- The server validates each claim against the `TeamCaseOut` /
+  `ComparisonResultOut` models and renders the number itself.
+- The lexical check shrinks to "no digits outside placeholders".
+
+A timeboxed spike (#200) decides go/no-go first. Until the epic lands, no new
+grounding patches, security fixes excepted.
+
 ### 4.4 Error handling as persona copy (Domain 2.2, 5.3)
 
 The existing MCP server already returns structured, typed errors instead of
@@ -339,12 +356,18 @@ verdict's fact block *plus* whatever this turn's tool calls actually
 returned — still nothing invented, just a larger, dynamically-assembled set
 of "things Claude is allowed to have said."
 
-**Not built for MVP unless the founder wants it there day one**: the turn
-cap, tool-call cap, and exact tool schema names are implementation details
-to settle when this gets built, not open architecture questions — the
-pattern above is the answer regardless of when it's scheduled.
+**Deferred (founder decision, 2026-09-14; #202).** Not built, and sequenced
+after the grounding redesign (#199): the honesty check above would otherwise
+inherit today's matcher's misattribution gaps on a larger, dynamic fact set.
+The turn cap, tool-call cap, and exact tool schema names are implementation
+details to settle when this gets built, not open architecture questions —
+the pattern above is the answer regardless of when it's scheduled.
 
 ## 5. Accounts — guest-first, optional upgrade
+
+**Status: deferred, not built (founder decision, 2026-09-14; #201).** Guest
+mode is the whole product today. The design below stands for when accounts
+are scheduled.
 
 No credential is ever required to ask a question (PRD §5.3). This shapes the
 backend and data model:
@@ -518,8 +541,9 @@ Single `render.yaml` blueprint:
   against the committed `data/raw/` cache (§3.1) so the SQLite reference
   data is baked into every deploy with zero live CFBD calls.
 - **Postgres** — Render managed instance, **entry-level paid plan
-  (Basic-256mb, ~$6–7/mo) from day one**, for accounts/history/persona
-  cache.
+  (Basic-256mb, ~$6–7/mo) from day one**. Today it holds only the persona
+  narration cache; accounts and history are deferred (#201). Its Blueprint
+  declaration has drifted (#53).
 
 **Two Render tier facts that drove both paid-plan decisions, verified
 against current pricing and policy:**
@@ -534,9 +558,19 @@ entry-level paid tiers), independent of Claude API usage (PRD §6's
 cache/model-choice cost controls still apply on top of this) and independent
 of the domain (`my-team-is-better.lol`, already purchased separately).
 
-Environment variables: `ANTHROPIC_API_KEY`, `CFBD_API_KEY` (build-time
-ingest only, not needed at runtime), `DATABASE_URL` (Postgres), auth
-provider secret.
+Environment variables:
+
+- `ANTHROPIC_API_KEY`: the narrator's Claude calls (runtime).
+- `CFBD_API_KEY`: build-time ingest only, not needed at runtime.
+- `DATABASE_URL`: Postgres, for the persona narration cache.
+- `CORS_ALLOWED_ORIGINS`: the web origins allowed to call the API.
+- `VITE_API_BASE_URL`: web build time; where the SPA finds the API.
+- `APP_TEST_MODE`: the API uses an in-memory cache and a stub narrator
+  (tests and e2e only, never production).
+- `CFB_DATA_DIR`, `CFB_DB_PATH`: override the engine's data directory and
+  SQLite file (defaults `data/` and `data/cfb.sqlite3`).
+- `MY_TEAM_IS_BETTER_API_ENV_FILE`: an alternate `.env` path for local API dev.
+- An auth provider secret, once accounts are built (#201).
 
 ## 8. CI (`.github/workflows/ci.yml`)
 
@@ -557,6 +591,14 @@ Extends the engine's existing checks rather than replacing them:
   no banned-word hits. This is the persona's answer to Domain 4.6's
   "independent review instance" idea — a cheap automated check standing in
   for the human review loop this project doesn't otherwise have.
+  **Decided 2026-09-14 (#203):** add an `ANTHROPIC_API_KEY` Actions secret
+  and run it on PRs that touch persona paths, plus nightly on `main`. Until
+  that lands, the CI step skips.
+- **e2e** (Playwright, `apps/web/e2e/`): blocking since 2026-09-14. CI
+  retries a failed spec twice, which hides flakes (#197). Coverage beyond
+  2005's happy paths is #204.
+
+The rest of this section predates later CI jobs; #224 tracks the rewrite.
 
 ## 9. Explicit non-goals for this brief
 

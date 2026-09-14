@@ -31,7 +31,8 @@ professional network (portfolio/demo use), not a marketing push.
 
 ## 3. Core experience
 
-1. User picks (or the app remembers via account) **their team**.
+1. User picks **their team** (remembered on this device; accounts that sync
+   it are deferred, see §5.3).
 2. User asks one of a small set of supported question types (structured form,
    not free-text NLP — see §5).
 3. The app computes the real answer deterministically, then a persona —
@@ -114,6 +115,12 @@ prompt-design detail, not a product blocker.
 
 ### 5.1a Push back on the take (bounded debate follow-up)
 
+> **Deferred, not built** (founder decision, 2026-09-14; #202). It is
+> sequenced after the grounding redesign (#199), because its honesty check
+> would extend grounding to live tool results, which today's after-the-fact
+> matcher can't check reliably. The design below stands for when it's
+> scheduled.
+
 A real bar-stool argument doesn't stop at the first answer — "no way, what
 was Ohio State's actual record in 2007? who'd they even play?" is exactly
 the reaction this app should invite, not dodge. So every verdict card gets a
@@ -142,6 +149,9 @@ small. Historical pre-1998 seasons are a plausible v2, not a launch blocker.
 
 ### 5.3 Accounts — guest-first, never a wall
 
+> **Status (2026-09-14):** guest mode is built and is the whole product
+> today. The optional account below is **deferred, not built** (#201).
+
 Nobody is forced to sign in or hand over credentials to ask a question. Guest
 mode is the default, first-class experience, not a degraded fallback:
 
@@ -160,9 +170,9 @@ mode is the default, first-class experience, not a degraded fallback:
 accounts cost real money (~$6–7/mo, entry-level paid instance) from the day
 they're turned on, there's no free way to have them. Founder is willing to
 spend at the entry level to keep account data actually persistent, so
-accounts ship **from day one, on paid Postgres**, as originally scoped —
-guest mode stays the default first-class path, but there's no $0/month
-period where accounts silently don't work.
+when accounts ship, they ship on paid Postgres, never on a free instance that
+silently expires. Accounts were deferred on 2026-09-14 (#201); the paid
+instance runs today and holds only the persona narration cache.
 
 No further profile/social features (no following other users, no public
 leaderboards, no comments) for MVP.
@@ -171,8 +181,8 @@ leaderboards, no comments) for MVP.
 
 The **initial verdict** is single-shot and stateless — one structured
 question in, one cached answer out, no server-side memory (§5.1). The
-**pushback follow-up** (§5.1a) is the one place this app has real
-conversation: the backend still doesn't need a database session for it,
+**pushback follow-up** (§5.1a, deferred, #202) would be the one place this
+app has real conversation: the backend still doesn't need a database session for it,
 though — the client resends the verdict's fact block plus the running
 follow-up exchange with each pushback, so the server stays logically
 stateless per request even though the *conversation* has turns (the "case
@@ -238,7 +248,7 @@ prominently is a founder value, not a legal-minimum afterthought:
   be cache-served) and should default to the cheapest Claude model that can
   hold the persona voice, since the hard reasoning is already done
   deterministically before Claude is ever called. Pushback follow-ups
-  (§5.1a) are the deliberate exception — they're not cacheable the same way
+  (§5.1a, deferred) will be the deliberate exception — they're not cacheable the same way
   since they're free-text — so the turn cap and tool-call cap in
   Architecture Brief §4.6 are the cost guardrail there instead of caching.
 - **Portfolio-grade frontend**: React + Storybook is a stated goal in its own
@@ -268,15 +278,19 @@ prominently is a founder value, not a legal-minimum afterthought:
 - **Contested-year disclosure copy** — needs a few real drafted examples
   (2003, 2017) to see if "in character but honest about the controversy"
   actually reads well; may need prompt iteration.
+- **Persona grounding** — direction decided 2026-09-14: the narrator returns
+  typed claims and the server renders the numbers, instead of a text matcher
+  checking them after the fact (epic #199, spike #200 first).
 - **CFBD free-tier budget** (1,000 calls/month) — one-time ingest of
   1998–present should fit easily since games are fetched per-season and
   cached to `data/raw/`, but re-ingesting for corrections/new seasons should
   be budgeted deliberately, not automated on a tight loop.
 - ~~Render Postgres free-tier terms~~ — **resolved**: free Postgres expires
   30 days after creation and gets deleted, unacceptable for account data.
-  Founder is willing to pay the entry-level tier (~$6–7/mo) from day one to
-  keep account data actually persistent — accounts ship on paid Postgres
-  from the start, not deferred. See Architecture Brief §7.
+  Founder is willing to pay the entry-level tier (~$6–7/mo) so account data
+  is actually persistent. Accounts themselves were **deferred on
+  2026-09-14** (#201); the paid instance runs today for the persona narration
+  cache. See Architecture Brief §7.
 - ~~Render web service cold starts~~ — **resolved**: founder confirmed the
   additional ~$7/mo Starter instance is worth it to avoid the 30–60s cold
   start a free instance would show a demo visitor. Confirmed hosting

@@ -60,9 +60,8 @@ mis-scoped: fix the brief, don't ship the violation.
 - **CI gates everything.** `.github/workflows/ci.yml` runs on every PR into `main` and
   every push to `main`, and nothing merges with a red check. Known exceptions, listed so
   nobody assumes more coverage than exists:
-  - the `e2e` job is not yet treated as blocking;
   - the persona smoke eval step always skips in CI, because there is no API key secret
-    (#109);
+    (#203);
   - nothing in CI runs `prettier --check` (#116), or ruff on `packages/cfb-engine`
     (#141). Run those locally.
 
@@ -122,7 +121,7 @@ another (#105).
 
 | Rule | Enforced by | Mode |
 |---|---|---|
-| A spoke's edits stay inside its owned paths | PreToolUse `guard_edit_scope.py` | **warn**: a note in the spoke's context plus a log at `<git-common-dir>/claude-hooks/scope-warnings.jsonl`. Flip `edit_scope_mode` to `block` once the log stays clean |
+| A spoke's edits stay inside its owned paths | PreToolUse `guard_edit_scope.py` | **warn**: a note in the spoke's context plus a log at `<git-common-dir>/claude-hooks/scope-warnings.jsonl`. Flip `edit_scope_mode` to `block` once the log stays clean (#205) |
 | No push to `main`; no shared-stash use | PreToolUse `guard_bash.py` | block |
 | Brief shape; scope inside ownership; own scratch dir | `delegation.py render-brief` | block (the brief won't render) |
 | Return shape and its semantic rules | SubagentStop `delegation.py` sends the errors back to the spoke (2 retries); the coordinator re-checks with `delegation.py validate-return` | block; still invalid = `malformed-return` |
