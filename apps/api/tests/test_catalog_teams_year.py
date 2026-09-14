@@ -11,9 +11,11 @@ given season.
 Two fixtures are used deliberately:
 
 * `client` (the committed, real-engine-computed `cfb_verdict_fixture.sqlite3`)
-  for the CFB half -- 378 real team names, of which only 117/119/125 have a
-  real keener rating in 2001/2005/2013. That ratio *is* the bug, so the test
-  asserts against real data rather than a hand-built stand-in.
+  for the CFB half -- 451 real team names, of which only 117 to 130 have a
+  real keener rating in any one of its seven seasons (2001: 117, 2003: 117,
+  2004: 119, 2005: 119, 2013: 125, 2017: 130, 2019: 130). That ratio *is* the
+  bug, so the test asserts against real data rather than a hand-built
+  stand-in.
 * `team_catalog_client` (`tests/fixtures/team_catalog_fixture.py`) for the
   NFL relocation half, which needs two seasons either side of a franchise
   move -- see that module's docstring for why neither existing fixture has
@@ -119,11 +121,11 @@ def test_teams_with_year_excludes_relocated_franchise(
 
 
 def test_teams_with_year_scopes_cfb_to_rated_teams(client: TestClient) -> None:
-    """Real data: 378 CFB names in the db, only 119 of them rated in 2005."""
+    """Real data: 451 CFB names in the db, only 119 of them rated in 2005."""
     unscoped = client.get("/api/teams", params={"sport": "cfb"}).json()["teams"]
     scoped = client.get("/api/teams", params={"sport": "cfb", "year": 2005}).json()["teams"]
 
-    assert len(unscoped) == 378
+    assert len(unscoped) == 451
     assert len(scoped) == 119
     assert "Texas" in scoped
     assert "USC" in scoped
@@ -264,7 +266,7 @@ def test_grounding_is_handed_the_whole_unscoped_team_universe(
 
     assert response.status_code == 200
     assert captured["known_team_names"] == _pre_issue_78_team_names(FIXTURE_DB, "cfb")
-    assert len(captured["known_team_names"]) == 378
+    assert len(captured["known_team_names"]) == 451
 
 
 def test_list_all_team_names_signature_stays_year_free() -> None:

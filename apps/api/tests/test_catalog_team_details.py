@@ -112,19 +112,29 @@ def test_null_and_empty_alternate_names_decode_to_empty_list(
     }
 
 
-def test_real_fixture_with_unpopulated_alias_columns_still_serves_details(
+def test_real_fixture_serves_real_mascots_and_unpopulated_columns_alike(
     client: TestClient,
 ) -> None:
-    """The committed real-data fixture has both columns NULL for all 378
-    rows (the alias *data* comes from a sibling ingest task). That must be a
-    perfectly ordinary response, not an error -- the same state production
-    is in until that ingest runs."""
+    """The committed real-data fixture carries the CFBD `/teams` enrichment
+    (#77) since #110 rebuilt it: 450 of its 451 CFB teams have a mascot.
+    The one that doesn't, Cal State Northridge (CFBD has no mascot for it),
+    has both columns NULL -- and that must still be a perfectly ordinary
+    detail, not an error, exactly like a real team with a mascot."""
     response = client.get("/api/teams")
 
     assert response.status_code == 200
     details = _details_by_name(response.json())
-    assert details["Texas"] == {"name": "Texas", "mascot": None, "aliases": []}
-    assert len(details) == 378
+    assert details["Texas"] == {
+        "name": "Texas",
+        "mascot": "Longhorns",
+        "aliases": ["TEX", "Texas"],
+    }
+    assert details["Cal State Northridge"] == {
+        "name": "Cal State Northridge",
+        "mascot": None,
+        "aliases": [],
+    }
+    assert len(details) == 451
 
 
 def test_teams_and_team_details_stay_aligned(

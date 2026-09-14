@@ -8,7 +8,8 @@ envelope, these responses are unwrapped: `{"years": [...]}` /
 Both tests go through the actual HTTP endpoint (`TestClient`) against the
 committed, real-engine-computed fixture db
 (`tests/fixtures/cfb_verdict_fixture.sqlite3`), which has real keener
-ratings for 2001/2005/2013 and the real `teams` table (including "Texas",
+ratings for the seven golden seasons (2001, 2003, 2004, 2005, 2013, 2017,
+2019) and the real `teams` table (including "Texas",
 the 2005 champion used throughout `test_verdict.py`) -- not a mocked or
 hand-written list.
 """
@@ -25,7 +26,7 @@ def test_years_endpoint_default_method_returns_real_ascending_years(
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {"years": [2001, 2005, 2013]}
+    assert body == {"years": [2001, 2003, 2004, 2005, 2013, 2017, 2019]}
 
 
 def test_years_endpoint_explicit_keener_method_matches_default(
@@ -35,7 +36,7 @@ def test_years_endpoint_explicit_keener_method_matches_default(
 
     assert response.status_code == 200
     body = response.json()
-    assert body == {"years": [2001, 2005, 2013]}
+    assert body == {"years": [2001, 2003, 2004, 2005, 2013, 2017, 2019]}
     # ascending, matching `list_available_years`'s own contract
     assert body["years"] == sorted(body["years"])
 

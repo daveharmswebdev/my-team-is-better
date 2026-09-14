@@ -18,6 +18,11 @@ import type { Page } from '@playwright/test'
  *    `aria-label="Team A suggestions"`, which a substring `getByLabel('Team
  *    A')` would also match -- a strict-mode violation that only appears
  *    once the suggestions are showing.
+ * 4. A suggestion's accessible name is the canonical team name, followed by
+ *    ` · <mascot>` when the catalog has one (e.g. "USC · Trojans"; the
+ *    fixture carries real mascots since #110). So the option is matched by
+ *    the canonical name exactly, with an optional mascot suffix. A plain
+ *    substring match would also pick "USC Upstate".
  */
 export async function pickTeam(
   page: Page,
@@ -27,6 +32,9 @@ export async function pickTeam(
   const field = page.getByLabel(label, { exact: true })
   await expect(field).toHaveAttribute('role', 'combobox')
   await field.fill(team)
-  await page.getByRole('option', { name: team, exact: true }).click()
+  const escaped = team.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  await page
+    .getByRole('option', { name: new RegExp(`^${escaped}(?: · .+)?$`) })
+    .click()
   await expect(field).toHaveValue(team)
 }

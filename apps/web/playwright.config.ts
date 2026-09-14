@@ -42,7 +42,9 @@ export default defineConfig({
   webServer: [
     {
       // Boots the real FastAPI app in test mode against the committed
-      // fixture db (2001/2005/2013 golden data). `APP_TEST_MODE=1` makes
+      // fixture db (the seven PRD golden years since #110, with real team
+      // mascots, which is why `e2e/pickTeam.ts` allows a ` · <mascot>`
+      // suffix on suggestion names). `APP_TEST_MODE=1` makes
       // `api.deps`'s `get_narration_cache`/`get_narrator` return the same
       // in-memory cache / stub narrator pytest already trusts, so this
       // e2e run needs neither a live Postgres instance nor a real
