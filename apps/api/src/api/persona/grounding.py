@@ -243,7 +243,8 @@ def _extract_rating_values(fact_block_json: str) -> list[Decimal]:
     """Every value of a key in `_ROUNDABLE_KEYS`, anywhere in the fact
     block, parsed as an exact `Decimal` from its JSON literal (so rounding
     never depends on float repr). Walks by field name, like
-    `_extract_valid_score_tuples`, never importing the Pydantic models.
+    `_extract_valid_score_tuples`, never importing the Pydantic response
+    models (this module takes only the `Method` alias from `api.models`).
     """
     try:
         data: Any = json.loads(fact_block_json, parse_float=Decimal)
@@ -283,7 +284,7 @@ def _collect_rating_values(node: Any, ratings: list[Decimal]) -> None:
 
 def _extract_valid_score_tuples(fact_block_json: str) -> _ScoreTuplesByName:
     """Recursively walk the parsed fact block, pattern-matching dict shapes
-    by field name (never importing the Pydantic models -- see
+    by field name (never importing the Pydantic response models -- see
     `api.models` for `OpponentResultOut` / `HeadToHeadMeetingOut` /
     `CommonOpponentOut`, the three shapes recognized here) to build every
     `name -> {(own_score, other_score), ...}` fact this fact block states.

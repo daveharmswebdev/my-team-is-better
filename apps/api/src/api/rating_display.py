@@ -36,8 +36,14 @@ OUTPUT_FILE: Path = Path(__file__).resolve().parents[2] / "rating-display.json"
 
 @dataclass(frozen=True)
 class RatingDisplay:
-    """A rating is displayed as `value * scale`, rounded half away from zero
-    to `decimals` places and printed at exactly that precision."""
+    """A rating is displayed as `value * scale`, rounded to `decimals` places
+    and printed at exactly that precision.
+
+    `display_value` rounds the exact decimal half away from zero. apps/web's
+    `toFixed` rounds the binary double instead, so the two can differ on a
+    short decimal tie (`0.003505` -> "3.51" here, "3.50" on the card). Real
+    ratings are full-precision doubles, where they agree; see
+    `tests/test_rating_display.py`'s cross-check on the fixture."""
 
     scale: int
     decimals: int

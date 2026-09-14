@@ -242,6 +242,9 @@ don't actually improve precision):
 - **Post-generation check, not just prompt instructions**: extract team
   names/numbers mentioned in the persona's response with a cheap regex pass
   and confirm they're a subset of the fact block's own team names/numbers.
+  Ratings are the only widening: a rating rounded to fewer decimals (#162),
+  or quoted the way the card displays it (#165), also counts (see
+  `api.persona.grounding`).
   Fail → one retry with the specific mismatch appended as feedback (Domain
   4.4's retry-with-error-feedback pattern — this works because the failure
   is "said something not grounded," a correctable instruction-following
@@ -426,8 +429,9 @@ never a subclass.
 - **The display scale is defined once.** `api.rating_display.RATING_DISPLAY`
   defines it and publishes `apps/api/rating-display.json`. apps/web's
   `formatRating` and the prompt are both checked against it, so changing one
-  side alone fails CI. Derived figures (`rating_diff`, breakdown credits)
-  are still open (#108).
+  side alone fails CI. `rating_diff` and other derived figures are still
+  open (#108). The Keener breakdown panel's scaled figures (credit,
+  contribution, baseline) are tracked separately in #175.
 
 **Still tracked:**
 
