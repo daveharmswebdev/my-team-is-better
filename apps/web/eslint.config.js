@@ -8,54 +8,109 @@ import tseslint from 'typescript-eslint'
 
 /**
  * Lint layer of the Storybook a11y gate (issue #90; see
- * .storybook/a11yPolicy.ts). The run-time guard trusts the a11y report and
- * story state it reads in the same browser realm as story code, so this rule
- * bans the syntax that forges that report or changes a11y settings at run
- * time, everywhere in `src` except unit tests:
- * - importing `vitest` / `@vitest/*` / addon-vitest (statically or with
- *   `import()`), which gives access to test hooks and `task.meta`;
- * - reading `reporting` from a story context (`addReport` forgery);
- * - any `.a11y` / `.ghostStories` member access or destructuring (every way
- *   to mutate or alias `parameters.a11y`, `globals.a11y`,
- *   `globals.ghostStories` starts there), reassigning `.parameters` /
- *   `.globals`, and `Object` / `Reflect` mutators aimed at them.
+ * .storybook/a11yPolicy.ts). The run-time guard trusts a11y reports and story
+ * state it reads in the same browser realm as story code, so these rules ban
+ * the syntax that forges them.
+ *
+ * Everywhere in `src` except test files (`*.test.*`, `src/test/setup.ts`):
+ * importing `vitest`, `@vitest/*`, `@storybook/addon-vitest` or `.storybook/*`,
+ * statically or with `import()`.
+ *
+ * In story files (`src/**\/*.stories.*`) only:
+ * - inside story annotation functions (`play`, `beforeEach`, `afterEach`,
+ *   `loaders`, `decorators`, `render`, `mount`): reading or destructuring
+ *   `reporting`, `a11y` or `ghostStories` (as `.key`, `['key']` or
+ *   `` [`key`] ``), except on `args` / `props` and in `render`'s args
+ *   parameter; assigning `parameters` / `globals`;
+ * - anywhere in the file: assigning or deleting `viewMode`; the same reads
+ *   and writes through a context-named identifier (`ctx`, `context`,
+ *   `storyContext`) or through `parameters.` / `globals.`; and `Object` /
+ *   `Reflect` mutators given `parameters` / `globals`, or a key
+ *   `reporting` / `a11y` / `ghostStories` / `parameters` / `globals` /
+ *   `viewMode`.
  * Declaring `parameters: { a11y: ... }` in an annotation object is untouched:
  * the policy test checks those values.
  *
- * Still possible, but only deliberately: computed keys built at run time
- * (`parameters[key]`), `eval` / `Function`, mutation from a `*.test.*` file or
- * from `.storybook/**`, or an `eslint-disable` comment -- each leaves a
- * visible trace in the diff. `src/test/storyA11yPolicy.test.ts` proves the
- * rule still exists and fires.
+ * Not covered (each is deliberate, and visible in review): keys computed at
+ * run time (`ctx['rep' + 'orting']`, a key held in a variable); aliasing the
+ * context under another name in a module-level helper outside an annotation
+ * function (`function h(c) { c.reporting }` then `play: h`); `eval` / `new
+ * Function`; code in test files or in `.storybook/**`; and `eslint-disable`
+ * comments. `src/test/storyA11yPolicy.test.ts` proves these rules still
+ * exist, fire on the forbidden forms, and stay quiet on ordinary code.
  */
-const A11Y_KEYS = '/^(a11y|ghostStories)$/'
-const CONTEXT_KEYS = '/^(parameters|globals)$/'
-const MUTATORS =
-  '/^(assign|defineProperty|defineProperties|set|deleteProperty|setPrototypeOf)$/'
-const A11Y_GATE_MESSAGE =
-  'Story/app code must not forge a11y reports or change a11y settings at run time (issue #90, .storybook/a11yPolicy.ts). Declare parameters statically, or add a justified exemption.'
+const MESSAGE =
+  'Story code must not forge a11y reports or change a11y settings at run time (issue #90, .storybook/a11yPolicy.ts). Declare parameters statically, or add a justified exemption.'
 
-const a11yGateSyntax = [
-  // vitest access by dynamic import (static imports: no-restricted-imports)
-  'ImportExpression[source.value=/^@?vitest/]',
-  // addReport forgery
-  "MemberExpression[property.name='reporting']",
-  "MemberExpression[computed=true][property.value='reporting']",
-  "ObjectPattern > Property[key.name='reporting']",
-  "ObjectPattern > Property[key.value='reporting']",
-  // a11y settings: any access, alias or destructuring
-  `MemberExpression[property.name=${A11Y_KEYS}]`,
-  `MemberExpression[computed=true][property.value=${A11Y_KEYS}]`,
-  `ObjectPattern > Property[key.name=${A11Y_KEYS}]`,
-  `ObjectPattern > Property[key.value=${A11Y_KEYS}]`,
-  // replacing the whole parameters / globals object
-  `AssignmentExpression[left.property.name=${CONTEXT_KEYS}]`,
-  // Object.assign(parameters, { a11y }), Object.assign(ctx.globals, ...)
-  `CallExpression[callee.object.name=/^(Object|Reflect)$/][callee.property.name=${MUTATORS}] > Identifier[name=${CONTEXT_KEYS}]`,
-  `CallExpression[callee.object.name=/^(Object|Reflect)$/][callee.property.name=${MUTATORS}] > MemberExpression[property.name=${CONTEXT_KEYS}]`,
-  `CallExpression[callee.object.name=/^(Object|Reflect)$/][callee.property.name=${MUTATORS}] Property[key.name=${A11Y_KEYS}]`,
-  `CallExpression[callee.object.name='Reflect'] > Literal[value=${A11Y_KEYS}]`,
-].map((selector) => ({ selector, message: A11Y_GATE_MESSAGE }))
+const oneOf = (alternatives) => `/^(${alternatives})$/`
+const READ_KEYS = 'reporting|a11y|ghostStories'
+const CONTEXT_OBJECT_KEYS = 'parameters|globals'
+const ANY_KEYS = `${READ_KEYS}|${CONTEXT_OBJECT_KEYS}|viewMode`
+const ANNOTATIONS = oneOf(
+  'play|beforeEach|afterEach|loaders|decorators|render|mount',
+)
+const ARGS_OR_PROPS = oneOf('args|props')
+const CONTEXT_NAMES = oneOf('ctx|context|storyContext')
+const MUTATOR = `CallExpression[callee.object.name=${oneOf('Object|Reflect')}][callee.property.name=${oneOf('assign|defineProperty|defineProperties|set|deleteProperty|setPrototypeOf')}]`
+const IN_ANNOTATION = `:matches(Property[key.name=${ANNOTATIONS}], AssignmentExpression[left.property.name=${ANNOTATIONS}])`
+
+/** Attribute selectors for a key at `path` written `.k`, `['k']` or `` [`k`] ``. */
+const keyForms = (path, computedAttr, keys) => [
+  `[${path}.name=${oneOf(keys)}]`,
+  `[${computedAttr}=true][${path}.value=${oneOf(keys)}]`,
+  `[${computedAttr}=true][${path}.type='TemplateLiteral'][${path}.expressions.length=0][${path}.quasis.0.value.cooked=${oneOf(keys)}]`,
+]
+const memberKey = (keys) => keyForms('property', 'computed', keys)
+const propertyKey = (keys) => keyForms('key', 'computed', keys)
+const assignedKey = (keys) => keyForms('left.property', 'left.computed', keys)
+const deletedKey = (keys) =>
+  keyForms('argument.property', 'argument.computed', keys)
+
+// Destructuring that reads args, not the story context.
+const ARGS_DESTRUCTURING = `:matches(Property[key.name='render'] > :function > ObjectPattern:first-child > Property, Property[key.name=${ARGS_OR_PROPS}] > ObjectPattern > Property, VariableDeclarator[init.name=${ARGS_OR_PROPS}] > ObjectPattern > Property)`
+
+const dynamicVitestImport = 'ImportExpression[source.value=/^@?vitest/]'
+
+const storySyntax = [
+  dynamicVitestImport,
+  // inside story annotation functions
+  ...memberKey(READ_KEYS).map(
+    (key) =>
+      `${IN_ANNOTATION} MemberExpression${key}:not([object.name=${ARGS_OR_PROPS}])`,
+  ),
+  ...propertyKey(READ_KEYS).map(
+    (key) =>
+      `${IN_ANNOTATION} ObjectPattern > Property${key}:not(${ARGS_DESTRUCTURING})`,
+  ),
+  ...assignedKey(CONTEXT_OBJECT_KEYS).map(
+    (key) =>
+      `${IN_ANNOTATION} AssignmentExpression${key}:not([left.object.name=${ARGS_OR_PROPS}])`,
+  ),
+  // anywhere in a story file
+  ...assignedKey('viewMode').map((key) => `AssignmentExpression${key}`),
+  ...deletedKey('viewMode').map(
+    (key) => `UnaryExpression[operator='delete']${key}`,
+  ),
+  ...memberKey(READ_KEYS).map(
+    (key) => `MemberExpression[object.name=${CONTEXT_NAMES}]${key}`,
+  ),
+  ...memberKey('a11y|ghostStories').flatMap((key) => [
+    `MemberExpression[object.name=${oneOf(CONTEXT_OBJECT_KEYS)}]${key}`,
+    `MemberExpression[object.property.name=${oneOf(CONTEXT_OBJECT_KEYS)}]${key}`,
+  ]),
+  ...assignedKey(CONTEXT_OBJECT_KEYS).map(
+    (key) => `AssignmentExpression[left.object.name=${CONTEXT_NAMES}]${key}`,
+  ),
+  `${MUTATOR} > Identifier[name=${oneOf(CONTEXT_OBJECT_KEYS)}]`,
+  ...memberKey(`${CONTEXT_OBJECT_KEYS}|a11y|ghostStories`).map(
+    (key) => `${MUTATOR} > MemberExpression${key}`,
+  ),
+  ...propertyKey(ANY_KEYS).map(
+    (key) => `${MUTATOR} > ObjectExpression > Property${key}`,
+  ),
+  `${MUTATOR} > Literal[value=${oneOf(ANY_KEYS)}]`,
+  `${MUTATOR} > TemplateLiteral[expressions.length=0][quasis.0.value.cooked=${oneOf(ANY_KEYS)}]`,
+].map((selector) => ({ selector, message: MESSAGE }))
 
 export default tseslint.config(
   { ignores: ['dist', 'storybook-static', 'coverage'] },
@@ -74,9 +129,9 @@ export default tseslint.config(
   },
   ...storybook.configs['flat/recommended'],
   {
-    name: 'a11y-gate/story-and-app-code',
+    name: 'a11y-gate/imports',
     files: ['src/**/*.{js,jsx,mjs,ts,tsx}'],
-    ignores: ['src/**/*.test.{js,jsx,mjs,ts,tsx}', 'src/test/**'],
+    ignores: ['src/**/*.test.{js,jsx,mjs,ts,tsx}', 'src/test/setup.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -89,21 +144,38 @@ export default tseslint.config(
                 '@vitest/**',
                 '@storybook/addon-vitest',
                 '@storybook/addon-vitest/**',
+                '**/.storybook',
+                '**/.storybook/**',
               ],
-              message: A11Y_GATE_MESSAGE,
+              message: MESSAGE,
             },
           ],
         },
       ],
-      'no-restricted-syntax': ['error', ...a11yGateSyntax],
+      'no-restricted-syntax': [
+        'error',
+        { selector: dynamicVitestImport, message: MESSAGE },
+      ],
     },
   },
   {
-    // `preview.tsx` and `*.setup.ts` run in the browser. tsconfig.storybook.json
-    // gives them DOM + JSX, but dependency type declarations still pull
-    // @types/node into that program, so `tsc` cannot reject Node globals here.
+    name: 'a11y-gate/story-files',
+    files: ['src/**/*.stories.{js,jsx,mjs,ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error', ...storySyntax],
+    },
+  },
+  {
+    // `preview.tsx`, `*.setup.ts` and `a11yPolicy.ts` (imported by the guard)
+    // run in the browser. tsconfig.storybook.json gives the first two DOM +
+    // JSX, but dependency type declarations still pull @types/node into that
+    // program, so `tsc` cannot reject Node globals here.
     name: 'storybook/browser-side-files',
-    files: ['.storybook/*.tsx', '.storybook/*.setup.ts'],
+    files: [
+      '.storybook/*.tsx',
+      '.storybook/*.setup.ts',
+      '.storybook/a11yPolicy.ts',
+    ],
     rules: {
       'no-restricted-globals': [
         'error',

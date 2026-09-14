@@ -7,19 +7,21 @@
  *   tags, re-exported stories addon-vitest cannot turn into tests, and that the
  *   lint rule below still exists and fires.
  * - `.storybook/a11y-guard.setup.ts` (`npm run test-storybook`): run-time skips
- *   (axe never ran, or not in 'error' mode) AND run-time narrowing (runOnly,
- *   disabled rules, context), read from the axe result and from the story's
- *   final `parameters` / `globals` after loaders, beforeEach, decorators and
- *   play functions ran.
- * - `eslint.config.js` (`npm run lint`): the syntax that forges a passed report
- *   or mutates a11y settings at run time (vitest imports, `reporting`,
- *   `.a11y` / `.ghostStories` access, `parameters` / `globals` reassignment).
+ *   and narrowing, on the exact `viewMode`, `parameters.a11y` and `globals`
+ *   addon-a11y reads (recorded by `.storybook/preview.tsx`'s `afterEach`, after
+ *   every story hook), compared with the real project annotations; and that
+ *   the a11y report is a single passed result with axe-core's shape.
+ * - `eslint.config.js` (`npm run lint`): the syntax, in story files, that
+ *   forges a report or changes a11y settings at run time, and vitest /
+ *   `.storybook` imports anywhere in non-test `src` (its header lists exactly
+ *   which forms remain possible).
  * - `.storybook/storyRunGuard.ts` (`npm run test-storybook`): dropped or partial
  *   story files -- skipped tests, files that ran no test or a different set of
  *   stories than they export, files never collected, tests the guard never saw.
  *
- * This file is imported by the browser-side guard, so it must stay free of
- * Node APIs.
+ * This file is imported by the browser-side guard and preview, so it must stay
+ * free of Node APIs (the `storybook/browser-side-files` ESLint block enforces
+ * that for Node globals).
  */
 
 /**
@@ -162,12 +164,9 @@ function isEnablingConfigRule(rule: unknown): boolean {
   )
 }
 
-/** axe run-option `rules` whose every entry is exactly `{ enabled: true }`. */
-function isEnablingRuleOptions(rules: unknown): boolean {
-  return (
-    isRecord(rules) &&
-    Object.values(rules).every((rule) => deepEqual(rule, { enabled: true }))
-  )
+/** An axe run-option rule setting that turns the rule on and nothing else. */
+function isEnablingRuleOption(setting: unknown): boolean {
+  return deepEqual(setting, { enabled: true })
 }
 
 /** The a11y parameters left after removing every key a named knob covers. */
@@ -230,32 +229,72 @@ export function findA11yKnobs(
       detail: `globals.ghostStories is ${show(story.globals.ghostStories)}`,
     })
   }
+  // `rules`, `context` and `runOnly` are judged against the baseline, so
+  // whatever the project annotations (every addon's defaults included) already
+  // set is not the story's doing.
+  const baselineA11y = isRecord(baseline.a11y) ? baseline.a11y : {}
+  const baselineConfig = isRecord(baselineA11y.config)
+    ? baselineA11y.config
+    : {}
+  const baselineOptions = isRecord(baselineA11y.options)
+    ? baselineA11y.options
+    : {}
+
   const configRules = prune(config.rules)
-  if (
-    configRules !== undefined &&
-    !(Array.isArray(configRules) && configRules.every(isEnablingConfigRule))
-  ) {
+  const baselineConfigRules = prune(baselineConfig.rules)
+  const addedConfigRules = Array.isArray(configRules)
+    ? configRules.filter(
+        (rule) =>
+          !isEnablingConfigRule(rule) &&
+          !(
+            Array.isArray(baselineConfigRules) &&
+            baselineConfigRules.some((known) => deepEqual(known, rule))
+          ),
+      )
+    : configRules === undefined || deepEqual(configRules, baselineConfigRules)
+      ? []
+      : [configRules]
+  if (addedConfigRules.length > 0) {
     findings.push({
       knob: 'rules',
-      detail: `parameters.a11y.config.rules ${show(configRules)} does more than enable extra rules`,
+      detail: `parameters.a11y.config.rules ${show(addedConfigRules)} does more than enable extra rules`,
     })
   }
   const optionRules = prune(options.rules)
-  if (optionRules !== undefined && !isEnablingRuleOptions(optionRules)) {
+  const baselineOptionRules = prune(baselineOptions.rules)
+  const addedOptionRules = isRecord(optionRules)
+    ? Object.entries(optionRules).filter(
+        ([id, setting]) =>
+          !isEnablingRuleOption(setting) &&
+          !(
+            isRecord(baselineOptionRules) &&
+            deepEqual(baselineOptionRules[id], setting)
+          ),
+      )
+    : optionRules === undefined || deepEqual(optionRules, baselineOptionRules)
+      ? []
+      : [['(not an object)', optionRules]]
+  if (addedOptionRules.length > 0) {
     findings.push({
       knob: 'rules',
-      detail: `parameters.a11y.options.rules ${show(optionRules)} does more than enable extra rules`,
+      detail: `parameters.a11y.options.rules ${show(Object.fromEntries(addedOptionRules))} does more than enable extra rules`,
     })
   }
   const context = prune(a11y.context)
-  if (context !== undefined) {
+  if (
+    context !== undefined &&
+    !deepEqual(context, prune(baselineA11y.context))
+  ) {
     findings.push({
       knob: 'context',
       detail: `parameters.a11y.context is ${show(context)}`,
     })
   }
   const runOnly = prune(options.runOnly)
-  if (runOnly !== undefined) {
+  if (
+    runOnly !== undefined &&
+    !deepEqual(runOnly, prune(baselineOptions.runOnly))
+  ) {
     findings.push({
       knob: 'runOnly',
       detail: `parameters.a11y.options.runOnly is ${show(runOnly)}`,
@@ -279,27 +318,56 @@ export function findA11yKnobs(
 }
 
 /**
- * Narrowing visible in the options axe actually ran with (an axe result's
- * `toolOptions`): any `runOnly`, or `rules` that do more than enable extra
- * rules. Context narrowing is not recorded in the result, so the guard also
- * applies `findA11yKnobs` to the story's final parameters.
+ * The story context addon-a11y is about to read, as `.storybook/preview.tsx`'s
+ * `afterEach` records it: that hook runs after every story-level hook and play
+ * function and immediately before addon-a11y's own `afterEach` (Storybook runs
+ * annotation `afterEach` hooks in reverse order).
+ *
+ * The guard checks these values rather than the axe result's `toolOptions`:
+ * the addon derives its run options from exactly these parameters, adding its
+ * own defaults (e.g. a disabled `region` rule), so the options add no signal
+ * and would only mistake addon defaults for narrowing.
+ *
+ * Kept on `globalThis` so the recorder and the guard share it whichever module
+ * instance each loads. Story code could write it deliberately; the lint rule
+ * bans importing `.storybook/*` from `src`.
  */
-export function findAxeRunNarrowing(toolOptions: unknown): KnobFinding[] {
-  const options = isRecord(toolOptions) ? toolOptions : {}
-  const findings: KnobFinding[] = []
-  const runOnly = prune(options.runOnly)
-  if (runOnly !== undefined) {
-    findings.push({
-      knob: 'runOnly',
-      detail: `axe ran with runOnly ${show(runOnly)}`,
-    })
+export interface RecordedStoryA11yContext {
+  viewMode: unknown
+  a11y: unknown
+  globals: Record<string, unknown>
+}
+
+const RECORDED_CONTEXTS = Symbol.for(
+  'my-team-is-better.a11y-gate.recorded-story-contexts',
+)
+
+function recordedContexts(): Map<string, RecordedStoryA11yContext> {
+  const holder = globalThis as unknown as Record<
+    symbol,
+    Map<string, RecordedStoryA11yContext> | undefined
+  >
+  let contexts = holder[RECORDED_CONTEXTS]
+  if (contexts === undefined) {
+    contexts = new Map()
+    holder[RECORDED_CONTEXTS] = contexts
   }
-  const rules = prune(options.rules)
-  if (rules !== undefined && !isEnablingRuleOptions(rules)) {
-    findings.push({
-      knob: 'rules',
-      detail: `axe ran with rules ${show(rules)}`,
-    })
-  }
-  return findings
+  return contexts
+}
+
+export function recordStoryA11yContext(
+  storyId: string,
+  context: RecordedStoryA11yContext,
+): void {
+  recordedContexts().set(storyId, context)
+}
+
+/** Returns and forgets the context recorded for `storyId`, if any. */
+export function takeStoryA11yContext(
+  storyId: string,
+): RecordedStoryA11yContext | undefined {
+  const contexts = recordedContexts()
+  const recorded = contexts.get(storyId)
+  contexts.delete(storyId)
+  return recorded
 }

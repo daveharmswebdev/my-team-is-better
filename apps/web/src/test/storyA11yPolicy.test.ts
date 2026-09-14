@@ -217,6 +217,38 @@ const FORBIDDEN_STORY_CODE: [string, string][] = [
     'deletes under parameters.a11y',
     'export const S = { play: async ({ parameters }: { parameters: { a11y: { test?: string } } }) => { delete parameters.a11y.test } }\n',
   ],
+  [
+    'sets viewMode and forges a report through a template-literal `reporting` key (T1)',
+    "export const S = {\n  beforeEach: (ctx: object) => { (ctx as { viewMode: string }).viewMode = 'docs' },\n  play: async (ctx: object) => { (ctx as Record<string, { addReport: (r: unknown) => void }>)[`reporting`].addReport({ type: 'a11y', status: 'passed' }) },\n}\n",
+  ],
+  [
+    'sets viewMode (T1b)',
+    "export const S = { beforeEach: (ctx: { viewMode: string }) => { ctx.viewMode = 'docs' } }\n",
+  ],
+  [
+    'narrows context through a template-literal `a11y` key (T2)',
+    "export const S = { beforeEach: ({ parameters }: { parameters: Record<string, unknown> }) => { parameters[`a11y`] = { context: { exclude: ['img'] } } } }\n",
+  ],
+  [
+    'destructures a template-literal `reporting` key',
+    'export const S = { play: async ({ [`reporting`]: r }: Record<string, unknown>) => { void r } }\n',
+  ],
+  [
+    'sets viewMode with Reflect.set and a template key',
+    "export const S = { play: async (ctx: object) => { Reflect.set(ctx, `viewMode`, 'docs') } }\n",
+  ],
+  [
+    'sets viewMode with Object.assign',
+    "export const S = { play: async (ctx: object) => { Object.assign(ctx, { viewMode: 'docs' }) } }\n",
+  ],
+  [
+    'reads reporting in a module-level helper that takes the story context',
+    'async function forge(ctx: { reporting: { addReport: (r: unknown) => void } }) { ctx.reporting.addReport({}) }\nexport const S = { play: forge }\n',
+  ],
+  [
+    'imports the gate policy module from story code',
+    "import { STORY_A11Y_EXEMPTIONS } from '../../.storybook/a11yPolicy'\nvoid STORY_A11Y_EXEMPTIONS\n",
+  ],
 ]
 
 /** Ordinary story code the rule must leave alone. */
@@ -244,6 +276,66 @@ export const Default: StoryObj<typeof meta> = {
 
 const A11Y_LINT_RULES = ['no-restricted-syntax', 'no-restricted-imports']
 const PROBE_FILE = 'src/zzlintprobe/Probe.stories.ts'
+
+/**
+ * Ordinary code that happens to use the same names (`reporting`, `a11y`,
+ * `parameters`, `globals`) and must lint clean -- each was a false positive
+ * of an earlier, name-only version of the rule (issue #90 review, L1-L8).
+ * [description, file path, code]
+ */
+const ORDINARY_CODE: [string, string, string][] = [
+  ['an ordinary story', PROBE_FILE, ORDINARY_STORY_CODE],
+  [
+    'a component destructuring a `reporting` prop (L1)',
+    'src/components/ReportPanel/ReportPanel.tsx',
+    'export function ReportPanel({ reporting }: { reporting: boolean }) {\n  return reporting ? <p>on</p> : null\n}\n',
+  ],
+  [
+    'a component reading props.reporting (L1b)',
+    'src/components/ReportPanel/ReportPanel.tsx',
+    'export function ReportPanel(props: { reporting: boolean }) {\n  return props.reporting ? <p>on</p> : null\n}\n',
+  ],
+  [
+    'a hook destructuring `parameters` (L2)',
+    'src/hooks/useMethod.ts',
+    'declare function useMethodConfig(): { parameters: { k: number } }\nexport function useK() {\n  const { parameters } = useMethodConfig()\n  return parameters.k\n}\n',
+  ],
+  [
+    'a lib module assigning request.parameters (L3)',
+    'src/lib/api/request.ts',
+    'export function build(season: number) {\n  const request: { parameters: Record<string, string> } = { parameters: {} }\n  request.parameters = { season: String(season) }\n  return request\n}\n',
+  ],
+  [
+    'Object.assign on a local named parameters (L4)',
+    'src/lib/api/request.ts',
+    'export function build(extra: Record<string, string>) {\n  const parameters: Record<string, string> = {}\n  Object.assign(parameters, extra)\n  return parameters\n}\n',
+  ],
+  [
+    'a domain type with an a11y field (L5)',
+    'src/lib/teams.ts',
+    'export interface Team {\n  name: string\n  a11y: { label: string }\n}\nexport const label = (team: Team) => team.a11y.label\n',
+  ],
+  [
+    'settings.reporting access (L6)',
+    'src/lib/settings.ts',
+    'export const settings = { reporting: { enabled: false } }\nexport const reportingOn = () => settings.reporting.enabled\n',
+  ],
+  [
+    'a store.globals assignment (L7)',
+    'src/lib/state.ts',
+    'export const store: { globals: Record<string, unknown> } = { globals: {} }\nexport function reset() {\n  store.globals = {}\n}\n',
+  ],
+  [
+    'a story passing a `reporting` arg (L8)',
+    'src/components/ReportPanel/ReportPanel.stories.tsx',
+    "import type { Meta, StoryObj } from '@storybook/react-vite'\n\nfunction ReportPanel(props: { reporting: boolean }) {\n  return props.reporting ? <p>on</p> : null\n}\n\nconst meta = {\n  component: ReportPanel,\n  args: { reporting: true },\n  render: (args) => <ReportPanel reporting={args.reporting} />,\n} satisfies Meta<typeof ReportPanel>\n\nexport default meta\n\nexport const Default: StoryObj<typeof meta> = {}\n",
+  ],
+  [
+    'a story destructuring `a11y` / `reporting` args in render and reading args in play',
+    'src/components/Badge/Badge.stories.tsx',
+    "import type { Meta, StoryObj } from '@storybook/react-vite'\n\nfunction Badge(props: { a11y: string; reporting: boolean }) {\n  return <span aria-label={props.a11y}>{props.reporting ? 'on' : 'off'}</span>\n}\n\nconst meta = {\n  component: Badge,\n  args: { a11y: 'Badge', reporting: false },\n  render: ({ a11y, reporting }) => <Badge a11y={a11y} reporting={reporting} />,\n} satisfies Meta<typeof Badge>\n\nexport default meta\n\nexport const Default: StoryObj<typeof meta> = {\n  play: async ({ args }) => {\n    void args.reporting\n  },\n}\n",
+  ],
+]
 
 describe('Storybook a11y policy (issue #90)', () => {
   it('covers every story file Storybook collects', () => {
@@ -385,15 +477,15 @@ describe('Storybook a11y policy (issue #90)', () => {
       },
     )
 
-    it('leaves ordinary story code alone', async () => {
-      const [result] = await eslint.lintText(ORDINARY_STORY_CODE, {
-        filePath: PROBE_FILE,
-      })
-      expect(
-        (result?.messages ?? []).filter((message) =>
+    it.each(ORDINARY_CODE)(
+      'leaves ordinary code alone: %s',
+      async (_description, filePath, code) => {
+        const [result] = await eslint.lintText(code, { filePath })
+        const hits = (result?.messages ?? []).filter((message) =>
           A11Y_LINT_RULES.includes(message.ruleId ?? ''),
-        ),
-      ).toEqual([])
-    })
+        )
+        expect(hits, `false positive in ${filePath}: ${show(hits)}`).toEqual([])
+      },
+    )
   })
 })

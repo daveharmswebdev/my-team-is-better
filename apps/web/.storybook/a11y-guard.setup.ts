@@ -1,43 +1,59 @@
+// `storybook/preview-api` rather than `@storybook/react-vite`: addon-vitest
+// pre-bundles it, so importing it here cannot trigger a mid-run dependency
+// re-optimization (which reloads every test file and loses the runner).
+import { composeStory } from 'storybook/preview-api'
 import { afterEach } from 'vitest'
 import {
   A11Y_GUARD_META_KEY,
   AXE_SKIPPING_KNOBS,
   STORY_A11Y_EXEMPTIONS,
   findA11yKnobs,
-  findAxeRunNarrowing,
+  takeStoryA11yContext,
   type A11yState,
 } from './a11yPolicy.ts'
-import previewAnnotations from './preview.tsx'
 
 /**
  * Run-time layer of the Storybook a11y gate (issue #90), registered in
  * `vitest.storybook.config.ts` `test.setupFiles`.
  *
- * What it catches, after loaders, beforeEach, decorators and play functions
- * have run:
- * - run-time skips: the story must end with exactly one a11y report, produced
- *   by axe-core, with status 'passed' ('todo', disable, manual, ghostStories
- *   or a missing @storybook/addon-a11y all leave none, or a non-passed one);
- * - run-time narrowing: the axe result's `toolOptions` must show no `runOnly`
- *   and no rules beyond enabling extra ones, and the story's final
- *   `parameters.a11y` / `globals` (addon-vitest's `context.story`, the same
- *   objects those hooks mutate) must pass `findA11yKnobs`.
- * `STORY_A11Y_EXEMPTIONS` waives only the knobs an entry names.
+ * What it checks, for every story, after loaders, beforeEach, decorators,
+ * play functions and story afterEach hooks have run:
+ * - the story context addon-a11y is about to read, as recorded by the
+ *   `afterEach` in `.storybook/preview.tsx` (Storybook runs annotation
+ *   `afterEach` hooks in reverse, so that one runs after every story hook and
+ *   immediately before addon-a11y's): it must exist, its `viewMode` must be
+ *   'story' (addon-a11y skips axe otherwise), and its `parameters.a11y` /
+ *   `globals` must pass `findA11yKnobs` against the real project annotations
+ *   (every addon plus preview, so an addon's own defaults count as baseline);
+ * - unless an exemption waives an axe-skipping knob: exactly one a11y report,
+ *   status 'passed', whose result names axe-core and has the shape axe
+ *   produces (`passes` / `violations` / `incomplete` / `inapplicable` arrays
+ *   and a `url`).
+ * An exemption waives only the knobs it names; the other knobs are still
+ * checked.
  *
- * What it does not catch: a report or story state forged from story code in
- * the same browser realm (e.g. through `reporting` or a vitest hook). The lint
- * rule in `eslint.config.js` covers that syntax. It also cannot tell that axe
- * passed because nothing had rendered yet.
+ * What it does not stop: this all runs in the same browser realm as story
+ * code, so a deliberate forger can still write the recorder's registry or
+ * build a report object with axe's full shape. The ESLint rule in
+ * `eslint.config.js` bans the syntax for that in story files; anything that
+ * gets past both leaves an `eslint-disable` or a root-config edit in review.
+ * It also cannot tell that axe passed because nothing had rendered yet.
  *
- * It has to be a Vitest hook, not a `preview.tsx` `afterEach`. Storybook runs
- * annotation `afterEach` hooks in reverse order, so a preview hook would run
- * before addon-a11y's and see no report yet.
+ * It has to be a Vitest hook: a Storybook annotation `afterEach` added by
+ * preview would run before addon-a11y's and see no report yet.
  */
 
 interface A11yReport {
   type: string
   status: string
-  result?: { testEngine?: { name?: unknown }; toolOptions?: unknown }
+  result?: {
+    testEngine?: { name?: unknown }
+    url?: unknown
+    passes?: unknown
+    violations?: unknown
+    incomplete?: unknown
+    inapplicable?: unknown
+  }
 }
 
 interface StoryTaskMeta {
@@ -46,14 +62,43 @@ interface StoryTaskMeta {
   [A11Y_GUARD_META_KEY]?: boolean
 }
 
-interface StoryContextShape {
-  parameters?: Record<string, unknown>
-  globals?: Record<string, unknown>
+interface ComposedBaseline {
+  parameters: Record<string, unknown>
+  globals: Record<string, unknown>
 }
 
-const PROJECT_BASELINE: A11yState = {
-  a11y: previewAnnotations.parameters?.a11y,
-  globals: {},
+const show = (value: unknown) => JSON.stringify(value)
+
+let projectBaseline: A11yState | undefined
+
+/**
+ * What the real project annotations (set by addon-vitest before any test)
+ * give a story with no annotations of its own.
+ */
+function getProjectBaseline(): A11yState {
+  if (projectBaseline === undefined) {
+    const composed = composeStory(
+      {},
+      { title: 'a11y-guard/baseline' },
+    ) as unknown as ComposedBaseline
+    projectBaseline = {
+      a11y: composed.parameters.a11y,
+      globals: composed.globals,
+    }
+  }
+  return projectBaseline
+}
+
+function isAxeResultShape(result: A11yReport['result']): boolean {
+  return (
+    result !== undefined &&
+    result.testEngine?.name === 'axe-core' &&
+    typeof result.url === 'string' &&
+    Array.isArray(result.passes) &&
+    Array.isArray(result.violations) &&
+    Array.isArray(result.incomplete) &&
+    Array.isArray(result.inapplicable)
+  )
 }
 
 afterEach((context) => {
@@ -64,50 +109,58 @@ afterEach((context) => {
 
   const storyId = meta.storyId ?? '(no story id)'
   const waives = STORY_A11Y_EXEMPTIONS[storyId]?.waives ?? []
-  if (waives.some((knob) => AXE_SKIPPING_KNOBS.includes(knob))) {
-    return
-  }
-
   const problems: string[] = []
-  const a11yReports = (meta.reports ?? []).filter(
-    (report) => report.type === 'a11y',
-  )
-  if (a11yReports.length !== 1) {
+
+  const baseline = getProjectBaseline()
+  const baselineA11y = baseline.a11y as { test?: unknown } | undefined
+  if (baselineA11y?.test !== 'error') {
     problems.push(
-      `expected exactly one a11y report, found ${a11yReports.length}`,
+      `project annotations give parameters.a11y.test ${show(baselineA11y?.test)}, must be 'error'`,
     )
-  }
-  const report = a11yReports[0]
-  if (report?.status !== 'passed') {
-    problems.push(
-      `a11y report status is ${report?.status ?? 'none'}, must be 'passed'`,
-    )
-  }
-  if (report !== undefined && report.result?.testEngine?.name !== 'axe-core') {
-    problems.push('the a11y report was not produced by axe-core')
   }
 
-  // Set by addon-vitest's test body; not part of Vitest's TestContext type.
-  const story = (context as unknown as { story?: StoryContextShape }).story
-  const findings = [
-    ...findAxeRunNarrowing(report?.result?.toolOptions),
-    ...(story === undefined
-      ? [
-          {
-            knob: 'other' as const,
-            detail: 'addon-vitest provided no story context',
-          },
-        ]
-      : findA11yKnobs(
-          { a11y: story.parameters?.a11y, globals: story.globals ?? {} },
-          PROJECT_BASELINE,
-        )),
-  ]
-  problems.push(
-    ...findings
-      .filter((finding) => !waives.includes(finding.knob))
-      .map((finding) => `${finding.knob}: ${finding.detail}`),
-  )
+  const recorded = takeStoryA11yContext(storyId)
+  if (recorded === undefined) {
+    problems.push(
+      "no story context was recorded by .storybook/preview.tsx's afterEach (removed, or the story never reached afterEach)",
+    )
+  } else {
+    if (recorded.viewMode !== 'story') {
+      problems.push(
+        `viewMode is ${show(recorded.viewMode)} at afterEach, must be 'story' (addon-a11y skips axe otherwise)`,
+      )
+    }
+    problems.push(
+      ...findA11yKnobs(
+        { a11y: recorded.a11y, globals: recorded.globals },
+        baseline,
+      )
+        .filter((finding) => !waives.includes(finding.knob))
+        .map((finding) => `${finding.knob}: ${finding.detail}`),
+    )
+  }
+
+  if (!waives.some((knob) => AXE_SKIPPING_KNOBS.includes(knob))) {
+    const a11yReports = (meta.reports ?? []).filter(
+      (report) => report.type === 'a11y',
+    )
+    if (a11yReports.length !== 1) {
+      problems.push(
+        `expected exactly one a11y report, found ${a11yReports.length}`,
+      )
+    }
+    const report = a11yReports[0]
+    if (report?.status !== 'passed') {
+      problems.push(
+        `a11y report status is ${report?.status ?? 'none'}, must be 'passed'`,
+      )
+    }
+    if (report !== undefined && !isAxeResultShape(report.result)) {
+      problems.push(
+        'the a11y report result does not have the shape axe-core produces (testEngine axe-core, url, passes/violations/incomplete/inapplicable arrays)',
+      )
+    }
+  }
 
   if (problems.length > 0) {
     throw new Error(
