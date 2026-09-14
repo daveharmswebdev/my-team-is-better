@@ -30,3 +30,7 @@ storybook-static/
 .DS_Store
 .vscode/
 .idea/
+
+# Half-built fixture dbs a failed or interrupted generator run can leave behind (#110).
+**/tests/fixtures/.*.partial
+**/tests/fixtures/.*.partial-*

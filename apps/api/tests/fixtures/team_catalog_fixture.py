@@ -4,12 +4,12 @@ mascot/alias payload tests (GitHub issue #78, epic #76).
 Neither existing fixture can cover this issue:
 
 * `cfb_verdict_fixture.sqlite3` (committed, real-engine-computed) has real
-  CFB ratings for 2001/2005/2013 and 378 real team names -- perfect for the
-  "an unrated opponent disappears once `?year=` is supplied" half, and used
-  directly for that -- but it has no NFL rows at all, and every one of its
-  `teams.mascot` / `teams.alternate_names` values is NULL (the alias *data*
-  is populated by the sibling CFBD `/teams` ingest task, #77, not by
-  anything `apps/api` can run).
+  CFB ratings for the seven golden seasons and 451 real team names --
+  perfect for the "an unrated opponent disappears once `?year=` is
+  supplied" half, and used directly for that -- but it has no NFL rows at
+  all. Since #110 it does carry real CFBD mascots/aliases (#77), but only in
+  their real shapes, so it can't pin the `'[]'` storage shape this module
+  hand-builds.
 * `sport_fixture.py` has NFL rows, but a single year (2023, plus one 2024
   NFL row) and no relocated franchises -- so it can't express the bug this
   issue is about: the nflverse ingest mints one `teams` row per historical

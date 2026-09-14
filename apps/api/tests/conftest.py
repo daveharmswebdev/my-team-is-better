@@ -3,10 +3,11 @@
 Every fixture here only ever opens the pre-baked, committed
 `tests/fixtures/cfb_verdict_fixture.sqlite3` via `get_conn` -- it never
 imports `cfb_strength.ratings` or `cfb_strength.ingest`. That db already has
-real keener ratings computed for 2001/2005/2013 (see
+real keener and elo ratings computed for the seven golden seasons (2001,
+2003, 2004, 2005, 2013, 2017, 2019) and real CFBD mascots/aliases (see
 `tests/fixtures/build_fixture.py`, a one-off generator script that is the
-only place in `apps/api` allowed to import `cfb_strength.ratings`, and is
-not itself part of this pytest suite).
+only place in `apps/api` allowed to import `cfb_strength.ratings` or
+`cfb_strength.ingest`, and is not itself part of this pytest suite).
 
 That "never imports ratings/ingest" is a convention here, not a checked
 rule: `apps/api/.importlinter` (issue #54) has `source_modules = api`, so it
@@ -27,7 +28,7 @@ fixture, with their own scripted fakes.
 `sport_client` (issue #59) is a second, function-scoped `TestClient` wired to
 a freshly built, throwaway db (`tests/fixtures/sport_fixture.py`) that has
 both CFB and NFL rows, plus a cross-sport name collision -- unlike
-`cfb_verdict_fixture.sqlite3`, which predates NFL support and has no
+`cfb_verdict_fixture.sqlite3`, which is a CFB-only slice and has no
 `sport='nfl'` rows at all. Tests that need to prove `sport` threads correctly
 through the HTTP layer (`test_verdict_sport.py`, `test_catalog_sport.py`) use
 this fixture instead of `client`.

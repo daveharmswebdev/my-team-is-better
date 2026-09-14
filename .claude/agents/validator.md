@@ -24,8 +24,12 @@ and report that as your gap, never as a pass. Never run `ensure_schema` on a db 
 it readable; migrating a stale db's columns in disguises that its data is stale too.
 Committed test fixtures hold deliberate season slices, but they aren't exempt: still run
 the doctor, and waive only these findings:
-- `season_behind_cache` and `season_missing_ratings`, for seasons the fixture
-  deliberately omits;
+- `season_behind_cache`, for seasons the fixture deliberately omits;
+- `season_missing_ratings`, for seasons the fixture carries but deliberately stores no
+  ratings for under that method. The committed engine fixtures store no ratings at all
+  (their tests compute them); apps/api's verdict fixture stores keener and elo, but not
+  elo_career (#98). The finding must name exactly the fixture's own seasons, and
+  nothing else;
 - `league_has_no_games`, for a league the fixture deliberately doesn't carry. That
   fixture then verifies nothing about that league;
 - `raw_cache_*`, only when you pointed `--raw-dir` at something other than the
@@ -33,8 +37,9 @@ the doctor, and waive only these findings:
 
 Any other finding blocks verification of **every** league in that fixture, including
 `schema_not_current`, which has no league attached, and `no_cfb_mascots`. Report it as a
-gap, not a pass. (Until #110 rebuilds them, both committed engine fixtures fail on
-schema, so neither can certify anything on its own.) One blocking finding isn't about
+gap, not a pass. `packages/cfb-engine/tests/test_regression_fixtures_currency.py` and
+`apps/api/tests/fixtures/build_fixture.py` enforce these same waivers on the committed
+fixtures (#110). One blocking finding isn't about
 the db at all: `cache_past_max_year` means the committed cache holds a finished season
 that a league's ingest `MAX_YEAR` doesn't cover yet. Rebuilding won't clear it, only a
 code change bumping `MAX_YEAR` will (the #9 class). Report it as that, not as a stale

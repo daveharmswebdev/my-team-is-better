@@ -21,6 +21,14 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-name = "cfb_strength"
 
+[tool.pytest.ini_options]
+# Issue #110: `ensure_schema` migrating a db that already holds games means
+# the db is stale (#97), so the warning is an error for the whole suite. The
+# committed fixtures come from tests/fixtures/build_regression_fixtures.py.
+# Only a test that migrates a stale db on purpose may ignore it, narrowly,
+# on that test (see test_schema_migration.py) -- never here.
+filterwarnings = ["error::cfb_strength.db.connection.StaleDatabaseWarning"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

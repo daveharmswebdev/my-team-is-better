@@ -499,7 +499,8 @@ def rated_league(request: pytest.FixtureRequest) -> RatedLeague:
     runs each test in both scan orders.
 
     Every (method, league) pair is representable, including elo_career. Both
-    fixtures hold non-contiguous seasons (CFB 2001/2005/2013), so elo_career
+    fixtures hold non-contiguous seasons (CFB 2001/2003/2004/2005/2013/2017/
+    2019, NFL 1999/2004/2013/2022), so elo_career
     replays only those and reverts ratings across the missing years. Its values
     therefore differ from a full-database run, which is a question for the
     ratings suite. What this suite tests is the evidence layer reading back
@@ -508,7 +509,10 @@ def rated_league(request: pytest.FixtureRequest) -> RatedLeague:
     method, sport = request.param
     sample = LEAGUE_SAMPLES[sport]
     conn: sqlite3.Connection = request.getfixturevalue(sample.conn_fixture)
-    ensure_schema(conn)  # the committed fixtures predate the `sport` column
+    # A no-op on the committed fixtures, which are at the current schema
+    # (#110). A stale one fails here, at setup, on the StaleDatabaseWarning
+    # gate, instead of on a missing column in the query below.
+    ensure_schema(conn)
 
     seasons = [
         int(row["season"])
@@ -669,7 +673,7 @@ def test_build_comparison_says_which_method_answered_it(rated_league: RatedLeagu
 # ---------------------------------------------------------------------------
 
 ISOLATION_YEAR = 2005
-ISOLATION_SEASONS = (2001, 2005, 2013)  # every season in the CFB fixture
+ISOLATION_SEASONS = (2001, 2005, 2013)  # every season ISOLATION_YEARS stores any method for
 # Every method is stored for ISOLATION_YEAR. Outside it, each method lacks a
 # season, and methods whose names share a prefix lack different ones.
 ISOLATION_YEARS: dict[str, tuple[int, ...]] = {

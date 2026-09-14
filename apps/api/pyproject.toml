@@ -25,6 +25,16 @@ module-name = "api"
 [tool.uv.sources]
 cfb-strength-orchestrated = { workspace = true }
 
+[tool.pytest.ini_options]
+# Issue #110: the same gate as packages/cfb-engine. `ensure_schema` migrating
+# a db that already holds games means the db is stale (#97), so the warning is
+# an error for the whole suite. `tests/fixtures/cfb_verdict_fixture.sqlite3`
+# comes from `tests/fixtures/build_fixture.py`, and the throwaway dbs in
+# `sport_fixture.py` / `team_catalog_fixture.py` are built fresh, so none of
+# them should ever trip it. Never ignore it here; a test that migrates a stale
+# db on purpose must ignore it narrowly, on that test.
+filterwarnings = ["error::cfb_strength.db.connection.StaleDatabaseWarning"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

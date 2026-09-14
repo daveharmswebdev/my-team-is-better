@@ -206,7 +206,7 @@ FRAMEWORK_DEFAULT_HANDLERS: frozenset[Any] = frozenset(
 # handler with no entry here fails on purpose: add the example AND declare the
 # response on the routes that can raise it.
 EXAMPLE_EXCEPTIONS: dict[type[BaseException], BaseException] = {
-    UnknownYearError: UnknownYearError(1999, [2001, 2005, 2013]),
+    UnknownYearError: UnknownYearError(1999, [2001, 2003, 2004, 2005, 2013, 2017, 2019]),
     UnknownTeamError: UnknownTeamError("Zzyzx Polytechnic", 2005, "cfb"),
     AmbiguousTeamError: AmbiguousTeamError("State", ["Ohio State", "Penn State"]),
     SameTeamComparisonError: SameTeamComparisonError("Texas"),

@@ -112,6 +112,38 @@ PR #93 so that the modules *implementing* `RatingMethod` are checked for
 conformance, not only the Protocol declaring it. `.github/workflows/ci.yml`
 runs exactly these three commands.
 
+### Regenerating the test fixtures
+
+`tests/fixtures/cfb_regression.sqlite3` (CFB 2001, 2003, 2004, 2005, 2013,
+2017, 2019) and `tests/fixtures/nfl_regression.sqlite3` (NFL 1999, 2004,
+2013, 2022) are generated from the committed raw cache, never copied out of
+a local db:
+
+```bash
+uv run python tests/fixtures/build_regression_fixtures.py
+```
+
+It runs the real ingest path with live fetches disabled, prunes to those
+seasons, stores no ratings, and is byte-for-byte reproducible on the same
+SQLite build. Rerun it after any change to the schema, to either ingest
+path, or to those seasons' cached data, then rebuild `apps/api`'s fixture
+(`apps/api/tests/fixtures/build_fixture.py`), which starts from
+`cfb_regression.sqlite3`.
+
+Three parts of the suite catch a fixture that wasn't regenerated, and each
+covers something different:
+
+- `tests/test_regression_fixtures_regenerate_identically.py` regenerates
+  both fixtures into a temp dir (about 2 seconds, no network) and fails
+  unless every row and the schema match the committed files. This catches
+  content drift: a changed score, a missing game, an edited mascot or
+  `ingestion_log` row, whether the fixture or the cache changed.
+- `tests/test_regression_fixtures_currency.py` runs `cfb doctor`'s check on
+  both fixtures. It covers the schema and which (season, season_type)
+  batches are present, not game content.
+- Pytest treats `StaleDatabaseWarning` as an error, so a fixture at an old
+  schema fails every test that opens it.
+
 ### `src/cfb_strength/py.typed`
 
 That zero-byte file is a [PEP 561](https://peps.python.org/pep-0561/) marker

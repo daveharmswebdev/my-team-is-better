@@ -162,7 +162,7 @@ def test_years_accepts_every_registered_method(client: TestClient, method: str) 
     """Schema-level acceptance for all three registered methods, including
     `elo_career`, which deliberately has **no rows in the fixture**: its
     offseason mean reversion counts *elapsed* years, and the fixture's
-    seasons (2001/2005/2013) are non-contiguous by design, so baking it
+    seasons (2001, 2003-2005, 2013, 2017, 2019) are non-contiguous, so baking it
     would produce numbers that model nothing (issue #98). Accepting the
     method and returning an empty year list is the correct behavior for a
     real-but-uncomputed method -- which is precisely the case a typo must

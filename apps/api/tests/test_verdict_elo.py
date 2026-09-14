@@ -9,11 +9,11 @@ stayed untested while looking fine -- a request at `method="elo"` would have
 ingested.
 
 `tests/fixtures/build_fixture.py` now bakes real `elo` ratings alongside
-`keener` for the same three seasons (2001/2005/2013), computed by the real
-engine, so the assertions below are against genuine Elo output rather than
-handwritten rows. See that script for why `elo_career` is deliberately
-absent (its offseason reversion counts elapsed years, and these seasons are
-non-contiguous on purpose -- issue #98).
+`keener` for the same seven seasons (2001, 2003, 2004, 2005, 2013, 2017,
+2019), computed by the real engine, so the assertions below are against
+genuine Elo output rather than handwritten rows. See that script for why
+`elo_career` is deliberately absent (its offseason reversion counts elapsed
+years, and these seasons are non-contiguous -- issue #98).
 
 The scale assertion in `test_elo_champion_is_on_the_elo_scale_not_keeners`
 is the load-bearing one: Keener ratings are eigenvector components in the
@@ -123,11 +123,11 @@ def test_elo_case_has_no_per_opponent_breakdown(client: TestClient) -> None:
 
 def test_elo_catalog_routes_serve_the_same_seasons_as_keener(client: TestClient) -> None:
     """`/api/years` and `/api/teams` are the picker's universe -- with Elo
-    baked for the same three seasons, both must answer for it, not return
+    baked for the same seven seasons, both must answer for it, not return
     the empty list that used to be indistinguishable from a typo."""
     years = client.get("/api/years", params={"method": "elo"})
     assert years.status_code == 200
-    assert years.json() == {"years": [2001, 2005, 2013]}
+    assert years.json() == {"years": [2001, 2003, 2004, 2005, 2013, 2017, 2019]}
 
     teams = client.get("/api/teams", params={"method": "elo", "year": 2005})
     assert teams.status_code == 200

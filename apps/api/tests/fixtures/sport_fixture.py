@@ -3,7 +3,7 @@
 Mirrors `cfb_strength.evidence.test_proof`'s `_build_fixture` almost exactly
 (same insert helpers, same CFB win-cycle/NFL win-cycle/"Wildcats" name-
 collision shape) rather than reusing the committed
-`cfb_verdict_fixture.sqlite3`, which predates NFL support and has no
+`cfb_verdict_fixture.sqlite3`, which is a CFB-only slice and has no
 `sport='nfl'` rows at all. This is the one place in `apps/api` that needs a
 hand-built db instead of the real-engine-computed fixture, since exercising
 sport threading through the HTTP layer requires NFL rows to exist somewhere,
@@ -206,7 +206,7 @@ def build_sport_fixture(conn: sqlite3.Connection) -> None:
 
 
 # Issue #83: a synthetic NFL tie. No committed apps/api fixture had a single
-# equal-score game (the CFB fixture's real 2001/2005/2013 data and the win
+# equal-score game (the CFB fixture's real seven-season data and the win
 # cycles above are all decisive), so nothing could prove a tie survives the
 # HTTP layer. Kept disjoint from the win cycle above -- separate ids, ranks
 # below every existing NFL row -- so no pre-existing assertion moves.
