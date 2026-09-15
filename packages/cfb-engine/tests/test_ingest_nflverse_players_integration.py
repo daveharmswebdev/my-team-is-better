@@ -36,6 +36,7 @@ import pytest
 from cfb_strength.config import RAW_DIR
 from cfb_strength.db.connection import get_conn
 from cfb_strength.ingest.nflverse import client as nflverse_client
+from cfb_strength.ingest.nflverse import player_normalize
 from cfb_strength.ingest.nflverse.ingest_players import (
     PlayerIngestReport,
     ingest_players,
@@ -222,7 +223,7 @@ def test_season_row_is_the_sum_of_its_game_rows_with_the_one_team(
     assert row["team_id"] == sums["team_id"] == mint_surrogate_id("nfl_team", "STL")
 
 
-def test_a_stat_missing_on_every_game_row_stays_null_in_the_season_row(
+def test_no_season_row_invents_a_null_stat_in_the_sample_seasons(
     ingested: tuple[sqlite3.Connection, PlayerIngestReport],
 ) -> None:
     conn, _ = ingested
@@ -234,6 +235,47 @@ def test_a_stat_missing_on_every_game_row_stays_null_in_the_season_row(
         f"{' OR '.join(f'{c} IS NULL' for c in STAT_FIELDS)}"
     ).fetchone()[0]
     assert nulls == 0
+
+
+def test_a_stat_missing_on_every_game_row_stays_null_while_an_all_zero_stat_stays_zero(
+    nfl_regression_db: Path, tmp_path: Path, no_network: None
+) -> None:
+    # An untracked stat is NULL on every line; the season total must stay
+    # NULL, never read as 0. Edgerrin James's 1999 regular-season lines carry
+    # passing_yards 0 on all 16, which must stay a real 0.
+    raw = _sample_raw_dir(tmp_path)
+    path = raw / "nfl" / "stats_player_week_1999.csv"
+    rows = _read_csv(path)
+    for row in rows:
+        row["sacks_suffered"] = ""
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    james = [
+        r
+        for r in rows
+        if r["player_display_name"] == "Edgerrin James" and r["season_type"] == "REG"
+    ]
+    assert len(james) == 16 and {r["passing_yards"] for r in james} == {"0"}
+
+    conn = get_conn(nfl_regression_db)
+    try:
+        ingest_players(conn, [1999], raw_dir=raw)
+        james_row = _season_row(conn, "Edgerrin James", 1999, "regular")
+        warner_row = _season_row(conn, "Kurt Warner", 1999, "regular")
+        game_lines_with_sacks = conn.execute(
+            "SELECT COUNT(*) FROM player_game_stats WHERE sacks_suffered IS NOT NULL"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert game_lines_with_sacks == 0
+    assert james_row["games"] == 16
+    assert james_row["sacks_suffered"] is None
+    assert james_row["passing_yards"] == 0
+    assert warner_row["sacks_suffered"] is None
+    assert warner_row["passing_yards"] == 4044
 
 
 def test_a_listed_starter_with_no_line_for_his_side_is_repaired_to_most_attempts(
@@ -455,6 +497,33 @@ def test_reingesting_a_season_leaves_every_written_table_identical(
     assert all(first[t] for t in WRITTEN_TABLES)
     assert second == first
     assert third == first
+
+
+def test_a_player_id_the_db_holds_for_another_gsis_id_raises_and_writes_nothing(
+    nfl_regression_db: Path, tmp_path: Path, no_network: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Swapping two players' minted ids keeps the season free of a collision
+    # within itself, so only the check against the db's stored gsis ids can
+    # stop Warner's id from silently becoming Manning's career.
+    warner, manning = "00-0017200", "00-0010346"
+    raw = _sample_raw_dir(tmp_path)
+    conn = get_conn(nfl_regression_db)
+    try:
+        ingest_players(conn, [1999], raw_dir=raw)
+        before = _dump(conn)
+        real = player_normalize.player_id_for
+        swap = {warner: manning, manning: warner}
+        monkeypatch.setattr(
+            player_normalize, "player_id_for", lambda gsis_id: real(swap.get(gsis_id, gsis_id))
+        )
+
+        with pytest.raises(ValueError, match="surrogate id collision"):
+            ingest_players(conn, [1999], raw_dir=raw)
+        after = _dump(conn)
+    finally:
+        conn.close()
+
+    assert after == before
 
 
 def test_the_ingest_makes_no_network_call_when_the_cache_is_present(

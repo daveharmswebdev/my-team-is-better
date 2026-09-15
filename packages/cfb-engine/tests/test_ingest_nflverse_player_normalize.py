@@ -30,6 +30,7 @@ import pytest
 from cfb_strength.config import RAW_DIR
 from cfb_strength.contracts import PlayerStats
 from cfb_strength.ingest.nflverse import client as nflverse_client
+from cfb_strength.ingest.nflverse import player_normalize
 from cfb_strength.ingest.nflverse.normalize import (
     build_team_lookup,
     mint_surrogate_id,
@@ -215,6 +216,24 @@ def test_player_ids_are_deterministic_in_the_nfl_player_namespace() -> None:
     assert mint_surrogate_id("nfl_player", "00-0010346") != mint_surrogate_id(
         "nfl_player", "00-0019596"
     )
+
+
+def test_two_gsis_ids_minting_one_player_id_in_a_season_raise(
+    nfl_regression_conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A collision would silently merge two careers into one player.
+    rows = [r for r in _stat_rows(2022) if r["game_id"] == "2022_11_PHI_IND"]
+    assert len({r["player_id"] for r in rows}) > 1
+    monkeypatch.setattr(player_normalize, "player_id_for", lambda gsis_id: 2_000_000_001)
+
+    with pytest.raises(ValueError, match="surrogate id collision: player id 2000000001"):
+        build_player_season(
+            2022,
+            rows,
+            _games(nfl_regression_conn, 2022),
+            _franchise(),
+            build_roster(_read_csv(PLAYER_SAMPLE_DIR / "players.csv")),
+        )
 
 
 # --- REG/POST and rule 4 ----------------------------------------------------
