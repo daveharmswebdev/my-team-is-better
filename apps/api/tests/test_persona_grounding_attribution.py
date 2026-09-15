@@ -1741,7 +1741,11 @@ def test_every_breakdown_quote_narrated_in_order_is_grounded_and_swapped_is_flag
     instead), and with #26's score message when a row does. The one swap
     that is not flagged is the documented limit outside this rule: a swap
     that is itself, in order, another row's score (the head-to-head game
-    recorded from both sides)."""
+    recorded from both sides). Since #228 a *loss* a row states, swapped
+    beside "lost to", is the winner-first form rule 5 now asks for
+    ("Michigan State lost to Notre Dame 17-13" for the 13-17 `worst_loss`)
+    and is grounded; the same swap in a sentence with no loss cue is still
+    flagged with #26's score message."""
     fact_block, sport, conn = block
     data = json.loads(fact_block)
     rows = _row_scores(fact_block)
@@ -1760,7 +1764,14 @@ def test_every_breakdown_quote_narrated_in_order_is_grounded_and_swapped_is_flag
             continue
         response = _narrated(team_name, opponent_name, explanation, swapped)
         flagged = _check(conn, response, fact_block, sport)
-        if pair in rows:
+        if pair in rows and explanation.startswith("Lost"):
+            assert flagged == [], response
+            uncued = f"{team_name} played {opponent_name} {swapped[0]}-{swapped[1]}."
+            assert _check(conn, uncued, fact_block, sport) == [
+                f"{opponent_name}'s score should be stated {pair[0]}-{pair[1]}, "
+                f"not {swapped[0]}-{swapped[1]}"
+            ], uncued
+        elif pair in rows:
             assert flagged, response
         elif pair in records:
             assert flagged == [

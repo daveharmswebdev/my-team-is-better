@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from test_persona_smoke_eval import (
     _banned_hits,
+    _loss_order_violations,
     _section_8_violations,
     _sentence_count,
 )
@@ -294,3 +295,90 @@ def test_2c_leaves_game_score_order_to_production(client: TestClient) -> None:
     # check only asks whether the game happened.
     text = "Texas went 13-0 in 2005 and beat USC 38-41. That's a machine."
     assert _labelled(_violations(client, 2005, text), "grounded: scores/records") == []
+
+
+# ---------------------------------------------------------------------------
+# #228: the team-case eval's loss-order check, on the real 2005 USC case
+# (12-1, its one loss 38-41 to Texas; a 34-31 win over Notre Dame)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def usc_2005(client: TestClient) -> TeamCaseOut:
+    response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
+    assert response.status_code == 200, response.text
+    case = TeamCaseOut.model_validate(response.json()["evidence"])
+    losses = [
+        (g.opponent_name, g.team_score, g.opponent_score) for g in case.games if g.result == "L"
+    ]
+    assert losses == [("Texas", 38, 41)]
+    return case
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "USC went 12-1 in 2005 and lost 41-38 to Texas in the Rose Bowl. That's a machine.",
+        "USC fell 41-38 to Texas, and that's the whole story.",
+        "The Trojans dropped one, 41-38, to Texas.",
+        # a win's order is production's rule (#26); the loss check ignores it
+        "USC beat Notre Dame 34-31. USC beat Notre Dame 31-34.",
+        # a record is not a loss
+        "USC went 12-1 in 2005.",
+        # no score cited at all
+        "USC lost to Texas in the Rose Bowl and nobody's forgotten it.",
+    ],
+)
+def test_loss_order_accepts_a_loss_said_winner_first_with_a_cue(
+    usc_2005: TeamCaseOut, text: str
+) -> None:
+    assert _loss_order_violations(text, usc_2005) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "written"),
+    [
+        # #228's own shape: losing-score-first
+        ("USC went 12-1, and Texas got them 38-41.", "38-41"),
+        ("USC lost to Texas 38-41.", "38-41"),
+        ("USC lost to Texas (38 - 41).", "38 - 41"),
+    ],
+)
+def test_loss_order_flags_a_loss_said_losing_score_first(
+    usc_2005: TeamCaseOut, text: str, written: str
+) -> None:
+    violations = _loss_order_violations(text, usc_2005)
+    assert len(violations) == 1
+    assert violations[0].startswith(f"loss-order: {written} says USC's loss to Texas")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Texas got them 41-38.",
+        # the cue must be in the sentence that cites the score
+        "USC lost one game all year. Texas got them 41-38.",
+        # a noun is not a cue
+        "The 41-38 loss to Texas stung.",
+    ],
+)
+def test_loss_order_flags_a_winner_first_loss_with_no_loss_cue(
+    usc_2005: TeamCaseOut, text: str
+) -> None:
+    violations = _loss_order_violations(text, usc_2005)
+    assert violations == [
+        "loss-order: 41-38 is USC's loss to Texas, but the sentence never says it was lost "
+        "(lost / fell / dropped)"
+    ]
+
+
+def test_loss_order_is_not_part_of_the_champion_eval(client: TestClient) -> None:
+    # The 2017 narration the real narrator served in the #109 runs cites
+    # Alabama's loss losing-score-first ("to Auburn 14-26"). The champion eval
+    # (`_section_8_violations`) does not judge loss order; the team-case eval
+    # does, through `_loss_order_violations`.
+    text = "Alabama went 13-1 in 2017. Yeah, they took one on the chin to Auburn 14-26."
+    assert _violations(client, 2017, text) == []
+    assert [v.split(";")[0] for v in _loss_order_violations(text, _case(client, 2017))] == [
+        "loss-order: 14-26 says Alabama's loss to Auburn losing-score-first"
+    ]

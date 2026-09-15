@@ -168,8 +168,34 @@ def test_prompt_pins_the_score_order_convention() -> None:
     # `opponent_score` -- this rule is what makes that checkable.
     prompt = build_system_prompt("Texas")
 
-    assert "`team_score` number first" in prompt
-    assert "A swapped order is exactly as wrong as an invented" in prompt
+    assert "say the winner's points first" in prompt
+    assert "always give the FACT BLOCK's" not in prompt
+
+
+_RULE_5_WINNER_FIRST = (
+    "5. Whenever you cite a specific game's score, say the winner's points first.\n"
+    "   For a win, that is the FACT BLOCK's `team_score` then `opponent_score`\n"
+    '   ("beat USC 41-38" when `team_score` is 41 and `opponent_score` is 38).\n'
+    "   For a loss, that is `opponent_score` then `team_score`, and the sentence\n"
+    '   must say the game was lost — "lost 19-7 to Florida", "fell 19-7 to\n'
+    '   Florida" — when `team_score` is 7 and `opponent_score` is 19. Never\n'
+    '   "Florida got them 7-19": a loss said losing-score-first is exactly as\n'
+    "   wrong as an invented number, and so is a win said the other way round.\n"
+    "\n"
+    "Two or three sentences."
+)
+
+
+def test_rule_5_states_a_loss_winner_first_with_a_loss_cue() -> None:
+    # issue #228: persona-v9's rule 5 demanded `team_score` first for every
+    # score, so a loss had to read losing-score-first ("Florida got them
+    # 7-19"). A loss is now said winner-first in a sentence that says it was
+    # lost, which is exactly the form `api.persona.grounding` accepts.
+    for user_team in ("Texas", None):
+        prompt = build_system_prompt(user_team)
+
+        assert _RULE_5_WINNER_FIRST in prompt
+        assert "never the reverse, even if you also get" not in prompt
 
 
 def test_user_message_embeds_fact_block_json_verbatim() -> None:
