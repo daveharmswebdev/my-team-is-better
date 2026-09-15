@@ -12,7 +12,8 @@ scratch dir, secrets safety, evidence and the return contract; `.claude/rules/py
 has the exact checks.
 
 From `packages/cfb-engine` you may import only `cfb_strength.evidence`,
-`cfb_strength.db`, `cfb_strength.contracts` and `cfb_strength.config`, calling into them
+`cfb_strength.players`, `cfb_strength.db`, `cfb_strength.contracts` and
+`cfb_strength.config`, calling into them
 and never editing them. Every other engine module is forbidden, and that is checked:
 `apps/api/.importlinter` fails CI on a violating import, and
 `tests/test_import_layering_classification.py` fails CI on any new engine module nobody
