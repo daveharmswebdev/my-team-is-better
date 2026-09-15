@@ -22,6 +22,7 @@ const mockCredits: CreditsOut = {
       url: 'https://dl.acm.org/doi/10.1137/1035004',
       summary:
         "A team's rating depends recursively on the strength of the teams it beat, whose strength depends on the strength of their opponents -- the same Perron-Frobenius eigenvector idea behind PageRank, applied to a win graph. This is stock Keener, with win/loss as the dominant signal: this method does not weight margin of victory, so running up the score doesn't move the needle. It is the default, and the only method checked against the golden dataset of undisputed champions.",
+      methods: ['keener'],
     },
     {
       name: 'Elo',
@@ -30,6 +31,7 @@ const mockCredits: CreditsOut = {
       url: 'https://github.com/fivethirtyeight/nfl-elo-game',
       summary:
         'Every team starts even and they trade points after each game: beat someone better than you and you take more from them than you would from a team you were supposed to beat. Arpad Elo built it for chess; FiveThirtyEight published the football adaptation implemented here -- including the margin-of-victory multiplier, so unlike Keener above, blowouts do count. Offered as a second opinion, not a replacement -- two different methods will naturally rank teams differently from time to time.',
+      methods: ['elo', 'elo_career'],
     },
   ],
   data_sources: [

@@ -23,8 +23,8 @@
 }
 
 /*
- * `#methods` and each method article (`#elo`, `#keeners-method`) are link
- * targets (issue #227). The shell's topbar is sticky and about 3rem tall, so
+ * `#methods` and each method article (`#elo`, `#keener`) are link targets
+ * (issues #227, #144). The shell's topbar is sticky and about 3rem tall, so
  * without a scroll margin a target scrolled to the top would sit under it.
  */
 .section,

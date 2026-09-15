@@ -35,6 +35,7 @@ const keener = {
   url: 'https://dl.acm.org/doi/10.1137/1035004',
   summary:
     "A team's rating depends recursively on the strength of the teams it beat, the same eigenvector idea behind PageRank applied to a win graph.",
+  methods: ['keener'],
 } as const satisfies CreditsMethodologyOut
 
 const elo = {
@@ -44,6 +45,7 @@ const elo = {
   url: 'https://github.com/fivethirtyeight/nfl-elo-game',
   summary:
     'Every team starts even and they trade points after each game: beat someone better than you and you take more from them than you would from a team you were supposed to beat.',
+  methods: ['elo', 'elo_career'],
 } as const satisfies CreditsMethodologyOut
 
 const credits: CreditsOut = {
@@ -142,6 +144,7 @@ describe('AboutPage', () => {
           citation: 'Some citation.',
           url: 'https://example.com/only',
           summary: 'The only summary.',
+          methods: ['elo'],
         },
       ],
     })
@@ -273,11 +276,12 @@ describe('AboutPage', () => {
   })
 
   /**
-   * Issue #227: the Elo ledger's provenance link is `/about#elo`. The ids
-   * are slugged from the API's display names (see `methodologyId.ts`), and
-   * because the articles only exist once the credits resolve, the page has
-   * to do the hash scroll itself -- the browser and React Router both gave
-   * up long before the element was there.
+   * Issue #227: the Elo ledger's provenance link is `/about#elo`. Each
+   * article's id is the first entry of the credit's `methods` (issue #144:
+   * the API guarantees `methods[0]` is unique across credits), never the
+   * display name, and because the articles only exist once the credits
+   * resolve, the page has to do the hash scroll itself -- the browser and
+   * React Router both gave up long before the element was there.
    */
   describe('landing on a method by hash (issue #227)', () => {
     /** The elements `scrollIntoView` was called on, in order. */
@@ -300,7 +304,7 @@ describe('AboutPage', () => {
       window.history.replaceState(null, '', '/')
     })
 
-    it('gives each method article an id slugged from its name, and the section the id "methods"', async () => {
+    it('gives each method article the id of its first `methods` entry, and the section the id "methods"', async () => {
       mockedFetchCredits.mockResolvedValue(credits)
 
       render(<AboutPage />)
@@ -311,10 +315,28 @@ describe('AboutPage', () => {
         screen
           .getByRole('heading', { name: "Keener's method" })
           .closest('article'),
-      ).toHaveAttribute('id', 'keeners-method')
+      ).toHaveAttribute('id', 'keener')
       expect(
         screen.getByRole('heading', { name: 'The Methods' }).closest('section'),
       ).toHaveAttribute('id', 'methods')
+    })
+
+    it('takes the id from `methods[0]`, not the display name', async () => {
+      mockedFetchCredits.mockResolvedValue({
+        ...credits,
+        methodologies: [
+          { ...keener, name: 'Elo' },
+          { ...elo, name: 'Keener' },
+        ],
+      })
+
+      render(<AboutPage />)
+
+      const first = await screen.findByRole('heading', { name: 'Elo' })
+      expect(first.closest('article')).toHaveAttribute('id', 'keener')
+      expect(
+        screen.getByRole('heading', { name: 'Keener' }).closest('article'),
+      ).toHaveAttribute('id', 'elo')
     })
 
     it('scrolls the Elo article into view once the credits resolve when the hash is #elo', async () => {
@@ -329,6 +351,21 @@ describe('AboutPage', () => {
 
       const eloHeading = await screen.findByRole('heading', { name: 'Elo' })
       expect(scrolledInto).toEqual([eloHeading.closest('article')])
+    })
+
+    it('scrolls the Keener article into view once the credits resolve when the hash is #keener', async () => {
+      window.location.hash = '#keener'
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      expect(screen.getByRole('status')).toBeInTheDocument()
+      expect(scrolledInto).toEqual([])
+
+      const keenerHeading = await screen.findByRole('heading', {
+        name: "Keener's method",
+      })
+      expect(scrolledInto).toEqual([keenerHeading.closest('article')])
     })
 
     it('scrolls nothing when there is no hash', async () => {
