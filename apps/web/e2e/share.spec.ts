@@ -18,18 +18,26 @@ const SHARE_SEARCH = new URLSearchParams({
   for: 'Texas',
 }).toString()
 
-// Browser-side snippets are passed as strings: this directory type-checks
-// against Node's globals, which have no `window` and a `Navigator` with no
-// `clipboard`.
-const READ_STORED_USER_TEAM =
-  "window.localStorage.getItem('myTeamIsBetter.userTeam')"
-const READ_CLIPBOARD = 'navigator.clipboard.readText()'
-const READ_WINDOW_SCROLL_Y = 'window.scrollY'
-const READ_MODAL_SCROLL_TOP = "document.querySelector('dialog[open]').scrollTop"
+// Browser-side snippets, type-checked against the DOM lib by
+// tsconfig.e2e.json (issue #226). Each is self-contained: Playwright ships a
+// callback's source to the page, so it cannot close over anything here.
+const readStoredUserTeam = () =>
+  window.localStorage.getItem('myTeamIsBetter.userTeam')
+const readClipboard = () => navigator.clipboard.readText()
+const readWindowScrollY = () => window.scrollY
+const readModalScrollTop = () => {
+  const modal = document.querySelector('dialog[open]')
+  if (modal === null) throw new Error('no open dialog')
+  return modal.scrollTop
+}
 // Takes the clipboard branch: a desktop Chromium may otherwise offer a native
 // share sheet that a headless run cannot dismiss.
-const REMOVE_NATIVE_SHARE =
-  "Object.defineProperty(Navigator.prototype, 'share', { value: undefined, configurable: true })"
+const removeNativeShare = () => {
+  Object.defineProperty(Navigator.prototype, 'share', {
+    value: undefined,
+    configurable: true,
+  })
+}
 
 test('opening a share link answers its question in the verdict modal with no click and offers to share it', async ({
   page,
@@ -66,7 +74,7 @@ test('opening a share link answers its question in the verdict modal with no cli
     page.getByLabel('Your team (optional)', { exact: true }),
   ).toHaveValue('Texas')
   // Someone else's link never becomes your saved team.
-  expect(await page.evaluate(READ_STORED_USER_TEAM)).toBeNull()
+  expect(await page.evaluate(readStoredUserTeam)).toBeNull()
 })
 
 test('the Share button copies the link the verdict was opened with', async ({
@@ -74,7 +82,7 @@ test('the Share button copies the link the verdict was opened with', async ({
   context,
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-  await page.addInitScript({ content: REMOVE_NATIVE_SHARE })
+  await page.addInitScript(removeNativeShare)
   await page.goto(`/?${SHARE_SEARCH}`)
 
   const verdict = page
@@ -84,7 +92,7 @@ test('the Share button copies the link the verdict was opened with', async ({
 
   await expect(verdict.getByText('Link copied')).toBeVisible()
   const origin = new URL(page.url()).origin
-  expect(await page.evaluate(READ_CLIPBOARD)).toBe(`${origin}/?${SHARE_SEARCH}`)
+  expect(await page.evaluate(readClipboard)).toBe(`${origin}/?${SHARE_SEARCH}`)
 })
 
 test('closing the verdict returns to the filled-in form, drops the share query, and a reload stays closed', async ({
@@ -127,8 +135,8 @@ test('on a phone, a share link opens its verdict full screen with the first line
   })
   const close = dialog.getByRole('button', { name: 'Close the verdict' })
   await expect(close).toBeInViewport({ ratio: 1 })
-  expect(await page.evaluate(READ_WINDOW_SCROLL_Y)).toBe(0)
-  expect(await page.evaluate(READ_MODAL_SCROLL_TOP)).toBe(0)
+  expect(await page.evaluate(readWindowScrollY)).toBe(0)
+  expect(await page.evaluate(readModalScrollTop)).toBe(0)
 
   // Full screen, and a 44x44 touch target.
   expect(await dialog.boundingBox()).toEqual({
@@ -148,7 +156,7 @@ test('on a phone, a share link opens its verdict full screen with the first line
   await page.mouse.move(195, 600)
   await page.mouse.wheel(0, 1500)
   await expect(close).toBeInViewport({ ratio: 1 })
-  expect(await page.evaluate(READ_WINDOW_SCROLL_Y)).toBe(0)
+  expect(await page.evaluate(readWindowScrollY)).toBe(0)
 
   await close.click()
 
