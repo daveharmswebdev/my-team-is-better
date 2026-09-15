@@ -25,6 +25,10 @@ prominently rather than as a footnote:
   strength of the teams it beat — the same Perron-Frobenius eigenvector idea
   behind PageRank, applied to a win graph instead of a hyperlink graph.
 - **Game data** from [CollegeFootballData.com](https://collegefootballdata.com).
+- **NFL schedules, results and player stats** from
+  [nflverse](https://github.com/nflverse/nflverse-data). The schedule data was
+  originally compiled and maintained by Lee Sharpe before nflverse took over
+  publishing it.
 
 ## Structure
 

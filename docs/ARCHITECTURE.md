@@ -135,7 +135,7 @@ suite's own convention of not importing `ratings`/`ingest` is documented in
 
 | Store | Contents | Lifecycle | Why |
 |---|---|---|---|
-| **SQLite** (`cfb-engine`'s existing schema, unchanged) | `teams`, `team_season`, `games`, `ratings`, `ingestion_log` | Rebuilt fresh by the Render **build command** on every deploy | This is reference data — it doesn't change per-request, doesn't need a network round trip, and paying for a managed Postgres instance just to serve read-mostly rankings would be waste for a hobby-budget app. |
+| **SQLite** (`cfb-engine`'s schema) | `teams`, `team_season`, `games`, `ratings`, `ingestion_log`; NFL player stats (#289): `players`, `player_source_ids`, `game_starters`, `player_game_stats`, `player_season_stats` | Rebuilt fresh by the Render **build command** on every deploy | This is reference data — it doesn't change per-request, doesn't need a network round trip, and paying for a managed Postgres instance just to serve read-mostly rankings would be waste for a hobby-budget app. |
 | **Postgres** (Render managed) | **persona response cache** today; accounts (via auth provider's user id), favorite team and question history once accounts are built (deferred, #201) | Runtime, mutable, grows with usage | This is genuinely dynamic app state — the one thing that has to be a real database. |
 
 ### 3.1 Where the SQLite file actually lives (verified against Render's docs)
@@ -177,7 +177,12 @@ already fetches cache-first from `data/raw/*.json`
 (`cfb_strength.ingest.client.get_games`) — so the fix is simply to **commit
 `data/raw/` to the repo** (done: cached CFBD JSON for the full 1998–2025
 product range is now tracked, `.gitignore` only excludes the derived
-`cfb.sqlite3` binary).
+`cfb.sqlite3` binary). The nflverse player-stats cache (#289) is the one
+committed file set that isn't the raw download: nflverse's weekly files are
+~7–8 MB a season, so `data/raw/nfl/stats_player_week_<year>.csv` and
+`players.csv` keep only the columns the ingest reads and rows with a
+non-zero stat (~6 MB for 1999–2025). Adding a stat means widening that
+projection in `ingest/nflverse/client.py` and refetching with `--force`.
 Every build's ingest step is then a 100% cache hit — zero live API calls per
 deploy, regardless of deploy frequency or instance count. A human only
 touches the live API deliberately, with `--force`, to add a new season or

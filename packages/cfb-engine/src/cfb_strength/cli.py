@@ -1,10 +1,10 @@
-"""Umbrella CLI for cfb-strength: `cfb ingest`, `cfb rate`, `cfb serve`,
-`cfb doctor`.
+"""Umbrella CLI for cfb-strength: `cfb ingest`, `cfb ingest-players`,
+`cfb rate`, `cfb serve`, `cfb doctor`.
 
 This module only dispatches to entry points owned by other modules
 (`ingest.ingest_season.main`, `ingest.nflverse.ingest_season.main`,
-`ratings.compute_ratings.main`, `mcp_server.server.main`,
-`ingest.currency.main`) -- it contains no
+`ingest.nflverse.ingest_players.main`, `ratings.compute_ratings.main`,
+`mcp_server.server.main`, `ingest.currency.main`) -- it contains no
 ingestion, rating, or evidence logic of its own. Imports are deferred into
 each branch so that, e.g., `cfb ingest --years 2005` doesn't pay the cost of
 importing the MCP SDK.
@@ -63,6 +63,21 @@ INGEST_ENTRY_POINTS: dict[str, Callable[[], IngestMain]] = {
     "nfl": _nfl_ingest_main,
 }
 
+
+def _nfl_player_ingest_main() -> IngestMain:
+    from cfb_strength.ingest.nflverse.ingest_players import main
+
+    return main
+
+
+# League -> loader for that league's player-stats ingest (issue #289). Unlike
+# INGEST_ENTRY_POINTS this is deliberately partial: only the NFL has player
+# stats so far, and adding a league is one entry here (epic #288).
+PLAYER_INGEST_ENTRY_POINTS: dict[str, Callable[[], IngestMain]] = {
+    "nfl": _nfl_player_ingest_main,
+}
+_PLAYER_SPORT_CHOICES = ",".join(PLAYER_INGEST_ENTRY_POINTS)
+
 USAGE = f"""\
 usage: cfb <command> [args]
 
@@ -71,6 +86,10 @@ commands:
          [--db-path PATH]
       Fetch and store game/team data for one or more seasons. --sport
       defaults to "cfb" (CFBD); "nfl" ingests nflverse data instead.
+
+  ingest-players --sport {{{_PLAYER_SPORT_CHOICES}}} --years YEARS [--force] [--db-path PATH]
+      Fetch and store player stat lines, season totals and starters for
+      seasons whose games are already ingested. --sport is required.
 
   rate --years YEARS [--method {{{_METHOD_CHOICES}}}] [--sport {{{_SPORT_CHOICES}}}]
       Compute and store team ratings for one or more seasons.
@@ -147,6 +166,27 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         return load_ingest_main()(ingest_args)
+
+    if command == "ingest-players":
+        if not any(arg == "--sport" or arg.startswith("--sport=") for arg in rest):
+            print("error: ingest-players requires --sport\n", file=sys.stderr)
+            return 2
+        try:
+            sport, player_args = _split_out_sport_flag(rest)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+
+        load_player_main = PLAYER_INGEST_ENTRY_POINTS.get(sport)
+        if load_player_main is None:
+            available = " or ".join(repr(s) for s in PLAYER_INGEST_ENTRY_POINTS)
+            print(
+                f"error: no player-stats ingest for {sport!r} yet; available: {available}\n",
+                file=sys.stderr,
+            )
+            return 2
+
+        return load_player_main()(player_args)
 
     if command == "rate":
         from cfb_strength.ratings.compute_ratings import main as rate_main
