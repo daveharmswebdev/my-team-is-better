@@ -625,3 +625,231 @@ export const SEARCH_MC: PlayerSearchOut = {
     },
   ],
 }
+
+// ---------------------------------------------------------------------------
+// Changing a pick (issue #304). Peyton Manning's career, search row and the
+// Warner/Manning comparison are copied from `apps/api` booted on the committed
+// fixture db. Tom Brady and Brady Quinn aren't in that fixture (NFL 1999 +
+// 2023), so their rows, careers and comparisons are invented for the
+// founder's repro, and say so.
+// ---------------------------------------------------------------------------
+
+const MANNING_1999_REGULAR: PlayerSeasonLineOut = {
+  season: 1999,
+  season_type: 'regular',
+  teams: ['Indianapolis Colts'],
+  games: 16,
+  record: { wins: 13, losses: 3, ties: 0, starts: 16 },
+  stats: {
+    completions: 331,
+    attempts: 532,
+    passing_yards: 4135,
+    passing_tds: 26,
+    passing_interceptions: 15,
+    sacks_suffered: 14,
+    sack_yards_lost: -116,
+    carries: 35,
+    rushing_yards: 73,
+    rushing_tds: 2,
+  },
+  games_without_stat_lines: 0,
+}
+
+const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
+  season: 1999,
+  season_type: 'postseason',
+  teams: ['Indianapolis Colts'],
+  games: 1,
+  record: { wins: 0, losses: 1, ties: 0, starts: 1 },
+  stats: {
+    completions: 19,
+    attempts: 42,
+    passing_yards: 227,
+    passing_tds: 0,
+    passing_interceptions: 0,
+    sacks_suffered: 0,
+    sack_yards_lost: 0,
+    carries: 3,
+    rushing_yards: 22,
+    rushing_tds: 1,
+  },
+  games_without_stat_lines: 0,
+}
+
+/** `GET /api/players/2153701690?sport=nfl` on the committed fixture. */
+export const PEYTON_MANNING_CAREER: PlayerCareerOut = {
+  sport: 'nfl',
+  player_id: 2153701690,
+  display_name: 'Peyton Manning',
+  position: 'QB',
+  seasons: [MANNING_1999_REGULAR, MANNING_1999_POSTSEASON],
+  regular_season: {
+    season_type: 'regular',
+    seasons: 1,
+    games: 16,
+    record: MANNING_1999_REGULAR.record,
+    stats: MANNING_1999_REGULAR.stats,
+  },
+  postseason: {
+    season_type: 'postseason',
+    seasons: 1,
+    games: 1,
+    record: MANNING_1999_POSTSEASON.record,
+    stats: MANNING_1999_POSTSEASON.stats,
+  },
+}
+
+/** `GET /api/players/compare?a=2044124519&b=2153701690&sport=nfl` on the committed fixture: they never met. */
+export const WARNER_VS_MANNING: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: KURT_WARNER_CAREER,
+  b: PEYTON_MANNING_CAREER,
+  regular_season_head_to_head: {
+    season_type: 'regular',
+    record: { wins: 0, losses: 0, ties: 0, starts: 0 },
+    games: [],
+  },
+  postseason_head_to_head: {
+    season_type: 'postseason',
+    record: { wins: 0, losses: 0, ties: 0, starts: 0 },
+    games: [],
+  },
+}
+
+/** `GET /api/players/search?q=Manning&sport=nfl` on the committed fixture. */
+export const SEARCH_MANNING: PlayerSearchOut = {
+  sport: 'nfl',
+  query: 'Manning',
+  limit: 10,
+  rows: [
+    {
+      player_id: 2153701690,
+      display_name: 'Peyton Manning',
+      position: 'QB',
+      first_season: 1999,
+      last_season: 1999,
+    },
+  ],
+}
+
+/** Invented: a search for "Brady" that finds both of the founder's players. */
+export const SEARCH_BRADY: PlayerSearchOut = {
+  sport: 'nfl',
+  query: 'Brady',
+  limit: 10,
+  rows: [
+    {
+      player_id: 1002,
+      display_name: 'Tom Brady',
+      position: 'QB',
+      first_season: 2001,
+      last_season: 2001,
+    },
+    {
+      player_id: 1003,
+      display_name: 'Brady Quinn',
+      position: 'QB',
+      first_season: 2009,
+      last_season: 2009,
+    },
+  ],
+}
+
+/** Invented: one season line, with numbers made up for the repro. */
+function inventedCareer(
+  playerId: number,
+  displayName: string,
+  line: PlayerSeasonLineOut,
+): PlayerCareerOut {
+  return {
+    sport: 'nfl',
+    player_id: playerId,
+    display_name: displayName,
+    position: 'QB',
+    seasons: [line],
+    regular_season: {
+      season_type: 'regular',
+      seasons: 1,
+      games: line.games,
+      record: line.record,
+      stats: line.stats,
+    },
+    postseason: null,
+  }
+}
+
+/** Invented. */
+export const TOM_BRADY_CAREER: PlayerCareerOut = inventedCareer(
+  1002,
+  'Tom Brady',
+  {
+    season: 2001,
+    season_type: 'regular',
+    teams: ['New England Patriots'],
+    games: 15,
+    record: { wins: 11, losses: 3, ties: 0, starts: 14 },
+    stats: {
+      completions: 264,
+      attempts: 413,
+      passing_yards: 2843,
+      passing_tds: 18,
+      passing_interceptions: 12,
+      sacks_suffered: 41,
+      sack_yards_lost: -216,
+      carries: 36,
+      rushing_yards: 43,
+      rushing_tds: 0,
+    },
+    games_without_stat_lines: 0,
+  },
+)
+
+/** Invented. */
+export const BRADY_QUINN_CAREER: PlayerCareerOut = inventedCareer(
+  1003,
+  'Brady Quinn',
+  {
+    season: 2009,
+    season_type: 'regular',
+    teams: ['Cleveland Browns'],
+    games: 10,
+    record: { wins: 1, losses: 8, ties: 0, starts: 9 },
+    stats: {
+      completions: 136,
+      attempts: 256,
+      passing_yards: 1339,
+      passing_tds: 8,
+      passing_interceptions: 7,
+      sacks_suffered: 20,
+      sack_yards_lost: -120,
+      carries: 23,
+      rushing_yards: 97,
+      rushing_tds: 0,
+    },
+    games_without_stat_lines: 0,
+  },
+)
+
+const NEVER_MET_HEAD_TO_HEADS = {
+  regular_season_head_to_head: NEVER_MET_COMPARISON.regular_season_head_to_head,
+  postseason_head_to_head: NEVER_MET_COMPARISON.postseason_head_to_head,
+}
+
+/** Invented: Tom Brady and Brady Quinn, who never met here. */
+export const BRADY_VS_QUINN: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: TOM_BRADY_CAREER,
+  b: BRADY_QUINN_CAREER,
+  ...NEVER_MET_HEAD_TO_HEADS,
+}
+
+/**
+ * Invented: Tom Brady and Peyton Manning. The full build has them 9-3-0 in
+ * the regular season; this stand-in keeps the never-met shape.
+ */
+export const BRADY_VS_MANNING: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: TOM_BRADY_CAREER,
+  b: PEYTON_MANNING_CAREER,
+  ...NEVER_MET_HEAD_TO_HEADS,
+}

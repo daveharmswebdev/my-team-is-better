@@ -18,6 +18,8 @@ export interface PlayerComboboxProps {
   options: PlayerSearchRowOut[]
   /** Called with the picked player. */
   onSelect: (player: PlayerSearchRowOut) => void
+  /** Called by the clear button: the parent empties the text and the pick. */
+  onClear: () => void
   status: PlayerSearchStatus
   /** Secondary text under the field, e.g. a search that failed. */
   hint?: string
@@ -55,6 +57,11 @@ function statusText(
  * Each option shows the name, position and season span, so two players with
  * the same name can be told apart. Picking one hands the whole row back; the
  * field's text is only ever what the parent sets.
+ *
+ * Re-entry (issue #304): Enter picks the highlighted option or, with nothing
+ * highlighted, the only suggestion left once the search for the current text
+ * is done (never a previous search's rows). A clear button, shown while the
+ * field has text, hands the emptying to the parent and puts focus back.
  */
 export function PlayerCombobox({
   label,
@@ -62,6 +69,7 @@ export function PlayerCombobox({
   onChange,
   options,
   onSelect,
+  onClear,
   status,
   hint,
   placeholder,
@@ -76,6 +84,7 @@ export function PlayerCombobox({
   /** -1 means nothing active: typing never picks a player by itself. */
   const [activeIndex, setActiveIndex] = useState(-1)
   const activeOptionRef = useRef<HTMLLIElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
 
   const isOpen = isExpanded && options.length > 0
   const activePlayer = activeIndex < 0 ? undefined : options[activeIndex]
@@ -106,6 +115,12 @@ export function PlayerCombobox({
     onSelect(player)
   }
 
+  function clear() {
+    close()
+    onClear()
+    inputRef.current?.focus()
+  }
+
   function moveActive(delta: number) {
     if (options.length === 0) {
       return
@@ -128,12 +143,21 @@ export function PlayerCombobox({
         event.preventDefault()
         moveActive(-1)
         return
-      case 'Enter':
+      case 'Enter': {
         if (isOpen && activePlayer !== undefined) {
           event.preventDefault()
           select(activePlayer)
+          return
+        }
+        // A result list for older text is still showing while 'searching'.
+        const onlyPlayer =
+          options.length === 1 && status === 'done' ? options[0] : undefined
+        if (onlyPlayer !== undefined) {
+          event.preventDefault()
+          select(onlyPlayer)
         }
         return
+      }
       case 'Escape':
         if (isOpen) {
           event.preventDefault()
@@ -152,6 +176,7 @@ export function PlayerCombobox({
       <label htmlFor={inputId}>{label}</label>
       <div className={styles.combo}>
         <input
+          ref={inputRef}
           id={inputId}
           className={styles.input}
           type="text"
@@ -171,6 +196,16 @@ export function PlayerCombobox({
           onClick={() => setIsExpanded(true)}
           onBlur={close}
         />
+        {value !== '' && (
+          <button
+            type="button"
+            className={styles.clear}
+            aria-label={`Clear ${label}`}
+            onClick={clear}
+          >
+            <span aria-hidden="true">&times;</span>
+          </button>
+        )}
         {isOpen && (
           <ul
             className={styles.listbox}

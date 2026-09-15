@@ -13,6 +13,7 @@ interface HarnessProps {
   hint?: string
   onChange?: (text: string) => void
   onSelect?: (player: PlayerSearchRowOut) => void
+  onClear?: () => void
 }
 
 /** A controlled parent: the page owns the text and the search results. */
@@ -22,6 +23,7 @@ function Harness({
   hint,
   onChange,
   onSelect,
+  onClear,
 }: HarnessProps) {
   const [value, setValue] = useState('')
   return (
@@ -38,6 +40,10 @@ function Harness({
       onSelect={(player) => {
         setValue(player.display_name)
         onSelect?.(player)
+      }}
+      onClear={() => {
+        setValue('')
+        onClear?.()
       }}
     />
   )
@@ -196,5 +202,91 @@ describe('PlayerCombobox (issue #301)', () => {
     render(<Harness options={[]} hint="Search is down." status="error" />)
 
     expect(screen.getByText('Search is down.')).toBeInTheDocument()
+  })
+})
+
+describe('PlayerCombobox re-entry (issue #304)', () => {
+  it('Enter picks the only suggestion left once the search is done', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<Harness options={SEARCH_MCNAIR.rows} onSelect={onSelect} />)
+
+    const input = screen.getByRole('combobox')
+    await user.type(input, 'McNair')
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+    await user.keyboard('{Enter}')
+
+    expect(onSelect).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith(SEARCH_MCNAIR.rows[0])
+    expect(input).toHaveValue('Steve McNair')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('Enter picks nothing when two suggestions are left and none is highlighted', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<Harness options={SEARCH_MC.rows.slice(0, 2)} onSelect={onSelect} />)
+
+    const input = screen.getByRole('combobox')
+    await user.type(input, 'mc')
+    await user.keyboard('{Enter}')
+
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(input).toHaveValue('mc')
+  })
+
+  it('Enter picks nothing from a single suggestion while the search for the current text is still out', async () => {
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(
+      <Harness
+        options={SEARCH_MCNAIR.rows}
+        status="searching"
+        onSelect={onSelect}
+      />,
+    )
+
+    const input = screen.getByRole('combobox')
+    await user.type(input, 'McNairz')
+    await user.keyboard('{Enter}')
+
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(input).toHaveValue('McNairz')
+  })
+
+  it('has a clear button only while the field has text, which empties it and puts focus back', async () => {
+    const user = userEvent.setup()
+    const onClear = vi.fn()
+    render(<Harness options={[]} onClear={onClear} />)
+
+    expect(
+      screen.queryByRole('button', { name: 'Clear Player B' }),
+    ).not.toBeInTheDocument()
+
+    const input = screen.getByRole('combobox')
+    await user.type(input, 'McNair')
+    await user.click(screen.getByRole('button', { name: 'Clear Player B' }))
+
+    expect(onClear).toHaveBeenCalledTimes(1)
+    expect(input).toHaveValue('')
+    expect(input).toHaveFocus()
+    expect(
+      screen.queryByRole('button', { name: 'Clear Player B' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('the clear button is reachable from the keyboard', async () => {
+    const user = userEvent.setup()
+    const onClear = vi.fn()
+    render(<Harness options={[]} onClear={onClear} />)
+
+    const input = screen.getByRole('combobox')
+    await user.type(input, 'McNair')
+    await user.tab()
+    expect(screen.getByRole('button', { name: 'Clear Player B' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+
+    expect(onClear).toHaveBeenCalledTimes(1)
+    expect(input).toHaveFocus()
   })
 })

@@ -43,6 +43,51 @@
   gap: var(--sp-4);
 }
 
+/* The Compare button and its pick-from-list line (issue #304). */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+/* QuestionForm's primary button, at its own width. */
+.compare {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  padding: 0.85rem 1.4rem;
+  background: var(--leather);
+  color: var(--on-leather);
+}
+
+.compare:hover:not(:disabled) {
+  background: var(--leather-strong);
+}
+
+.compare:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 2px;
+}
+
+.compare:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.pickHint {
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
 .prompt {
   color: var(--ink-muted);
 }

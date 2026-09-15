@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { expect, userEvent, within } from 'storybook/test'
 import {
+  PICK_FROM_LIST_COPY,
   PICK_TWO_COPY,
   SAME_PLAYER_COPY,
   pickOneMoreCopy,
@@ -127,6 +128,55 @@ export const PickingPlayerB: Story = {
     await expect(
       await canvas.findByRole('option', { name: /Steve McNair/ }),
     ).toBeVisible()
+  },
+}
+
+/**
+ * Text typed into Player B but nothing picked from the list (issue #304):
+ * Compare stays disabled and says why.
+ */
+export const TypedNotPicked: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}`, {
+      career: () => jsonResponse(200, KURT_WARNER_CAREER),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
+    await userEvent.type(
+      canvas.getByLabelText('Player B', { exact: true }),
+      'McN',
+    )
+    await expect(canvas.getByText(PICK_FROM_LIST_COPY)).toBeVisible()
+    await expect(canvas.getByRole('button', { name: 'Compare' })).toBeDisabled()
+  },
+}
+
+/** Steve McNair picked into Player B, then Compare pressed (issue #304). */
+export const PickedAndCompared: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}`, {
+      career: () => jsonResponse(200, KURT_WARNER_CAREER),
+      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
+    await userEvent.type(
+      canvas.getByLabelText('Player B', { exact: true }),
+      'McNair',
+    )
+    await userEvent.click(
+      await canvas.findByRole('option', { name: /Steve McNair/ }),
+    )
+    const compare = canvas.getByRole('button', { name: 'Compare' })
+    await expect(compare).toBeEnabled()
+    await userEvent.click(compare)
+    await canvas.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    })
   },
 }
 
