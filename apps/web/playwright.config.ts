@@ -9,6 +9,41 @@ import { defineConfig, devices } from '@playwright/test'
  * Chromium only for v1 -- no cross-browser matrix yet (issue #39's stated
  * initial scope).
  */
+
+/**
+ * Ports (issue #226). Both come from the environment, with the defaults CI
+ * relies on (CI sets neither), and everything below -- `baseURL`, both
+ * `webServer` URLs, uvicorn's and `vite preview`'s `--port`, the API's CORS
+ * allow-list and the API base baked into the built app -- derives from these
+ * two, so nothing else in this file names a port. Several coordinator
+ * worktrees run at once here, and each needs its own pair. To run a second
+ * suite alongside one already on the defaults:
+ *
+ *   E2E_API_PORT=8010 E2E_WEB_PORT=4183 npx playwright test
+ *
+ * `reuseExistingServer` is off unconditionally: with several worktrees
+ * running, something already listening on :4173 is far more likely to be a
+ * stranger's preview server than this checkout's, and borrowing it means
+ * ERR_CONNECTION_REFUSED when it goes away mid-run (291 of 300 runs on #197).
+ * A busy port fails fast with Playwright's port-in-use error instead, and the
+ * fix is the line above.
+ */
+function portFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') {
+    return fallback
+  }
+  if (!/^\d+$/.test(raw)) {
+    throw new Error(`${name} must be a port number, got ${JSON.stringify(raw)}`)
+  }
+  return Number(raw)
+}
+
+const API_PORT = portFromEnv('E2E_API_PORT', 8000)
+const WEB_PORT = portFromEnv('E2E_WEB_PORT', 4173)
+const API_ORIGIN = `http://localhost:${API_PORT}`
+const WEB_ORIGIN = `http://localhost:${WEB_PORT}`
+
 export default defineConfig({
   testDir: './e2e',
   // Parallel again as of #44/#99. This was previously pinned to
@@ -30,7 +65,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: WEB_ORIGIN,
     trace: 'on-first-retry',
   },
   projects: [
@@ -50,21 +85,21 @@ export default defineConfig({
       // e2e run needs neither a live Postgres instance nor a real
       // `ANTHROPIC_API_KEY` (see apps/api's own test-mode seam, issue #39's
       // groundwork).
-      command:
-        'cd ../api && APP_TEST_MODE=1 CORS_ALLOWED_ORIGINS=http://localhost:4173 CFB_DB_PATH=tests/fixtures/cfb_verdict_fixture.sqlite3 uv run uvicorn api.main:app --port 8000',
-      url: 'http://localhost:8000/health',
-      reuseExistingServer: !process.env.CI,
+      command: `cd ../api && APP_TEST_MODE=1 CORS_ALLOWED_ORIGINS=${WEB_ORIGIN} CFB_DB_PATH=tests/fixtures/cfb_verdict_fixture.sqlite3 uv run uvicorn api.main:app --port ${API_PORT}`,
+      url: `${API_ORIGIN}/health`,
+      reuseExistingServer: false,
     },
     {
       // `vite preview` (already available via the existing `preview` npm
-      // script) serves the production build on a fixed port -- chosen over
-      // adding a separate static-file-server devDependency since it needs
-      // none. `src/lib/api/client.ts`'s `VITE_API_BASE_URL` already
-      // defaults to `http://localhost:8000` when unset, so no env override
-      // is needed here for the built app to reach the API entry above.
-      command: 'npm run build && npm run preview -- --port 4173',
-      url: 'http://localhost:4173',
-      reuseExistingServer: !process.env.CI,
+      // script) serves the production build -- chosen over adding a separate
+      // static-file-server devDependency since it needs none.
+      // `src/lib/api/client.ts` reads `VITE_API_BASE_URL` at build time and
+      // only defaults to :8000, so the build gets this run's API origin.
+      // `--strictPort` keeps `vite preview` from quietly moving to the next
+      // free port if the one it was given is taken.
+      command: `VITE_API_BASE_URL=${API_ORIGIN} npm run build && npm run preview -- --port ${WEB_PORT} --strictPort`,
+      url: WEB_ORIGIN,
+      reuseExistingServer: false,
     },
   ],
 })

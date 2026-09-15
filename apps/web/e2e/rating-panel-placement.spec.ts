@@ -16,8 +16,9 @@ import { fillYear } from './fillYear.ts'
 // height where the popover's default height (80% of the viewport) is too
 // short for four games, so it is what proves the four-game minimum holds.
 //
-// This project's e2e files compile without the DOM lib, so the few in-page
-// measurements are sent as script text rather than typed callbacks.
+// The e2e files type-check against the DOM lib (tsconfig.e2e.json, #226), so
+// the small in-page reads below are typed callbacks. `MEASURE_LEDGER` is still
+// script text: a larger conversion left for its own round.
 
 interface Viewport {
   width: number
@@ -36,9 +37,6 @@ const LAYOUTS: ReadonlyArray<{
 const GAMES_2005 = 13
 /** The fewest complete game rows the Elo ledger must show at once. */
 const MIN_VISIBLE_ROWS = 4
-
-/** The open verdict modal, in page script. */
-const OPEN_MODAL = "document.querySelector('dialog[open]')"
 
 interface Box {
   top: number
@@ -127,18 +125,26 @@ async function placeTriggerAt(
   await page.addStyleTag({
     content: `dialog[open] > * { padding-bottom: ${viewport.height * 2}px; }`,
   })
+  // Each callback finds the open modal itself: Playwright ships a callback's
+  // source to the page, so it cannot share a helper defined out here.
   const scrolledTop =
     (await boxOf(trigger)).top +
-    (await page.evaluate<number>(`${OPEN_MODAL}.scrollTop`))
+    (await page.evaluate(() => {
+      const modal = document.querySelector('dialog[open]')
+      if (modal === null) throw new Error('no open dialog')
+      return modal.scrollTop
+    }))
   if (scrolledTop < top) {
     await page.addStyleTag({
       content: `dialog[open] > * { padding-top: ${top - scrolledTop}px; }`,
     })
   }
   const current = (await boxOf(trigger)).top
-  await page.evaluate(
-    `${OPEN_MODAL}.scrollBy({ top: ${current - top}, behavior: 'instant' })`,
-  )
+  await page.evaluate((by) => {
+    const modal = document.querySelector('dialog[open]')
+    if (modal === null) throw new Error('no open dialog')
+    modal.scrollBy({ top: by, behavior: 'instant' })
+  }, current - top)
   expect(Math.abs((await boxOf(trigger)).top - top)).toBeLessThanOrEqual(2)
 }
 

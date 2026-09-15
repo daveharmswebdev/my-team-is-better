@@ -1,8 +1,13 @@
 {
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.e2e.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
+    /* The Playwright specs run under Node, but the callbacks they hand to
+       `page.evaluate` / `page.addInitScript` run in the browser, so this
+       program needs both worlds: Node's types for the runner and the DOM lib
+       so those callbacks are type-checked instead of passed as strings
+       (issue #226). */
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "skipLibCheck": true,
 
@@ -22,11 +27,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": [
-    "vite.config.ts",
-    "vitest.storybook.config.ts",
-    ".storybook/*.ts",
-    "playwright.config.ts"
-  ],
-  "exclude": [".storybook/*.setup.ts"]
+  "include": ["e2e"]
 }
