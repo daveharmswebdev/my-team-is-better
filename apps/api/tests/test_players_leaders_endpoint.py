@@ -307,6 +307,10 @@ def _assert_422_at(response_status: int, body: Any, field: str) -> None:
         ({"limit": 101}, "limit"),
         ({"limit": -1}, "limit"),
         ({"offset": -1}, "offset"),
+        # #296 review: past SQLite's signed 64-bit INTEGER, sqlite3 raises an
+        # unmapped OverflowError (a 500) unless the bound stops it here.
+        ({"offset": 2**63}, "offset"),
+        ({"offset": 2**64}, "offset"),
         ({"sport": "cfb"}, "sport"),
         ({"sport": "basketball"}, "sport"),
         ({"sort": "rushing_yards"}, "sort"),
@@ -320,6 +324,13 @@ def test_invalid_query_is_a_422_at_that_field(
     response = client.get(LEADERS, params=params)
 
     _assert_422_at(response.status_code, response.json(), field)
+
+
+def test_largest_sqlite_offset_is_an_empty_page_not_an_error(client: TestClient) -> None:
+    body = _get(client, offset=2**63 - 1)
+
+    assert body["offset"] == 2**63 - 1
+    assert body["rows"] == []
 
 
 def test_cfb_is_never_an_empty_200(client: TestClient) -> None:

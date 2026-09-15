@@ -9,9 +9,11 @@ nothing here re-sorts, re-ranks or fills a null stat with 0. What this
 module adds is only the HTTP boundary:
 
 - **Bounds are request validation.** `limit` (1..`PLAYER_LEADERS_MAX_LIMIT`)
-  and `offset` (>= 0) are FastAPI `Query` bounds, so an out-of-range value
-  is a 422 located at that field before the engine is called. The engine's
-  own `ValueError` for the same bounds must never surface as a 500.
+  and `offset` (0..`SQLITE_INTEGER_MAX`) are FastAPI `Query` bounds, so an
+  out-of-range value is a 422 located at that field before the engine is
+  called. The engine's own `ValueError` for the same bounds must never
+  surface as a 500, and neither may sqlite3's `OverflowError` for an offset
+  no SQLite INTEGER can hold (#296 review).
 - **Only leagues with player stats.** CFB has none, so `sport=cfb` would
   answer an empty 200 that looks exactly like an unloaded db (the failure
   #104 fixed for `method`). `player_sport` turns it into a 422 at `sport`
@@ -84,7 +86,7 @@ def leaders(
     season_type: PlayerSeasonType = "regular",
     sort: PlayerLeaderSort = "passing_yards",
     limit: Annotated[int, Query(ge=1, le=PLAYER_LEADERS_MAX_LIMIT)] = 50,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[int, Query(ge=0, le=SQLITE_INTEGER_MAX)] = 0,
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> PlayerLeadersOut:
     """One page of a career leaderboard, always descending on `sort`, with
