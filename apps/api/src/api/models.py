@@ -287,6 +287,13 @@ class EloLedgerOut(BaseModel):
     block (`api.persona.service`): narrating ledger figures is an open
     question (#175), not something this field quietly opts the narrator
     into.
+
+    `mov_denom_floor_fraction` (issue #194) is the margin-of-victory
+    denominator floor as a fraction of `mov_scale`, copied from the ledger
+    as the engine read it back from `elo_ledger_configs`. It is required
+    with no default on purpose: the value is whatever the walk actually
+    used, and a stored fraction other than the engine's constant must reach
+    the client as stored, never be masked by a hard-coded "half" here.
     """
 
     starting_rating: float
@@ -295,6 +302,7 @@ class EloLedgerOut(BaseModel):
     scale: float
     mov_scale: float
     mov_autocorr: float
+    mov_denom_floor_fraction: float
     steps: list[EloGameStepOut]
 
     @classmethod
@@ -306,6 +314,7 @@ class EloLedgerOut(BaseModel):
             scale=ledger.scale,
             mov_scale=ledger.mov_scale,
             mov_autocorr=ledger.mov_autocorr,
+            mov_denom_floor_fraction=ledger.mov_denom_floor_fraction,
             steps=[EloGameStepOut.from_dataclass(s) for s in ledger.steps],
         )
 

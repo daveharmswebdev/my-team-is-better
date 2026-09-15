@@ -130,8 +130,9 @@ def _build_current_db(path: Path) -> Path:
             for method in LEDGER_METHODS:
                 conn.execute(
                     "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, "
-                    "hfa, scale, mov_scale, mov_autocorr, computed_at) "
-                    "VALUES (?, ?, ?, 1500.0, 20.0, 55.0, 400.0, 2.2, 0.001, "
+                    "hfa, scale, mov_scale, mov_autocorr, mov_denom_floor_fraction, "
+                    "computed_at) "
+                    "VALUES (?, ?, ?, 1500.0, 20.0, 55.0, 400.0, 2.2, 0.001, 0.5, "
                     "'2026-01-01T00:00:00+00:00')",
                     (season, method, sport),
                 )

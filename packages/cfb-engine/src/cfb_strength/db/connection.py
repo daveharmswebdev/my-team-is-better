@@ -188,6 +188,27 @@ def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> list[str]:
     return []
 
 
+def _migrate_elo_ledger_floor_column(conn: sqlite3.Connection) -> list[str]:
+    """Add `elo_ledger_configs.mov_denom_floor_fraction` (issue #194) to a
+    db whose ledger table predates it.
+
+    Existing rows backfill to 0.5: that is the value
+    `ratings/elo.py::_MIN_DENOM_FRACTION` had for every ledger computed
+    before the column existed (it has never been anything else), so the
+    backfill records the constant those walks actually ran with rather
+    than inventing one. The DDL in schema.sql has no default on purpose: a
+    fresh ledger row must state the fraction its walk used. Re-rating a
+    (year, method, sport) rewrites its config row wholesale.
+    """
+    if not _has_column(conn, "elo_ledger_configs", "mov_denom_floor_fraction"):
+        conn.execute(
+            "ALTER TABLE elo_ledger_configs "
+            "ADD COLUMN mov_denom_floor_fraction REAL NOT NULL DEFAULT 0.5"
+        )
+        return ["elo_ledger_configs.mov_denom_floor_fraction"]
+    return []
+
+
 def _schema_objects(conn: sqlite3.Connection) -> set[str]:
     return {
         f"{row[0]} {row[1]}"
@@ -205,6 +226,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         *_migrate_sport_columns(conn),
         *_migrate_team_alias_columns(conn),
         *_migrate_ratings_ties_column(conn),
+        *_migrate_elo_ledger_floor_column(conn),
     ]
     # Whole tables/indexes too, not only ALTER TABLE columns: schema.sql's
     # `CREATE ... IF NOT EXISTS` and the migration's indexes also only add

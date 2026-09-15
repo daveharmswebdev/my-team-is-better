@@ -709,6 +709,9 @@ def _walk(
             scale=cfg.scale,
             mov_scale=cfg.mov_scale,
             mov_autocorr=cfg.mov_autocorr,
+            # Issue #194: the same constant `mov_multiplier` clamped with,
+            # so a reader of the ledger never has to hard-code "half".
+            mov_denom_floor_fraction=_MIN_DENOM_FRACTION,
             steps=team_steps,
         )
         for team_id, team_steps in steps.items()

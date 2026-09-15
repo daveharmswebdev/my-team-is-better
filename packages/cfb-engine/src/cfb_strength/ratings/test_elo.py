@@ -24,6 +24,7 @@ from cfb_strength.contracts import (
     TeamRating,
 )
 from cfb_strength.ratings.elo import (
+    _MIN_DENOM_FRACTION,
     ELO_CONFIGS,
     EloCareerRating,
     EloConfig,
@@ -942,12 +943,20 @@ def test_elo_ledger_steps_re_derive_from_their_own_fields() -> None:
         ledger = tr.elo_ledger
         assert ledger is not None
         assert ledger.starting_rating == CFB.initial
-        assert (ledger.k, ledger.hfa, ledger.scale, ledger.mov_scale, ledger.mov_autocorr) == (
+        assert (
+            ledger.k,
+            ledger.hfa,
+            ledger.scale,
+            ledger.mov_scale,
+            ledger.mov_autocorr,
+            ledger.mov_denom_floor_fraction,
+        ) == (
             CFB.k,
             CFB.hfa,
             CFB.scale,
             CFB.mov_scale,
             CFB.mov_autocorr,
+            _MIN_DENOM_FRACTION,
         )
         for step in ledger.steps:
             result_score = _RESULT_SCORE[step.result]
@@ -1050,9 +1059,40 @@ def test_elo_ledger_carries_the_nfl_constants() -> None:
         scale=NFL.scale,
         mov_scale=NFL.mov_scale,
         mov_autocorr=NFL.mov_autocorr,
+        mov_denom_floor_fraction=_MIN_DENOM_FRACTION,
         steps=ledger.steps,
     )
     assert {s.home_field_adjustment for s in ledger.steps} == {NFL.hfa, -NFL.hfa, 0.0}
+
+
+def test_elo_ledger_floor_fraction_is_the_constant_the_multiplier_clamps_with() -> None:
+    """Issue #194: the ledger names the margin-of-victory denominator floor
+    the walk ran with, and the number is tied to behaviour rather than
+    copied from a config. With `mov_autocorr` large enough that an
+    underdog's win drives the raw denominator below the floor, the walked
+    step's multiplier is the undamped `ln(margin + 1)` divided by the
+    ledger's own fraction -- exactly 2x at 0.5. A ledger claiming any other
+    fraction would name a saturation the multiplier never produced."""
+    for cfg in (CFB, NFL):
+        for tr in EloRating(cfg).rate(_ledger_season()).values():
+            assert tr.elo_ledger is not None
+            assert tr.elo_ledger.mov_denom_floor_fraction == _MIN_DENOM_FRACTION
+
+    # One game at B's home, won by A (the away side, so the underdog by
+    # `hfa`) by 21. Raw denominator = -100 * 0.02 + 2.2 = 0.2, below the
+    # 0.5 * 2.2 = 1.1 floor, so this step ran at the clamp.
+    cfg = EloConfig(k=20.0, hfa=100.0, mean=1500.0, initial=1500.0, mov_autocorr=0.02)
+    ledger = EloRating(cfg).rate([_game(B, A, 10, 31)])[A].elo_ledger
+    assert ledger is not None
+    assert ledger.mov_denom_floor_fraction == _MIN_DENOM_FRACTION
+    (step,) = ledger.steps
+    assert step.result == "W"
+    assert step.rating_gap == -cfg.hfa
+    floor = ledger.mov_denom_floor_fraction * cfg.mov_scale
+    assert step.rating_gap * cfg.mov_autocorr + cfg.mov_scale < floor
+    undamped = math.log((step.team_points - step.opponent_points) + 1.0)
+    assert step.mov_multiplier == pytest.approx(undamped / ledger.mov_denom_floor_fraction)
+    assert step.mov_multiplier == pytest.approx(2.0 * undamped)
 
 
 def test_elo_ledger_is_none_for_career_elo_and_keener() -> None:

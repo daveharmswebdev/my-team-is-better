@@ -698,3 +698,91 @@ def test_immutable_read_only_conn_reads_a_wal_db_without_creating_sidecar_files(
         conn.close()
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["wal.sqlite3"]
+
+
+# ---------------------------------------------------------------------------
+# Issue #194: elo_ledger_configs.mov_denom_floor_fraction. A db whose ledger
+# table predates the column gets it via ALTER TABLE, backfilled to 0.5 (the
+# only value `_MIN_DENOM_FRACTION` has ever had, so the backfill records what
+# those walks ran with). A fresh db gets it from the DDL, NOT NULL and with
+# no default, so a new config row must state its fraction.
+# ---------------------------------------------------------------------------
+
+_PRE_194_LEDGER_CONFIGS_DDL = """
+CREATE TABLE elo_ledger_configs (
+    year INTEGER NOT NULL,
+    method TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    starting_rating REAL NOT NULL,
+    k REAL NOT NULL,
+    hfa REAL NOT NULL,
+    scale REAL NOT NULL,
+    mov_scale REAL NOT NULL,
+    mov_autocorr REAL NOT NULL,
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (year, method, sport)
+);
+"""
+
+
+@pytest.fixture
+def pre_194_db(tmp_path: Path) -> Path:
+    """An otherwise-current db whose `elo_ledger_configs` lacks
+    `mov_denom_floor_fraction`, holding one 2005 cfb elo config row."""
+    dest = tmp_path / "pre_194.sqlite3"
+    conn = get_conn(dest)
+    ddl = SCHEMA_PATH.read_text()
+    start = ddl.index("CREATE TABLE IF NOT EXISTS elo_ledger_configs")
+    end = ddl.index(";", start) + 1
+    conn.executescript(ddl[:start] + _PRE_194_LEDGER_CONFIGS_DDL + ddl[end:])
+    conn.execute(
+        "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, hfa, "
+        "scale, mov_scale, mov_autocorr, computed_at) "
+        "VALUES (2005, 'elo', 'cfb', 1500.0, 40.0, 100.0, 400.0, 2.2, 0.001, 'x')"
+    )
+    conn.commit()
+    conn.close()
+    return dest
+
+
+def test_migration_adds_floor_fraction_column_backfilling_existing_rows_to_half(
+    pre_194_db: Path,
+) -> None:
+    conn = get_conn(pre_194_db)
+    ensure_schema(conn)
+
+    row = conn.execute(
+        "SELECT mov_scale, mov_denom_floor_fraction FROM elo_ledger_configs "
+        "WHERE year = 2005 AND method = 'elo' AND sport = 'cfb'"
+    ).fetchone()
+    assert (row["mov_scale"], row["mov_denom_floor_fraction"]) == (2.2, 0.5)
+    conn.close()
+
+
+def test_floor_fraction_migration_is_idempotent_when_run_twice(pre_194_db: Path) -> None:
+    conn = get_conn(pre_194_db)
+    ensure_schema(conn)
+    ensure_schema(conn)  # must not raise "duplicate column name"
+
+    assert conn.execute("SELECT COUNT(*) AS c FROM elo_ledger_configs").fetchone()["c"] == 1
+    conn.close()
+
+
+def test_fresh_db_has_floor_fraction_column_from_the_ddl_with_no_default(tmp_path: Path) -> None:
+    """A clean Render build must get the column from schema.sql itself, and a
+    new config row must state its fraction rather than inherit a default."""
+    dest = tmp_path / "fresh_floor.sqlite3"
+    conn = get_conn(dest)
+    conn.executescript(SCHEMA_PATH.read_text())  # DDL only -- no migration
+
+    cols = {row["name"]: row for row in conn.execute("PRAGMA table_info(elo_ledger_configs)")}
+    assert "mov_denom_floor_fraction" in cols
+    assert cols["mov_denom_floor_fraction"]["notnull"] == 1
+    assert cols["mov_denom_floor_fraction"]["dflt_value"] is None
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, hfa, "
+            "scale, mov_scale, mov_autocorr, computed_at) "
+            "VALUES (2005, 'elo', 'cfb', 1500.0, 40.0, 100.0, 400.0, 2.2, 0.001, 'x')"
+        )
+    conn.close()

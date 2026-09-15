@@ -1171,6 +1171,9 @@ _ELO_CONFIG = {
     "scale": 400.75,
     "mov_scale": 2.2,
     "mov_autocorr": 0.001,
+    # issue #194: not the engine's default (0.5), so a defaulted read-back
+    # cannot pass by coincidence.
+    "mov_denom_floor_fraction": 0.375,
 }
 
 
@@ -1185,15 +1188,27 @@ def _insert_ledger_config(
     scale: float,
     mov_scale: float,
     mov_autocorr: float,
+    mov_denom_floor_fraction: float,
 ) -> None:
     conn.execute(
         """
         INSERT INTO elo_ledger_configs (
             year, method, sport, starting_rating, k, hfa, scale, mov_scale,
-            mov_autocorr, computed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')
+            mov_autocorr, mov_denom_floor_fraction, computed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')
         """,
-        (year, method, sport, starting_rating, k, hfa, scale, mov_scale, mov_autocorr),
+        (
+            year,
+            method,
+            sport,
+            starting_rating,
+            k,
+            hfa,
+            scale,
+            mov_scale,
+            mov_autocorr,
+            mov_denom_floor_fraction,
+        ),
     )
 
 
@@ -1361,6 +1376,9 @@ def test_elo_case_ledger_is_ordered_resolved_and_copied_exactly(
     assert case.elo_ledger is not None
     assert [s.game_number for s in case.elo_ledger.steps] == [1, 2]
     assert [s.opponent_name for s in case.elo_ledger.steps] == ["Bravo Tech", "Charlie U"]
+    # issue #194: the MOV denominator floor fraction is read back from the
+    # config row as stored, never defaulted or recomputed.
+    assert case.elo_ledger.mov_denom_floor_fraction == _ELO_CONFIG["mov_denom_floor_fraction"]
     assert case.elo_ledger == _expected_ledger(_ALPHA_STEP_1, _ALPHA_STEP_2)
 
 

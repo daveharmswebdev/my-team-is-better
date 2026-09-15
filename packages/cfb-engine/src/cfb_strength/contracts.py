@@ -361,6 +361,12 @@ class EloLedger:
     scale: float
     mov_scale: float
     mov_autocorr: float
+    # Issue #194: the margin-of-victory denominator floor, as a fraction of
+    # `mov_scale` (`ratings/elo.py::_MIN_DENOM_FRACTION`), stored with the
+    # other constants so a panel prints the floor the walk actually used
+    # instead of hard-coding "half". Same rule as every field above: read
+    # back from `elo_ledger_configs`, never re-read from the module constant.
+    mov_denom_floor_fraction: float
     steps: list[EloGameStep] = field(default_factory=list)
 
 
