@@ -788,6 +788,39 @@ def test_build_comparison_common_opponent_lists_every_meeting_chronologically(
 
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_every_evidence_record_carries_its_games_id(conn: sqlite3.Connection, sport: Sport) -> None:
+    """Issue #218: `OpponentResult`, `HeadToHeadMeeting` and
+    `CommonOpponentMeeting` each carry the `games.id` of the row they came
+    from, so a rematch (Oscar/Papa three times here) has a per-game key
+    where `opponent_team_id` repeats. The rematch fixture's ids are known
+    (base+1..base+4), so the expected values are exact, not just unique."""
+    _build_rematch_fixture(conn, sport)
+    base = 30 if sport == "cfb" else 130
+
+    oscar = build_team_case(conn, REMATCH_YEAR, "Oscar Twice", method=METHOD, sport=sport)
+    # Chronological: week 2 win (base+3), week 9 loss (base+1), postseason tie (base+4).
+    assert [(g.game_id, g.result) for g in oscar.games] == [
+        (base + 3, "W"),
+        (base + 1, "L"),
+        (base + 4, "T"),
+    ]
+    assert oscar.worst_loss is not None
+    assert oscar.worst_loss.game_id == base + 1
+
+    comparison = build_comparison(
+        conn, REMATCH_YEAR, "Oscar Twice", "Papa Shared", method=METHOD, sport=sport
+    )
+    assert [m.game_id for m in comparison.head_to_head.meetings] == [base + 3, base + 1, base + 4]
+
+    comparison = build_comparison(
+        conn, REMATCH_YEAR, "Oscar Twice", "Quebec Once", method=METHOD, sport=sport
+    )
+    papa = comparison.common_opponents[0]
+    assert [m.game_id for m in papa.team_a_meetings] == [base + 3, base + 1, base + 4]
+    assert [m.game_id for m in papa.team_b_meetings] == [base + 2]
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
 def test_verdict_states_every_meeting_against_a_common_opponent(
     conn: sqlite3.Connection, sport: Sport
 ) -> None:

@@ -24,16 +24,6 @@ export interface TeamCaseReceiptsProps {
 
 type Highlight = 'Quality win' | 'Worst loss'
 
-/**
- * Identifies a specific game instance (not just an opponent) so a rematch
- * against the same team in one season -- e.g. a regular-season game and a
- * conference-championship rematch -- is treated as two distinct games when
- * cross-referencing `quality_wins`/`worst_loss` against the full schedule.
- */
-function gameKey(game: OpponentResultOut): string {
-  return `${game.opponent_team_id}-${game.week ?? 'na'}-${game.season_type}`
-}
-
 function GameLine({
   game,
   highlight,
@@ -98,16 +88,22 @@ function bySeasonOrder(a: OpponentResultOut, b: OpponentResultOut): number {
  * team actually played), the matching full-schedule row is starred with the
  * same label so it reads as "this is that quality win/worst loss, in its
  * chronological place" rather than an unexplained duplicate.
+ *
+ * Every game list is keyed on `game_id` (`games.id`, issue #218), the one
+ * identity a game has: a rematch against the same opponent in one season
+ * (a regular-season game and a conference-title rematch, say) is two games
+ * with two keys, both in the lists and in the quality-win/worst-loss
+ * cross-reference below.
  */
 export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
   const orderedGames = [...evidence.games].sort(bySeasonOrder)
 
-  const highlightByGame = new Map<string, Highlight>()
+  const highlightByGame = new Map<number, Highlight>()
   for (const game of evidence.quality_wins) {
-    highlightByGame.set(gameKey(game), 'Quality win')
+    highlightByGame.set(game.game_id, 'Quality win')
   }
   if (evidence.worst_loss) {
-    highlightByGame.set(gameKey(evidence.worst_loss), 'Worst loss')
+    highlightByGame.set(evidence.worst_loss.game_id, 'Worst loss')
   }
 
   const headingId = useId()
@@ -155,7 +151,7 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
       {evidence.quality_wins.length > 0 ? (
         <ul className={styles.list} aria-labelledby={qualityWinsHeadingId}>
           {evidence.quality_wins.map((game) => (
-            <GameLine key={game.opponent_team_id} game={game} />
+            <GameLine key={game.game_id} game={game} />
           ))}
         </ul>
       ) : (
@@ -178,11 +174,11 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
       </h4>
       {orderedGames.length > 0 ? (
         <ul className={styles.list} aria-labelledby={fullScheduleHeadingId}>
-          {orderedGames.map((game, index) => (
+          {orderedGames.map((game) => (
             <GameLine
-              key={`${game.opponent_team_id}-${game.week ?? 'na'}-${index}`}
+              key={game.game_id}
               game={game}
-              highlight={highlightByGame.get(gameKey(game))}
+              highlight={highlightByGame.get(game.game_id)}
             />
           ))}
         </ul>

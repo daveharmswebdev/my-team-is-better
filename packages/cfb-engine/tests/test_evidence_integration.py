@@ -863,3 +863,127 @@ def test_isolation_verdict_follows_the_requested_method(
     elo = build_comparison(conn, ISOLATION_YEAR, "Penn State", "Ohio State", method="elo")
     assert keener.rating_diff > 0
     assert elo.rating_diff < 0
+
+
+# ---------------------------------------------------------------------------
+# Issue #218: every per-game evidence record carries `games.id`
+# ---------------------------------------------------------------------------
+#
+# A team can meet the same opponent twice in a season (Texas played Colorado
+# in 2005's regular season and again in the Big 12 title game; every NFL
+# division opponent), so `opponent_team_id` is not a key for a game list.
+# The only key is `games.id`, which these tests check is threaded through
+# unchanged -- never a constant, never a re-derived value. Ids measured on
+# tests/fixtures/cfb_regression.sqlite3 with the sqlite3 CLI (2026-09-14).
+
+TEXAS_COLORADO_2005_GAME_IDS = {
+    # regular week 7, Texas 42 Colorado 17, Texas home
+    (42, 17): 252880251,
+    # regular week 14 (Big 12 title), Colorado 3 Texas 70, Colorado home
+    (70, 3): 253370251,
+}
+TEXAS_USC_2005_ROSE_BOWL_GAME_ID = 260040030
+
+
+def _game_row(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT home_team_id, away_team_id, season, sport FROM games WHERE id = ?",
+        (game_id,),
+    ).fetchone()
+    assert row is not None, game_id
+    return typing.cast(sqlite3.Row, row)
+
+
+def test_texas_2005_lists_both_colorado_games_with_their_own_game_ids(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """(a) Two entries for Colorado, each carrying the `games.id` of the game
+    it came from -- not the same id twice, not a placeholder."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+    colorado = [g for g in case.games if g.opponent_name == "Colorado"]
+    assert len(colorado) == 2
+    assert {g.game_id for g in colorado} == set(TEXAS_COLORADO_2005_GAME_IDS.values())
+    for g in colorado:
+        assert g.game_id == TEXAS_COLORADO_2005_GAME_IDS[(g.team_score, g.opponent_score)], g
+
+
+def test_every_game_id_in_a_team_case_names_that_teams_game_in_the_games_table(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """(b) Each record's `game_id` resolves to a 2005 `games` row whose two
+    teams are Texas and the record's opponent -- for the schedule, the
+    quality wins and the worst loss alike."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+    records = list(case.games) + list(case.quality_wins)
+    if case.worst_loss is not None:
+        records.append(case.worst_loss)
+    assert case.quality_wins  # 2005 Texas beat ranked teams, so this is not vacuous
+    for record in records:
+        row = _game_row(rated_conn, record.game_id)
+        assert row["season"] == 2005, record
+        assert row["sport"] == "cfb", record
+        assert {row["home_team_id"], row["away_team_id"]} == {
+            case.team_id,
+            record.opponent_team_id,
+        }, record
+
+
+def test_game_ids_across_a_team_cases_games_are_unique(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """(c) The point of #218: `game_id` is a usable list key where
+    `opponent_team_id` is not (Colorado appears twice)."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+    ids = [g.game_id for g in case.games]
+    assert len(ids) == len(set(ids))
+    opponents = [g.opponent_team_id for g in case.games]
+    assert len(opponents) != len(set(opponents))
+
+
+def test_head_to_head_meeting_carries_the_games_id(rated_conn: sqlite3.Connection) -> None:
+    """(d) The 2005 Rose Bowl, by its `games.id`."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "USC", method="keener")
+    assert comparison.head_to_head.meetings[0].game_id == TEXAS_USC_2005_ROSE_BOWL_GAME_ID
+
+
+def test_head_to_head_rematch_meetings_carry_distinct_game_ids(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """Texas and Colorado met twice in 2005; the two meetings are the two
+    games, in chronological order."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "Colorado", method="keener")
+    meetings = comparison.head_to_head.meetings
+    assert len(meetings) == 2
+    assert [m.game_id for m in meetings] == [252880251, 253370251]
+    assert (meetings[0].home_points, meetings[0].away_points) == (42, 17)
+    assert (meetings[1].home_points, meetings[1].away_points) == (3, 70)
+
+
+def test_common_opponent_meetings_carry_the_game_ids_of_the_sides_own_games(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """(e) Measured on tests/fixtures/cfb_regression.sqlite3 (2026-09-14):
+    2005 Texas and Colorado share four opponents -- Missouri, Oklahoma
+    State, Kansas and Texas A&M. (Texas and USC share none, so the Rose
+    Bowl comparison cannot exercise this.) Every meeting's `game_id` per side
+    is one of that side's `TeamCase.games` ids, the ids within a side's list
+    are unique, and the game named is against that common opponent."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "Colorado", method="keener")
+    assert {c.opponent_name for c in comparison.common_opponents} == {
+        "Missouri",
+        "Oklahoma State",
+        "Kansas",
+        "Texas A&M",
+    }
+    texas_ids = {g.game_id for g in build_team_case(rated_conn, 2005, "Texas").games}
+    colorado_ids = {g.game_id for g in build_team_case(rated_conn, 2005, "Colorado").games}
+    for common in comparison.common_opponents:
+        sides = ((texas_ids, common.team_a_meetings), (colorado_ids, common.team_b_meetings))
+        for side_ids, meetings in sides:
+            assert meetings, common.opponent_name
+            ids = [m.game_id for m in meetings]
+            assert len(ids) == len(set(ids)), common.opponent_name
+            for m in meetings:
+                assert m.game_id in side_ids, (common.opponent_name, m)
+                row = _game_row(rated_conn, m.game_id)
+                assert common.opponent_team_id in (row["home_team_id"], row["away_team_id"]), m

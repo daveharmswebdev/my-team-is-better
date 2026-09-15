@@ -36,6 +36,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
     games: [],
     quality_wins: [
       {
+        game_id: 252740251,
         opponent_team_id: 2,
         opponent_name: 'Michigan',
         opponent_rank: 3,
@@ -125,6 +126,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
         opponent_rank: 4,
         team_a_meetings: [
           {
+            game_id: 252600194,
             result: 'W',
             team_score: 38,
             opponent_score: 24,
@@ -134,6 +136,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
         ],
         team_b_meetings: [
           {
+            game_id: 253160194,
             result: 'L',
             team_score: 17,
             opponent_score: 20,

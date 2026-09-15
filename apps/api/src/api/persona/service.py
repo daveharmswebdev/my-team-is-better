@@ -58,6 +58,7 @@ import logging
 import sqlite3
 
 import psycopg
+from pydantic.main import IncEx
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
 from api.deps import list_all_team_names
@@ -76,10 +77,42 @@ logger = logging.getLogger(__name__)
 # grounding's accepted-number set -- quietly licensing the narrator to quote
 # figures nobody decided it should narrate (#175's open question). Removing an
 # entry here is that decision, and needs a PROMPT_VERSION bump with it.
-TEAM_CASE_FACT_BLOCK_EXCLUDE: dict[str, bool] = {"elo_ledger": True}
-COMPARISON_FACT_BLOCK_EXCLUDE: dict[str, dict[str, bool]] = {
-    "team_a": {"elo_ledger": True},
-    "team_b": {"elo_ledger": True},
+#
+# Issue #218: `game_id` (`games.id`, a nine-digit CFBD number) is published on
+# every per-game record (`OpponentResultOut`, `HeadToHeadMeetingOut`,
+# `CommonOpponentMeetingOut`) so apps/web can key its game lists on it, and
+# is kept out of both fact blocks for the same reason. With it excluded the
+# block Claude sees is byte-identical to the pre-#218 block, so
+# `PROMPT_VERSION` does not move and no cached narration is invalidated
+# (`tests/test_persona_fact_block_game_id.py` pins the byte equality; the
+# cache key does not cover the fact block, #145, which is why that equality
+# has to hold rather than be re-keyed). `"__all__"` applies the exclusion to
+# every item of a list; a `None` `worst_loss` is simply skipped.
+#
+# `IncEx` is pydantic's own type for `model_dump_json(exclude=...)`: nested
+# mappings of field name -> `True` (drop the field) or a further mapping.
+_GAME_ID: dict[str, bool] = {"game_id": True}
+_EACH_GAME_ID: dict[str, IncEx | bool] = {"__all__": _GAME_ID}
+# `ComparisonTeamSummaryOut` is `TeamCaseOut` without `games` (#183, #218).
+_TEAM_SUMMARY_EXCLUDE: dict[str, IncEx | bool] = {
+    "elo_ledger": True,
+    "quality_wins": _EACH_GAME_ID,
+    "worst_loss": _GAME_ID,
+}
+TEAM_CASE_FACT_BLOCK_EXCLUDE: dict[str, IncEx | bool] = {
+    **_TEAM_SUMMARY_EXCLUDE,
+    "games": _EACH_GAME_ID,
+}
+COMPARISON_FACT_BLOCK_EXCLUDE: dict[str, IncEx | bool] = {
+    "team_a": _TEAM_SUMMARY_EXCLUDE,
+    "team_b": _TEAM_SUMMARY_EXCLUDE,
+    "head_to_head": {"meetings": _EACH_GAME_ID},
+    "common_opponents": {
+        "__all__": {
+            "team_a_meetings": _EACH_GAME_ID,
+            "team_b_meetings": _EACH_GAME_ID,
+        }
+    },
 }
 
 

@@ -13,6 +13,8 @@
 export type GameResult = 'W' | 'L' | 'T'
 
 export interface OpponentResultOut {
+  /** `games.id` (issue #218): the one per-game identity; key lists of games on it. */
+  game_id: number
   opponent_team_id: number
   opponent_name: string
   opponent_rank: number | null
@@ -127,6 +129,8 @@ export interface ComparisonTeamSummaryOut {
 }
 
 export interface HeadToHeadMeetingOut {
+  /** `games.id` (issue #218), like `OpponentResultOut.game_id`. */
+  game_id: number
   week: number | null
   season_type: string
   neutral_site: boolean
@@ -148,6 +152,8 @@ export interface HeadToHeadOut {
  * from that side's perspective, so apps/web never re-derives which side it is.
  */
 export interface CommonOpponentMeetingOut {
+  /** `games.id` (issue #218), like `OpponentResultOut.game_id`. */
+  game_id: number
   /** From that side's perspective, like `OpponentResultOut`. */
   result: GameResult
   team_score: number

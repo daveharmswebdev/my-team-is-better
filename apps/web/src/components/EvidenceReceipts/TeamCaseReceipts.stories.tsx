@@ -4,7 +4,10 @@ import type { TeamCaseOut } from '../../lib/api/types'
 import { TEXAS_ELO } from './eloLedgerFixture'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
 
+// `game_id`s follow the upstream `games.id` shape for 2005 (e.g. 252880251):
+// distinct per game, since every list keys on them (issue #218).
 const qualityWin = {
+  game_id: 252740251,
   opponent_team_id: 2,
   opponent_name: 'Michigan',
   opponent_rank: 3,
@@ -18,6 +21,7 @@ const qualityWin = {
 }
 
 const openerWin = {
+  game_id: 252460251,
   opponent_team_id: 3,
   opponent_name: 'LSU',
   opponent_rank: null,
@@ -31,6 +35,7 @@ const openerWin = {
 }
 
 const midseasonWin = {
+  game_id: 253090251,
   opponent_team_id: 4,
   opponent_name: 'Tennessee',
   opponent_rank: null,
@@ -44,6 +49,7 @@ const midseasonWin = {
 }
 
 const lateSeasonWin = {
+  game_id: 253190251,
   opponent_team_id: 5,
   opponent_name: 'Oklahoma',
   opponent_rank: 8,
@@ -57,6 +63,7 @@ const lateSeasonWin = {
 }
 
 const bowlWin = {
+  game_id: 260040030,
   opponent_team_id: 6,
   opponent_name: 'USC',
   opponent_rank: 2,
@@ -124,6 +131,7 @@ export const Undefeated: Story = {
 }
 
 const worstLoss = {
+  game_id: 252950251,
   opponent_team_id: 7,
   opponent_name: 'Baylor',
   opponent_rank: null,
@@ -152,6 +160,7 @@ export const WithALoss: Story = {
 }
 
 const tiedGame = {
+  game_id: 331021016,
   opponent_team_id: 16,
   opponent_name: 'Minnesota Vikings',
   opponent_rank: null,
@@ -178,6 +187,54 @@ export const WithATie: Story = {
       ties: 1,
       games: [...undefeated.games, tiedGame],
     },
+  },
+}
+
+const coloradoWeek7 = {
+  game_id: 252880251,
+  opponent_team_id: 38,
+  opponent_name: 'Colorado',
+  opponent_rank: 19,
+  opponent_rating: 7.7,
+  result: 'W' as const,
+  team_score: 42,
+  opponent_score: 17,
+  week: 7,
+  season_type: 'regular',
+  neutral_site: false,
+}
+
+const coloradoTitleGame = {
+  ...coloradoWeek7,
+  game_id: 253370251,
+  team_score: 70,
+  opponent_score: 3,
+  week: 14,
+  neutral_site: true,
+}
+
+/**
+ * A rematch (issue #218): real 2005 Texas beat Colorado in week 7 and again
+ * in the Big 12 title game. Both are quality wins and both sit in the full
+ * schedule, each as its own row keyed on its own `game_id` -- the same
+ * `opponent_team_id` twice is two games, not one.
+ */
+export const Rematch: Story = {
+  args: {
+    evidence: {
+      ...undefeated,
+      games: [...undefeated.games, coloradoWeek7, coloradoTitleGame],
+      quality_wins: [qualityWin, coloradoWeek7, coloradoTitleGame],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const qualityWins = canvas.getByRole('list', { name: /quality wins/i })
+    await expect(within(qualityWins).getAllByText(/vs Colorado/)).toHaveLength(
+      2,
+    )
+    const schedule = canvas.getByRole('list', { name: /full schedule/i })
+    await expect(within(schedule).getAllByText(/vs Colorado/)).toHaveLength(2)
   },
 }
 

@@ -462,6 +462,11 @@ class CareerRatingMethod(Protocol):
 
 @dataclass(frozen=True)
 class OpponentResult:
+    # `games.id` (issue #218): the one per-game identity. A team can meet the
+    # same opponent twice in a season (conference-title rematches; every NFL
+    # division opponent), so `opponent_team_id` alone is not a key, and
+    # `week` can be NULL. Consumers that list games key on this.
+    game_id: int
     opponent_team_id: int
     opponent_name: str
     opponent_rank: int | None
@@ -522,6 +527,8 @@ class ComparisonTeamSummary:
 
 @dataclass(frozen=True)
 class HeadToHeadMeeting:
+    # `games.id` (issue #218) -- see `OpponentResult.game_id`.
+    game_id: int
     week: int | None
     season_type: str
     neutral_site: bool
@@ -548,6 +555,8 @@ class CommonOpponentMeeting:
     `winner` name.
     """
 
+    # `games.id` (issue #218) -- see `OpponentResult.game_id`.
+    game_id: int
     result: Literal["W", "L", "T"]
     team_score: int
     opponent_score: int

@@ -42,6 +42,7 @@ import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.method_fixture import TEAM_A, TEAM_B, YEAR, make_method_fixture_db
+from pydantic.main import IncEx
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
@@ -313,6 +314,15 @@ def _keys_at_any_depth(value: Any) -> set[str]:
     return set()
 
 
+def _without_game_id(value: Any) -> Any:
+    """`value` with every `game_id` key (#218) dropped at any depth, order kept."""
+    if isinstance(value, dict):
+        return {k: _without_game_id(v) for k, v in value.items() if k != "game_id"}
+    if isinstance(value, list):
+        return [_without_game_id(child) for child in value]
+    return value
+
+
 @pytest.fixture
 def recording_client(client: TestClient) -> Iterator[tuple[TestClient, _RecordingNarrator]]:
     narrator = _RecordingNarrator()
@@ -330,9 +340,21 @@ def test_team_case_fact_block_excludes_the_ledger(
     fact_block = _fact_block(narrator)
 
     assert "elo_ledger" not in _keys_at_any_depth(json.loads(fact_block))
-    expected = TeamCaseOut.model_validate(evidence).model_dump_json(exclude={"elo_ledger"})
+    # Since #218 the response also carries each game's `game_id`, which the
+    # fact block leaves out too (`tests/test_persona_fact_block_game_id.py`);
+    # this exclusion is spelled out here, independently of the service's own.
+    expected = TeamCaseOut.model_validate(evidence).model_dump_json(
+        exclude={
+            "elo_ledger": True,
+            "games": {"__all__": {"game_id"}},
+            "quality_wins": {"__all__": {"game_id"}},
+            "worst_loss": {"game_id"},
+        }
+    )
     assert fact_block == expected
-    assert json.loads(fact_block) == {k: v for k, v in evidence.items() if k != "elo_ledger"}
+    assert json.loads(fact_block) == _without_game_id(
+        {k: v for k, v in evidence.items() if k != "elo_ledger"}
+    )
 
 
 def test_comparison_fact_block_excludes_both_ledgers(
@@ -346,14 +368,30 @@ def test_comparison_fact_block_excludes_both_ledgers(
     fact_block = _fact_block(narrator)
 
     assert "elo_ledger" not in _keys_at_any_depth(json.loads(fact_block))
+    # `game_id` (#218) is left out alongside the ledgers; see the team-case test.
+    side_exclude: dict[str, IncEx | bool] = {
+        "elo_ledger": True,
+        "quality_wins": {"__all__": {"game_id"}},
+        "worst_loss": {"game_id"},
+    }
     expected = ComparisonResultOut.model_validate(evidence).model_dump_json(
-        exclude={"team_a": {"elo_ledger"}, "team_b": {"elo_ledger"}}
+        exclude={
+            "team_a": side_exclude,
+            "team_b": side_exclude,
+            "head_to_head": {"meetings": {"__all__": {"game_id"}}},
+            "common_opponents": {
+                "__all__": {
+                    "team_a_meetings": {"__all__": {"game_id"}},
+                    "team_b_meetings": {"__all__": {"game_id"}},
+                }
+            },
+        }
     )
     assert fact_block == expected
     stripped = dict(evidence)
     for side in ("team_a", "team_b"):
         stripped[side] = {k: v for k, v in evidence[side].items() if k != "elo_ledger"}
-    assert json.loads(fact_block) == stripped
+    assert json.loads(fact_block) == _without_game_id(stripped)
 
 
 # ---------------------------------------------------------------------------

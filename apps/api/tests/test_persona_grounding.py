@@ -391,6 +391,8 @@ def _bengals_fact_block(*, with_tie_game: bool) -> str:
     games = (
         [
             OpponentResultOut(
+                # No digit "1" here either (see the comment above).
+                game_id=2008,
                 opponent_team_id=33,
                 opponent_name="Washington Redskins",
                 opponent_rank=14,

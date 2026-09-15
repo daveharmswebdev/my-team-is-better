@@ -140,7 +140,9 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
 
     assert len(common["team_a_meetings"]) == 2
     tie, rematch = common["team_a_meetings"]
+    # `game_id` is the fixture's `games.id` for each meeting (#218).
     assert tie == {
+        "game_id": 105,
         "result": "T",
         "team_score": 17,
         "opponent_score": 17,
@@ -148,6 +150,7 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
         "season_type": "regular",
     }
     assert rematch == {
+        "game_id": 108,
         "result": "W",
         "team_score": 31,
         "opponent_score": 14,

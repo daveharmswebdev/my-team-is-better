@@ -169,8 +169,11 @@ function MeetingGroup({
         {teamName}
       </span>
       {meetings.map((meeting, index) => (
-        // Index-as-key: meetings have no stable id and the list is render-only.
-        <Meeting key={index} meeting={meeting} separated={index > 0} />
+        <Meeting
+          key={meeting.game_id}
+          meeting={meeting}
+          separated={index > 0}
+        />
       ))}
     </span>
   )
@@ -246,10 +249,8 @@ export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
       <h4 className={styles.label}>Head to head</h4>
       {head_to_head.played ? (
         <dl className={styles.kvGrid}>
-          {head_to_head.meetings.map((meeting, index) => (
-            // Index-as-key: meetings have no stable id and the list is
-            // render-only.
-            <MeetingRow key={index} meeting={meeting} />
+          {head_to_head.meetings.map((meeting) => (
+            <MeetingRow key={meeting.game_id} meeting={meeting} />
           ))}
         </dl>
       ) : (
