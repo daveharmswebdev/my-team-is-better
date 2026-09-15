@@ -134,6 +134,141 @@ class TeamRow:
 
 
 # ---------------------------------------------------------------------------
+# player stats (issue #289, epic #288): ingest -> db rows for the `players`,
+# `player_source_ids`, `game_starters`, `player_game_stats` and
+# `player_season_stats` tables per schema.sql
+# ---------------------------------------------------------------------------
+
+PlayerSeasonType = Literal["regular", "postseason"]
+"""The same two values `games.season_type` holds. A source's own spelling
+(nflverse's "REG"/"POST") is translated at ingest, never stored."""
+
+
+def _require_non_empty(value: str, row: str, name: str) -> None:
+    if not value:
+        raise ValueError(f"{row}.{name} must be non-empty")
+
+
+@dataclass(frozen=True)
+class PlayerStats:
+    """The stat columns shared, in this order, by `player_game_stats` and
+    `player_season_stats` (tests/test_player_schema.py checks the DDL
+    against this class). Adding a stat means a field here and a column on
+    both tables.
+
+    None means the source did not track the stat, never zero: an era
+    before a stat was recorded must not read as a player who had none."""
+
+    completions: int | None = None
+    attempts: int | None = None
+    passing_yards: int | None = None
+    passing_tds: int | None = None
+    passing_interceptions: int | None = None
+    sacks_suffered: int | None = None
+    sack_yards_lost: int | None = None
+    carries: int | None = None
+    rushing_yards: int | None = None
+    rushing_tds: int | None = None
+
+
+@dataclass(frozen=True)
+class PlayerRow:
+    """One person in one sport. Identity across data sources is carried by
+    `PlayerSourceIdRow`, not by this row; the same person in CFB and the
+    NFL is two rows (linking them is out of scope, epic #288)."""
+
+    id: int
+    display_name: str
+    position: str | None
+    birth_date: str | None
+    sport: Sport
+
+    def __post_init__(self) -> None:
+        _require_known_sport(self.sport, "PlayerRow")
+        _require_non_empty(self.display_name, "PlayerRow", "display_name")
+
+
+@dataclass(frozen=True)
+class PlayerSourceIdRow:
+    """A source's own id for a player, e.g. ("gsis", "00-0010346") or
+    ("pfr", "MannPe00"). This is the crosswalk that lets a later source
+    (Pro Football Reference for pre-1999 seasons, CFBD for college) attach
+    to an existing player instead of minting a duplicate."""
+
+    player_id: int
+    source: str
+    source_id: str
+
+    def __post_init__(self) -> None:
+        _require_non_empty(self.source, "PlayerSourceIdRow", "source")
+        _require_non_empty(self.source_id, "PlayerSourceIdRow", "source_id")
+
+
+@dataclass(frozen=True)
+class GameStarterRow:
+    """The player who started a game at `position` for `team_id`. `source`
+    names where that claim came from, because sources disagree about
+    starters and a record-as-starter is only as good as this row."""
+
+    game_id: int
+    team_id: int
+    position: str
+    player_id: int
+    source: str
+    sport: Sport
+
+    def __post_init__(self) -> None:
+        _require_known_sport(self.sport, "GameStarterRow")
+        _require_non_empty(self.position, "GameStarterRow", "position")
+        _require_non_empty(self.source, "GameStarterRow", "source")
+
+
+@dataclass(frozen=True)
+class PlayerGameStatRow:
+    """One player's stat line in one game, for the team they played for in
+    that game (which is how traded players and transfers stay correct)."""
+
+    player_id: int
+    game_id: int
+    team_id: int
+    sport: Sport
+    stats: PlayerStats
+
+    def __post_init__(self) -> None:
+        _require_known_sport(self.sport, "PlayerGameStatRow")
+
+
+@dataclass(frozen=True)
+class PlayerSeasonStatRow:
+    """A player's season totals for one season type. Stored in its own
+    right rather than only summed from game rows, because older eras have
+    season totals and no game logs.
+
+    `team_id` is None when the totals span more than one team or the source
+    doesn't say; per-team splits come from `PlayerGameStatRow`. One row per
+    (player, season, season_type) whatever the source, so two sources can
+    never double a career total."""
+
+    player_id: int
+    season: int
+    season_type: PlayerSeasonType
+    team_id: int | None
+    games: int | None
+    source: str
+    sport: Sport
+    stats: PlayerStats
+
+    def __post_init__(self) -> None:
+        _require_known_sport(self.sport, "PlayerSeasonStatRow")
+        _require_non_empty(self.source, "PlayerSeasonStatRow", "source")
+        if self.season_type not in get_args(PlayerSeasonType):
+            valid = ", ".join(repr(s) for s in get_args(PlayerSeasonType))
+            raise ValueError(
+                f"PlayerSeasonStatRow.season_type={self.season_type!r}; expected one of {valid}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # ratings input/output (ratings-agent implements RatingMethod; the CLI reads
 # `games` from the db, the compute-and-store step writes to `ratings`)
 # ---------------------------------------------------------------------------

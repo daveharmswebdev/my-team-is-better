@@ -164,6 +164,99 @@ CREATE TABLE IF NOT EXISTS elo_ledger_configs (
     PRIMARY KEY (year, method, sport)
 );
 
+-- Player stats (issue #289, epic #288). New tables, so `CREATE TABLE IF NOT
+-- EXISTS` covers a pre-existing db too; no connection.py migration. Shaped so
+-- that CFB players, pre-1999 seasons and game-winning drives are additive:
+--   * a player's team lives on each stat/starter row, never on `players`;
+--   * `player_source_ids` crosswalks every source's own id (gsis, pfr, espn,
+--     cfbd) to one player, so a later source attaches instead of duplicating;
+--   * season totals are stored in their own right (old eras have no game
+--     logs), keyed without `source` so a career can't be counted twice;
+--   * a stat a source didn't track is NULL, never 0.
+-- The stat columns of both stat tables are exactly `contracts.PlayerStats`,
+-- in order (tests/test_player_schema.py).
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY,
+    sport TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    position TEXT,
+    birth_date TEXT
+);
+
+CREATE TABLE IF NOT EXISTS player_source_ids (
+    player_id INTEGER NOT NULL REFERENCES players(id),
+    source TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    PRIMARY KEY (source, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_player_source_ids_player ON player_source_ids(player_id);
+
+-- `source` says who claims this start: sources disagree about starters.
+CREATE TABLE IF NOT EXISTS game_starters (
+    game_id INTEGER NOT NULL REFERENCES games(id),
+    team_id INTEGER NOT NULL REFERENCES teams(id),
+    position TEXT NOT NULL,
+    player_id INTEGER NOT NULL REFERENCES players(id),
+    sport TEXT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (game_id, team_id, position)
+);
+CREATE INDEX IF NOT EXISTS idx_game_starters_player ON game_starters(player_id);
+
+CREATE TABLE IF NOT EXISTS player_game_stats (
+    player_id INTEGER NOT NULL REFERENCES players(id),
+    game_id INTEGER NOT NULL REFERENCES games(id),
+    team_id INTEGER NOT NULL REFERENCES teams(id),
+    sport TEXT NOT NULL,
+    completions INTEGER,
+    attempts INTEGER,
+    passing_yards INTEGER,
+    passing_tds INTEGER,
+    passing_interceptions INTEGER,
+    sacks_suffered INTEGER,
+    sack_yards_lost INTEGER,
+    carries INTEGER,
+    rushing_yards INTEGER,
+    rushing_tds INTEGER,
+    PRIMARY KEY (player_id, game_id)
+);
+CREATE INDEX IF NOT EXISTS idx_player_game_stats_game ON player_game_stats(game_id);
+
+-- team_id NULL: the totals span several teams, or the source doesn't say.
+CREATE TABLE IF NOT EXISTS player_season_stats (
+    player_id INTEGER NOT NULL REFERENCES players(id),
+    season INTEGER NOT NULL,
+    season_type TEXT NOT NULL CHECK (season_type IN ('regular', 'postseason')),
+    team_id INTEGER REFERENCES teams(id),
+    games INTEGER,
+    source TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    completions INTEGER,
+    attempts INTEGER,
+    passing_yards INTEGER,
+    passing_tds INTEGER,
+    passing_interceptions INTEGER,
+    sacks_suffered INTEGER,
+    sack_yards_lost INTEGER,
+    carries INTEGER,
+    rushing_yards INTEGER,
+    rushing_tds INTEGER,
+    PRIMARY KEY (player_id, season, season_type)
+);
+
+-- Reserved for game-winning drives and similar per-game labels. A feat is a
+-- definition applied to a game, not a count, so each row names the definition
+-- version it was computed under; a career count is a count of rows. Nothing
+-- writes here yet (epic #288, not v1).
+CREATE TABLE IF NOT EXISTS player_game_feats (
+    player_id INTEGER NOT NULL REFERENCES players(id),
+    game_id INTEGER NOT NULL REFERENCES games(id),
+    kind TEXT NOT NULL,
+    definition_version TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    PRIMARY KEY (player_id, game_id, kind, definition_version)
+);
+
 -- sport is part of the PK here (unlike the tables above): year/season_type
 -- alone would collide between a CFB and an NFL ingest run of the same
 -- year/season_type, and team_id-based disambiguation (which is what lets the
