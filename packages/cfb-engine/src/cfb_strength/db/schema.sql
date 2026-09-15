@@ -157,6 +157,9 @@ CREATE TABLE IF NOT EXISTS elo_ledger_configs (
     scale REAL NOT NULL,
     mov_scale REAL NOT NULL,
     mov_autocorr REAL NOT NULL,
+    -- Issue #194: the MOV denominator floor as a fraction of mov_scale.
+    -- Pre-#194 dbs get it via `_migrate_elo_ledger_floor_column`.
+    mov_denom_floor_fraction REAL NOT NULL,
     computed_at TEXT NOT NULL,
     PRIMARY KEY (year, method, sport)
 );
