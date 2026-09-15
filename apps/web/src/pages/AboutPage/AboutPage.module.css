@@ -22,6 +22,16 @@
   max-width: 60ch;
 }
 
+/*
+ * `#methods` and each method article (`#elo`, `#keeners-method`) are link
+ * targets (issue #227). The shell's topbar is sticky and about 3rem tall, so
+ * without a scroll margin a target scrolled to the top would sit under it.
+ */
+.section,
+.method {
+  scroll-margin-top: calc(var(--sp-12) + var(--sp-4));
+}
+
 .section {
   padding-top: var(--sp-8);
   border-top: 1px solid var(--rule);

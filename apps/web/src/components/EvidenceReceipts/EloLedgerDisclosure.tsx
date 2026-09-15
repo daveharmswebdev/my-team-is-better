@@ -117,15 +117,21 @@ function workedStep(k: number, step: EloGameStepOut): string {
   )
 }
 
+/**
+ * The Elo article on the About page, not the top of it (issue #227). The
+ * fragment is the id `AboutPage` slugs from the methodology's name.
+ */
+const ABOUT_ELO = '/about#elo'
+
 /** Client-side navigation inside the app; a plain link where there is no router (a story, a test). */
 function AboutLink({ children }: { children: string }) {
   const inRouter = useInRouterContext()
   return inRouter ? (
-    <Link to="/about" className={styles.link}>
+    <Link to={ABOUT_ELO} className={styles.link}>
       {children}
     </Link>
   ) : (
-    <a href="/about" className={styles.link}>
+    <a href={ABOUT_ELO} className={styles.link}>
       {children}
     </a>
   )
