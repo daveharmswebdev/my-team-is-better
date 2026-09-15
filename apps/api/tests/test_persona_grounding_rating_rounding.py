@@ -53,12 +53,13 @@ from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
 
-from api.deps import get_narration_cache, get_narrator, list_all_team_names
+from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
 from api.persona.grounding import find_ungrounded_tokens
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
+from api.repositories.teams import list_all_team_names
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 

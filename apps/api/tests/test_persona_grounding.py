@@ -16,11 +16,11 @@ from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fixtures.sport_fixture import make_sport_fixture_db
 
-from api.deps import list_all_team_names
 from api.models import ComparisonResultOut, Method, Sport, TeamCaseOut
 from api.persona.grounding import _mismatch_message, find_ungrounded_tokens
 from api.persona.narrate import NarrationResult, narrate
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
+from api.repositories.teams import list_all_team_names
 
 FACT_BLOCK = (
     '{"team_name": "Texas", "year": 2005, "wins": 13, "losses": 0, "rank": 1, '

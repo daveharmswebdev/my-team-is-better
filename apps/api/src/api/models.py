@@ -536,7 +536,7 @@ class YearsOut(BaseModel):
 
 class TeamDetailOut(BaseModel):
     """One selectable team's display/search metadata (issue #78, epic #76),
-    faithful to `api.deps.TeamRecord`.
+    faithful to `api.repositories.teams.TeamRecord`.
 
     `name` is `teams.school` verbatim and is the value a client submits
     back -- the verdict lookup, the persona grounding check, the golden
@@ -563,7 +563,7 @@ class TeamsOut(BaseModel):
     `teams: string[]` and renders `value={name}` straight from it -- so
     changing the element type would render `[object Object]` in the live
     team picker for the whole window between the two merges. Both arrays
-    come from one query (`api.deps.list_team_records`), so a consumer may
+    come from one query (`api.repositories.teams.list_team_records`), so a consumer may
     zip them by index.
     """
 

@@ -37,10 +37,10 @@ issue #3's brief, `_resolve_champion_name` below replicates that same
 7-line rank=1 SQL query directly against the connection this app already
 holds, then hands the resolved name to `build_team_case` -- the only
 non-evidence-layer SQL in this app, by design (issue #4 adds one more:
-`api.deps.list_all_team_names`, the grounding check's "known team names"
-universe, same justification -- promoted from a private
+`api.repositories.teams.list_all_team_names`, the grounding check's "known
+team names" universe, same justification -- promoted from a private
 `api.persona.service._all_team_names` helper by issue #13 so `api.catalog`'s
-`/api/teams` route can share it).
+`/api/teams` route can share it, and moved out of `api.deps` by issue #209).
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ from cfb_strength.contracts import UnknownYearError
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
 from fastapi import APIRouter, Depends
 
-from api.deps import get_db_conn, get_narration_cache, get_narrator, list_team_records
+from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.errors import (
     CHAMPION_ERROR_RESPONSES,
     COMPARISON_ERROR_RESPONSES,
@@ -76,6 +76,7 @@ from api.models import (
 from api.persona.cache import NarrationCacheStore
 from api.persona.claude_client import Narrator
 from api.persona.service import narrate_comparison, narrate_team_case
+from api.repositories.teams import list_team_records
 
 router = APIRouter(prefix="/api/verdict", tags=["verdict"])
 

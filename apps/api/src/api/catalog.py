@@ -7,8 +7,8 @@ users can only select years that are actually ingested"). `/api/credits`
 backs issue #29's "How this works / Credits" page. Unlike `api.verdict`'s
 routes, all three return plain evidence-catalog data -- no persona
 narration envelope, no MCP -- so each route is a thin call straight into
-`cfb_strength.evidence.proof` (years), `api.deps.list_team_records`
-(teams), or `cfb_strength.evidence.credits` (credits), with no
+`cfb_strength.evidence.proof` (years), `api.repositories.teams.
+list_team_records` (teams), or `cfb_strength.evidence.credits` (credits), with no
 business logic of its own. `/api/credits` needs no db connection at all
 (unlike the other two): `get_credits()` takes no arguments and touches no
 database, so this route has no `Depends(get_db_conn)`.
@@ -22,8 +22,9 @@ from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import list_available_years
 from fastapi import APIRouter, Depends
 
-from api.deps import get_db_conn, list_team_records
+from api.deps import get_db_conn
 from api.models import CreditsOut, Method, Sport, TeamDetailOut, TeamsOut, YearsOut
+from api.repositories.teams import list_team_records
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
@@ -83,7 +84,7 @@ def teams(
 
     Note this is `list_team_records`, not the grounding check's
     `list_all_team_names`: the persona layer's known-team-name universe
-    must stay unscoped (see `api.deps`).
+    must stay unscoped (see `api.repositories.teams`).
     """
     records = list_team_records(conn, sport=sport, year=year, method=method)
     return TeamsOut(
