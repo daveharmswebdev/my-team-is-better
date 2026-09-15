@@ -85,6 +85,7 @@ const evidence: ComparisonResultOut = {
       opponent_rank: 21,
       team_a_meetings: [
         {
+          game_id: 401234803,
           result: 'W',
           team_score: 42,
           opponent_score: 35,
@@ -94,6 +95,7 @@ const evidence: ComparisonResultOut = {
       ],
       team_b_meetings: [
         {
+          game_id: 401234804,
           result: 'L',
           team_score: 21,
           opponent_score: 38,
@@ -108,6 +110,7 @@ const evidence: ComparisonResultOut = {
       opponent_rank: 101,
       team_a_meetings: [
         {
+          game_id: 401234810,
           result: 'W',
           team_score: 52,
           opponent_score: 12,
@@ -117,6 +120,7 @@ const evidence: ComparisonResultOut = {
       ],
       team_b_meetings: [
         {
+          game_id: 401234811,
           result: 'L',
           team_score: 24,
           opponent_score: 27,
@@ -157,6 +161,7 @@ export const HeadToHeadPlayed: Story = {
         played: true,
         meetings: [
           {
+            game_id: 401234801,
             week: 13,
             season_type: 'regular',
             neutral_site: false,
@@ -198,6 +203,7 @@ export const CommonOpponentTie: Story = {
           opponent_rank: 21,
           team_a_meetings: [
             {
+              game_id: 401234803,
               result: 'T',
               team_score: 26,
               opponent_score: 26,
@@ -207,6 +213,7 @@ export const CommonOpponentTie: Story = {
           ],
           team_b_meetings: [
             {
+              game_id: 401234804,
               result: 'L',
               team_score: 21,
               opponent_score: 38,
@@ -259,6 +266,7 @@ export const TwoMeetingsPerSide: Story = {
         played: true,
         meetings: [
           {
+            game_id: 331201016,
             week: 13,
             season_type: 'regular',
             neutral_site: false,
@@ -269,6 +277,7 @@ export const TwoMeetingsPerSide: Story = {
             winner: 'Minnesota Vikings',
           },
           {
+            game_id: 330915003,
             week: 2,
             season_type: 'regular',
             neutral_site: false,
@@ -287,6 +296,7 @@ export const TwoMeetingsPerSide: Story = {
           opponent_rank: 8,
           team_a_meetings: [
             {
+              game_id: 331027016,
               result: 'L',
               team_score: 31,
               opponent_score: 44,
@@ -294,6 +304,7 @@ export const TwoMeetingsPerSide: Story = {
               season_type: 'regular',
             },
             {
+              game_id: 331124009,
               result: 'T',
               team_score: 26,
               opponent_score: 26,
@@ -303,6 +314,7 @@ export const TwoMeetingsPerSide: Story = {
           ],
           team_b_meetings: [
             {
+              game_id: 331104003,
               result: 'W',
               team_score: 27,
               opponent_score: 20,
@@ -310,6 +322,7 @@ export const TwoMeetingsPerSide: Story = {
               season_type: 'regular',
             },
             {
+              game_id: 331229009,
               result: 'L',
               team_score: 28,
               opponent_score: 33,

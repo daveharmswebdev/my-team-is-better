@@ -1,11 +1,14 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TeamCaseOut } from '../../lib/api/types'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
 import { TEXAS_ELO } from './eloLedgerFixture'
 
+// `game_id`s follow the upstream `games.id` shape for 2005 (e.g. 252880251):
+// distinct per game, since every list keys on them (issue #218).
 const baseOpponent = {
+  game_id: 252740251,
   opponent_team_id: 2,
   opponent_name: 'Michigan',
   opponent_rank: 3,
@@ -20,6 +23,7 @@ const baseOpponent = {
 
 const lsuGame = {
   ...baseOpponent,
+  game_id: 252460251,
   opponent_team_id: 3,
   opponent_name: 'LSU',
   opponent_rank: null,
@@ -32,6 +36,7 @@ const lsuGame = {
 
 const tennesseeGame = {
   ...baseOpponent,
+  game_id: 253090251,
   opponent_team_id: 4,
   opponent_name: 'Tennessee',
   opponent_rank: null,
@@ -44,6 +49,7 @@ const tennesseeGame = {
 
 const bowlGame = {
   ...baseOpponent,
+  game_id: 260040030,
   opponent_team_id: 5,
   opponent_name: 'USC',
   opponent_rank: 2,
@@ -110,6 +116,7 @@ function resultTagIn(row: HTMLElement): HTMLElement {
 // with one tied game (26-26) on the schedule.
 const tiedGame = {
   ...baseOpponent,
+  game_id: 331021016,
   opponent_team_id: 16,
   opponent_name: 'Minnesota Vikings',
   opponent_rank: null,
@@ -172,7 +179,13 @@ describe('TeamCaseReceipts', () => {
         evidence={{
           ...evidence,
           losses: 1,
-          worst_loss: { ...baseOpponent, opponent_name: 'Baylor', result: 'L' },
+          worst_loss: {
+            ...baseOpponent,
+            game_id: 252950251,
+            opponent_team_id: 7,
+            opponent_name: 'Baylor',
+            result: 'L',
+          },
         }}
       />,
     )
@@ -253,7 +266,13 @@ describe('TeamCaseReceipts', () => {
         evidence={{
           ...evidence,
           losses: 1,
-          worst_loss: { ...baseOpponent, opponent_name: 'Baylor', result: 'L' },
+          worst_loss: {
+            ...baseOpponent,
+            game_id: 252950251,
+            opponent_team_id: 7,
+            opponent_name: 'Baylor',
+            result: 'L',
+          },
         }}
       />,
     )
@@ -489,6 +508,81 @@ describe('TeamCaseReceipts', () => {
       expect(within(dialog).queryByText(/game by game/)).not.toBeInTheDocument()
       expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
       expect(screen.queryByText(CAREER)).not.toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Issue #218: a team that beats the same opponent twice in one season is
+   * two games, not one. Real 2005 Texas: Colorado in week 7 (42-17,
+   * games.id 252880251) and again in the Big 12 title game (70-3,
+   * games.id 253370251). Every game list keys on the game's own identity,
+   * `game_id`; keying on `opponent_team_id` gave both rows one React key,
+   * which React reports through `console.error` -- so the spy must stay
+   * silent.
+   */
+  describe('a rematch renders both games, keyed on game_id (issue #218)', () => {
+    const coloradoWeek7 = {
+      ...baseOpponent,
+      game_id: 252880251,
+      opponent_team_id: 38,
+      opponent_name: 'Colorado',
+      opponent_rank: 19,
+      result: 'W' as const,
+      team_score: 42,
+      opponent_score: 17,
+      week: 7,
+      season_type: 'regular',
+    }
+    const coloradoTitleGame = {
+      ...coloradoWeek7,
+      game_id: 253370251,
+      team_score: 70,
+      opponent_score: 3,
+      week: 14,
+      neutral_site: true,
+    }
+    const rematchSeason: TeamCaseOut = {
+      ...evidence,
+      games: [...evidence.games, coloradoWeek7, coloradoTitleGame],
+      quality_wins: [coloradoWeek7, coloradoTitleGame],
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('lists both quality wins against the same opponent, with no duplicate-key warning', () => {
+      const consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+
+      render(<TeamCaseReceipts evidence={rematchSeason} />)
+
+      const qualityWins = screen.getByRole('list', { name: /quality wins/i })
+      const rows = within(qualityWins).getAllByRole('listitem')
+      expect(rows).toHaveLength(2)
+      expect(within(qualityWins).getAllByText(/vs Colorado/)).toHaveLength(2)
+      expect(rows[0]?.textContent).toContain('42-17')
+      expect(rows[1]?.textContent).toContain('70-3')
+      expect(consoleError).not.toHaveBeenCalled()
+    })
+
+    it('lists both games in the full schedule, each starred as a quality win, with no duplicate-key warning', () => {
+      const consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+
+      render(<TeamCaseReceipts evidence={rematchSeason} />)
+
+      const schedule = screen.getByRole('list', { name: /full schedule/i })
+      const coloradoRows = within(schedule)
+        .getAllByText(/vs Colorado/)
+        .map((opponent) => opponent.closest('li') as HTMLElement)
+      expect(coloradoRows).toHaveLength(2)
+      for (const row of coloradoRows) {
+        expect(within(row).getByText(/quality win/i)).toBeInTheDocument()
+      }
+      expect(consoleError).not.toHaveBeenCalled()
     })
   })
 })

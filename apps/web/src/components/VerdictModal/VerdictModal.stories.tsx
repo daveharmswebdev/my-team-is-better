@@ -27,6 +27,8 @@ const OPPONENTS = [
 
 function game(index: number, opponent: string): OpponentResultOut {
   return {
+    // Distinct per game, in the upstream `games.id` shape (issue #218).
+    game_id: 252460251 + index * 70000,
     opponent_team_id: index + 2,
     opponent_name: opponent,
     opponent_rank: index + 3,

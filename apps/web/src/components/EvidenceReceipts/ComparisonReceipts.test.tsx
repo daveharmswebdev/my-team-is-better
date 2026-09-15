@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   METHODS,
   type CommonOpponentOut,
@@ -72,6 +72,7 @@ const evidence: ComparisonResultOut = {
     elo_ledger: null,
     quality_wins: [
       {
+        game_id: 401234596,
         opponent_team_id: 555,
         opponent_name: 'Northwestern',
         opponent_rank: 45,
@@ -120,6 +121,7 @@ const evidence: ComparisonResultOut = {
     played: true,
     meetings: [
       {
+        game_id: 401234801,
         week: 13,
         season_type: 'regular',
         neutral_site: false,
@@ -138,6 +140,7 @@ const evidence: ComparisonResultOut = {
       opponent_rank: 21,
       team_a_meetings: [
         {
+          game_id: 401234803,
           result: 'W',
           team_score: 42,
           opponent_score: 35,
@@ -147,6 +150,7 @@ const evidence: ComparisonResultOut = {
       ],
       team_b_meetings: [
         {
+          game_id: 401234804,
           result: 'L',
           team_score: 21,
           opponent_score: 38,
@@ -171,6 +175,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
   opponent_rank: 8,
   team_a_meetings: [
     {
+      game_id: 331027016,
       result: 'L',
       team_score: 31,
       opponent_score: 44,
@@ -178,6 +183,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       season_type: 'regular',
     },
     {
+      game_id: 331124009,
       result: 'T',
       team_score: 26,
       opponent_score: 26,
@@ -187,6 +193,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
   ],
   team_b_meetings: [
     {
+      game_id: 331104003,
       result: 'W',
       team_score: 27,
       opponent_score: 20,
@@ -194,6 +201,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       season_type: 'regular',
     },
     {
+      game_id: 331229009,
       result: 'L',
       team_score: 28,
       opponent_score: 33,
@@ -645,6 +653,7 @@ describe('ComparisonReceipts', () => {
               opponent_rank: 21,
               team_a_meetings: [
                 {
+                  game_id: 401234803,
                   result: 'T',
                   team_score: 26,
                   opponent_score: 26,
@@ -654,6 +663,7 @@ describe('ComparisonReceipts', () => {
               ],
               team_b_meetings: [
                 {
+                  game_id: 401234804,
                   result: 'L',
                   team_score: 21,
                   opponent_score: 38,
@@ -999,6 +1009,82 @@ describe('ComparisonReceipts', () => {
       expect(screen.queryByRole('button')).not.toBeInTheDocument()
       expect(screen.getAllByText(CAREER)).toHaveLength(1)
       expect(screen.queryByText(UNAVAILABLE)).not.toBeInTheDocument()
+    })
+  })
+
+  /**
+   * Issue #218: every meeting list keys on the game's own identity,
+   * `game_id`, so two head-to-head meetings and a common opponent met twice
+   * per side all render as their own rows with nothing reported through
+   * `console.error` (where React puts its duplicate-key warning). Real 2013
+   * NFL: the Vikings and Bears met in weeks 2 and 13, and each met Green Bay
+   * twice.
+   */
+  describe('rematches render every meeting, keyed on game_id (issue #218)', () => {
+    const vikingsVsBearsTwice: ComparisonResultOut = {
+      ...vikingsVsBears,
+      head_to_head: {
+        played: true,
+        meetings: [
+          {
+            game_id: 330915003,
+            week: 2,
+            season_type: 'regular',
+            neutral_site: false,
+            home_team: 'Chicago Bears',
+            away_team: 'Minnesota Vikings',
+            home_points: 31,
+            away_points: 30,
+            winner: 'Chicago Bears',
+          },
+          {
+            game_id: 331201016,
+            week: 13,
+            season_type: 'regular',
+            neutral_site: false,
+            home_team: 'Minnesota Vikings',
+            away_team: 'Chicago Bears',
+            home_points: 23,
+            away_points: 20,
+            winner: 'Minnesota Vikings',
+          },
+        ],
+      },
+    }
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+    })
+
+    it('renders both head-to-head meetings and both meetings per side with a common opponent, with no duplicate-key warning', () => {
+      const consoleError = vi
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined)
+
+      render(<ComparisonReceipts evidence={vikingsVsBearsTwice} />)
+
+      expect(
+        screen.getByText(/Chicago Bears 31-30 Minnesota Vikings/),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText(/Minnesota Vikings 23-20 Chicago Bears/),
+      ).toBeInTheDocument()
+
+      const row = screen.getByText(/Green Bay/).closest('li') as HTMLElement
+      const minnesota = within(row).getByRole('group', {
+        name: 'Minnesota Vikings',
+      })
+      expect(minnesota.querySelectorAll('[class*="gamelineTag"]')).toHaveLength(
+        2,
+      )
+      expect(minnesota.textContent).toContain('31-44')
+      expect(minnesota.textContent).toContain('26-26')
+      const chicago = within(row).getByRole('group', { name: 'Chicago Bears' })
+      expect(chicago.querySelectorAll('[class*="gamelineTag"]')).toHaveLength(2)
+      expect(chicago.textContent).toContain('27-20')
+      expect(chicago.textContent).toContain('28-33')
+
+      expect(consoleError).not.toHaveBeenCalled()
     })
   })
 })
