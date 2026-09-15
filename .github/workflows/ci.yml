@@ -269,8 +269,8 @@ jobs:
           path: apps/web/playwright-report/
           retention-days: 7
 
-  # Every job above, `e2e` included, is blocking in the process-only sense
-  # (CLAUDE.md "main is protected"), and should be listed as a required check
-  # if/when branch protection on main becomes GitHub-enforced. `e2e` became
-  # blocking on 2026-09-14 (founder decision). Playwright retries a failed
+  # Every job above, `e2e` included, is a required check in main's ruleset
+  # (.github/rulesets/main.json). Adding, renaming or removing a job means updating
+  # that file and applying it (CLAUDE.md); test_ruleset.py fails until they match.
+  # `e2e` became blocking on 2026-09-14 (founder decision). Playwright retries a failed
   # spec twice in CI, which hides flakes (#197); broader coverage is #204.
