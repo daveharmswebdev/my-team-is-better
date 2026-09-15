@@ -96,6 +96,20 @@ from pydantic import BaseModel, ConfigDict, Field
 # the longest stored team name or alias (27 chars).
 USER_TEAM_MAX_LENGTH = 64
 
+# Issue #189: a season year has exactly four digits (1000..9999 inclusive) --
+# the same shape the web's share-link parser (#184, `HomePage/shareLink.ts`)
+# accepts. The bounds are derived from the digit count so the rule is named
+# once, the way the parser states it. `year` stays a plain `int` on the
+# request models rather than a `Field(ge=, le=)`: an out-of-range year is
+# the existing `unknown_year` 404 (which the web already renders with its
+# `available_years`), not a request-validation 422, and the 404 body echoes
+# the year as sent -- including one too large for a SQLite INTEGER, which
+# used to reach sqlite3 and raise an unmapped `OverflowError`.
+# `api.verdict.require_season_year` is the one place the bound is checked.
+SEASON_YEAR_DIGITS = 4
+MIN_SEASON_YEAR = 10 ** (SEASON_YEAR_DIGITS - 1)
+MAX_SEASON_YEAR = 10**SEASON_YEAR_DIGITS - 1
+
 
 class ChampionRequest(BaseModel):
     """'Who was the best team in <year>?' -- no team named."""

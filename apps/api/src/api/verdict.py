@@ -46,17 +46,21 @@ from __future__ import annotations
 import sqlite3
 import unicodedata
 
-from cfb_strength.evidence.proof import build_comparison, build_team_case
+from cfb_strength.contracts import UnknownYearError
+from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
 from fastapi import APIRouter, Depends
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator, list_team_records
 from api.errors import COMPARISON_ERROR_RESPONSES, TEAM_CASE_ERROR_RESPONSES
 from api.models import (
+    MAX_SEASON_YEAR,
+    MIN_SEASON_YEAR,
     USER_TEAM_MAX_LENGTH,
     ChampionRequest,
     ComparisonEnvelope,
     ComparisonRequest,
     ComparisonResultOut,
+    Sport,
     TeamCaseEnvelope,
     TeamCaseOut,
     TeamCaseRequest,
@@ -138,6 +142,29 @@ def resolve_user_team(conn: sqlite3.Connection, user_team: str | None, sport: st
     return next(iter(alias_owners))
 
 
+def require_season_year(conn: sqlite3.Connection, year: int, method: str, sport: Sport) -> None:
+    """Reject a `year` outside `MIN_SEASON_YEAR..MAX_SEASON_YEAR` before any
+    SQL binds it (issue #189).
+
+    Every verdict route calls this first. Without it a year too large for a
+    SQLite INTEGER (`100000000000000000000`) reached `conn.execute` in
+    `_resolve_champion_name` and raised `OverflowError`, which no handler in
+    `api.errors` maps, so /champion answered 500. The other two routes never
+    bound the year -- the engine's `_require_year` compares in Python first
+    -- but they call this too, so the bound is one rule checked in one place
+    rather than an accident of which query runs first.
+
+    Raises `UnknownYearError` built exactly as the engine's `_require_year`
+    builds it: the year as sent, plus the real `available_years` for the
+    request's method and sport. That is the same 404 the web already renders
+    for a rated-but-absent year; no new error code (see `MIN_SEASON_YEAR` in
+    `api.models` for why this is not a request-validation 422).
+    """
+    if MIN_SEASON_YEAR <= year <= MAX_SEASON_YEAR:
+        return
+    raise UnknownYearError(year, list_available_years(conn, method, sport))
+
+
 def _resolve_champion_name(
     conn: sqlite3.Connection, year: int, method: str, sport: str
 ) -> str | None:
@@ -163,6 +190,7 @@ def champion(
     """'Who was the best team in <year>?' -- resolve the #1-ranked team, then
     return its full evidentiary case (same shape as /team-case) plus its
     persona narration."""
+    require_season_year(conn, payload.year, payload.method, payload.sport)
     name = _resolve_champion_name(conn, payload.year, payload.method, payload.sport)
     # `name is None` (no ratings rows at all for year/method/sport) still
     # needs to surface as UnknownYearError -- build_team_case raises it for
@@ -193,6 +221,7 @@ def team_case(
     narrator: Narrator = Depends(get_narrator),
 ) -> TeamCaseEnvelope:
     """'How good was <team> in <year>?'"""
+    require_season_year(conn, payload.year, payload.method, payload.sport)
     case = build_team_case(
         conn, payload.year, payload.team, method=payload.method, sport=payload.sport
     )
@@ -218,6 +247,7 @@ def compare(
     narrator: Narrator = Depends(get_narrator),
 ) -> ComparisonEnvelope:
     """'Was <team_a> better than <team_b> in <year>?'"""
+    require_season_year(conn, payload.year, payload.method, payload.sport)
     comparison = build_comparison(
         conn,
         payload.year,
