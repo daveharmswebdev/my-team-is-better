@@ -15,17 +15,6 @@ type CreditsState =
   | { status: 'error'; message: string }
 
 /**
- * The site's "How this works / Credits" surface -- PRD §5.6 requires this be
- * visible, not just documented, and requires the methodology citations and
- * data-source attribution be plain-language and prominent. Every word of
- * that attribution copy -- names, summaries, citations -- comes from the
- * engine's `evidence/credits.py` via `/api/credits` so the About page, the
- * API and the MCP resource cannot drift (ARCHITECTURE §4.5); none of it is
- * re-hardcoded here.
- * Pages own composition/data-fetching; components do not import from pages
- * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
- */
-/**
  * The element id a location hash names. A fragment that is not valid
  * percent-encoding (`#100%`) makes `decodeURIComponent` throw, and an
  * uncaught error in an effect unmounts the page (there is no error boundary),
@@ -40,6 +29,17 @@ function fragmentId(hash: string): string {
   }
 }
 
+/**
+ * The site's "How this works / Credits" surface -- PRD §5.6 requires this be
+ * visible, not just documented, and requires the methodology citations and
+ * data-source attribution be plain-language and prominent. Every word of
+ * that attribution copy -- names, summaries, citations -- comes from the
+ * engine's `evidence/credits.py` via `/api/credits` so the About page, the
+ * API and the MCP resource cannot drift (ARCHITECTURE §4.5); none of it is
+ * re-hardcoded here.
+ * Pages own composition/data-fetching; components do not import from pages
+ * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
+ */
 export function AboutPage() {
   const [state, setState] = useState<CreditsState>({ status: 'loading' })
 
