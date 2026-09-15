@@ -10,6 +10,7 @@ import type { Locator } from '@playwright/test'
 
 const WARNER = '2044124519'
 const MCNAIR = '2385180619'
+const MANNING = '2153701690'
 
 /** A totals row's two value cells, player A's first. */
 function valueCells(table: Locator, label: string): Locator {
@@ -36,6 +37,7 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
 
   await playerB.pressSequentially('McNair')
   await page.getByRole('option', { name: /Steve McNair/ }).click()
+  await page.getByRole('button', { name: 'Compare', exact: true }).click()
 
   await expect(page).toHaveURL(
     new RegExp(`/nfl/compare\\?a=${WARNER}&b=${MCNAIR}$`),
@@ -95,6 +97,71 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
   await expect(playerA).toHaveValue('Kurt Warner')
   await expect(playerB).toHaveValue('')
   await expect(regular).toHaveCount(0)
+})
+
+// Issue #304: changing a pick and pressing Compare again compares the new
+// pair. Measured on the fixture: Peyton Manning's 4,135 regular-season yards
+// to Warner's 4,044, and no game with both as opposing starters.
+test('changing Player B and pressing Compare again puts Kurt Warner next to Peyton Manning, and the clear control empties the field', async ({
+  page,
+}) => {
+  await page.goto('/nfl/compare')
+  const playerA = page.getByLabel('Player A', { exact: true })
+  const playerB = page.getByLabel('Player B', { exact: true })
+  const compare = page.getByRole('button', { name: 'Compare', exact: true })
+  await expect(compare).toBeDisabled()
+
+  await playerA.pressSequentially('Warner')
+  await page.getByRole('option', { name: /Kurt Warner/ }).click()
+  await playerB.pressSequentially('McNair')
+  await page.getByRole('option', { name: /Steve McNair/ }).click()
+  await compare.click()
+
+  const warnerMcNair = page.getByRole('table', {
+    name: 'Kurt Warner and Steve McNair, regular season',
+  })
+  await expect(warnerMcNair).toBeVisible()
+
+  // Type over Player B: the pick is gone until one is picked from the list.
+  await playerB.selectText()
+  await playerB.pressSequentially('Manning')
+  await expect(compare).toBeDisabled()
+  await expect(
+    page.getByText('Pick each player from the list, then press Compare.'),
+  ).toBeVisible()
+  await page.getByRole('option', { name: /Peyton Manning/ }).click()
+  await expect(playerB).toHaveValue('Peyton Manning')
+  // Nothing changes until Compare is pressed.
+  await expect(warnerMcNair).toBeVisible()
+  await expect(page).toHaveURL(
+    new RegExp(`/nfl/compare\\?a=${WARNER}&b=${MCNAIR}$`),
+  )
+
+  await compare.click()
+
+  await expect(page).toHaveURL(
+    new RegExp(`/nfl/compare\\?a=${WARNER}&b=${MANNING}$`),
+  )
+  const regular = page.getByRole('table', {
+    name: 'Kurt Warner and Peyton Manning, regular season',
+  })
+  const yards = valueCells(regular, 'Passing yards')
+  await expect(yards.nth(0)).toHaveText('4,044')
+  await expect(yards.nth(1)).toContainText('4,135')
+  await expect(yards.nth(1)).toContainText('(larger number)')
+  await expect(warnerMcNair).toHaveCount(0)
+  await expect(
+    page
+      .getByRole('region', { name: 'Head to head' })
+      .getByText(
+        'Kurt Warner and Peyton Manning never started against each other in the regular season.',
+      ),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Clear Player B' }).click()
+  await expect(playerB).toHaveValue('')
+  await expect(playerB).toBeFocused()
+  await expect(compare).toBeDisabled()
 })
 
 test('the Primary nav reaches the compare page', async ({ page }) => {

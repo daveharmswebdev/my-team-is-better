@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { PlayerCombobox } from '../../components/PlayerCombobox/PlayerCombobox'
 import { PlayerComparisonTable } from '../../components/PlayerComparisonTable/PlayerComparisonTable'
 import { PlayerHeadToHead } from '../../components/PlayerHeadToHead/PlayerHeadToHead'
@@ -25,6 +25,7 @@ import {
   MARK_LEGEND,
   NEITHER_TOTALS_COPY,
   NO_TOTALS_COPY,
+  PICK_FROM_LIST_COPY,
   PICK_TWO_COPY,
   SAME_PLAYER_COPY,
   SEARCH_FAILED_COPY,
@@ -41,6 +42,8 @@ import { usePlayerSearch } from './usePlayerSearch'
 import styles from './PlayerComparePage.module.css'
 
 type Slot = 'a' | 'b'
+
+const SLOTS: readonly Slot[] = ['a', 'b']
 
 /** One URL param: nobody picked, a player id, or something no id can be. */
 type Pick = number | null | 'invalid'
@@ -79,10 +82,39 @@ type ComparisonAnswer = { key: string } & (
 /** The latest lone-player answer, tagged with the id it answers. */
 type CareerAnswer = { id: number } & ({ status: 'success' } | Failure)
 
-/** Text typed into a field, for the pick it was typed over. */
-interface Draft {
-  forPick: Pick
+/**
+ * A player in a slot. A pick seeded from the URL has no name until the API
+ * names that player; until then the field is empty and it can't be compared.
+ */
+interface SlotPick {
+  player_id: number
+  display_name: string | null
+}
+
+/** A slot's field: a pick, or the text typed since. Typing clears the pick. */
+interface SlotState {
+  pick: SlotPick | null
   text: string
+}
+
+/** The slots, and the navigation (`location.key`) they were seeded from. */
+interface Seeded {
+  locationKey: string
+  slots: Record<Slot, SlotState>
+}
+
+function seedSlots(
+  picks: Record<Slot, Pick>,
+  names: Record<number, string>,
+): Record<Slot, SlotState> {
+  const seed = (pick: Pick): SlotState => ({
+    pick:
+      typeof pick === 'number'
+        ? { player_id: pick, display_name: names[pick] ?? null }
+        : null,
+    text: '',
+  })
+  return { a: seed(picks.a), b: seed(picks.b) }
 }
 
 /**
@@ -90,29 +122,43 @@ interface Draft {
  * type in their own table, with the larger number in each row marked, and
  * their games against each other as opposing starting quarterbacks.
  *
- * The URL holds the picks (`?a=<id>&b=<id>`), so a link, a reload and Back
- * all show the same comparison. The same player twice, or an id that can't
- * be one, is answered here without asking the API.
+ * Each field holds a pick or typed text, never both (issue #304): typing over
+ * a pick clears it, and picking a suggestion changes only that field. The URL
+ * (`?a=<id>&b=<id>`) is the comparison on screen, and only the Compare button
+ * changes it, pushing a history entry, so a link, a reload and Back all show
+ * the same comparison. Every press asks again, even for the pair on screen.
+ * Any navigation re-seeds the fields from the URL. The same player twice, or
+ * an id that can't be one, is answered here without asking the API.
  *
  * Pages own composition/data-fetching; components do not import from pages
  * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
  */
 export function PlayerComparePage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const pickA = parsePick(searchParams.get('a'))
   const pickB = parsePick(searchParams.get('b'))
-  const picks: Record<Slot, Pick> = { a: pickA, b: pickB }
 
   const [names, setNames] = useState<Record<number, string>>({})
-  const [drafts, setDrafts] = useState<Record<Slot, Draft | null>>({
-    a: null,
-    b: null,
-  })
+  const [seeded, setSeeded] = useState<Seeded>(() => ({
+    locationKey: location.key,
+    slots: seedSlots({ a: pickA, b: pickB }, {}),
+  }))
+  /** Bumped by every Compare press on the pair already committed. */
+  const [run, setRun] = useState(0)
   const [comparisonAnswer, setComparisonAnswer] =
     useState<ComparisonAnswer | null>(null)
   const [careerAnswer, setCareerAnswer] = useState<CareerAnswer | null>(null)
   const credit = usePlayerStatsCredit()
   const noteId = useId()
+  const pickHintId = `${noteId}-pick-hint`
+
+  // Back, Forward or a link moved the URL: the fields follow it.
+  let slots = seeded.slots
+  if (seeded.locationKey !== location.key) {
+    slots = seedSlots({ a: pickA, b: pickB }, names)
+    setSeeded({ locationKey: location.key, slots })
+  }
 
   const comparisonKey =
     typeof pickA === 'number' && typeof pickB === 'number' && pickA !== pickB
@@ -126,6 +172,7 @@ export function PlayerComparePage() {
         ? pickB
         : null
 
+  // `run` is a dependency on purpose: each press of Compare asks again.
   useEffect(() => {
     if (typeof pickA !== 'number' || typeof pickB !== 'number') {
       return
@@ -155,7 +202,7 @@ export function PlayerComparePage() {
     return () => {
       cancelled = true
     }
-  }, [pickA, pickB])
+  }, [pickA, pickB, run])
 
   useEffect(() => {
     if (loneId === null) {
@@ -183,49 +230,71 @@ export function PlayerComparePage() {
     }
   }, [loneId])
 
-  /** The text a slot's field is typing, or `''` when it shows the pick. */
-  function draftText(slot: Slot): string | null {
-    const draft = drafts[slot]
-    return draft !== null && draft.forPick === picks[slot] ? draft.text : null
+  function pickName(pick: SlotPick): string | null {
+    return pick.display_name ?? names[pick.player_id] ?? null
+  }
+
+  /**
+   * A slot's player id once the field shows that player's name; `null`
+   * otherwise, so an empty field is never compared.
+   */
+  function namedPick(slot: Slot): number | null {
+    const { pick } = slots[slot]
+    return pick !== null && pickName(pick) !== null ? pick.player_id : null
   }
 
   function fieldText(slot: Slot): string {
-    const pick = picks[slot]
-    return (
-      draftText(slot) ?? (typeof pick === 'number' ? (names[pick] ?? '') : '')
-    )
+    const { pick, text } = slots[slot]
+    return pick === null ? text : (pickName(pick) ?? '')
   }
 
-  const searchA = usePlayerSearch(draftText('a') ?? '')
-  const searchB = usePlayerSearch(draftText('b') ?? '')
+  const searchA = usePlayerSearch(slots.a.pick === null ? slots.a.text : '')
+  const searchB = usePlayerSearch(slots.b.pick === null ? slots.b.text : '')
 
-  function handleType(slot: Slot, text: string) {
-    setDrafts((current) => ({
+  function updateSlot(slot: Slot, next: SlotState) {
+    setSeeded((current) => ({
       ...current,
-      [slot]: { forPick: picks[slot], text },
+      slots: { ...current.slots, [slot]: next },
     }))
   }
 
-  /** Pushes a history entry, so Back returns to the picks before. */
+  function handleType(slot: Slot, text: string) {
+    updateSlot(slot, { pick: null, text })
+  }
+
+  /** Fills the field only: nothing is compared until Compare is pressed. */
   function handleSelect(slot: Slot, player: PlayerSearchRowOut) {
     setNames((known) => ({
       ...known,
       [player.player_id]: player.display_name,
     }))
-    setDrafts((current) => ({ ...current, [slot]: null }))
-    const values: Record<Slot, string | null> = {
-      a: searchParams.get('a'),
-      b: searchParams.get('b'),
+    updateSlot(slot, {
+      pick: { player_id: player.player_id, display_name: player.display_name },
+      text: '',
+    })
+  }
+
+  function handleClear(slot: Slot) {
+    updateSlot(slot, { pick: null, text: '' })
+  }
+
+  const compareA = namedPick('a')
+  const compareB = namedPick('b')
+  const canCompare = compareA !== null && compareB !== null
+  const typedNotPicked = SLOTS.some(
+    (slot) => slots[slot].pick === null && slots[slot].text !== '',
+  )
+
+  /** Pushes a history entry for a new pair; the pair on screen asks again. */
+  function handleCompare() {
+    if (compareA === null || compareB === null) {
+      return
     }
-    values[slot] = String(player.player_id)
-    const next = new URLSearchParams()
-    for (const key of ['a', 'b'] as const) {
-      const value = values[key]
-      if (value !== null && value !== '') {
-        next.set(key, value)
-      }
+    if (compareA === pickA && compareB === pickB) {
+      setRun((count) => count + 1)
+      return
     }
-    setSearchParams(next)
+    setSearchParams({ a: String(compareA), b: String(compareB) })
   }
 
   const currentComparison =
@@ -303,6 +372,7 @@ export function PlayerComparePage() {
           status={searchA.status}
           hint={searchA.status === 'error' ? SEARCH_FAILED_COPY : undefined}
           onSelect={(player) => handleSelect('a', player)}
+          onClear={() => handleClear('a')}
           placeholder="Type a name"
         />
         <PlayerCombobox
@@ -313,8 +383,26 @@ export function PlayerComparePage() {
           status={searchB.status}
           hint={searchB.status === 'error' ? SEARCH_FAILED_COPY : undefined}
           onSelect={(player) => handleSelect('b', player)}
+          onClear={() => handleClear('b')}
           placeholder="Type a name"
         />
+      </div>
+
+      <div className={styles.actions}>
+        <button
+          type="button"
+          className={styles.compare}
+          disabled={!canCompare}
+          aria-describedby={typedNotPicked ? pickHintId : undefined}
+          onClick={handleCompare}
+        >
+          Compare
+        </button>
+        {typedNotPicked && (
+          <p id={pickHintId} className={styles.pickHint}>
+            {PICK_FROM_LIST_COPY}
+          </p>
+        )}
       </div>
 
       {body}

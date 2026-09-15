@@ -111,6 +111,13 @@ export const HEAD_TO_HEAD_RULE =
 export const PICK_TWO_COPY =
   'Pick two players to put their careers side by side.'
 
+/**
+ * Under the Compare button while a field holds typed text that isn't a player
+ * picked from the list (issue #304). Plain, not the narrator: it's an instruction.
+ */
+export const PICK_FROM_LIST_COPY =
+  'Pick each player from the list, then press Compare.'
+
 export function pickOneMoreCopy(name: string | null): string {
   return name === null
     ? 'Now pick the other player.'

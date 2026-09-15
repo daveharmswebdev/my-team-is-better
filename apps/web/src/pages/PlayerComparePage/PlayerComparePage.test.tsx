@@ -1,6 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NETWORK_ERROR_COPY,
@@ -9,10 +15,15 @@ import {
   VerdictHttpError,
   VerdictNetworkError,
 } from '../../lib/api/client'
+import type { PlayerComparisonOut } from '../../lib/api/types'
 import {
+  BRADY_VS_MANNING,
+  BRADY_VS_QUINN,
   DATA_SOURCES,
   KURT_WARNER_CAREER,
   NEVER_MET_COMPARISON,
+  SEARCH_BRADY,
+  SEARCH_MANNING,
   SEARCH_MCNAIR,
   WARNER_VS_MCNAIR,
 } from '../../lib/playerFixtures'
@@ -20,6 +31,7 @@ import {
   HEAD_TO_HEAD_RULE,
   MARK_LEGEND,
   MARK_SCREEN_READER_TEXT,
+  PICK_FROM_LIST_COPY,
   PICK_TWO_COPY,
   SAME_PLAYER_COPY,
   pickOneMoreCopy,
@@ -54,10 +66,22 @@ const mockedCredits = vi.mocked(fetchCredits)
 
 const WARNER = 2044124519
 const MCNAIR = 2385180619
+const BRADY = 1002
+const QUINN = 1003
+const MANNING = 2153701690
 
+/** Shows the URL's search, and goes Back through the router's history. */
 function LocationProbe() {
   const location = useLocation()
-  return <output data-testid="location">{location.search}</output>
+  const navigate = useNavigate()
+  return (
+    <>
+      <output data-testid="location">{location.search}</output>
+      <button type="button" onClick={() => void navigate(-1)}>
+        Go back
+      </button>
+    </>
+  )
 }
 
 function renderPage(search = '') {
@@ -80,6 +104,47 @@ function renderPage(search = '') {
 
 const playerA = () => screen.getByLabelText('Player A', { exact: true })
 const playerB = () => screen.getByLabelText('Player B', { exact: true })
+const compareButton = () => screen.getByRole('button', { name: 'Compare' })
+
+type User = ReturnType<typeof userEvent.setup>
+
+/** Types into a field and clicks the suggestion matching `option`. */
+async function pick(
+  user: User,
+  field: HTMLElement,
+  text: string,
+  option: RegExp,
+) {
+  await user.type(field, text)
+  await user.click(await screen.findByRole('option', { name: option }))
+}
+
+/** Search answers by query; anything else finds nobody. */
+function searchByQuery() {
+  const answers = [SEARCH_BRADY, SEARCH_MANNING, SEARCH_MCNAIR]
+  mockedSearch.mockImplementation((query) =>
+    Promise.resolve(
+      answers.find((answer) => answer.query === query) ?? {
+        ...SEARCH_MCNAIR,
+        query,
+        rows: [],
+      },
+    ),
+  )
+}
+
+/** The comparison answers by pair, rejecting any pair it wasn't given. */
+function compareByPair(comparisons: PlayerComparisonOut[]) {
+  mockedCompare.mockImplementation((a, b) => {
+    const found = comparisons.find(
+      (comparison) =>
+        comparison.a.player_id === a && comparison.b.player_id === b,
+    )
+    return found === undefined
+      ? Promise.reject(new Error(`no fixture for ${a}:${b}`))
+      : Promise.resolve(found)
+  })
+}
 
 function cellsOf(table: HTMLElement, label: string): HTMLElement[] {
   const row = within(table).getByRole('rowheader', { name: label })
@@ -301,6 +366,7 @@ describe('PlayerComparePage (issue #301)', () => {
     await user.click(
       await screen.findByRole('option', { name: /Steve McNair/ }),
     )
+    await user.click(compareButton())
 
     expect(mockedSearch).toHaveBeenCalledWith('McNair')
     expect(screen.getByTestId('location')).toHaveTextContent(
@@ -329,5 +395,187 @@ describe('PlayerComparePage (issue #301)', () => {
       expect(mockedSearch).toHaveBeenCalledWith('m c')
     })
     expect(mockedSearch).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('PlayerComparePage: changing a pick (issue #304)', () => {
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    searchByQuery()
+    compareByPair([BRADY_VS_QUINN, BRADY_VS_MANNING])
+  })
+
+  it("the founder's repro: Brady and Quinn, then Player B changed to Manning, compares Brady and Manning", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Brady Quinn/)
+    await user.click(compareButton())
+
+    expect(
+      await screen.findByRole('table', {
+        name: 'Tom Brady and Brady Quinn, regular season',
+      }),
+    ).toBeInTheDocument()
+    expect(mockedCompare).toHaveBeenLastCalledWith(BRADY, QUINN)
+
+    await user.clear(playerB())
+    await pick(user, playerB(), 'Manning', /Peyton Manning/)
+    expect(playerB()).toHaveValue('Peyton Manning')
+    // Nothing is compared until the button is pressed.
+    expect(
+      screen.getByRole('table', {
+        name: 'Tom Brady and Brady Quinn, regular season',
+      }),
+    ).toBeInTheDocument()
+    expect(mockedCompare).toHaveBeenCalledTimes(1)
+
+    await user.click(compareButton())
+
+    expect(
+      await screen.findByRole('table', {
+        name: 'Tom Brady and Peyton Manning, regular season',
+      }),
+    ).toBeInTheDocument()
+    expect(mockedCompare).toHaveBeenLastCalledWith(BRADY, MANNING)
+    expect(
+      screen.queryByRole('table', {
+        name: 'Tom Brady and Brady Quinn, regular season',
+      }),
+    ).not.toBeInTheDocument()
+    const players = screen.getByRole('list', { name: 'Players compared' })
+    expect(
+      within(players).getByRole('link', { name: 'Tom Brady' }),
+    ).toBeVisible()
+    expect(
+      within(players).getByRole('link', { name: 'Peyton Manning' }),
+    ).toBeVisible()
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `?a=${BRADY}&b=${MANNING}`,
+    )
+  })
+
+  it('typing over a pick clears it: Compare is disabled and says to pick from the list, until a new pick', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    expect(compareButton()).toBeDisabled()
+    expect(screen.queryByText(PICK_FROM_LIST_COPY)).not.toBeInTheDocument()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Brady Quinn/)
+    expect(compareButton()).toBeEnabled()
+    expect(screen.queryByText(PICK_FROM_LIST_COPY)).not.toBeInTheDocument()
+
+    await user.type(playerB(), 'x')
+
+    expect(playerB()).toHaveValue('Brady Quinnx')
+    expect(compareButton()).toBeDisabled()
+    expect(screen.getByText(PICK_FROM_LIST_COPY)).toBeInTheDocument()
+    expect(compareButton()).toHaveAccessibleDescription(PICK_FROM_LIST_COPY)
+
+    await user.clear(playerB())
+    await pick(user, playerB(), 'Manning', /Peyton Manning/)
+
+    expect(compareButton()).toBeEnabled()
+    expect(screen.queryByText(PICK_FROM_LIST_COPY)).not.toBeInTheDocument()
+  })
+
+  it('the clear control empties that field and disables Compare', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Brady Quinn/)
+    expect(compareButton()).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Clear Player B' }))
+
+    expect(playerB()).toHaveValue('')
+    expect(playerB()).toHaveFocus()
+    expect(playerA()).toHaveValue('Tom Brady')
+    expect(compareButton()).toBeDisabled()
+    expect(
+      screen.queryByRole('button', { name: 'Clear Player B' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('pressing Compare twice on the pair already shown asks the API twice', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockReset()
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    await screen.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    })
+    expect(mockedCompare).toHaveBeenCalledTimes(1)
+    expect(compareButton()).toBeEnabled()
+
+    await user.click(compareButton())
+
+    await waitFor(() => {
+      expect(mockedCompare).toHaveBeenCalledTimes(2)
+    })
+    expect(mockedCompare).toHaveBeenNthCalledWith(2, WARNER, MCNAIR)
+    expect(
+      await screen.findByRole('table', {
+        name: 'Kurt Warner and Steve McNair, regular season',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('picking suggestions alone changes neither the URL nor the comparison; Compare pushes ?a=&b=', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Brady Quinn/)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    expect(screen.getByTestId('location')).toBeEmptyDOMElement()
+    expect(mockedCompare).not.toHaveBeenCalled()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+
+    await user.click(compareButton())
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `?a=${BRADY}&b=${QUINN}`,
+    )
+    expect(
+      await screen.findByRole('table', {
+        name: 'Tom Brady and Brady Quinn, regular season',
+      }),
+    ).toBeInTheDocument()
+    expect(mockedCompare).toHaveBeenCalledWith(BRADY, QUINN)
+
+    // A pushed entry: Back returns to nobody picked, and the fields follow.
+    await user.click(screen.getByRole('button', { name: 'Go back' }))
+    expect(screen.getByTestId('location')).toBeEmptyDOMElement()
+    expect(playerA()).toHaveValue('')
+    expect(playerB()).toHaveValue('')
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
+  it('the same player in both slots, on Compare, gets the same-player line without asking the API', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Tom Brady/)
+    await user.click(compareButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(SAME_PLAYER_COPY)
+    expect(mockedCompare).not.toHaveBeenCalled()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
   })
 })

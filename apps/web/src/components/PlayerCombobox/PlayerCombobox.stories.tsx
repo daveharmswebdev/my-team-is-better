@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import { SEARCH_FAILED_COPY } from '../../lib/playerCompare'
-import { SEARCH_MC } from '../../lib/playerFixtures'
+import { SEARCH_MC, SEARCH_MCNAIR } from '../../lib/playerFixtures'
 import { PlayerCombobox } from './PlayerCombobox'
 import type { PlayerComboboxProps } from './PlayerCombobox'
 
@@ -22,6 +22,10 @@ function Harness(props: PlayerComboboxProps) {
           setValue(player.display_name)
           props.onSelect(player)
         }}
+        onClear={() => {
+          setValue('')
+          props.onClear()
+        }}
       />
     </div>
   )
@@ -39,6 +43,7 @@ const meta = {
     placeholder: 'Type a name',
     onChange: fn(),
     onSelect: fn(),
+    onClear: fn(),
   },
   render: (args) => <Harness {...args} />,
 } satisfies Meta<typeof PlayerCombobox>
@@ -115,6 +120,38 @@ export const NoMatches: Story = {
     await expect(canvas.getByRole('status')).toHaveTextContent(
       'No players match',
     )
+  },
+}
+
+/**
+ * A picked player with the clear control (issue #304): pressing it empties
+ * the field, hands the pick back to the page and puts focus in the field.
+ */
+export const Clearable: Story = {
+  args: { label: 'Player A', value: 'Kurt Warner' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Clear Player A' }),
+    )
+    await expect(args.onClear).toHaveBeenCalledTimes(1)
+    await expect(canvas.getByRole('combobox')).toHaveValue('')
+    await expect(canvas.getByRole('combobox')).toHaveFocus()
+    await expect(
+      canvas.queryByRole('button', { name: 'Clear Player A' }),
+    ).not.toBeInTheDocument()
+  },
+}
+
+/** One suggestion left and nothing highlighted: Enter picks it (issue #304). */
+export const EnterPicksOnlyMatch: Story = {
+  args: { options: SEARCH_MCNAIR.rows, status: 'done' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('combobox'), 'McNair')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSelect).toHaveBeenCalledWith(SEARCH_MCNAIR.rows[0])
+    await expect(canvas.getByRole('combobox')).toHaveValue('Steve McNair')
   },
 }
 
