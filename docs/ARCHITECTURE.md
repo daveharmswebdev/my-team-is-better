@@ -215,7 +215,11 @@ path (PRD §5.1a) is a deliberately different flow — see §4.6.
    genuine input problems (ambiguous team → show candidates), which is
    exactly the distinction Domain 2.2 asks for.
 3. API checks the **persona cache** (Postgres) keyed on
-   `hash(question_type, year, team(s), user_team, method, prompt_version)`.
+   `hash(question_type, year, team(s), user_team, method, sport, prompt_version,
+   sha256(fact block), grounding_version)` (#84 added `sport`; #145 added the
+   fact-block digest and `GROUNDING_VERSION`, so a fact-block or grounding-rules
+   change misses exactly the affected entries and `PROMPT_VERSION` means prompt
+   wording only).
    Cache hit → return immediately, no Claude call. This is the single
    biggest cost lever available (PRD §6): the deterministic facts and the
    allegiance are both part of the key, so "Michigan fan asks about 2005"

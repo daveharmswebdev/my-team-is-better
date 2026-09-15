@@ -58,7 +58,7 @@ overwritten through the cache's upsert. A hit whose flag matches is served
 unchanged. This was chosen over a PROMPT_VERSION bump, which would discard
 every cached narration in both leagues to fix a handful of NFL rows, and it
 heals any later change to the contested lists the same way without a global
-bust. The cache key and `CachedNarration` are unchanged.
+bust. #151 changed neither the cache key nor `CachedNarration`.
 """
 
 from __future__ import annotations
