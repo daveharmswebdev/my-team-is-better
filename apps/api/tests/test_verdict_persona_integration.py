@@ -15,14 +15,23 @@ a cache hit the second time.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
+from cfb_strength.db.connection import get_conn
+from cfb_strength.evidence.proof import build_team_case
 from fastapi.testclient import TestClient
 
 from api.config import ANTHROPIC_API_KEY, DATABASE_URL, PROMPT_VERSION
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
+from api.models import TeamCaseOut
 from api.persona.cache import cache_key, ensure_schema
+from api.persona.grounding import GROUNDING_VERSION
+from api.persona.service import team_case_fact_block_json
+
+FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL or not ANTHROPIC_API_KEY,
@@ -48,6 +57,15 @@ def test_repeated_champion_request_is_a_cache_hit_on_the_second_call(
         # `api.persona.service.narrate_team_case` will compute for this
         # request. Deleted up front so this test proves a genuine
         # miss-then-hit sequence, not a leftover row from a prior local run.
+        # The fact block is the service's own, built from the same fixture
+        # evidence the route builds (issue #145).
+        sqlite_conn = get_conn(FIXTURE_DB, read_only=True)
+        try:
+            case = TeamCaseOut.from_dataclass(
+                build_team_case(sqlite_conn, 2005, "Texas", method="keener", sport="cfb")
+            )
+        finally:
+            sqlite_conn.close()
         key = cache_key(
             question_type="champion",
             year=2005,
@@ -56,6 +74,8 @@ def test_repeated_champion_request_is_a_cache_hit_on_the_second_call(
             method="keener",
             sport="cfb",
             prompt_version=PROMPT_VERSION,
+            fact_block_json=team_case_fact_block_json(case),
+            grounding_version=GROUNDING_VERSION,
         )
         conn.execute("DELETE FROM persona_cache WHERE cache_key = %s", (key,))
         conn.commit()

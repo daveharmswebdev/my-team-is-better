@@ -11,20 +11,37 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 
 import anthropic
 import httpx2
+from cfb_strength.db.connection import get_conn
+from cfb_strength.evidence.proof import build_team_case
 from fastapi.testclient import TestClient
 
 from api.config import PROMPT_VERSION
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
+from api.models import TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore, cache_key
+from api.persona.grounding import GROUNDING_VERSION
+from api.persona.service import team_case_fact_block_json
+
+FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
 
 def _usc_2005_team_case_key() -> str:
     """The cache key `/api/verdict/team-case {"year": 2005, "team": "USC"}`
-    uses with the request's default method and sport."""
+    uses with the request's default method and sport. The fact block is the
+    service's own, built from the same fixture evidence the route builds
+    (issue #145)."""
+    conn = get_conn(FIXTURE_DB, read_only=True)
+    try:
+        case = TeamCaseOut.from_dataclass(
+            build_team_case(conn, 2005, "USC", method="keener", sport="cfb")
+        )
+    finally:
+        conn.close()
     return cache_key(
         question_type="team_case",
         year=2005,
@@ -33,6 +50,8 @@ def _usc_2005_team_case_key() -> str:
         method="keener",
         sport="cfb",
         prompt_version=PROMPT_VERSION,
+        fact_block_json=team_case_fact_block_json(case),
+        grounding_version=GROUNDING_VERSION,
     )
 
 

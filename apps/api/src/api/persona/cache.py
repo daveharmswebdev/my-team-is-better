@@ -64,12 +64,14 @@ def cache_key(
     method: str,
     sport: str,
     prompt_version: str,
+    fact_block_json: str,
+    grounding_version: str,
 ) -> str:
     """issue #4's cache key: `hash(question_type, year, team(s), user_team,
-    method, sport, PROMPT_VERSION)`. `teams` should be the evidence layer's
-    *resolved* canonical name(s) (e.g. `TeamCaseOut.team_name`), not the raw
-    request string, so cache hits survive e.g. "Bama" vs "Alabama" both
-    resolving to the same team.
+    method, sport, PROMPT_VERSION, sha256(fact block), GROUNDING_VERSION)`.
+    `teams` should be the evidence layer's *resolved* canonical name(s)
+    (e.g. `TeamCaseOut.team_name`), not the raw request string, so cache
+    hits survive e.g. "Bama" vs "Alabama" both resolving to the same team.
 
     `sport` is required with no default (issue #84): CFB and NFL share team
     names ("Houston", "Miami", "Arizona", ...), so without it a CFB question
@@ -77,6 +79,25 @@ def cache_key(
     keep being served it from the cache. Adding it changed every key, which
     invalidated all older entries on purpose, since they can't say which
     league they describe.
+
+    `fact_block_json` and `grounding_version` (issue #145): a cached
+    narration was generated from one exact fact block and passed the
+    grounding check under one set of rules, and the key says which. Before
+    #145 it did not, so every change to the block -- a new field (#83,
+    #152, #130), a corrected score (#122) -- had to be paid for with a
+    `PROMPT_VERSION` bump that discarded every narration in both leagues,
+    and a tightening of the grounding rules could invalidate nothing at all.
+    `fact_block_json` is the canonical block string the narrator and the
+    checker see (`api.persona.service.team_case_fact_block_json` /
+    `comparison_fact_block_json`, never a bare `model_dump_json()`); it is
+    folded in as its own sha256 rather than as text, so the key stays one
+    fixed-length digest whatever the block's size. `grounding_version` is
+    `api.persona.grounding.GROUNDING_VERSION`. A changed block, or tightened
+    rules, now miss exactly the affected entries, and `PROMPT_VERSION` is
+    back to meaning the prompt wording changed. Adding these two fields
+    changed every key, which invalidated all older entries on purpose (the
+    same deliberate bust #84 did): they cannot say which block they were
+    written from.
     """
     payload = {
         "question_type": question_type,
@@ -86,6 +107,8 @@ def cache_key(
         "method": method,
         "sport": sport,
         "prompt_version": prompt_version,
+        "fact_block_sha256": hashlib.sha256(fact_block_json.encode("utf-8")).hexdigest(),
+        "grounding_version": grounding_version,
     }
     canonical = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

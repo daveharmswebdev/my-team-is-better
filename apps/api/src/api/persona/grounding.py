@@ -352,6 +352,21 @@ from typing import Any
 from api.models import Method
 from api.rating_display import RATING_DISPLAY, display_value
 
+GROUNDING_VERSION = "grounding-v1"
+"""The version of this module's rules, part of the narration cache key
+(issue #145, `api.persona.cache.cache_key`).
+
+Bump it whenever the checker's rules change -- whatever it newly accepts or
+newly rejects: a rounding or display allowance added or withdrawn, a new
+relational check, a widened or narrowed token pattern. A cached narration
+passed the check under the rules in force when it was written, and the key
+records which; a bump misses every entry checked under the old rules so
+each is re-narrated and re-checked under the new ones, without touching
+`PROMPT_VERSION` (which since #145 means only that the prompt wording
+changed). A pure refactor that changes no accept/reject outcome needs no
+bump; a fact-block change needs none either, the key hashes the block.
+"""
+
 # No leading `-?`: records and scores in this domain (e.g. "13-0", "41-38")
 # use a hyphen as a separator, not a negative sign, and treating it as one
 # would misparse "13-0" as the tokens "13" and "-0" instead of "13" and "0".

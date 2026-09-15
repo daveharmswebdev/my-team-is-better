@@ -10,11 +10,16 @@ this app is scoped to. This module loads `apps/api/.env` (via
 
 - `DATABASE_URL` / `ANTHROPIC_API_KEY`: `None` when unset (e.g. in CI, which
   intentionally has neither -- see CLAUDE.md/issue #4's negative scope).
-- `PROMPT_VERSION`: bumped whenever anything the model is given changes --
-  the persona system prompt text in `api.persona.prompt`, or the shape or
-  meaning of the fact block (the evidence JSON) -- so the Postgres response
-  cache (`api.persona.cache`) auto-busts instead of serving stale narration
-  written under an old voice or from old facts.
+- `PROMPT_VERSION`: bumped whenever the persona system prompt's wording in
+  `api.persona.prompt` changes, so the Postgres response cache
+  (`api.persona.cache`) auto-busts instead of serving narration written
+  under an old voice. It means prompt wording only, since issue #145: the
+  cache key also hashes the exact fact block (the evidence JSON) a narration
+  was generated from and carries `api.persona.grounding.GROUNDING_VERSION`,
+  so a change to the block's shape or content, or to the grounding rules, is
+  a miss on its own and needs no bump here. Before #145 the key covered
+  neither, which is why v2, v3, v8 and v9 below were bumped for fact-block
+  changes.
 - `CONTESTED_YEARS`: the seasons whose champion is disputed (the human polls
   and the computed ratings disagreed), keyed by league (issue #151). It was
   a bare CFB year set, so NFL 2003/2017 verdicts were flagged contested too.
@@ -92,6 +97,9 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # `common_opponents` now carry every meeting per side (`team_a_meetings` /
 # `team_b_meetings`) and the engine's verdict prose lists them, so v8
 # comparison narrations were grounded against facts that hid earlier meetings.
+# Issue #145 (no bump): the cache key gained the fact block's sha256 and
+# `GROUNDING_VERSION`, which missed every pre-#145 row on its own. From here
+# on this moves for prompt wording only; see the module docstring.
 PROMPT_VERSION = "persona-v9"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {

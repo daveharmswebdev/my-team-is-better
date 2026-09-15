@@ -9,9 +9,11 @@ the same reason #183 kept the Elo ledger out: any number in the fact block
 enters grounding's accepted-number set, quietly licensing the narrator to
 quote figures nobody decided it should narrate. So `api.persona.service`'s
 `team_case_fact_block_json` / `comparison_fact_block_json` exclude `game_id`
-from every per-game record, and -- because the excluded block equals the
-pre-#218 block -- `PROMPT_VERSION` does not move and no cached narration is
-invalidated.
+from every per-game record, so the excluded block equals the pre-#218 block
+and `PROMPT_VERSION` does not move. (When #218 landed the cache key did not
+cover the fact block, so that byte equality was also what kept every cached
+narration valid; since #145 the key hashes the block, so the equality is
+purely about what Claude and the grounding check see.)
 
 Every block here is the real one the service hands Claude, built the way the
 routes build it from the committed `cfb_verdict_fixture.sqlite3`. Where
