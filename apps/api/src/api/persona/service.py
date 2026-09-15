@@ -58,7 +58,7 @@ overwritten through the cache's upsert. A hit whose flag matches is served
 unchanged. This was chosen over a PROMPT_VERSION bump, which would discard
 every cached narration in both leagues to fix a handful of NFL rows, and it
 heals any later change to the contested lists the same way without a global
-bust. The cache key and `CachedNarration` are unchanged.
+bust. #151 changed neither the cache key nor `CachedNarration`.
 """
 
 from __future__ import annotations
@@ -73,6 +73,7 @@ from api.models import ComparisonResultOut, NarrationOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
+from api.persona.grounding import GROUNDING_VERSION
 from api.persona.narrate import narrate
 
 logger = logging.getLogger(__name__)
@@ -83,18 +84,20 @@ logger = logging.getLogger(__name__)
 # and, through `find_ungrounded_tokens(text, fact_block_json, ...)`,
 # grounding's accepted-number set -- quietly licensing the narrator to quote
 # figures nobody decided it should narrate (#175's open question). Removing an
-# entry here is that decision, and needs a PROMPT_VERSION bump with it.
+# entry here is that decision. It needs no PROMPT_VERSION bump: since #145
+# the cache key hashes the fact block, so the changed block misses on its own.
 #
 # Issue #218: `game_id` (`games.id`, a nine-digit CFBD number) is published on
 # every per-game record (`OpponentResultOut`, `HeadToHeadMeetingOut`,
 # `CommonOpponentMeetingOut`) so apps/web can key its game lists on it, and
 # is kept out of both fact blocks for the same reason. With it excluded the
-# block Claude sees is byte-identical to the pre-#218 block, so
-# `PROMPT_VERSION` does not move and no cached narration is invalidated
-# (`tests/test_persona_fact_block_game_id.py` pins the byte equality; the
-# cache key does not cover the fact block, #145, which is why that equality
-# has to hold rather than be re-keyed). `"__all__"` applies the exclusion to
-# every item of a list; a `None` `worst_loss` is simply skipped.
+# block Claude sees is byte-identical to the pre-#218 block
+# (`tests/test_persona_fact_block_game_id.py` pins the byte equality). That
+# equality is about what Claude and the grounding check see, not about the
+# cache: since #145 the key covers the block's sha256, so any block change
+# is its own cache miss and `PROMPT_VERSION` moves only for prompt wording.
+# `"__all__"` applies the exclusion to every item of a list; a `None`
+# `worst_loss` is simply skipped.
 #
 # `IncEx` is pydantic's own type for `model_dump_json(exclude=...)`: nested
 # mappings of field name -> `True` (drop the field) or a further mapping.
@@ -159,6 +162,7 @@ def narrate_team_case(
     """Narrate a champion or team-case verdict. `known_team_names` is the
     grounding check's universe, every canonical team name for `sport`,
     derived by the route from the catalog it already read (issue #245)."""
+    fact_block_json = team_case_fact_block_json(case)
     key = cache_key(
         question_type=question_type,
         year=case.year,
@@ -167,10 +171,12 @@ def narrate_team_case(
         method=method,
         sport=sport,
         prompt_version=PROMPT_VERSION,
+        fact_block_json=fact_block_json,
+        grounding_version=GROUNDING_VERSION,
     )
     return _cached_narration(
         year=case.year,
-        fact_block_json=team_case_fact_block_json(case),
+        fact_block_json=fact_block_json,
         key=key,
         fallback_text=team_case_fallback_text(case),
         user_team=user_team,
@@ -193,6 +199,7 @@ def narrate_comparison(
 ) -> NarrationOut:
     """Narrate a compare verdict; `known_team_names` as in
     `narrate_team_case`."""
+    fact_block_json = comparison_fact_block_json(comparison)
     key = cache_key(
         question_type="compare",
         year=comparison.year,
@@ -201,10 +208,12 @@ def narrate_comparison(
         method=method,
         sport=sport,
         prompt_version=PROMPT_VERSION,
+        fact_block_json=fact_block_json,
+        grounding_version=GROUNDING_VERSION,
     )
     return _cached_narration(
         year=comparison.year,
-        fact_block_json=comparison_fact_block_json(comparison),
+        fact_block_json=fact_block_json,
         key=key,
         fallback_text=comparison_fallback_text(comparison),
         user_team=user_team,

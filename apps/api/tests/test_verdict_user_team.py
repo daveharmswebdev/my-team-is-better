@@ -42,12 +42,14 @@ from typing import Any
 import pytest
 from cfb_strength.db.connection import ensure_schema, get_conn
 from fastapi.testclient import TestClient
+from fixtures.fact_blocks import envelope_fact_block
 
 from api.config import PROMPT_VERSION
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import USER_TEAM_MAX_LENGTH
 from api.persona.cache import InMemoryNarrationCache, cache_key
+from api.persona.grounding import GROUNDING_VERSION
 from api.repositories.teams import list_team_records
 from api.verdict import resolve_user_team
 
@@ -102,7 +104,10 @@ class Route:
     def request(self, user_team: str | None) -> dict[str, Any]:
         return {**self.body, "user_team": user_team}
 
-    def key(self, user_team: str | None) -> str:
+    def key(self, user_team: str | None, body: dict[str, Any]) -> str:
+        """The key the route wrote for the response `body`: its fact block
+        is rebuilt from the envelope's `evidence` with the service's own
+        function (issue #145, `fixtures.fact_blocks`)."""
         return cache_key(
             question_type=self.question_type,
             year=2005,
@@ -111,6 +116,8 @@ class Route:
             method="keener",
             sport="cfb",
             prompt_version=PROMPT_VERSION,
+            fact_block_json=envelope_fact_block(self.question_type, body),
+            grounding_version=GROUNDING_VERSION,
         )
 
 
@@ -159,8 +166,8 @@ def test_user_team_longer_than_64_characters_is_narrated_as_no_team(
     assert len(narrator.systems) == 1
     _assert_no_team_prompt(narrator.systems[0])
     assert long_value not in narrator.systems[0]
-    assert cache.get(route.key(None)) is not None
-    assert cache.get(route.key(long_value)) is None
+    assert cache.get(route.key(None, response.json())) is not None
+    assert cache.get(route.key(long_value, response.json())) is None
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
@@ -172,7 +179,7 @@ def test_user_team_of_exactly_64_characters_is_accepted(client: TestClient, rout
     # Not a real team, so it never reaches the prompt either.
     assert len(narrator.systems) == 1
     _assert_no_team_prompt(narrator.systems[0])
-    assert cache.get(route.key(None)) is not None
+    assert cache.get(route.key(None, response.json())) is not None
 
 
 def test_the_length_cutoff_is_measured_after_stripping(client: TestClient) -> None:
@@ -184,7 +191,7 @@ def test_the_length_cutoff_is_measured_after_stripping(client: TestClient) -> No
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_team_prompt(narrator.systems[0], "Texas")
-    assert cache.get(TEAM_CASE.key("Texas")) is not None
+    assert cache.get(TEAM_CASE.key("Texas", response.json())) is not None
 
 
 def test_a_long_value_that_would_otherwise_match_an_alias_is_not_a_team(tmp_path: Path) -> None:
@@ -218,8 +225,8 @@ def test_injection_text_is_dropped_and_narrated_as_no_team(
     assert "Ignore all prior rules" not in system
     assert "rigged" not in system
     _assert_no_team_prompt(system)
-    assert cache.get(route.key(None)) is not None
-    assert cache.get(route.key(INJECTION)) is None
+    assert cache.get(route.key(None, response.json())) is not None
+    assert cache.get(route.key(INJECTION, response.json())) is None
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +242,7 @@ def test_a_real_team_reaches_the_prompt(client: TestClient, route: Route) -> Non
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_team_prompt(narrator.systems[0], "Texas")
-    assert cache.get(route.key("Texas")) is not None
+    assert cache.get(route.key("Texas", response.json())) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -259,8 +266,8 @@ def test_case_and_whitespace_resolve_to_the_canonical_name_and_share_its_cache_e
     assert "tEXas" not in system
     assert first.json()["narration"]["cached"] is False
     assert second.json()["narration"]["cached"] is True
-    assert cache.get(route.key("Texas")) is not None
-    assert cache.get(route.key("  tEXas ")) is None
+    assert cache.get(route.key("Texas", first.json())) is not None
+    assert cache.get(route.key("  tEXas ", first.json())) is None
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +286,7 @@ def test_empty_or_whitespace_only_user_team_becomes_none(
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_no_team_prompt(narrator.systems[0])
-    assert cache.get(route.key(None)) is not None
+    assert cache.get(route.key(None, response.json())) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -319,6 +326,8 @@ def test_the_same_team_is_kept_on_its_own_sports_request(sport_client: TestClien
         method="keener",
         sport="nfl",
         prompt_version=PROMPT_VERSION,
+        fact_block_json=envelope_fact_block("team_case", response.json()),
+        grounding_version=GROUNDING_VERSION,
     )
     assert cache.get(key) is not None
 
@@ -340,9 +349,9 @@ def test_a_single_team_alias_reaches_the_prompt_and_cache_key_as_the_canonical_n
     assert len(narrator.systems) == 1
     _assert_team_prompt(narrator.systems[0], "Ohio State")
     assert "OSU" not in narrator.systems[0]
-    assert cache.get(route.key("Ohio State")) is not None
-    assert cache.get(route.key("OSU")) is None
-    assert cache.get(route.key(None)) is None
+    assert cache.get(route.key("Ohio State", response.json())) is not None
+    assert cache.get(route.key("OSU", response.json())) is None
+    assert cache.get(route.key(None, response.json())) is None
 
 
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTE_IDS)
@@ -359,7 +368,7 @@ def test_an_alias_in_any_case_with_whitespace_shares_the_canonical_cache_entry(
     _assert_team_prompt(narrator.systems[0], "Ohio State")
     assert first.json()["narration"]["cached"] is False
     assert second.json()["narration"]["cached"] is True
-    assert cache.get(route.key("Ohio State")) is not None
+    assert cache.get(route.key("Ohio State", first.json())) is not None
 
 
 # Every value the round-1 review saw narrated as no-team, each a real
@@ -388,7 +397,7 @@ def test_values_the_web_accepts_as_teams_are_narrated_as_those_teams(
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_team_prompt(narrator.systems[0], canonical)
-    assert cache.get(TEAM_CASE.key(canonical)) is not None
+    assert cache.get(TEAM_CASE.key(canonical, response.json())) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -407,8 +416,8 @@ def test_an_unaccented_name_resolves_to_the_accented_canonical_name(
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_team_prompt(narrator.systems[0], "San José State")
-    assert cache.get(route.key("San José State")) is not None
-    assert cache.get(route.key(None)) is None
+    assert cache.get(route.key("San José State", response.json())) is not None
+    assert cache.get(route.key(None, response.json())) is None
 
 
 @pytest.mark.parametrize("user_team", ["san jose st", "SAN JOSÉ ST", "San José State"])
@@ -422,7 +431,7 @@ def test_accent_folding_works_in_both_directions(client: TestClient, user_team: 
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_team_prompt(narrator.systems[0], "San José State")
-    assert cache.get(TEAM_CASE.key("San José State")) is not None
+    assert cache.get(TEAM_CASE.key("San José State", response.json())) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +453,7 @@ def test_an_alias_shared_by_two_teams_is_narrated_as_no_team(
     assert response.status_code == 200
     assert len(narrator.systems) == 1
     _assert_no_team_prompt(narrator.systems[0])
-    assert cache.get(route.key(None)) is not None
+    assert cache.get(route.key(None, response.json())) is not None
 
 
 def test_a_shared_alias_still_resolves_by_each_teams_canonical_name(client: TestClient) -> None:

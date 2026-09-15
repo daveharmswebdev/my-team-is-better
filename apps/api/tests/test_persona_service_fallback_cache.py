@@ -27,7 +27,13 @@ from api.config import PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
-from api.persona.service import narrate_comparison, narrate_team_case
+from api.persona.grounding import GROUNDING_VERSION
+from api.persona.service import (
+    comparison_fact_block_json,
+    narrate_comparison,
+    narrate_team_case,
+    team_case_fact_block_json,
+)
 from api.repositories.teams import list_all_team_names
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
@@ -105,7 +111,9 @@ def _ask(
     )
 
 
-def _key(route: str) -> str:
+def _key(route: str, conn: sqlite3.Connection) -> str:
+    # The fact block is the service's own (issue #145), built from the same
+    # evidence `_ask` narrates.
     if route == "team_case":
         return cache_key(
             question_type="team_case",
@@ -115,6 +123,8 @@ def _key(route: str) -> str:
             method="keener",
             sport="cfb",
             prompt_version=PROMPT_VERSION,
+            fact_block_json=team_case_fact_block_json(_case(conn)),
+            grounding_version=GROUNDING_VERSION,
         )
     return cache_key(
         question_type="compare",
@@ -124,6 +134,8 @@ def _key(route: str) -> str:
         method="keener",
         sport="cfb",
         prompt_version=PROMPT_VERSION,
+        fact_block_json=comparison_fact_block_json(_comparison(conn)),
+        grounding_version=GROUNDING_VERSION,
     )
 
 
@@ -145,7 +157,7 @@ def test_real_narration_is_cached_under_the_expected_key(
     out = _ask(route, conn, cache, narrator)
 
     assert out == NarrationOut(text=REAL_NARRATION, contested=False, cached=False)
-    assert cache.get(_key(route)) == CachedNarration(text=REAL_NARRATION, contested=False)
+    assert cache.get(_key(route, conn)) == CachedNarration(text=REAL_NARRATION, contested=False)
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -159,7 +171,7 @@ def test_grounding_fallback_is_served_uncached_and_not_stored(
 
     assert out == NarrationOut(text=_fallback_text(route, conn), contested=False, cached=False)
     assert len(narrator.calls) == 2
-    assert cache.get(_key(route)) is None
+    assert cache.get(_key(route, conn)) is None
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -173,7 +185,7 @@ def test_transport_error_fallback_is_served_uncached_and_not_stored(
     out = _ask(route, conn, cache, narrator)
 
     assert out == NarrationOut(text=_fallback_text(route, conn), contested=False, cached=False)
-    assert cache.get(_key(route)) is None
+    assert cache.get(_key(route, conn)) is None
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -190,13 +202,13 @@ def test_request_after_a_fallback_asks_the_narrator_again(
     first = _ask(route, conn, cache, narrator)
 
     assert first == NarrationOut(text=_fallback_text(route, conn), contested=False, cached=False)
-    assert cache.get(_key(route)) is None
+    assert cache.get(_key(route, conn)) is None
 
     second = _ask(route, conn, cache, narrator)
 
     assert second == NarrationOut(text=REAL_NARRATION, contested=False, cached=False)
     assert len(narrator.calls) == 3
-    assert cache.get(_key(route)) == CachedNarration(text=REAL_NARRATION, contested=False)
+    assert cache.get(_key(route, conn)) == CachedNarration(text=REAL_NARRATION, contested=False)
 
 
 @pytest.mark.parametrize("route", ROUTES)
@@ -204,14 +216,14 @@ def test_legacy_cached_fallback_is_a_miss_and_is_overwritten_by_a_real_narration
     route: str, conn: sqlite3.Connection
 ) -> None:
     cache = InMemoryNarrationCache()
-    cache.set(_key(route), CachedNarration(text=_fallback_text(route, conn), contested=False))
+    cache.set(_key(route, conn), CachedNarration(text=_fallback_text(route, conn), contested=False))
     narrator = _ScriptedNarrator([REAL_NARRATION])
 
     first = _ask(route, conn, cache, narrator)
 
     assert first == NarrationOut(text=REAL_NARRATION, contested=False, cached=False)
     assert len(narrator.calls) == 1
-    assert cache.get(_key(route)) == CachedNarration(text=REAL_NARRATION, contested=False)
+    assert cache.get(_key(route, conn)) == CachedNarration(text=REAL_NARRATION, contested=False)
 
     second = _ask(route, conn, cache, narrator)
 
@@ -227,7 +239,7 @@ def test_legacy_cached_fallback_that_fails_again_is_served_uncached(
     to two narrator calls per request instead of being pinned to the fallback."""
     fallback = _fallback_text(route, conn)
     cache = InMemoryNarrationCache()
-    cache.set(_key(route), CachedNarration(text=fallback, contested=False))
+    cache.set(_key(route, conn), CachedNarration(text=fallback, contested=False))
     narrator = _ScriptedNarrator([UNGROUNDED_NARRATION, UNGROUNDED_NARRATION])
 
     out = _ask(route, conn, cache, narrator)
@@ -241,7 +253,9 @@ def test_real_cached_narration_is_still_served_without_a_narrator_call(
     route: str, conn: sqlite3.Connection
 ) -> None:
     cache = InMemoryNarrationCache()
-    cache.set(_key(route), CachedNarration(text="A real, earlier narration.", contested=False))
+    cache.set(
+        _key(route, conn), CachedNarration(text="A real, earlier narration.", contested=False)
+    )
     narrator = _ScriptedNarrator([])
 
     out = _ask(route, conn, cache, narrator)

@@ -33,14 +33,17 @@ from typing import Any, get_args
 
 import pytest
 from cfb_strength.db.connection import get_conn
+from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
-from api.models import Sport
+from api.models import ComparisonResultOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
+from api.persona.grounding import GROUNDING_VERSION
+from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
 # No numbers and no team names: grounded against any fact block.
 NARRATION = "Solid case, no notes."
@@ -95,10 +98,8 @@ class _RecordingNarrator:
 
 @contextmanager
 def _client(
-    tmp_path: Path, year: int, cache: InMemoryNarrationCache, narrator: _RecordingNarrator
+    db: Path, cache: InMemoryNarrationCache, narrator: _RecordingNarrator
 ) -> Iterator[TestClient]:
-    db = make_sport_fixture_db(tmp_path, year=year)
-
     def _conn() -> Iterator[sqlite3.Connection]:
         conn = get_conn(db, read_only=True)
         try:
@@ -125,7 +126,27 @@ def _post(client: TestClient, route: str, sport: Sport, year: int) -> dict[str, 
     return narration
 
 
-def _key(route: str, sport: Sport, year: int) -> str:
+def _fact_block_json(db: Path, route: str, sport: Sport, year: int) -> str:
+    """The fact block the route narrates for this request, built from the
+    same db the way the route builds it (issue #145): the champion route
+    resolves the rank-1 team first, which `ROUTE_TEAMS` already names."""
+    _, teams = ROUTE_TEAMS[sport][route]
+    conn = get_conn(db, read_only=True)
+    try:
+        if route == "compare":
+            comparison = ComparisonResultOut.from_dataclass(
+                build_comparison(conn, year, teams[0], teams[1], method="keener", sport=sport)
+            )
+            return comparison_fact_block_json(comparison)
+        case = TeamCaseOut.from_dataclass(
+            build_team_case(conn, year, teams[0], method="keener", sport=sport)
+        )
+        return team_case_fact_block_json(case)
+    finally:
+        conn.close()
+
+
+def _key(db: Path, route: str, sport: Sport, year: int) -> str:
     _, teams = ROUTE_TEAMS[sport][route]
     return cache_key(
         question_type=QUESTION_TYPES[route],
@@ -135,6 +156,8 @@ def _key(route: str, sport: Sport, year: int) -> str:
         method="keener",
         sport=sport,
         prompt_version=PROMPT_VERSION,
+        fact_block_json=_fact_block_json(db, route, sport, year),
+        grounding_version=GROUNDING_VERSION,
     )
 
 
@@ -146,7 +169,7 @@ def test_contested_flag_is_per_league_in_the_response_and_the_prompt(
     narrator = _RecordingNarrator()
     cache = InMemoryNarrationCache()
 
-    with _client(tmp_path, year, cache, narrator) as client:
+    with _client(make_sport_fixture_db(tmp_path, year=year), cache, narrator) as client:
         narration = _post(client, route, sport, year)
 
     assert narration["contested"] is expected
@@ -165,12 +188,13 @@ def test_stale_contested_cache_row_is_a_miss_and_is_overwritten(tmp_path: Path, 
     """A row cached before #151 for NFL 2003 says `contested=True`, and its
     text was narrated under that wrong flag. It must not be served: narrate
     again with the right flag and overwrite the row."""
-    key = _key(route, "nfl", 2003)
+    db = make_sport_fixture_db(tmp_path, year=2003)
+    key = _key(db, route, "nfl", 2003)
     cache = InMemoryNarrationCache()
     cache.set(key, CachedNarration(text=STALE_NARRATION, contested=True))
     narrator = _RecordingNarrator()
 
-    with _client(tmp_path, 2003, cache, narrator) as client:
+    with _client(db, cache, narrator) as client:
         narration = _post(client, route, "nfl", 2003)
 
     assert narration == {"text": NARRATION, "contested": False, "cached": False}
@@ -183,12 +207,13 @@ def test_stale_contested_cache_row_is_a_miss_and_is_overwritten(tmp_path: Path, 
 def test_cache_row_with_the_right_contested_flag_is_still_a_hit(
     tmp_path: Path, route: str, sport: Sport, contested: bool
 ) -> None:
-    key = _key(route, sport, 2003)
+    db = make_sport_fixture_db(tmp_path, year=2003)
+    key = _key(db, route, sport, 2003)
     cache = InMemoryNarrationCache()
     cache.set(key, CachedNarration(text=STALE_NARRATION, contested=contested))
     narrator = _RecordingNarrator()
 
-    with _client(tmp_path, 2003, cache, narrator) as client:
+    with _client(db, cache, narrator) as client:
         narration = _post(client, route, sport, 2003)
 
     assert narration == {"text": STALE_NARRATION, "contested": contested, "cached": True}
