@@ -184,6 +184,9 @@ def _block(
         return block, "cfb", cfb_conn
     if name == "compare_2019_elo":
         return _comparison_block(cfb_conn, 2019, "LSU", "Clemson", "cfb", "elo"), "cfb", cfb_conn
+    if name == "compare_2019_keener":
+        block = _comparison_block(cfb_conn, 2019, "LSU", "Clemson", "cfb", "keener")
+        return block, "cfb", cfb_conn
     if name == "compare_2019_osu_elo":
         block = _comparison_block(cfb_conn, 2019, "LSU", "Ohio State", "cfb", "elo")
         return block, "cfb", cfb_conn
@@ -1572,3 +1575,219 @@ def test_name_glued_to_a_word_character_is_no_mention(
     assert [name for name, _ in _name_occurrences(f"{own}'s day ended.", known)] == [own]
     assert [name for name, _ in _name_occurrences(f"{own}' day ended.", known)] == [own]
     assert _check(cfb_conn, response, block, "cfb") == []
+
+
+# ---------------------------------------------------------------------------
+# G. round 5: the one false positive round 4 introduced. Round 4 dropped the
+# string-value branch from the attributed score check on the premise that
+# every score a Keener explanation quotes is also a `games[]` row. True of a
+# team case; false of a comparison, which carries no `games[]` and only the
+# `quality_wins` / `worst_loss` rows (4 + 1 of 13 breakdown entries for 2005
+# Texas), so most breakdown scores are stated *only* inside an explanation
+# string, and "Texas beat Colorado 42-17" was flagged as Texas's record
+# (742 of 742 such narrations at round 4, 0 before it). The engine quotes a
+# score team-first ("Swept them twice, 42-17 and 70-3", "Beat them, 38-10"),
+# so an in-order match of a string pair is a legitimate quote, while the
+# swapped score (12-45 for a 45-12 win) never matches and #26's Keener pins
+# in `test_persona_grounding.py` stay red on a swap.
+# ---------------------------------------------------------------------------
+
+KEENER_COMPARISONS = ["compare_keener", "compare_2013_keener", "compare_2019_keener"]
+_EXPLANATION_PAIR_RE = re.compile(r"(?<!\d)(\d+)\s*-\s*(\d+)(?!\s*-\s*\d)(?!\d)")
+
+
+def _breakdown_quotes(
+    fact_block: str,
+) -> list[tuple[str, str, str, tuple[int, int]]]:
+    """`(side team_name, opponent_name, explanation, (first, second))` for
+    every two-part hyphen pair each `rating_breakdown` entry's explanation
+    quotes, in the order written, on both sides of a comparison."""
+    data = json.loads(fact_block)
+    quotes: list[tuple[str, str, str, tuple[int, int]]] = []
+    for side in ("team_a", "team_b"):
+        team_name: str = data[side]["team_name"]
+        for entry in data[side]["rating_breakdown"]["entries"]:
+            explanation: str = entry["explanation"]
+            for match in _EXPLANATION_PAIR_RE.finditer(explanation):
+                pair = (int(match.group(1)), int(match.group(2)))
+                quotes.append((team_name, entry["opponent_name"], explanation, pair))
+    return quotes
+
+
+def _row_scores(fact_block: str) -> set[tuple[int, int]]:
+    """Every `(team_score, opponent_score)` a row of the block states, in
+    order: `quality_wins[]`, `worst_loss`, common-opponent meetings."""
+    scores: set[tuple[int, int]] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            if "opponent_name" in node and "team_score" in node and "opponent_score" in node:
+                scores.add((node["team_score"], node["opponent_score"]))
+            if "team_a_meetings" in node and "team_b_meetings" in node:
+                for meeting in (*node["team_a_meetings"], *node["team_b_meetings"]):
+                    scores.add((meeting["team_score"], meeting["opponent_score"]))
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(json.loads(fact_block))
+    return scores
+
+
+def _narrated(team_name: str, opponent_name: str, explanation: str, pair: tuple[int, int]) -> str:
+    """The natural narration of a breakdown quote: a win as "beat", a loss
+    (the engine's explanation opens with "Lost") as "lost to"."""
+    verb = "lost to" if explanation.startswith("Lost") else "beat"
+    return f"{team_name} {verb} {opponent_name} {pair[0]}-{pair[1]}."
+
+
+@pytest.mark.parametrize(
+    ("block", "explanation_only"),
+    [
+        pytest.param("compare_keener", 18, id="2005-texas-usc"),
+        pytest.param("compare_2013_keener", 22, id="2013-fsu-msu"),
+        pytest.param("compare_2019_keener", 20, id="2019-lsu-clemson"),
+    ],
+    indirect=["block"],
+)
+def test_fixture_keener_comparison_states_most_breakdown_scores_only_in_explanations(
+    block: tuple[str, Sport, sqlite3.Connection], explanation_only: int
+) -> None:
+    """The premise round 4 got wrong, pinned: a comparison block has no
+    `games[]` on either side, and most of the scores its breakdown
+    explanations quote are stated by no row of the block in either order
+    (distinct pairs: 18 on 2005 Texas vs USC, 22 on 2013 Florida State vs
+    Michigan State, 20 on 2019 LSU vs Clemson). Every quote is written
+    team-first: the pair a win quotes has its larger number first, a loss its
+    smaller."""
+    fact_block, _, _ = block
+    data = json.loads(fact_block)
+    assert "games" not in data["team_a"] and "games" not in data["team_b"]
+
+    rows = _row_scores(fact_block)
+    quotes = _breakdown_quotes(fact_block)
+    assert quotes
+    no_row = {pair for _, _, _, pair in quotes if pair not in rows and pair[::-1] not in rows}
+    assert len(no_row) == explanation_only
+    for _, _, explanation, (first, second) in quotes:
+        assert (first < second) == explanation.startswith("Lost"), explanation
+
+
+@pytest.mark.parametrize(
+    ("block", "response", "swapped", "expected_for_swapped"),
+    [
+        pytest.param(
+            "compare_keener",
+            "Texas beat Colorado 42-17.",
+            "Texas beat Colorado 17-42.",
+            ["17-42 is not Texas's record; Texas's record is 13-0"],
+            id="2005-colorado-first-game",
+        ),
+        pytest.param(
+            "compare_keener",
+            "Texas beat Colorado 70-3.",
+            "Texas beat Colorado 3-70.",
+            ["3-70 is not Texas's record; Texas's record is 13-0"],
+            id="2005-colorado-second-game",
+        ),
+        pytest.param(
+            "compare_2013_keener",
+            "Michigan State beat Purdue 14-0.",
+            "Michigan State beat Purdue 0-14.",
+            ["0-14 is not a stated record; Florida State's record is 14-0"],
+            id="2013-purdue",
+        ),
+    ],
+    indirect=["block"],
+)
+def test_in_order_quote_of_an_explanation_only_score_is_grounded(
+    block: tuple[str, Sport, sqlite3.Connection],
+    response: str,
+    swapped: str,
+    expected_for_swapped: list[str],
+) -> None:
+    """A score only an explanation quotes ("Swept them twice, 42-17 and
+    70-3" beside Colorado, who has no row; "Ran them off the field, 14-0"
+    beside Purdue), narrated in the order the engine wrote it, is grounded.
+    The same score swapped is not: the block never states it that way, so
+    it falls through to the record path and its message as measured -- the
+    record-shaped message beside an opponent with no row (the noted nit),
+    or #181's reversed-record message when the swap happens to be the other
+    compared team's record backwards (0-14 on the 2013 block)."""
+    fact_block, sport, conn = block
+    pair = _EXPLANATION_PAIR_RE.search(response)
+    assert pair is not None
+    claimed = (int(pair.group(1)), int(pair.group(2)))
+    rows = _row_scores(fact_block)
+    assert claimed not in rows and claimed[::-1] not in rows
+    quoted = f"{claimed[0]}-{claimed[1]}"
+    assert any(quoted in text for text in _string_values(json.loads(fact_block)))
+
+    assert _check(conn, response, fact_block, sport) == []
+    assert _check(conn, swapped, fact_block, sport) == expected_for_swapped
+
+
+@pytest.mark.parametrize("block", KEENER_COMPARISONS, indirect=True)
+def test_every_breakdown_quote_narrated_in_order_is_grounded_and_swapped_is_flagged(
+    block: tuple[str, Sport, sqlite3.Connection],
+) -> None:
+    """Mechanically, for every `rating_breakdown` entry on both sides of the
+    three Keener comparisons: the score its explanation quotes, narrated in
+    order beside that entry's opponent, is grounded; narrated swapped, it is
+    flagged -- with the record-shaped message when no row states the score
+    (the other compared team's record backwards takes #181's message
+    instead), and with #26's score message when a row does. The one swap
+    that is not flagged is the documented limit outside this rule: a swap
+    that is itself, in order, another row's score (the head-to-head game
+    recorded from both sides)."""
+    fact_block, sport, conn = block
+    data = json.loads(fact_block)
+    rows = _row_scores(fact_block)
+    records = {
+        (data[side]["wins"], data[side]["losses"]): data[side]["team_name"]
+        for side in ("team_a", "team_b")
+    }
+    own_record = {data[side]["team_name"]: data[side] for side in ("team_a", "team_b")}
+
+    for team_name, opponent_name, explanation, pair in _breakdown_quotes(fact_block):
+        response = _narrated(team_name, opponent_name, explanation, pair)
+        assert _check(conn, response, fact_block, sport) == [], response
+
+        swapped = pair[::-1]
+        if swapped in rows:
+            continue
+        response = _narrated(team_name, opponent_name, explanation, swapped)
+        flagged = _check(conn, response, fact_block, sport)
+        if pair in rows:
+            assert flagged, response
+        elif pair in records:
+            assert flagged == [
+                f"{swapped[0]}-{swapped[1]} is not a stated record; "
+                f"{records[pair]}'s record is {pair[0]}-{pair[1]}"
+            ], response
+        else:
+            side = own_record[team_name]
+            assert flagged == [
+                f"{swapped[0]}-{swapped[1]} is not {team_name}'s record; "
+                f"{team_name}'s record is {side['wins']}-{side['losses']}"
+            ], response
+
+
+def test_wrong_record_equal_to_an_explanation_quoted_score_is_the_documented_limit(
+    cfb_conn: sqlite3.Connection,
+) -> None:
+    """The in-order string quote extends the limit
+    `test_wrong_record_equal_to_a_game_score_is_the_documented_limit` pins:
+    on the 2013 Keener comparison, Michigan State's 14-0 over Purdue is
+    stated only by an explanation, so "Michigan State went 14-0" passes
+    there as it already does on the team case, where the game is a row.
+    The three-part form is still caught."""
+    block = _comparison_block(cfb_conn, 2013, "Florida State", "Michigan State", "cfb", "keener")
+    assert (14, 0) not in _row_scores(block)
+
+    assert _check(cfb_conn, "Michigan State went 14-0 this year.", block, "cfb") == []
+    assert _check(cfb_conn, "Michigan State went 14-0-0.", block, "cfb") == [
+        "14-0-0 is not Michigan State's record; Michigan State's record is 13-1-0"
+    ]

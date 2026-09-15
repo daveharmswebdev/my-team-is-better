@@ -212,14 +212,21 @@ in the same sentence owns it.
   subject's record with the same number of parts; grounded (bare only) if
   it is another named subject's record; grounded (two-part only) if it is a
   game score -- one of the nearest name's tuples, bare and one of another
-  named team's, or in order a game score from any row; otherwise flagged.
-  A hyphen pair inside a string value grounds nothing here (round 4): the
-  first version of this rule also accepted one in either order, which let a
-  swapped score beside the opponent's name ("Texas beat Oklahoma 12-45")
-  pass on every Keener block, whose `explanation` strings quote every game
-  score -- #26's own case, regressed. Every score an explanation quotes is
-  also a `games[]` row, so the in-order branch covers a legitimate quote;
-  the either-order string branch only ever rescued a swap. The message, in
+  named team's, in order a game score from any row, or in the order written
+  a hyphen pair inside some string value; otherwise flagged. The string
+  pair counts in its written order only (rounds 4 and 5): the first version
+  of this rule accepted one in either order, which let a swapped score
+  beside the opponent's name ("Texas beat Oklahoma 12-45") pass on every
+  Keener block, whose `explanation` strings quote every game score -- #26's
+  own case, regressed. Round 4 dropped the string branch outright on the
+  premise that every score an explanation quotes is also a `games[]` row.
+  That holds for a team case and not for a comparison, which carries no
+  `games[]` on either side and only its `quality_wins[]` / `worst_loss`
+  rows, so most breakdown scores there are stated only by an explanation
+  and every correct "Texas beat Colorado 42-17" was flagged as Texas's
+  record. The engine quotes a score team-first ("Swept them twice, 42-17
+  and 70-3"), so the in-order match grounds the legitimate quote and never
+  the swap. The message, in
   this order: a subject record backwards keeps #181's wording ("0-13 is not
   a stated record; Texas's record is 13-0"); a two-part claim whose nearest
   name is a non-subject opponent with game data is that opponent's score,
@@ -500,6 +507,10 @@ class _ClaimFacts:
     object_records: frozenset[tuple[int, int]]
     # Two-part hyphen pairs inside any string value, stored `(low, high)`.
     string_value_pairs: frozenset[tuple[int, int]]
+    # The same pairs in the order written (#166, round 5): the engine quotes
+    # a score team-first, so this is what a legitimate quote of a score that
+    # only an explanation states has to match.
+    ordered_string_pairs: frozenset[tuple[int, int]]
     # A subject record, `(wins, losses)` or `(wins, losses, ties)`, to the
     # `team_name` of every subject whose record it is (`None` for a subject
     # with no string `team_name`), for naming whose record a reverse is.
@@ -779,7 +790,10 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
 
     object_records: set[tuple[int, int]] = set()
     string_value_pairs: set[tuple[int, int]] = set()
-    _collect_records_and_string_pairs(data, object_records, string_value_pairs)
+    ordered_string_pairs: set[tuple[int, int]] = set()
+    _collect_records_and_string_pairs(
+        data, object_records, string_value_pairs, ordered_string_pairs
+    )
     return _ClaimFacts(
         valid_tuples=valid_tuples,
         game_scores=game_scores,
@@ -787,29 +801,38 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
         subject_w_l_t_records=frozenset(subject_w_l_t_records),
         object_records=frozenset(object_records),
         string_value_pairs=frozenset(string_value_pairs),
+        ordered_string_pairs=frozenset(ordered_string_pairs),
         record_owners={record: tuple(owners) for record, owners in record_owners.items()},
         subjects=subjects,
     )
 
 
 def _collect_records_and_string_pairs(
-    node: Any, object_records: set[tuple[int, int]], string_value_pairs: set[tuple[int, int]]
+    node: Any,
+    object_records: set[tuple[int, int]],
+    string_value_pairs: set[tuple[int, int]],
+    ordered_string_pairs: set[tuple[int, int]],
 ) -> None:
     if isinstance(node, dict):
         wins, losses = node.get("wins"), node.get("losses")
         if isinstance(wins, int) and isinstance(losses, int):
             object_records.add((wins, losses))
         for value in node.values():
-            _collect_records_and_string_pairs(value, object_records, string_value_pairs)
+            _collect_records_and_string_pairs(
+                value, object_records, string_value_pairs, ordered_string_pairs
+            )
     elif isinstance(node, list):
         for item in node:
-            _collect_records_and_string_pairs(item, object_records, string_value_pairs)
+            _collect_records_and_string_pairs(
+                item, object_records, string_value_pairs, ordered_string_pairs
+            )
     elif isinstance(node, str):
         for match in _SCORE_OR_RECORD_RE.finditer(node):
             first, second, third = match.groups()
             if third is None:
                 low, high = sorted((int(first), int(second)))
                 string_value_pairs.add((low, high))
+                ordered_string_pairs.add((int(first), int(second)))
 
 
 def _walk_fact_block(node: Any, valid: _ScoreTuplesByName) -> None:
@@ -1071,14 +1094,22 @@ def _is_stated_game_score(
 ) -> bool:
     """A two-part claim attributed to a subject may still be a game score:
     one of the nearest name's tuples; bare, one of another named team's; in
-    order, any row's game score. Not, any more, a hyphen pair inside some
-    string value in either order (round 4): every score a Keener
-    `explanation` quotes is also a `games[]` row of the block, so the
-    in-order branch already covers a legitimate quote, and the either-order
-    string branch only ever rescued a swapped score beside the opponent's
-    name ("Texas beat Oklahoma 12-45"), #26's own case, on every Keener
-    block. The string-value exemptions of `_check_reversed_record` and
-    `_check_unattributed_pair` (#181) are unchanged.
+    order, any row's game score; or, in the order written, a hyphen pair
+    inside some string value. Never a string pair in either order (round
+    4): that branch rescued a swapped score beside the opponent's name
+    ("Texas beat Oklahoma 12-45"), #26's own case, on every Keener block,
+    whose `explanation` strings quote every game score. Round 4 dropped the
+    string branch outright on the premise that every score an explanation
+    quotes is also a `games[]` row; that is true of a team case and false
+    of a comparison, which has no `games[]` and only its `quality_wins[]` /
+    `worst_loss` rows, so on a comparison an in-order string quote is the
+    only statement of most breakdown scores and dropping it flagged every
+    correct "Texas beat Colorado 42-17" as a record (round 5). In order is
+    enough: the engine quotes a score team-first ("Swept them twice, 42-17
+    and 70-3", "Beat them, 38-10"), so a legitimate quote matches and a
+    swapped score never does. The string-value exemptions of
+    `_check_reversed_record` and `_check_unattributed_pair` (#181), still
+    either-order, are unchanged.
     """
     nearest = attribution.nearest
     if nearest is not None and claimed in facts.valid_tuples.get(nearest, set()):
@@ -1089,7 +1120,7 @@ def _is_stated_game_score(
         if other != nearest
     ):
         return True
-    return claimed in facts.game_scores
+    return claimed in facts.game_scores or claimed in facts.ordered_string_pairs
 
 
 def _check_w_l_t_record(claimed: tuple[int, int, int], facts: _ClaimFacts) -> str | None:
