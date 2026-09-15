@@ -349,3 +349,239 @@ def test_player_leader_row_stats_are_a_full_player_stats(db: PlayerDb) -> None:
     db.season(p, 2000, **values)
     row = get_player_leaders(conn_of(db), sport="nfl").rows[0]
     assert row.stats == PlayerStats(**values)
+
+
+# --- the rushing category (#312) ----------------------------------------------
+
+RUSHING_SORTS = ("rushing_yards", "rushing_tds", "carries")
+
+
+def test_rushing_qualify_rule_one_carry_qualifies_attempts_or_a_start_without_carries_do_not(
+    db: PlayerDb,
+) -> None:
+    home, away = db.team("Home"), db.team("Away")
+    one_carry = db.player("One Carry", position="WR")
+    db.season(one_carry, 2000, **full_stats(attempts=0, carries=0))
+    db.season(one_carry, 2001, **full_stats(attempts=0, carries=1))
+    scrambler = db.player("Scrambler", position="QB")
+    db.season(scrambler, 2000, **full_stats(attempts=30, carries=4))
+    passer = db.player("Pocket Passer", position="QB")
+    db.season(passer, 2000, **full_stats(attempts=30, carries=0))
+    starter = db.player("Starter", position="QB")
+    db.start(db.game(2000, home, away, 10, 3), home, starter)
+    db.season(starter, 2000, **full_stats(attempts=0, carries=0))
+    starts_only = db.player("Starts Only", position="QB")
+    db.start(db.game(2000, home, away, 10, 3, week=2), home, starts_only)
+    no_position = db.player("No Position", position=None)
+    db.season(no_position, 2000, **full_stats(attempts=0, carries=2))
+    conn = conn_of(db)
+
+    rushing = get_player_leaders(conn, sport="nfl", category="rushing")
+    passing = get_player_leaders(conn, sport="nfl")
+
+    assert sorted(_names(rushing.rows)) == ["No Position", "One Carry", "Scrambler"]
+    assert rushing.total == 3
+    assert sorted(_names(passing.rows)) == ["Pocket Passer", "Scrambler", "Starter", "Starts Only"]
+    assert passing.total == 4
+
+
+def test_rushing_qualify_rule_is_per_season_type(db: PlayerDb) -> None:
+    p = db.player("Regular Carries", position="RB")
+    db.season(p, 2000, **full_stats(attempts=0, carries=10))
+    db.season(p, 2000, season_type="postseason", **full_stats(attempts=0, carries=0))
+    q = db.player("Postseason Carries", position="RB")
+    db.season(q, 2001, **full_stats(attempts=0, carries=0))
+    db.season(q, 2001, season_type="postseason", **full_stats(attempts=0, carries=3))
+    conn = conn_of(db)
+
+    regular = get_player_leaders(conn, sport="nfl", category="rushing")
+    post = get_player_leaders(conn, sport="nfl", category="rushing", season_type="postseason")
+
+    assert (_names(regular.rows), regular.total) == (["Regular Carries"], 1)
+    assert (_names(post.rows), post.total, post.season_type) == (
+        ["Postseason Carries"],
+        1,
+        "postseason",
+    )
+
+
+@pytest.mark.parametrize("sort", RUSHING_SORTS)
+def test_each_rushing_sort_orders_descending_with_competition_ranks_and_the_tiebreak(
+    db: PlayerDb, sort: str
+) -> None:
+    # The sorted column is 30 / 20 / 20 / 20 / 10; the other two rushing
+    # columns run the opposite way, so only the named column gives this order.
+    values = [("Dan", 10), ("Same Name", 20), ("Bob", 20), ("Ann", 30), ("Same Name", 20)]
+    ids = []
+    for name, value in values:
+        pid = db.player(name, position="RB")
+        ids.append(pid)
+        stats = {s: 100 - value for s in RUSHING_SORTS}
+        stats[sort] = value
+        db.season(pid, 2000, **full_stats(attempts=0, **stats))
+    same_first, same_second = ids[1], ids[4]
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="rushing", sort=sort)  # type: ignore[arg-type]  # parametrized over the Literal's values
+
+    assert [(r.rank, r.display_name, r.player_id) for r in board.rows] == [
+        (1, "Ann", ids[3]),
+        (2, "Bob", ids[2]),
+        (2, "Same Name", same_first),
+        (2, "Same Name", same_second),
+        (5, "Dan", ids[0]),
+    ]
+    assert (board.category, board.sort) == ("rushing", sort)
+
+
+def test_sort_none_resolves_to_the_categorys_first_sort_and_is_echoed(db: PlayerDb) -> None:
+    # Most yards and fewest carries/passing yards, so each default is visible.
+    big_yards = db.player("Big Yards", position="QB")
+    db.season(
+        big_yards, 2000, **full_stats(attempts=5, passing_yards=10, carries=5, rushing_yards=900)
+    )
+    many_carries = db.player("Many Carries", position="QB")
+    db.season(
+        many_carries,
+        2000,
+        **full_stats(attempts=5, passing_yards=500, carries=300, rushing_yards=100),
+    )
+    conn = conn_of(db)
+
+    rushing = get_player_leaders(conn, sport="nfl", category="rushing")
+    rushing_explicit_none = get_player_leaders(conn, sport="nfl", category="rushing", sort=None)
+    passing = get_player_leaders(conn, sport="nfl")
+    passing_explicit_none = get_player_leaders(conn, sport="nfl", category="passing", sort=None)
+
+    for board in (rushing, rushing_explicit_none):
+        assert (board.category, board.sort) == ("rushing", "rushing_yards")
+        assert _names(board.rows) == ["Big Yards", "Many Carries"]
+    for board in (passing, passing_explicit_none):
+        assert (board.category, board.sort) == ("passing", "passing_yards")
+        assert _names(board.rows) == ["Many Carries", "Big Yards"]
+
+
+@pytest.mark.parametrize(
+    ("category", "sort"),
+    [
+        ("rushing", "wins"),
+        ("rushing", "passing_yards"),
+        ("rushing", "passing_tds"),
+        ("passing", "carries"),
+        ("passing", "rushing_yards"),
+        ("receiving", None),
+        ("receiving", "passing_yards"),
+        ("rushing", "yards_per_carry"),
+    ],
+)
+def test_a_sort_outside_the_category_or_an_unknown_category_raises(
+    db: PlayerDb, category: str, sort: str | None
+) -> None:
+    p = db.player("Anyone")
+    db.season(p, 2000, **full_stats(attempts=5, carries=5))
+    with pytest.raises(ValueError):
+        get_player_leaders(
+            conn_of(db),
+            sport="nfl",
+            category=category,  # type: ignore[arg-type]  # deliberately outside the Literal
+            sort=sort,  # type: ignore[arg-type]  # deliberately outside the Literal
+        )
+
+
+def test_a_rusher_with_zero_or_negative_yards_still_qualifies_and_ranks(db: PlayerDb) -> None:
+    for name, yards in [("Loss", -7), ("Gain", 12), ("Nothing", 0)]:
+        db.season(
+            db.player(name, position="RB"),
+            2000,
+            **full_stats(attempts=0, carries=3, rushing_yards=yards),
+        )
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="rushing")
+
+    assert [(r.rank, r.display_name, r.stats.rushing_yards) for r in board.rows] == [
+        (1, "Gain", 12),
+        (2, "Nothing", 0),
+        (3, "Loss", -7),
+    ]
+    assert board.total == 3
+
+
+def test_rushing_total_and_paging_count_the_rushing_population(db: PlayerDb) -> None:
+    for name, yards in [("Dan", 200), ("Eve", 100), ("Bob", 400), ("Ann", 500), ("Cat", 300)]:
+        db.season(
+            db.player(name, position="RB"),
+            2000,
+            **full_stats(attempts=0, carries=10, rushing_yards=yards),
+        )
+    for name in ("Passer One", "Passer Two"):
+        db.season(db.player(name), 2000, **full_stats(attempts=20, carries=0, rushing_yards=0))
+    conn = conn_of(db)
+
+    page = get_player_leaders(
+        conn, sport="nfl", category="rushing", sort="rushing_yards", limit=2, offset=1
+    )
+    last = get_player_leaders(conn, sport="nfl", category="rushing", limit=2, offset=4)
+    past_end = get_player_leaders(conn, sport="nfl", category="rushing", limit=2, offset=50)
+
+    assert (page.sport, page.category, page.season_type, page.sort, page.limit, page.offset) == (
+        "nfl",
+        "rushing",
+        "regular",
+        "rushing_yards",
+        2,
+        1,
+    )
+    assert [(r.rank, r.display_name) for r in page.rows] == [(2, "Bob"), (3, "Cat")]
+    assert [(r.rank, r.display_name) for r in last.rows] == [(5, "Eve")]
+    assert page.total == last.total == 5
+    assert past_end.rows == [] and past_end.total == 5
+    assert past_end.category == "rushing"
+    assert get_player_leaders(conn, sport="nfl").total == 2
+
+
+def test_every_rushing_leaders_row_equals_that_players_career_totals(db: PlayerDb) -> None:
+    home, away = db.team("Home"), db.team("Away")
+    back = db.player("Back", position="RB")
+    qb = db.player("Running QB", position="QB")
+    fb = db.player("Fullback", position="FB")
+    partial = db.player("Partial", position="RB")
+    db.season(back, 2000, games=16, **full_stats(attempts=0, carries=250, rushing_yards=1100))
+    db.season(back, 2001, games=14, **full_stats(attempts=0, carries=200, rushing_yards=900))
+    db.season(back, 2001, season_type="postseason", games=2, **full_stats(attempts=0, carries=40))
+    db.season(qb, 2001, games=12, **full_stats(attempts=300, carries=60, rushing_yards=400))
+    db.season(qb, 2002, games=10, **full_stats(attempts=250, carries=0, rushing_yards=0))
+    for week, (hp, ap) in enumerate([(20, 10), (10, 10), (3, 9)], 1):
+        db.start(db.game(2001, home, away, hp, ap, week=week), home, qb)
+    db.start(db.game(2001, home, away, 7, 0, season_type="postseason", week=19), away, qb)
+    db.season(qb, 2001, season_type="postseason", games=1, **full_stats(attempts=20, carries=5))
+    db.season(fb, 2002, games=16, **full_stats(attempts=0, carries=12, rushing_yards=-3))
+    db.season(partial, 2000, games=None, **full_stats(attempts=0, carries=8, rushing_tds=None))
+    db.season(partial, 2001, games=5, **full_stats(attempts=0, carries=9, rushing_tds=2))
+    conn = conn_of(db)
+
+    for season_type in ("regular", "postseason"):
+        for sort in (None, *RUSHING_SORTS):
+            board = get_player_leaders(
+                conn,
+                sport="nfl",
+                category="rushing",
+                season_type=season_type,  # type: ignore[arg-type]  # loop over the Literal's values
+                sort=sort,  # type: ignore[arg-type]  # loop over the Literal's values
+            )
+            assert board.rows
+            for row in board.rows:
+                career = get_player_career(conn, sport="nfl", player_id=row.player_id)
+                totals = career.regular_season if season_type == "regular" else career.postseason
+                assert totals is not None
+                assert (row.display_name, row.position) == (career.display_name, career.position)
+                assert row.games == totals.games
+                assert row.record == totals.record
+                assert row.stats == totals.stats
+                lines = [s for s in career.seasons if s.season_type == season_type]
+                assert (row.first_season, row.last_season) == (lines[0].season, lines[-1].season)
+    regular = get_player_leaders(conn, sport="nfl", category="rushing")
+    assert sorted(_names(regular.rows)) == ["Back", "Fullback", "Partial", "Running QB"]
+    by_name = {r.display_name: r for r in regular.rows}
+    assert by_name["Running QB"].record == StarterRecord(1, 1, 1)
+    assert by_name["Partial"].stats.rushing_tds is None and by_name["Partial"].games is None

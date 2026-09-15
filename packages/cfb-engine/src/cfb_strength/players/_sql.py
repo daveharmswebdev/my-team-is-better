@@ -10,9 +10,24 @@ as bound parameters (`:sport`, `:season_type`, `:player_id`).
 
 from __future__ import annotations
 
-from cfb_strength.contracts import PlayerStats
+from collections.abc import Mapping
+from types import MappingProxyType
+
+from cfb_strength.contracts import PlayerLeaderCategory, PlayerStats
 
 STAT_COLUMNS: tuple[str, ...] = tuple(PlayerStats.__dataclass_fields__)
+
+# The one statement of each leaderboard category's qualifying rule, as a
+# condition on a season line of `lines`, per season type with no minimum
+# (`PlayerLeaderCategory`). A NULL stat never qualifies a line.
+QUALIFYING: Mapping[PlayerLeaderCategory, str] = MappingProxyType(
+    {
+        # A pass attempt, or a QB start (#296).
+        "passing": "attempts > 0 OR start_rows > 0",
+        # A carry, whatever the position (#312).
+        "rushing": "carries > 0",
+    }
+)
 
 # A start counts toward W-L-T only in a completed game with both scores.
 _COUNTED = "g.completed = 1 AND g.home_points IS NOT NULL AND g.away_points IS NOT NULL"
@@ -80,9 +95,10 @@ def lines_cte(*, by_player: bool, by_season_type: bool) -> str:
     """
 
 
-def totals_select() -> str:
+def totals_select(category: PlayerLeaderCategory = "passing") -> str:
     """The per-(player, season_type) aggregate over `lines`. `qualifies` is
-    the leaderboard rule: a season row with a pass attempt, or a QB start."""
+    `category`'s leaderboard rule (`QUALIFYING`) holding on any line; the
+    totals themselves are the same whatever the category."""
     stats = ", ".join(f"{null_aware_sum(c)} AS {c}" for c in STAT_COLUMNS)
     return f"""
     SELECT player_id, season_type,
@@ -92,7 +108,7 @@ def totals_select() -> str:
            {null_aware_sum("games")} AS games,
            SUM(wins) AS wins, SUM(losses) AS losses, SUM(ties) AS ties,
            {stats},
-           MAX(CASE WHEN attempts > 0 OR start_rows > 0 THEN 1 ELSE 0 END) AS qualifies
+           MAX(CASE WHEN {QUALIFYING[category]} THEN 1 ELSE 0 END) AS qualifies
     FROM lines
     GROUP BY player_id, season_type
     """
