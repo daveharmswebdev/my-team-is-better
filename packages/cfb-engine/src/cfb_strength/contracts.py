@@ -298,6 +298,12 @@ class PlayerSeasonStatRow:
 #   * A leaders row and the same player's career totals for that season type
 #     agree exactly (games, record, every stat), and a career's totals equal
 #     the sum of its season lines.
+#   * Round-1 readings, accepted (#296): a season line that has a QB start
+#     but no season row carries None stats and games, so every total that
+#     covers it is None too (a gap stays visible rather than shrinking a
+#     career). Any QB `game_starters` row counts as a start for a line's
+#     existence and for qualifying; only completed games with both scores
+#     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
 # ---------------------------------------------------------------------------
 
 PlayerLeaderSort = Literal["passing_yards", "passing_tds", "wins"]

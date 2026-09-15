@@ -33,6 +33,10 @@ the doctor, and waive only these findings:
   (their tests compute them); apps/api's verdict fixture stores keener and elo, but not
   elo_career (#98). The finding must name exactly the fixture's own seasons, and
   nothing else;
+- `season_missing_player_stats`, for seasons the fixture carries but deliberately stores
+  no player stats for (#296: the committed engine NFL fixture stores none; its player
+  tests ingest their own). The finding must name exactly the fixture's own seasons.
+  That fixture then verifies nothing about player stats;
 - `league_has_no_games`, for a league the fixture deliberately doesn't carry. That
   fixture then verifies nothing about that league;
 - `raw_cache_*`, only when you pointed `--raw-dir` at something other than the
