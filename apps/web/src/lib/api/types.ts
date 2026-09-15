@@ -218,6 +218,14 @@ export interface CreditsMethodologyOut {
   citation: string
   url: string
   summary: string
+  /**
+   * The registered rating methods this citation covers, in the engine's
+   * order (issue #144). Required and never empty: the engine checks every
+   * registered method appears in exactly one credit and that `methods[0]`
+   * is unique across credits, so the About page keys each article's id on
+   * it (`/about#elo`, `/about#keener`).
+   */
+  methods: Method[]
 }
 
 export interface CreditsDataSourceOut {

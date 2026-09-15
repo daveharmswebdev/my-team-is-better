@@ -633,12 +633,14 @@ describe('fetchCredits', () => {
             'Keener, J. P. (1993). The Perron-Frobenius theorem and the ranking of football teams.',
           url: 'https://example.com/keener',
           summary: 'Eigenvector-based strength-of-schedule ranking.',
+          methods: ['keener'],
         },
         {
           name: 'Elo',
           citation: 'Arpad E. Elo, The Rating of Chessplayers (1978).',
           url: 'https://example.com/elo',
           summary: 'Teams trade rating points after every game.',
+          methods: ['elo', 'elo_career'],
         },
       ],
       data_sources: [

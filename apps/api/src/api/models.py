@@ -576,6 +576,12 @@ class MethodologyCreditOut(BaseModel):
     citation: str
     url: str
     summary: str
+    # Issue #144: the registered rating methods this citation covers, in the
+    # engine's order, so `methods[0]` is the credit's stable id downstream.
+    # Typed with the contract's `Method` alias (not `str`) so /openapi.json
+    # publishes the enum and apps/web gets `Method[]`, and required with no
+    # default so a credit can never be published covering nothing.
+    methods: list[Method]
 
     @classmethod
     def from_dataclass(cls, methodology: MethodologyCredit) -> MethodologyCreditOut:
@@ -584,6 +590,9 @@ class MethodologyCreditOut(BaseModel):
             citation=methodology.citation,
             url=methodology.url,
             summary=methodology.summary,
+            # The engine holds a tuple (frozen dataclass); JSON has no tuple,
+            # so it goes out as an array in the same order.
+            methods=list(methodology.methods),
         )
 
 
@@ -611,6 +620,15 @@ class CreditsOut(BaseModel):
     whichever method answered the current question. Order is `get_credits()`'s
     order -- Keener's method, then Elo -- and is preserved here rather than
     sorted, so the About page renders the default method first.
+
+    Each methodology carries `methods` (issue #144): the registered rating
+    methods that citation covers, copied from the engine's
+    `MethodologyCredit.methods`. The About page keys its article anchors on
+    `methods[0]` (`keener`, `elo`) instead of on a display name that could
+    be reworded, and the engine's tests/test_evidence_credits.py guarantees
+    every registered method is covered by exactly one credit, so the web
+    side can map any `method` value to exactly one article without a
+    lookup table of its own.
     """
 
     methodologies: list[MethodologyCreditOut]

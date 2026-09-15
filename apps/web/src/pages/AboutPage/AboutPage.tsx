@@ -7,7 +7,6 @@ import {
 } from '../../lib/api/client'
 import type { CreditsOut } from '../../lib/api/types'
 import styles from './AboutPage.module.css'
-import { methodologyId } from './methodologyId'
 
 type CreditsState =
   | { status: 'loading' }
@@ -129,15 +128,18 @@ export function AboutPage() {
             {/*
               Rendered in the order the API sends them -- Keener's method
               first as the validated default, Elo second as the second
-              opinion -- and never sorted. Keyed on `name`, not `url`: two
-              methodologies could plausibly share a DOI host. The id is the
-              link target for `/about#elo` and the like (issue #227).
+              opinion -- and never sorted. Both the React key and the
+              element id are `methods[0]` (issue #144): the engine checks it
+              is unique across credits, and unlike the display name it is a
+              stable identifier, so `/about#elo` (the Elo ledger's
+              provenance link, issue #227) and `/about#keener` survive a
+              rename.
             */}
             {state.credits.methodologies.map((methodology) => (
               <article
-                id={methodologyId(methodology.name)}
+                id={methodology.methods[0]}
                 className={styles.method}
-                key={methodology.name}
+                key={methodology.methods[0]}
               >
                 <h3 className={styles.methodName}>{methodology.name}</h3>
                 <p className={styles.body}>{methodology.summary}</p>

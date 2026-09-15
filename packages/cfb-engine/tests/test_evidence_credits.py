@@ -7,8 +7,18 @@ mcp_server and apps/api import from.
 
 from __future__ import annotations
 
-from cfb_strength.contracts import Credits, DataSourceCredit, MethodologyCredit
+import typing
+from collections import Counter
+
+from cfb_strength.contracts import Credits, DataSourceCredit, Method, MethodologyCredit
 from cfb_strength.evidence.credits import get_credits
+from cfb_strength.ratings import compute_ratings
+
+# The engine's closed method vocabulary and the registry it is checked against
+# (tests/test_contract_vocabularies.py already pins the two equal). The
+# import-linter contracts govern src/, not tests/, so importing
+# compute_ratings here is fine; evidence/credits.py itself must not.
+METHODS: tuple[str, ...] = typing.get_args(Method)
 
 
 def test_get_credits_returns_credits_instance() -> None:
@@ -116,3 +126,84 @@ def test_nflverse_data_source_credit_matches_exact_text() -> None:
 def test_get_credits_is_stable_across_calls() -> None:
     """Static data -- two calls should be equal (frozen dataclasses)."""
     assert get_credits() == get_credits()
+
+
+# ---------------------------------------------------------------------------
+# issue #144: every registered rating method is covered by exactly one credit
+# ---------------------------------------------------------------------------
+#
+# `MethodologyCredit.methods` exists so the credits can be checked against the
+# engine's method registry instead of trusting a hand-kept list. The invariant
+# is on the union, because the mapping is not 1:1 by name (`elo` and
+# `elo_career` share one Elo citation). Every comparison below is against a
+# registry the engine actually uses at runtime -- `get_args(Method)` and
+# `compute_ratings.METHODS` -- never against a second hand-written copy of the
+# method list, which would only prove the test agrees with itself.
+
+
+def _covered_methods() -> list[str]:
+    return [method for credit in get_credits().methodologies for method in credit.methods]
+
+
+def test_no_methodology_credit_has_an_empty_methods_tuple() -> None:
+    """A credit covering nothing would be unreachable from every method and
+    would have no `methods[0]` to serve as its downstream id."""
+    for credit in get_credits().methodologies:
+        assert credit.methods, f"{credit.name!r} covers no rating method"
+
+
+def test_methodology_credits_cover_exactly_the_method_alias() -> None:
+    """A method added to `contracts.Method` without a credit turns this red;
+    so does a credit naming a method the alias lacks."""
+    assert set(_covered_methods()) == set(METHODS), (
+        "the methodology credits and contracts.Method disagree: every rating "
+        "method needs a citation, and every citation must cover a real method"
+    )
+
+
+def test_methodology_credits_cover_exactly_the_registered_rating_methods() -> None:
+    """The same invariant against the runtime registry, so a method registered
+    in `compute_ratings.METHODS` (and therefore rateable from the CLI) can't be
+    served without attribution."""
+    assert set(_covered_methods()) == set(compute_ratings.METHODS), (
+        "the methodology credits and compute_ratings.METHODS disagree: every "
+        "registered rating method needs a citation"
+    )
+
+
+def test_every_method_named_by_a_credit_is_registered() -> None:
+    """Per-credit direction of the invariant: a credit that names an
+    unregistered method (a typo, or a method that was removed) fails on its
+    own name, not just as a set difference."""
+    for credit in get_credits().methodologies:
+        for method in credit.methods:
+            assert method in compute_ratings.METHODS, (
+                f"{credit.name!r} names {method!r}, which is not a registered rating method"
+            )
+
+
+def test_each_method_appears_in_exactly_one_credit() -> None:
+    counts = Counter(_covered_methods())
+    duplicated = sorted(method for method, n in counts.items() if n > 1)
+    assert not duplicated, f"methods covered by more than one credit: {duplicated}"
+    for method in METHODS:
+        assert counts[method] == 1, f"{method!r} is covered by {counts[method]} credits, not 1"
+
+
+def test_keener_credit_covers_keener_only() -> None:
+    assert _methodology_by_name("Keener's method").methods == ("keener",)
+
+
+def test_elo_credit_covers_elo_then_elo_career() -> None:
+    """Order is asserted: `methods[0]` is the credit's stable id downstream
+    (the About page's `/about#elo` anchor), so `elo` must come first and the
+    career variant, which shares the citation, second."""
+    assert _methodology_by_name("Elo").methods == ("elo", "elo_career")
+
+
+def test_credit_ids_are_unique_across_credits() -> None:
+    """`methods[0]` values are the downstream ids (`keener`, `elo`); two
+    credits sharing one would collide on the About page anchors."""
+    ids = [credit.methods[0] for credit in get_credits().methodologies]
+    assert len(set(ids)) == len(ids), f"duplicate credit ids: {ids}"
+    assert ids == ["keener", "elo"]
