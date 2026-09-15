@@ -21,3 +21,8 @@ run yet (#116), so run it yourself.
 - No `any` without a comment saying why it's unavoidable.
 - A local `npx playwright test` leaves `test-results/` and `playwright-report/` behind
   (#160): delete them before you finish.
+- The Playwright MCP browser tools (`mcp__playwright__*`) write their console logs and
+  page snapshots to `.playwright-mcp/` in the MCP server's own working directory, which
+  is the coordinator's checkout, not your worktree or scratch dir (#251). It is
+  git-ignored so it can't be committed by accident; you can't clean it from a worktree,
+  so don't report it as left behind.

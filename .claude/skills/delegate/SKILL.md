@@ -38,6 +38,16 @@ another in-flight branch touching it, sequence the work rather than racing it.
   count, "this makes it match") with a quick script over real fixture data. Paste the
   measured numbers into `contract`. A hand-checked example row proves nothing: one
   unchecked "3 decimals fixes it" cost #183 a full round.
+- **Check the e2e premise** for any brief whose scope touches `apps/web/src/**`: the
+  list of specs a change affects is a premise too, and written from memory it was wrong
+  twice (#234: `elo.spec` was left out of both #183's and #198's web briefs, and each
+  cost a round). Grep `apps/web/e2e/` for the changed components' selectors, roles,
+  test ids and visible copy, and paste the matching spec list, with the grep command,
+  into `contract`:
+  ```bash
+  grep -rlE "<role|testid|copy|selector>" apps/web/e2e/
+  ```
+  e2e is a blocking CI job (since #230), so a missed spec fails CI, not just the spoke.
 
 ## 4. Write the brief as JSON
 

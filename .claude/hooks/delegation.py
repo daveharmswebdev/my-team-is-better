@@ -203,12 +203,39 @@ def validate_brief(data: object, ownership: Ownership) -> list[str]:
     return errors
 
 
+def _is_read_only(agent: str, ownership: Ownership | None) -> bool:
+    entry = ownership.agents.get(agent) if ownership is not None else None
+    return entry is not None and entry.kind == "read-only"
+
+
+def _base_section(sha: str, *, read_only: bool) -> str:
+    if read_only:
+        return (
+            f"## BASE\nReview against `{sha}`; do not change HEAD. Your checkout is expected "
+            f"to be at or after this commit (a review covers the range after it). If "
+            f"`git merge-base --is-ancestor {sha} HEAD` fails, stop and return status failure "
+            "with failure_type blocked-by-missing-input. Report this commit as base_sha."
+        )
+    return (
+        f"## BASE\nStart from commit `{sha}`. Before changing anything, run "
+        f"`git rev-parse HEAD`. If it differs, run `git merge --ff-only {sha}`. If that "
+        "isn't a fast-forward, stop and return status failure with failure_type "
+        "blocked-by-missing-input. Report this commit as base_sha."
+    )
+
+
 def _bullets(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
-def render_brief(brief: dict[str, Any]) -> str:
-    """The prompt for the Agent tool. Assumes `validate_brief` returned no errors."""
+def render_brief(brief: dict[str, Any], ownership: Ownership | None = None) -> str:
+    """The prompt for the Agent tool. Assumes `validate_brief` returned no errors.
+
+    `ownership` decides the BASE wording: a read-only spoke (reviewer, validator)
+    reviews a range *after* `base_sha`, so its HEAD is always ahead of it and the
+    fast-forward instruction can't apply (#239). Without `ownership`, every agent
+    gets the implementation wording.
+    """
     who = brief["agent"]
     if brief.get("round"):
         who += f", round {brief['round']}"
@@ -223,12 +250,7 @@ def render_brief(brief: dict[str, Any]) -> str:
         "## SCOPE\nYou may change only:\n" + _bullets([f"`{s}`" for s in brief["scope"]]),
         "## NEGATIVE\n" + _bullets(brief["negative"]),
         "## RUBRIC\n" + _bullets(brief["rubric"]),
-        (
-            f"## BASE\nStart from commit `{sha}`. Before changing anything, run "
-            f"`git rev-parse HEAD`. If it differs, run `git merge --ff-only {sha}`. If that "
-            "isn't a fast-forward, stop and return status failure with failure_type "
-            "blocked-by-missing-input. Report this commit as base_sha."
-        ),
+        _base_section(sha, read_only=_is_read_only(brief["agent"], ownership)),
         (
             f"## SCRATCH\nYour own scratch directory is `{brief['scratch_dir']}`. Create it, "
             "and put every temporary file there (runners, sabotage scripts, dbs, logs) and "
@@ -341,7 +363,7 @@ def main(argv: list[str] | None = None) -> int:
         if brief_errors:
             print("\n".join(brief_errors), file=sys.stderr)
             return 1
-        print(render_brief(brief) if args.command == "render-brief" else "brief ok")
+        print(render_brief(brief, ownership) if args.command == "render-brief" else "brief ok")
         return 0
 
     text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
