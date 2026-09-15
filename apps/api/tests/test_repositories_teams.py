@@ -99,12 +99,16 @@ def test_deps_keeps_only_the_dependency_injection_callables() -> None:
 
 
 def test_persona_service_does_not_bind_deps() -> None:
-    """Belt to the contract's braces: the service module's namespace holds
-    the repository's query, and nothing defined in `api.deps`."""
+    """Belt to the contract's braces: nothing defined in `api.deps` is bound
+    in the service module's namespace. (Until issue #245 this also pinned
+    the service holding the repository's `list_all_team_names`; the route
+    now derives the grounding universe from its own catalog read and passes
+    it in, so the service binds no query at all -- see
+    `test_verdict_catalog_reads.py`.)"""
     import api.persona.service as service
 
     namespace = vars(service)
-    assert namespace["list_all_team_names"] is list_all_team_names
+    assert "list_all_team_names" not in namespace
     bound_from_deps = [
         name
         for name, value in namespace.items()
