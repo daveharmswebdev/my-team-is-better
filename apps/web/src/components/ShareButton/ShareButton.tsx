@@ -4,9 +4,17 @@ import styles from './ShareButton.module.css'
 export interface ShareButtonProps {
   /** The absolute share link to hand off (issue #184). */
   url: string
+  /**
+   * The button's visible text, which is also its accessible name. Defaults to
+   * the verdict wording every team-flow caller uses; the NFL player
+   * comparison passes its own (issue #310).
+   */
+  label?: string
 }
 
 const SHARE_TITLE = 'My Team Is Better'
+
+const DEFAULT_LABEL = 'Share this verdict'
 const COPIED_STATUS = 'Link copied'
 const MANUAL_COPY_STATUS =
   "Couldn't copy automatically -- the link is in the field below."
@@ -28,7 +36,7 @@ const MANUAL_COPY_STATUS =
  * the start of every attempt, so a repeat of the same message is a change a
  * screen reader announces again.
  */
-export function ShareButton({ url }: ShareButtonProps) {
+export function ShareButton({ url, label = DEFAULT_LABEL }: ShareButtonProps) {
   const fieldId = useId()
   const [status, setStatus] = useState('')
   const [showManualCopy, setShowManualCopy] = useState(false)
@@ -64,7 +72,7 @@ export function ShareButton({ url }: ShareButtonProps) {
         className={styles.shareButton}
         onClick={() => void handleClick()}
       >
-        Share this verdict
+        {label}
       </button>
       <p
         role="status"

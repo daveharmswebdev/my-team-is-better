@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import type { Locator } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 
 // Issue #301: the NFL player comparison, end to end against the real API on
 // the committed fixture db (NFL 1999 + 2023). Every number here was measured
@@ -7,10 +7,37 @@ import type { Locator } from '@playwright/test'
 // 2,179, McNair's 4 playoff games to Warner's 3, and their two games as
 // opposing starters, 1999 week 8 (Titans 24, Rams 21) and week 21 (Rams 23,
 // Titans 16).
+//
+// Since issue #310 every answer to a committed pair opens in a modal over the
+// form, the way #198 did for team verdicts, so a shared link opens on the
+// comparison instead of on the form. The form behind it is inert while it is
+// open, so changing a pick starts by closing the comparison.
 
 const WARNER = '2044124519'
 const MCNAIR = '2385180619'
 const MANNING = '2153701690'
+
+/** The share link this page writes, and the one the specs below open. */
+const WARNER_VS_MCNAIR_SEARCH = `a=${WARNER}&b=${MCNAIR}`
+
+// Browser-side snippets, type-checked against the DOM lib by
+// tsconfig.e2e.json (issue #226). Each is self-contained: Playwright ships a
+// callback's source to the page, so it cannot close over anything here.
+const readClipboard = () => navigator.clipboard.readText()
+const readWindowScrollY = () => window.scrollY
+const readModalScrollTop = () => {
+  const modal = document.querySelector('dialog[open]')
+  if (modal === null) throw new Error('no open dialog')
+  return modal.scrollTop
+}
+// Takes the clipboard branch: a desktop Chromium may otherwise offer a native
+// share sheet that a headless run cannot dismiss.
+const removeNativeShare = () => {
+  Object.defineProperty(Navigator.prototype, 'share', {
+    value: undefined,
+    configurable: true,
+  })
+}
 
 /** A totals row's two value cells, player A's first. */
 function valueCells(table: Locator, label: string): Locator {
@@ -21,6 +48,14 @@ function valueCells(table: Locator, label: string): Locator {
     })
     .getByRole('cell')
 }
+
+/** The comparison modal, by the two players it names. */
+function comparisonModal(page: Page, title: string): Locator {
+  return page.getByRole('dialog', { name: title })
+}
+
+const closeButton = (page: Page) =>
+  page.getByRole('button', { name: 'Close the comparison' })
 
 test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warner next to Steve McNair", async ({
   page,
@@ -34,6 +69,8 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
   const playerA = page.getByLabel('Player A', { exact: true })
   const playerB = page.getByLabel('Player B', { exact: true })
   await expect(playerA).toHaveValue('Kurt Warner')
+  // One player picked is a prompt, not an answer: nothing opens over the form.
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await playerB.pressSequentially('McNair')
   await page.getByRole('option', { name: /Steve McNair/ }).click()
@@ -44,7 +81,8 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
   )
   await expect(playerB).toHaveValue('Steve McNair')
 
-  const regular = page.getByRole('table', {
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  const regular = dialog.getByRole('table', {
     name: 'Kurt Warner and Steve McNair, regular season',
   })
   const yards = valueCells(regular, 'Passing yards')
@@ -52,14 +90,14 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
   await expect(yards.nth(0)).toContainText('(larger number)')
   await expect(yards.nth(1)).toHaveText('2,179')
 
-  const playoffs = page.getByRole('table', {
+  const playoffs = dialog.getByRole('table', {
     name: 'Kurt Warner and Steve McNair, playoffs',
   })
   const games = valueCells(playoffs, 'Games')
   await expect(games.nth(0)).toHaveText('3')
   await expect(games.nth(1)).toContainText('(larger number)')
 
-  const headToHead = page.getByRole('region', { name: 'Head to head' })
+  const headToHead = dialog.getByRole('region', { name: 'Head to head' })
   const regularGames = headToHead.getByRole('list', {
     name: 'Regular-season games',
   })
@@ -83,7 +121,10 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
     headToHead.getByText("Kurt Warner's record against Steve McNair: 1-0"),
   ).toBeVisible()
 
-  // A reload keeps both players.
+  // Where the numbers come from is credited with them, inside the modal.
+  await expect(dialog.getByRole('link', { name: /nflverse/ })).toBeVisible()
+
+  // A reload keeps both players, and reopens the comparison the URL names.
   await page.reload()
   await expect(playerA).toHaveValue('Kurt Warner')
   await expect(playerB).toHaveValue('Steve McNair')
@@ -91,12 +132,13 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
     '4,044',
   )
 
-  // Back returns to Warner alone.
+  // Back returns to Warner alone: no committed pair, so no modal.
   await page.goBack()
   await expect(page).toHaveURL(new RegExp(`/nfl/compare\\?a=${WARNER}$`))
   await expect(playerA).toHaveValue('Kurt Warner')
   await expect(playerB).toHaveValue('')
   await expect(regular).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 // Issue #304: changing a pick and pressing Compare again compares the new
@@ -117,10 +159,19 @@ test('changing Player B and pressing Compare again puts Kurt Warner next to Peyt
   await page.getByRole('option', { name: /Steve McNair/ }).click()
   await compare.click()
 
-  const warnerMcNair = page.getByRole('table', {
+  const warnerMcNair = page.getByRole('dialog').getByRole('table', {
     name: 'Kurt Warner and Steve McNair, regular season',
   })
   await expect(warnerMcNair).toBeVisible()
+
+  // The modal owns the screen while it is open and the form behind it is
+  // inert, so changing a pick starts by closing the comparison. Both fields
+  // keep the pair that was compared, and the address bar drops ?a&b.
+  await closeButton(page).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect.poll(() => new URL(page.url()).search).toBe('')
+  await expect(playerA).toHaveValue('Kurt Warner')
+  await expect(playerB).toHaveValue('Steve McNair')
 
   // Type over Player B: the pick is gone until one is picked from the list.
   await playerB.selectText()
@@ -131,18 +182,16 @@ test('changing Player B and pressing Compare again puts Kurt Warner next to Peyt
   ).toBeVisible()
   await page.getByRole('option', { name: /Peyton Manning/ }).click()
   await expect(playerB).toHaveValue('Peyton Manning')
-  // Nothing changes until Compare is pressed.
-  await expect(warnerMcNair).toBeVisible()
-  await expect(page).toHaveURL(
-    new RegExp(`/nfl/compare\\?a=${WARNER}&b=${MCNAIR}$`),
-  )
+  // Nothing is compared until Compare is pressed.
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await compare.click()
 
   await expect(page).toHaveURL(
     new RegExp(`/nfl/compare\\?a=${WARNER}&b=${MANNING}$`),
   )
-  const regular = page.getByRole('table', {
+  const dialog = comparisonModal(page, 'Kurt Warner and Peyton Manning')
+  const regular = dialog.getByRole('table', {
     name: 'Kurt Warner and Peyton Manning, regular season',
   })
   const yards = valueCells(regular, 'Passing yards')
@@ -151,13 +200,15 @@ test('changing Player B and pressing Compare again puts Kurt Warner next to Peyt
   await expect(yards.nth(1)).toContainText('(larger number)')
   await expect(warnerMcNair).toHaveCount(0)
   await expect(
-    page
+    dialog
       .getByRole('region', { name: 'Head to head' })
       .getByText(
         'Kurt Warner and Peyton Manning never started against each other in the regular season.',
       ),
   ).toBeVisible()
 
+  // Closing returns to the form, where the clear control still works.
+  await closeButton(page).click()
   await page.getByRole('button', { name: 'Clear Player B' }).click()
   await expect(playerB).toHaveValue('')
   await expect(playerB).toBeFocused()
@@ -178,6 +229,7 @@ test('the Primary nav reaches the compare page', async ({ page }) => {
   await expect(
     page.getByText('Pick two players to put their careers side by side.'),
   ).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
 test('an unknown player gets the narrator, not a status code', async ({
@@ -185,10 +237,133 @@ test('an unknown player gets the narrator, not a status code', async ({
 }) => {
   await page.goto(`/nfl/compare?a=${WARNER}&b=1`)
 
-  const alert = page.getByRole('alert')
+  // An answer to a committed pair, so it opens in the modal like any other.
+  const alert = page.getByRole('dialog').getByRole('alert')
   await expect(alert).toContainText('Never heard of him, pal.')
   await expect(alert).not.toContainText('404')
   await expect(
     alert.getByRole('link', { name: /leaders board/ }),
   ).toHaveAttribute('href', '/nfl/leaders')
+  // Nothing to share: there is no comparison.
+  await expect(page.getByRole('button', { name: /^Share/ })).toHaveCount(0)
+})
+
+// Issue #310, modelled on `e2e/share.spec.ts`: a shared comparison link opens
+// on the answer, offers to share itself, and closes back to the form.
+test('a share link opens the comparison in a modal with no click, and offers to share it', async ({
+  page,
+}) => {
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  await expect(
+    dialog.getByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    }),
+  ).toBeVisible()
+  await expect(
+    dialog.getByRole('button', { name: 'Share this comparison' }),
+  ).toBeVisible()
+  // Focus is in the modal, on its close button.
+  await expect(closeButton(page)).toBeFocused()
+
+  // The form behind it holds the pair the link named.
+  await expect(page.getByLabel('Player A', { exact: true })).toHaveValue(
+    'Kurt Warner',
+  )
+  await expect(page.getByLabel('Player B', { exact: true })).toHaveValue(
+    'Steve McNair',
+  )
+})
+
+test('the Share button copies the link the comparison was opened with', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.addInitScript(removeNativeShare)
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  await dialog.getByRole('button', { name: 'Share this comparison' }).click()
+
+  await expect(dialog.getByText('Link copied')).toBeVisible()
+  const origin = new URL(page.url()).origin
+  expect(await page.evaluate(readClipboard)).toBe(
+    `${origin}/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`,
+  )
+})
+
+test('closing the comparison returns to the filled-in form, drops the query, and a reload stays closed', async ({
+  page,
+}) => {
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  await expect(dialog).toBeVisible()
+
+  await page.keyboard.press('Escape')
+
+  await expect(dialog).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Compare', exact: true }),
+  ).toBeFocused()
+  await expect.poll(() => new URL(page.url()).search).toBe('')
+  // Both fields keep the pair, ready to compare again or to change.
+  await expect(page.getByLabel('Player A', { exact: true })).toHaveValue(
+    'Kurt Warner',
+  )
+  await expect(page.getByLabel('Player B', { exact: true })).toHaveValue(
+    'Steve McNair',
+  )
+
+  await page.reload()
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Compare NFL players' }),
+  ).toBeVisible()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
+test('on a phone, a share link opens its comparison full screen with the first line in view, no scrolling, and a working close button', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  await expect(dialog).toBeVisible()
+  // The comparison's first line -- the two players -- and the whole close
+  // button, with no scrolling.
+  await expect(
+    dialog
+      .getByRole('list', { name: 'Players compared' })
+      .getByRole('link', { name: 'Kurt Warner' }),
+  ).toBeInViewport({ ratio: 1 })
+  const close = closeButton(page)
+  await expect(close).toBeInViewport({ ratio: 1 })
+  expect(await page.evaluate(readWindowScrollY)).toBe(0)
+  expect(await page.evaluate(readModalScrollTop)).toBe(0)
+
+  // Full screen, and a 44x44 touch target.
+  expect(await dialog.boundingBox()).toEqual({
+    x: 0,
+    y: 0,
+    width: 390,
+    height: 844,
+  })
+  const closeBox = await close.boundingBox()
+  expect(closeBox?.width).toBeGreaterThanOrEqual(44)
+  expect(closeBox?.height).toBeGreaterThanOrEqual(44)
+
+  // A wheel over the modal scrolls the comparison, never the page behind it,
+  // and the sticky header keeps the close button in view.
+  await page.mouse.move(195, 600)
+  await page.mouse.wheel(0, 1500)
+  await expect(close).toBeInViewport({ ratio: 1 })
+  expect(await page.evaluate(readWindowScrollY)).toBe(0)
+
+  await close.click()
+
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByLabel('Player A', { exact: true })).toBeInViewport()
+  await expect.poll(() => new URL(page.url()).search).toBe('')
 })
