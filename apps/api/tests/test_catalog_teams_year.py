@@ -22,7 +22,8 @@ Two fixtures are used deliberately:
   them.
 
 The last two tests in this file pin issue #78's one real trap: the shared
-`api.deps.list_all_team_names` helper has a *second* caller, the persona
+`api.repositories.teams.list_all_team_names` helper (in `api.deps` until
+#209) has a *second* caller, the persona
 grounding check, which needs the full unscoped team-name universe. If
 year-scoping had been pushed down into that shared helper, the grounding
 check would stop recognizing legitimately-mentioned unrated opponents as
@@ -219,7 +220,7 @@ def test_grounding_team_universe_is_still_unscoped(
     Mentioning it must still be caught as ungrounded and trigger the retry.
 
     If `/api/teams`' new year scoping had been pushed down into the shared
-    `api.deps.list_all_team_names`, this name would no longer be a known
+    `list_all_team_names`, this name would no longer be a known
     team name at all, the mention would sail through as an arbitrary
     capitalized phrase, and there would be exactly one Claude call.
     """
@@ -274,7 +275,7 @@ def test_grounding_is_handed_the_whole_unscoped_team_universe(
 def test_list_all_team_names_signature_stays_year_free() -> None:
     """The shared helper keeps its pre-#78 behavior for its grounding
     caller: same call, same full-universe result."""
-    from api.deps import list_all_team_names
+    from api.repositories.teams import list_all_team_names
 
     conn: sqlite3.Connection = get_conn(FIXTURE_DB, read_only=True)
     try:

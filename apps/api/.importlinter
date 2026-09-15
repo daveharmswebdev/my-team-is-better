@@ -89,3 +89,52 @@ source_modules =
 forbidden_modules =
     cfb_strength.credit_math
 allow_indirect_imports = true
+
+; Issue #209: the layering INSIDE this app, which none of the three engine
+; contracts above looks at. What it protects: the persona layer (prompt,
+; grounding, cache, Claude client, and the `api.persona.service`
+; orchestration the routes call) must never reach up into the FastAPI wiring.
+; `api.deps` builds the narrator, the cache and the db connection and imports
+; `api.persona.*` to do it, so a persona module importing `api.deps` inverts
+; the layering and drags DI wiring into every persona import and test. That
+; is exactly how `api.persona.service` came to import `list_all_team_names`
+; from `api.deps` without anything noticing: the query had nothing to do with
+; DI, it just lived in the same file. The queries now live in
+; `api.repositories`, the bottom layer, which everything above may call and
+; which imports nothing of the app except leaves (`api.models` etc.).
+;
+; Read top-down: a higher layer may import any lower one, directly or
+; indirectly; a lower layer may never import a higher one. Modules joined by
+; `|` on one line are INDEPENDENT siblings in import-linter's layers
+; semantics: neither may import the other, on top of neither importing
+; anything above. `api.verdict` and `api.catalog` are the two route modules
+; `api.main` mounts, and they must stay independent -- a route module that
+; imports the other is starting to be a second `api.main`. (`:` would declare
+; siblings that MAY import each other; not what is wanted here.)
+;
+; Leaves are deliberately not listed: `api.models`, `api.errors`,
+; `api.config`, `api.rating_display` and `api.openapi_vocabularies` are
+; imported from every layer, and listing them as `|` siblings on one bottom
+; line would wrongly forbid the real `api.errors -> api.models` import. An
+; unlisted module is simply unconstrained by this contract. A layer named
+; here must exist: import-linter refuses to run a layers contract whose layer
+; is missing from the graph, so a rename cannot leave this vacuously kept.
+;
+; Like the engine contracts, this checks the `import` statements in
+; `src/api/` -- all of them, including a function-level `import api.deps`
+; inside a persona function (grimp walks the whole AST, and #209 verified
+; that such an import is reported with its line number). What escapes is a
+; runtime import by string, `importlib.import_module("api.deps")` or
+; `__import__`, which is not an import statement and so is not in the graph;
+; that is the known evasion route, and it is visible in review precisely
+; because it has to be written that way. The other is an `ignore_imports`
+; entry on this contract, equally visible. Neither is wanted.
+[importlinter:contract:api-internal-layers]
+name = api's internal layers: main > routes (verdict | catalog) > deps > persona > repositories
+type = layers
+layers =
+    api.main
+    api.verdict | api.catalog
+    api.deps
+    api.persona
+    api.repositories

@@ -12,9 +12,11 @@ just the ones in this particular fact block, so a mention of a real-but-
 wrong team, e.g. "Alabama" in a USC case, is recognized as a team-name
 mention and checked against the fact block rather than silently ignored as
 an arbitrary capitalized word) used to live here as a private
-`_all_team_names` helper; issue #13 promoted it to `api.deps.
-list_all_team_names` so `api.catalog`'s `/api/teams` route can share the
-same query instead of forking it.
+`_all_team_names` helper; issue #13 promoted it to a shared
+`list_all_team_names` so `api.catalog`'s `/api/teams` route can share the
+same query instead of forking it, and issue #209 settled it in
+`api.repositories.teams`, below this layer (it had sat in `api.deps`, which
+imports this package, so importing it from there was an upward import).
 
 **The templated fallback is never cached (issue #65).** When `narrate()`
 degrades to the fallback (a Claude transport error, or two grounding
@@ -61,12 +63,12 @@ import psycopg
 from pydantic.main import IncEx
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
-from api.deps import list_all_team_names
 from api.models import ComparisonResultOut, NarrationOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 from api.persona.narrate import narrate
+from api.repositories.teams import list_all_team_names
 
 logger = logging.getLogger(__name__)
 

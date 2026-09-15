@@ -1,14 +1,11 @@
-"""Failing-first test for `api.deps.list_all_team_names` (GitHub issue #13),
-plus `get_narration_cache`/`get_narrator`'s `APP_TEST_MODE` seam (issue #39's
+"""`get_narration_cache`/`get_narrator`'s `APP_TEST_MODE` seam (issue #39's
 groundwork -- a real booted `uvicorn` process needs both to work with no live
 Postgres instance or real `ANTHROPIC_API_KEY`).
 
-Promoted out of `api.persona.service._all_team_names` (issue #4's grounding-
-check helper) so both the persona grounding check and the new `/api/teams`
-route call the same `SELECT DISTINCT school FROM teams` query -- see
-`test_catalog.py` for the route-level coverage, and
-`test_verdict_persona.py`'s existing grounding-mismatch tests (unchanged)
-for proof the persona side still works correctly post-promotion.
+This file began as the failing-first test for `api.deps.list_all_team_names`
+(GitHub issue #13); issue #209 moved that query to `api.repositories.teams`
+and its tests to `test_repositories_teams.py`, which also pins that
+`api.deps` now holds only the three dependency-injection callables.
 
 The `APP_TEST_MODE` tests below reimport both `api.config` and `api.deps`
 fresh after monkeypatching the environment -- mirrors `test_config.py`'s
@@ -22,60 +19,11 @@ import importlib
 import logging
 import sys
 from collections.abc import Iterator
-from pathlib import Path
 from types import ModuleType
 
 import pytest
-from cfb_strength.db.connection import get_conn
 
 import api
-from api.deps import list_all_team_names
-
-FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
-
-
-def test_list_all_team_names_returns_real_teams_from_the_db() -> None:
-    conn = get_conn(FIXTURE_DB, read_only=True)
-    try:
-        names = list_all_team_names(conn)
-    finally:
-        conn.close()
-
-    assert "Texas" in names
-    assert "USC" in names
-    assert "Alabama" in names
-
-
-def test_list_all_team_names_default_sport_is_cfb() -> None:
-    """No pre-#59 call site ever passed `sport` -- the default must keep
-    producing the same result as an explicit sport='cfb' call."""
-    conn = get_conn(FIXTURE_DB, read_only=True)
-    try:
-        assert list_all_team_names(conn) == list_all_team_names(conn, sport="cfb")
-    finally:
-        conn.close()
-
-
-def test_list_all_team_names_scopes_by_sport(tmp_path: Path) -> None:
-    """Issue #59: a CFB/NFL name collision ("Wildcats" in both sports, same
-    year/method) must not cross-contaminate either sport's "known team
-    names" universe -- the grounding check's precondition."""
-    from fixtures.sport_fixture import make_sport_fixture_db
-
-    db_path = make_sport_fixture_db(tmp_path)
-    conn = get_conn(db_path, read_only=True)
-    try:
-        cfb_names = list_all_team_names(conn, sport="cfb")
-        nfl_names = list_all_team_names(conn, sport="nfl")
-    finally:
-        conn.close()
-
-    assert "Alpha State" in cfb_names
-    assert "Delta Squad" not in cfb_names
-    assert "Delta Squad" in nfl_names
-    assert "Alpha State" not in nfl_names
-    assert cfb_names.count("Wildcats") == 1
-    assert nfl_names.count("Wildcats") == 1
 
 
 def _reimport_deps() -> object:
