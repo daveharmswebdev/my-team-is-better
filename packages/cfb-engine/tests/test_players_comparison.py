@@ -46,7 +46,7 @@ def _swapped(game: PlayerHeadToHeadGame) -> PlayerHeadToHeadGame:
 # --- arguments and unknown players --------------------------------------------
 
 
-def test_comparing_a_player_with_himself_raises(db: PlayerDb) -> None:
+def test_comparing_a_player_with_the_same_player_raises(db: PlayerDb) -> None:
     p = db.player("Solo")
     with pytest.raises(ValueError):
         get_player_comparison(conn_of(db), sport="nfl", a=p, b=p)

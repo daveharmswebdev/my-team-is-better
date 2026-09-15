@@ -80,7 +80,7 @@ def get_player_comparison(
     Raises ValueError when a == b, and UnknownPlayerError for the first of
     `a`, `b` with no `players` row in `sport`."""
     if a == b:
-        raise ValueError(f"cannot compare player {a} with himself")
+        raise ValueError(f"cannot compare player {a} with the same player")
     career_a = get_player_career(conn, sport=sport, player_id=a)
     career_b = get_player_career(conn, sport=sport, player_id=b)
 
