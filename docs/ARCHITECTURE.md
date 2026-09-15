@@ -422,8 +422,11 @@ browser URL is always the current question's link.
   canonical name, or else on exactly one team's alias, sent on as the
   canonical name. Anything else becomes `null` rather than a 422: over 64
   characters, unknown, or an alias two teams share. So a stale or mistyped
-  saved team never breaks a verdict (#188). `year` is not yet
-  bounded (#189), and nothing is rate-limited (#236).
+  saved team never breaks a verdict (#188). `year` is bounded to four
+  digits before any SQL runs (`api.verdict.require_season_year`, #189):
+  an out-of-range year answers the same `unknown_year` 404 as a year with
+  no ratings, instead of the 500 an overflowing integer used to cause on
+  `/champion`'s own rank-1 query. Nothing is rate-limited (#236).
 - **Champion links carry no `for`.** The best-team question has no user team
   (#198). `toShareSearch` omits `for` from champion links, and
   `fromShareSearch` ignores it on the champion links #184 minted, without
