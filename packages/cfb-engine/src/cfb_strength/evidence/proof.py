@@ -443,6 +443,7 @@ def _opponent_result(
     opp_rating_row = ratings.get(int(opponent_id))
 
     return OpponentResult(
+        game_id=int(game["id"]),
         opponent_team_id=int(opponent_id),
         opponent_name=opponent_name,
         opponent_rank=int(opp_rating_row["rank"]) if opp_rating_row is not None else None,
@@ -563,7 +564,7 @@ def build_comparison(
     # Head-to-head: any completed game this season between the two teams.
     h2h_games = conn.execute(
         """
-        SELECT week, season_type, neutral_site, home_team_id, away_team_id,
+        SELECT id, week, season_type, neutral_site, home_team_id, away_team_id,
                home_team, away_team, home_points, away_points
         FROM games
         WHERE season = ? AND sport = ? AND completed = 1
@@ -591,6 +592,7 @@ def build_comparison(
             )
             meetings.append(
                 HeadToHeadMeeting(
+                    game_id=int(g["id"]),
                     week=g["week"],
                     season_type=g["season_type"],
                     neutral_site=bool(g["neutral_site"]),
@@ -659,6 +661,7 @@ def _meetings_by_opponent(
     for g in games:
         by_opp.setdefault(g.opponent_team_id, []).append(
             CommonOpponentMeeting(
+                game_id=g.game_id,
                 result=g.result,
                 team_score=g.team_score,
                 opponent_score=g.opponent_score,
