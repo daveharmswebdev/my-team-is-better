@@ -13,6 +13,13 @@ circumstance. Every tool catches its own exceptions and returns a
 JSON-serializable `{"error": ...}` dict rather than raising across the MCP
 boundary, so a malformed request (bad year, ambiguous team name) surfaces as
 data the calling LLM can read and react to, not a protocol-level failure.
+The typed, recoverable errors keep their structured bodies; anything else
+gets one fixed `internal_error` body from `_internal_error` (issue #208), so
+an exception's text -- a db path, a SQL fragment -- never reaches the
+connected model. The real cause goes to the operator through `logging`:
+this module adds no handler, so under a stdio transport Python's
+last-resort handler writes it to stderr and stdout stays the protocol
+channel.
 
 The database holds BOTH leagues (college football and the NFL) in the same
 tables, and `ratings`' UNIQUE(year, method, team_id) deliberately excludes
@@ -33,6 +40,7 @@ the exact same query helper so there is one source of truth, not two.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import sqlite3
 from typing import Any
 
@@ -52,6 +60,12 @@ from cfb_strength.contracts import (
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
+
+logger = logging.getLogger(__name__)
+
+# The one body every catch-all returns. Fixed on purpose: the model gets a
+# code it can react to and nothing that came out of the exception (#208).
+INTERNAL_ERROR_MESSAGE = "The ranking engine hit an unexpected error."
 
 mcp: MCPServer = MCPServer(
     "cfb-strength",
@@ -77,6 +91,16 @@ mcp: MCPServer = MCPServer(
 def _get_conn() -> sqlite3.Connection:
     """Open a read-only connection to the project sqlite db. Never writes."""
     return get_conn(DB_PATH, read_only=True)
+
+
+def _internal_error(e: BaseException) -> dict[str, Any]:
+    """Log an unexpected exception (with its traceback) for the operator and
+    return the fixed `internal_error` body for the model. The one place the
+    catch-all body is defined, so every tool and resource returns the same
+    thing and none of them can drift back to leaking `str(e)`.
+    """
+    logger.exception("Unexpected error inside the MCP boundary", exc_info=e)
+    return {"error": "internal_error", "message": INTERNAL_ERROR_MESSAGE}
 
 
 def _unknown_year(e: UnknownYearError, sport: str) -> dict[str, Any]:
@@ -129,7 +153,7 @@ def list_seasons() -> dict[str, Any]:
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
-        return {"error": str(e)}
+        return _internal_error(e)
 
 
 @mcp.resource(
@@ -144,11 +168,14 @@ def list_seasons() -> dict[str, Any]:
     mime_type="application/json",
 )
 def seasons_resource() -> dict[str, Any]:
-    conn = _get_conn()
     try:
-        return _season_catalog(conn)
-    finally:
-        conn.close()
+        conn = _get_conn()
+        try:
+            return _season_catalog(conn)
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
+        return _internal_error(e)
 
 
 @mcp.resource(
@@ -164,25 +191,28 @@ def seasons_resource() -> dict[str, Any]:
     mime_type="application/json",
 )
 def teams_resource() -> dict[str, Any]:
-    conn = _get_conn()
     try:
-        rows = conn.execute(
-            "SELECT id, school, classification, sport FROM teams ORDER BY school"
-        ).fetchall()
-    finally:
-        conn.close()
-    return {
-        "count": len(rows),
-        "teams": [
-            {
-                "team_id": int(row["id"]),
-                "school": row["school"],
-                "classification": row["classification"],
-                "sport": row["sport"],
-            }
-            for row in rows
-        ],
-    }
+        conn = _get_conn()
+        try:
+            rows = conn.execute(
+                "SELECT id, school, classification, sport FROM teams ORDER BY school"
+            ).fetchall()
+        finally:
+            conn.close()
+        return {
+            "count": len(rows),
+            "teams": [
+                {
+                    "team_id": int(row["id"]),
+                    "school": row["school"],
+                    "classification": row["classification"],
+                    "sport": row["sport"],
+                }
+                for row in rows
+            ],
+        }
+    except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
+        return _internal_error(e)
 
 
 @mcp.resource(
@@ -263,7 +293,7 @@ def get_rankings(
     except UnknownYearError as e:
         return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return _internal_error(e)
 
 
 @mcp.tool()
@@ -298,7 +328,7 @@ def get_team_season(
     except UnknownYearError as e:
         return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return _internal_error(e)
 
 
 @mcp.tool()
@@ -333,7 +363,7 @@ def compare_teams(
     except UnknownYearError as e:
         return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return _internal_error(e)
 
 
 @mcp.tool()
@@ -376,7 +406,7 @@ def get_champion(year: int, method: str = "keener", sport: Sport = "cfb") -> dic
     except UnknownYearError as e:
         return _unknown_year(e, sport)
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return _internal_error(e)
 
 
 def main() -> None:

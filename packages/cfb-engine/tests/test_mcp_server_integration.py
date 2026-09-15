@@ -14,6 +14,8 @@ since the server never writes and requires ratings to already exist).
 
 from __future__ import annotations
 
+import json
+import logging
 import sqlite3
 from pathlib import Path
 
@@ -444,3 +446,69 @@ def test_seasons_resource_matches_list_seasons_tool(both_leagues_db: Path) -> No
     assert catalog == list_seasons()
     keys = [(s["sport"], s["year"]) for s in catalog["seasons"]]
     assert keys == sorted(keys)
+
+
+# ---------------------------------------------------------------------------
+# Issue #208: an unexpected exception never leaks its text to the connected
+# model. Every catch-all returns one fixed body and the real cause goes to the
+# operator through `logging` (stderr under the last-resort handler, so stdout
+# stays the MCP protocol channel).
+# ---------------------------------------------------------------------------
+
+INTERNAL_ERROR_MESSAGE = "The ranking engine hit an unexpected error."
+SERVER_LOGGER = "cfb_strength.mcp_server.server"
+SENTINEL = "unable to open /secret/sentinel-path.db"
+
+
+@pytest.fixture
+def broken_conn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every connection attempt fail with an OperationalError whose text
+    carries a path the model must never see."""
+    import cfb_strength.mcp_server.server as server_module
+
+    def _raise() -> sqlite3.Connection:
+        raise sqlite3.OperationalError(SENTINEL)
+
+    monkeypatch.setattr(server_module, "_get_conn", _raise)
+
+
+@pytest.mark.parametrize(
+    "entrypoint",
+    [
+        "list_seasons",
+        "get_rankings",
+        "get_team_season",
+        "compare_teams",
+        "get_champion",
+        "seasons_resource",
+        "teams_resource",
+    ],
+)
+def test_unexpected_exception_returns_fixed_body_and_logs_cause(
+    broken_conn: None, caplog: pytest.LogCaptureFixture, entrypoint: str
+) -> None:
+    import cfb_strength.mcp_server.server as server_module
+
+    calls = {
+        "list_seasons": lambda: server_module.list_seasons(),
+        "get_rankings": lambda: server_module.get_rankings(2005),
+        "get_team_season": lambda: server_module.get_team_season(2005, "Texas"),
+        "compare_teams": lambda: server_module.compare_teams(2005, "Texas", "USC"),
+        "get_champion": lambda: server_module.get_champion(2005),
+        "seasons_resource": lambda: server_module.seasons_resource(),
+        "teams_resource": lambda: server_module.teams_resource(),
+    }
+    caplog.set_level(logging.ERROR, logger=SERVER_LOGGER)
+
+    result = calls[entrypoint]()
+
+    assert isinstance(result, dict)
+    assert result["error"] == "internal_error", result
+    assert result["message"] == INTERNAL_ERROR_MESSAGE
+    assert "sentinel-path" not in json.dumps(result)
+
+    # The operator still sees the real cause, with its traceback, exactly once.
+    records = [r for r in caplog.records if r.name == SERVER_LOGGER and r.levelno >= logging.ERROR]
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert records[0].exc_info is not None
+    assert "sentinel-path" in caplog.text
