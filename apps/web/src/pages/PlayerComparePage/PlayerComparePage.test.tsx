@@ -70,7 +70,7 @@ const BRADY = 1002
 const QUINN = 1003
 const MANNING = 2153701690
 
-/** Shows the URL's search, and goes Back through the router's history. */
+/** Shows the URL's search, and goes Back/Forward through the router's history. */
 function LocationProbe() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -79,6 +79,9 @@ function LocationProbe() {
       <output data-testid="location">{location.search}</output>
       <button type="button" onClick={() => void navigate(-1)}>
         Go back
+      </button>
+      <button type="button" onClick={() => void navigate(1)}>
+        Go forward
       </button>
     </>
   )
@@ -420,28 +423,37 @@ describe('PlayerComparePage: changing a pick (issue #304)', () => {
     await pick(user, playerB(), 'Brady', /Brady Quinn/)
     await user.click(compareButton())
 
+    const quinn = await screen.findByRole('dialog', {
+      name: 'Tom Brady and Brady Quinn',
+    })
     expect(
-      await screen.findByRole('table', {
+      within(quinn).getByRole('table', {
         name: 'Tom Brady and Brady Quinn, regular season',
       }),
     ).toBeInTheDocument()
     expect(mockedCompare).toHaveBeenLastCalledWith(BRADY, QUINN)
 
+    // The comparison owns the screen while it is open, so changing a pick
+    // starts by closing it (issue #310). Both fields keep the pair.
+    await user.click(
+      within(quinn).getByRole('button', { name: 'Close the comparison' }),
+    )
+    expect(playerA()).toHaveValue('Tom Brady')
+
     await user.clear(playerB())
     await pick(user, playerB(), 'Manning', /Peyton Manning/)
     expect(playerB()).toHaveValue('Peyton Manning')
     // Nothing is compared until the button is pressed.
-    expect(
-      screen.getByRole('table', {
-        name: 'Tom Brady and Brady Quinn, regular season',
-      }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(mockedCompare).toHaveBeenCalledTimes(1)
 
     await user.click(compareButton())
 
+    const manning = await screen.findByRole('dialog', {
+      name: 'Tom Brady and Peyton Manning',
+    })
     expect(
-      await screen.findByRole('table', {
+      within(manning).getByRole('table', {
         name: 'Tom Brady and Peyton Manning, regular season',
       }),
     ).toBeInTheDocument()
@@ -451,7 +463,9 @@ describe('PlayerComparePage: changing a pick (issue #304)', () => {
         name: 'Tom Brady and Brady Quinn, regular season',
       }),
     ).not.toBeInTheDocument()
-    const players = screen.getByRole('list', { name: 'Players compared' })
+    const players = within(manning).getByRole('list', {
+      name: 'Players compared',
+    })
     expect(
       within(players).getByRole('link', { name: 'Tom Brady' }),
     ).toBeVisible()
@@ -577,5 +591,225 @@ describe('PlayerComparePage: changing a pick (issue #304)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(SAME_PLAYER_COPY)
     expect(mockedCompare).not.toHaveBeenCalled()
     expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Issue #310: every answer to a committed pair shows in `VerdictModal` over
+ * the form, so a shared link opens on the answer instead of the form. The
+ * prompts that mean "you haven't asked yet" stay inline on the form.
+ */
+describe('PlayerComparePage: the comparison modal (issue #310)', () => {
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    searchByQuery()
+  })
+
+  const shareButton = () => screen.queryByRole('button', { name: /^Share/ })
+
+  it('a link to a pair opens the comparison over the form, with no click', async () => {
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Kurt Warner and Steve McNair',
+    })
+    expect(
+      within(dialog).getByRole('table', {
+        name: 'Kurt Warner and Steve McNair, regular season',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('table', {
+        name: 'Kurt Warner and Steve McNair, playoffs',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('region', { name: 'Head to head' }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('button', { name: 'Share this comparison' }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    ).toBeInTheDocument()
+  })
+
+  it('pressing Compare opens the comparison in the modal', async () => {
+    const user = userEvent.setup()
+    compareByPair([BRADY_VS_QUINN])
+
+    renderPage()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Brady Quinn/)
+    // Picking alone never opens it: nothing is asked until Compare.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(compareButton())
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Tom Brady and Brady Quinn',
+    })
+    expect(
+      within(dialog).getByRole('table', {
+        name: 'Tom Brady and Brady Quinn, regular season',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('closing drops ?a&b from the URL, keeps both fields filled, and returns focus to Compare', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Kurt Warner and Steve McNair',
+    })
+
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // The address bar no longer names a comparison, so a reload comes back to
+    // the form rather than to a comparison that was dismissed.
+    expect(screen.getByTestId('location')).toBeEmptyDOMElement()
+    // Dropping the query must not empty the fields: the pair is still there,
+    // ready to be changed or compared again.
+    expect(playerA()).toHaveValue('Kurt Warner')
+    expect(playerB()).toHaveValue('Steve McNair')
+    expect(compareButton()).toBeEnabled()
+    expect(compareButton()).toHaveFocus()
+  })
+
+  it('shares an absolute link to the committed pair', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Kurt Warner and Steve McNair',
+    })
+
+    // jsdom has no share sheet, and `userEvent.setup()` installs a clipboard
+    // stub, so ShareButton takes its clipboard branch: what it copied is the
+    // assertion.
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Share this comparison' }),
+    )
+
+    expect(await within(dialog).findByRole('status')).toHaveTextContent(
+      'Link copied',
+    )
+    expect(await navigator.clipboard.readText()).toBe(
+      `${window.location.origin}/nfl/compare?a=${WARNER}&b=${MCNAIR}`,
+    )
+  })
+
+  it('shows the narrator error state in the modal, with nothing to share', async () => {
+    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      NETWORK_ERROR_COPY,
+    )
+    expect(shareButton()).not.toBeInTheDocument()
+  })
+
+  it('shows an unknown player in the modal, with nothing to share', async () => {
+    mockedCompare.mockRejectedValue(
+      new PlayerApiError(404, {
+        error: 'unknown_player',
+        player_id: 1,
+        sport: 'nfl',
+      }),
+    )
+
+    renderPage(`?a=${WARNER}&b=1`)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      PLAYER_NOT_FOUND_COPY,
+    )
+    expect(shareButton()).not.toBeInTheDocument()
+  })
+
+  it('shows the same player twice in the modal, with nothing to share', async () => {
+    renderPage(`?a=${WARNER}&b=${WARNER}`)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      SAME_PLAYER_COPY,
+    )
+    expect(shareButton()).not.toBeInTheDocument()
+    expect(mockedCompare).not.toHaveBeenCalled()
+  })
+
+  it('opens no modal for a lone ?a=<id> link, keeping the prompt on the form', async () => {
+    mockedCareer.mockResolvedValue(KURT_WARNER_CAREER)
+
+    renderPage(`?a=${WARNER}`)
+
+    expect(
+      await screen.findByText(pickOneMoreCopy('Kurt Warner')),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(playerA()).toHaveValue('Kurt Warner')
+  })
+
+  it('opens no modal with nobody picked', () => {
+    renderPage()
+
+    expect(screen.getByText(PICK_TWO_COPY)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  /**
+   * The close replaces the ?a&b entry, and keeping the fields is scoped to
+   * that one arrival. Back and Forward onto the closed entry later are
+   * ordinary navigations: they follow the URL, which names no comparison, so
+   * the fields empty and the modal stays shut.
+   */
+  it('after closing, Back and Forward follow the URL and leave the modal closed', async () => {
+    const user = userEvent.setup()
+    compareByPair([BRADY_VS_QUINN])
+
+    renderPage()
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+    await pick(user, playerB(), 'Brady', /Brady Quinn/)
+    await user.click(compareButton())
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Tom Brady and Brady Quinn',
+    })
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
+    expect(playerA()).toHaveValue('Tom Brady')
+
+    await user.click(screen.getByRole('button', { name: 'Go back' }))
+
+    expect(screen.getByTestId('location')).toBeEmptyDOMElement()
+    expect(playerA()).toHaveValue('')
+    expect(playerB()).toHaveValue('')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Go forward' }))
+
+    expect(screen.getByTestId('location')).toBeEmptyDOMElement()
+    expect(playerA()).toHaveValue('')
+    expect(playerB()).toHaveValue('')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

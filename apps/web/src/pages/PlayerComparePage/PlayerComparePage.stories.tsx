@@ -83,6 +83,13 @@ function atSearch(search: string, handlers: Handlers = {}) {
 const WARNER = KURT_WARNER_CAREER.player_id
 const MCNAIR = WARNER_VS_MCNAIR.b.player_id
 
+/** The modal's name before the answer names both players (issue #310). */
+const COMPARISON_TITLE = 'The comparison'
+const WARNER_AND_MCNAIR = 'Kurt Warner and Steve McNair'
+
+const playerB = (canvas: ReturnType<typeof within>) =>
+  canvas.getByLabelText('Player B', { exact: true })
+
 const meta = {
   title: 'pages/PlayerComparePage',
   component: PlayerComparePage,
@@ -96,11 +103,14 @@ type Story = StoryObj<typeof meta>
 export const NothingPicked: Story = {
   decorators: [atSearch('')],
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(PICK_TWO_COPY)
+    const canvas = within(canvasElement)
+    await canvas.findByText(PICK_TWO_COPY)
+    // Nothing asked yet, so nothing opens over the form (issue #310).
+    await expect(canvas.queryByRole('dialog')).toBeNull()
   },
 }
 
-/** Opened from Kurt Warner's career page. */
+/** Opened from Kurt Warner's career page: a prompt, not an answer. */
 export const OnePicked: Story = {
   decorators: [
     atSearch(`?a=${WARNER}`, {
@@ -108,7 +118,9 @@ export const OnePicked: Story = {
     }),
   ],
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(pickOneMoreCopy('Kurt Warner'))
+    const canvas = within(canvasElement)
+    await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
+    await expect(canvas.queryByRole('dialog')).toBeNull()
   },
 }
 
@@ -121,10 +133,7 @@ export const PickingPlayerB: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.type(
-      canvas.getByLabelText('Player B', { exact: true }),
-      'McNair',
-    )
+    await userEvent.type(playerB(canvas), 'McNair')
     await expect(
       await canvas.findByRole('option', { name: /Steve McNair/ }),
     ).toBeVisible()
@@ -144,16 +153,16 @@ export const TypedNotPicked: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
-    await userEvent.type(
-      canvas.getByLabelText('Player B', { exact: true }),
-      'McN',
-    )
+    await userEvent.type(playerB(canvas), 'McN')
     await expect(canvas.getByText(PICK_FROM_LIST_COPY)).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Compare' })).toBeDisabled()
   },
 }
 
-/** Steve McNair picked into Player B, then Compare pressed (issue #304). */
+/**
+ * Steve McNair picked into Player B, then Compare pressed (issue #304): the
+ * comparison opens over the form (issue #310).
+ */
 export const PickedAndCompared: Story = {
   decorators: [
     atSearch(`?a=${WARNER}`, {
@@ -164,17 +173,20 @@ export const PickedAndCompared: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
-    await userEvent.type(
-      canvas.getByLabelText('Player B', { exact: true }),
-      'McNair',
-    )
+    await userEvent.type(playerB(canvas), 'McNair')
     await userEvent.click(
       await canvas.findByRole('option', { name: /Steve McNair/ }),
     )
     const compare = canvas.getByRole('button', { name: 'Compare' })
     await expect(compare).toBeEnabled()
+    await expect(canvas.queryByRole('dialog')).toBeNull()
+
     await userEvent.click(compare)
-    await canvas.findByRole('table', {
+
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    await within(dialog).findByRole('table', {
       name: 'Kurt Warner and Steve McNair, regular season',
     })
   },
@@ -183,17 +195,32 @@ export const PickedAndCompared: Story = {
 export const SamePlayer: Story = {
   decorators: [atSearch(`?a=${WARNER}&b=${WARNER}`)],
   play: async ({ canvasElement }) => {
-    await expect(
-      await within(canvasElement).findByRole('alert'),
-    ).toHaveTextContent(SAME_PLAYER_COPY)
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: COMPARISON_TITLE,
+    })
+    await expect(within(dialog).getByRole('alert')).toHaveTextContent(
+      SAME_PLAYER_COPY,
+    )
+    // Nothing to share: there is no comparison.
+    await expect(canvas.queryByRole('button', { name: /^Share/ })).toBeNull()
   },
 }
 
 export const Loading: Story = {
   decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`, { compare: never })],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: COMPARISON_TITLE,
+    })
+    await expect(within(dialog).getByRole('status')).toHaveTextContent(
+      'Loading the comparison',
+    )
+  },
 }
 
-/** Kurt Warner and Steve McNair on the committed fixture. */
+/** Kurt Warner and Steve McNair on the committed fixture, in the modal. */
 export const Loaded: Story = {
   decorators: [
     atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
@@ -202,10 +229,48 @@ export const Loaded: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await canvas.findByRole('table', {
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const modal = within(dialog)
+    await modal.findByRole('table', {
       name: 'Kurt Warner and Steve McNair, playoffs',
     })
-    await canvas.findByRole('link', { name: /nflfastR/ })
+    await modal.findByRole('region', { name: 'Head to head' })
+    // The credit travels with the numbers it credits.
+    await modal.findByRole('link', { name: /nflfastR/ })
+    await expect(
+      modal.getByRole('button', { name: 'Share this comparison' }),
+    ).toBeVisible()
+  },
+}
+
+/**
+ * Closing returns to the form with both fields still filled (issue #310), so
+ * the pair can be changed or compared again.
+ */
+export const ClosedAfterComparing: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
+
+    await expect(canvas.queryByRole('dialog')).toBeNull()
+    await expect(
+      canvas.getByLabelText('Player A', { exact: true }),
+    ).toHaveValue('Kurt Warner')
+    await expect(playerB(canvas)).toHaveValue('Steve McNair')
+    await expect(canvas.getByRole('button', { name: 'Compare' })).toBeEnabled()
   },
 }
 
@@ -217,7 +282,11 @@ export const NeverMet: Story = {
     }),
   ],
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findByText(
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Kurt Warner and Unrecorded Player',
+    })
+    await within(dialog).findByText(
       'Kurt Warner and Unrecorded Player never started against each other in the playoffs.',
     )
   },
@@ -234,9 +303,14 @@ export const UnknownPlayer: Story = {
     }),
   ],
   play: async ({ canvasElement }) => {
-    await expect(
-      await within(canvasElement).findByRole('alert'),
-    ).toHaveTextContent(PLAYER_NOT_FOUND_COPY)
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: COMPARISON_TITLE,
+    })
+    await expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      PLAYER_NOT_FOUND_COPY,
+    )
+    await expect(canvas.queryByRole('button', { name: /^Share/ })).toBeNull()
   },
 }
 
@@ -247,8 +321,13 @@ export const NetworkError: Story = {
     }),
   ],
   play: async ({ canvasElement }) => {
-    await expect(
-      await within(canvasElement).findByRole('alert'),
-    ).toHaveTextContent(NETWORK_ERROR_COPY)
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: COMPARISON_TITLE,
+    })
+    await expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      NETWORK_ERROR_COPY,
+    )
+    await expect(canvas.queryByRole('button', { name: /^Share/ })).toBeNull()
   },
 }

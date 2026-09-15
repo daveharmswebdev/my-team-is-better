@@ -1,10 +1,12 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { PlayerCombobox } from '../../components/PlayerCombobox/PlayerCombobox'
 import { PlayerComparisonTable } from '../../components/PlayerComparisonTable/PlayerComparisonTable'
 import { PlayerHeadToHead } from '../../components/PlayerHeadToHead/PlayerHeadToHead'
 import { PlayerStatsCredit } from '../../components/PlayerStatsCredit/PlayerStatsCredit'
+import { ShareButton } from '../../components/ShareButton/ShareButton'
+import { VerdictModal } from '../../components/VerdictModal/VerdictModal'
 import {
   PlayerApiError,
   SERVER_ERROR_COPY,
@@ -118,6 +120,21 @@ function seedSlots(
 }
 
 /**
+ * The key of the entry a close navigated away from (issue #310), read off
+ * `location.state`, which is `any` and can hold anything a browser restored.
+ */
+function closedFromKey(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null || !('closedFrom' in state)) {
+    return null
+  }
+  const { closedFrom } = state as { closedFrom: unknown }
+  return typeof closedFrom === 'string' ? closedFrom : null
+}
+
+/** The modal's name until the answer names both players. */
+const COMPARISON_TITLE = 'The comparison'
+
+/**
  * Two NFL players side by side (issue #301): career totals of each season
  * type in their own table, with the larger number in each row marked, and
  * their games against each other as opposing starting quarterbacks.
@@ -129,6 +146,14 @@ function seedSlots(
  * the same comparison. Every press asks again, even for the pair on screen.
  * Any navigation re-seeds the fields from the URL. The same player twice, or
  * an id that can't be one, is answered here without asking the API.
+ *
+ * Every answer to a committed pair opens in `VerdictModal` over the form
+ * (issue #310), the way a team verdict does since #198: a comparison rendered
+ * below the whole form sat off-screen on a phone, which is where shared links
+ * get opened. A successful comparison offers a share link that reopens it.
+ * The prompts that mean "you haven't asked yet" -- pick two, or pick one more
+ * next to the player a career page sent over -- stay inline on the form, so a
+ * lone `?a=<id>` link never opens a modal.
  *
  * Pages own composition/data-fetching; components do not import from pages
  * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
@@ -152,11 +177,24 @@ export function PlayerComparePage() {
   const credit = usePlayerStatsCredit()
   const noteId = useId()
   const pickHintId = `${noteId}-pick-hint`
+  /** Where focus goes when the comparison closes: the Compare button. */
+  const compareButtonRef = useRef<HTMLButtonElement>(null)
+  /** Raised by a close, lowered once focus has actually moved (see below). */
+  const focusCompareRef = useRef(false)
 
-  // Back, Forward or a link moved the URL: the fields follow it.
+  // Back, Forward or a link moved the URL: the fields follow it. The one
+  // exception is this page's own close (`closeComparison`), which drops ?a&b
+  // from the address bar while the fields keep the pair that was compared --
+  // seeding those from the now-empty URL would empty them. It navigates
+  // carrying the key of the entry it closed, so only the arrival straight
+  // from that entry keeps the fields; a later Back or Forward onto the closed
+  // entry is an ordinary navigation and follows the URL like any other.
   let slots = seeded.slots
   if (seeded.locationKey !== location.key) {
-    slots = seedSlots({ a: pickA, b: pickB }, names)
+    slots =
+      closedFromKey(location.state) === seeded.locationKey
+        ? seeded.slots
+        : seedSlots({ a: pickA, b: pickB }, names)
     setSeeded({ locationKey: location.key, slots })
   }
 
@@ -297,6 +335,21 @@ export function PlayerComparePage() {
     setSearchParams({ a: String(compareA), b: String(compareB) })
   }
 
+  /**
+   * Dismisses the comparison and returns to the form, which still holds the
+   * pair it compared (issue #310). The address bar drops ?a&b -- `replace`,
+   * so no history entry piles up -- because it is the share link of the
+   * comparison on screen, and now there isn't one: a reload comes back to the
+   * form rather than to a comparison that was dismissed.
+   */
+  function closeComparison() {
+    focusCompareRef.current = true
+    setSearchParams(new URLSearchParams(), {
+      replace: true,
+      state: { closedFrom: location.key },
+    })
+  }
+
   const currentComparison =
     comparisonKey !== null && comparisonAnswer?.key === comparisonKey
       ? comparisonAnswer
@@ -304,49 +357,112 @@ export function PlayerComparePage() {
   const currentCareer =
     loneId !== null && careerAnswer?.id === loneId ? careerAnswer : null
 
-  let body: ReactNode
-  if (pickA === 'invalid' || pickB === 'invalid') {
-    body = <NotFound />
-  } else if (pickA !== null && pickA === pickB) {
-    body = (
-      <p role="alert" className={styles.error}>
-        {SAME_PLAYER_COPY}
-      </p>
-    )
-  } else if (comparisonKey !== null) {
-    if (currentComparison === null) {
-      body = (
+  /**
+   * Both slots named in the URL: the page has been asked about a pair, so
+   * whatever it has to say -- loading, the comparison, an unknown player, the
+   * narrator's error line, or the same player twice -- is an answer, and every
+   * answer opens in the modal over the form (issue #310). Anything else is a
+   * prompt meaning "you haven't asked yet", which belongs on the form itself.
+   */
+  const askedPair = pickA !== null && pickB !== null
+
+  /**
+   * Returns focus to the Compare button after a close, once the modal is
+   * really gone. It has to wait for that: what opens the modal is the URL,
+   * and react-router applies a navigation in a transition, so the commit
+   * right after `closeComparison` can still have it open -- and focusing
+   * something outside an open modal only makes it pull focus back to its own
+   * close button. Runs after every render, and the flag makes it once.
+   */
+  useEffect(() => {
+    if (focusCompareRef.current && !askedPair) {
+      focusCompareRef.current = false
+      compareButtonRef.current?.focus()
+    }
+  })
+
+  const comparison =
+    currentComparison?.status === 'success'
+      ? currentComparison.comparison
+      : null
+  /**
+   * Built from the committed pair in the address bar, never from field state
+   * nobody pressed Compare on, so the link always reopens what is on screen.
+   */
+  const shareUrl =
+    comparison !== null &&
+    typeof pickA === 'number' &&
+    typeof pickB === 'number'
+      ? `${window.location.origin}/nfl/compare?a=${pickA}&b=${pickB}`
+      : undefined
+  const nameA = typeof pickA === 'number' ? names[pickA] : undefined
+  const nameB = typeof pickB === 'number' ? names[pickB] : undefined
+  const modalTitle =
+    comparison !== null
+      ? `${comparison.a.display_name} and ${comparison.b.display_name}`
+      : nameA !== undefined && nameB !== undefined && nameA !== nameB
+        ? `${nameA} and ${nameB}`
+        : COMPARISON_TITLE
+
+  /** The answer to the committed pair, shown in the modal. */
+  let answer: ReactNode = null
+  /** What the form says while it has not been asked about a pair. */
+  let prompt: ReactNode = null
+  if (askedPair) {
+    if (pickA === 'invalid' || pickB === 'invalid') {
+      answer = <NotFound />
+    } else if (pickA === pickB) {
+      answer = (
+        <p role="alert" className={styles.error}>
+          {SAME_PLAYER_COPY}
+        </p>
+      )
+    } else if (currentComparison === null) {
+      answer = (
         <p role="status" className={styles.status}>
           Loading the comparison&hellip;
         </p>
       )
     } else if (currentComparison.status === 'success') {
-      body = (
-        <Comparison comparison={currentComparison.comparison} noteId={noteId} />
+      answer = (
+        <div className={styles.answer}>
+          <Comparison
+            comparison={currentComparison.comparison}
+            noteId={noteId}
+          />
+          {/* The credit travels with the numbers it credits (issue #296). */}
+          <PlayerStatsCredit credit={credit} />
+          {shareUrl !== undefined && (
+            <ShareButton url={shareUrl} label="Share this comparison" />
+          )}
+        </div>
       )
     } else if (currentComparison.status === 'not_found') {
-      body = <NotFound />
+      answer = <NotFound />
     } else {
-      body = (
+      answer = (
         <p role="alert" className={styles.error}>
           {currentComparison.message}
         </p>
       )
     }
+  } else if (pickA === 'invalid' || pickB === 'invalid') {
+    // A lone id that can't be one: still nothing asked, so still on the form.
+    prompt = <NotFound />
   } else if (loneId !== null && currentCareer?.status === 'not_found') {
-    body = <NotFound />
+    prompt = <NotFound />
   } else if (loneId !== null && currentCareer?.status === 'error') {
-    body = (
+    prompt = (
       <p role="alert" className={styles.error}>
         {currentCareer.message}
       </p>
     )
   } else if (loneId !== null) {
-    body = (
+    prompt = (
       <p className={styles.prompt}>{pickOneMoreCopy(names[loneId] ?? null)}</p>
     )
   } else {
-    body = <p className={styles.prompt}>{PICK_TWO_COPY}</p>
+    prompt = <p className={styles.prompt}>{PICK_TWO_COPY}</p>
   }
 
   return (
@@ -390,6 +506,7 @@ export function PlayerComparePage() {
 
       <div className={styles.actions}>
         <button
+          ref={compareButtonRef}
           type="button"
           className={styles.compare}
           disabled={!canCompare}
@@ -405,9 +522,20 @@ export function PlayerComparePage() {
         )}
       </div>
 
-      {body}
+      {prompt}
 
-      <PlayerStatsCredit credit={credit} />
+      {/* While a comparison is on screen the credit is inside the modal with
+          it; otherwise it belongs here, under the form. */}
+      {comparison === null && <PlayerStatsCredit credit={credit} />}
+
+      <VerdictModal
+        open={askedPair}
+        title={modalTitle}
+        closeLabel="Close the comparison"
+        onClose={closeComparison}
+      >
+        {answer}
+      </VerdictModal>
     </main>
   )
 }
