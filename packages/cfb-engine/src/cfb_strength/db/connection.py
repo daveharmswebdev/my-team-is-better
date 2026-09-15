@@ -1,4 +1,5 @@
 import sqlite3
+import urllib.request
 import warnings
 from pathlib import Path
 
@@ -80,7 +81,14 @@ def get_conn(
         raise ValueError("immutable=True requires read_only=True")
     db_path = Path(db_path)
     if read_only:
-        uri = f"file:{db_path}?mode=ro" + ("&immutable=1" if immutable else "")
+        # Issue #163: SQLite parses this string as a URI, so the path must be
+        # percent-escaped. Unescaped, a `?` or `#` in the path ended it early
+        # (`mode=ro` was lost and a *truncated* path was opened read-write and
+        # created), and a literal `%HH` was decoded so the open failed on a
+        # file that exists. `pathname2url` on the resolved absolute path
+        # yields the `file:` form SQLite documents, on every platform.
+        escaped = urllib.request.pathname2url(str(db_path.resolve()))
+        uri = f"file:{escaped}?mode=ro" + ("&immutable=1" if immutable else "")
         conn = sqlite3.connect(uri, uri=True, check_same_thread=check_same_thread)
     else:
         db_path.parent.mkdir(parents=True, exist_ok=True)
