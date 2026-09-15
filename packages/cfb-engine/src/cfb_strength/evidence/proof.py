@@ -58,10 +58,12 @@ FUZZY_MATCH_LIMIT = 10
 #   neighbouring teams, which an integer often would not.
 #
 # No fixed precision rules out a printed dead heat. Two ratings closer than
-# half the last printed place still read as equal beside "rates higher"
-# (e.g. "1531.2 vs 1531.2"), and keener's `.6f` already does this for a few
-# real pairs. This table makes such dead heats rare, not impossible. Widening
-# the precision on near-ties, for every method, is #149.
+# half the last printed place print as equal (e.g. "1531.2 vs 1531.2"), and
+# keener's `.6f` does this for a few real pairs too. This table makes such
+# dead heats rare, not impossible. Issue #149 chose wording over precision:
+# `_build_verdict` compares the two formatted strings and, when they match
+# but the ratings differ, says "rates a hair higher overall" instead of
+# "rates higher overall". The numbers printed never change.
 #
 # Keyed by `Method` so a stray key is a mypy error. evidence/test_proof.py
 # checks the keys equal `typing.get_args(Method)`, so a newly registered
@@ -824,9 +826,18 @@ def _build_verdict(
 
     leader = case_a.team_name if rating_diff > 0 else case_b.team_name if rating_diff < 0 else None
     if leader:
+        printed_a = format(case_a.rating, rating_format)
+        printed_b = format(case_b.rating, rating_format)
+        # Issue #149: the leader is decided by the exact `rating_diff`, but
+        # the reader only sees the printed numbers. When those print
+        # identically at this method's precision, naming a leader beside two
+        # equal numbers reads as a contradiction, so the clause hedges. The
+        # test is the two formatted strings, never a float epsilon, so it
+        # tracks VERDICT_RATING_FORMATS exactly.
+        hedge = "a hair " if printed_a == printed_b else ""
         parts.append(
-            f"{leader} rates higher overall "
-            f"({case_a.rating:{rating_format}} vs {case_b.rating:{rating_format}}, "
+            f"{leader} rates {hedge}higher overall "
+            f"({printed_a} vs {printed_b}, "
             f"rank {case_a.rank} vs {case_b.rank})."
         )
     else:
