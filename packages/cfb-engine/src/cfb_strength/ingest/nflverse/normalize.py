@@ -38,7 +38,13 @@ from typing import TypedDict
 
 from cfb_strength.contracts import GameRow, TeamRow
 
-_NAMESPACE_BASE = {"nfl_team": 1_000_000_000, "nfl_game": 1_500_000_000}
+# `nfl_player` (issue #289) keys on the player's gsis id; see
+# player_normalize.py. Each namespace spans `_NAMESPACE_SPAN` from its base.
+_NAMESPACE_BASE = {
+    "nfl_team": 1_000_000_000,
+    "nfl_game": 1_500_000_000,
+    "nfl_player": 2_000_000_000,
+}
 _NAMESPACE_SPAN = 500_000_000
 
 _REGULAR_GAME_TYPE = "REG"
