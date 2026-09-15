@@ -686,6 +686,17 @@ class MethodologyCredit:
     citation: str
     url: str
     summary: str
+    # Issue #144: the registered rating methods this citation covers, so the
+    # credits can be checked against the engine's method registry instead of
+    # trusting a hand-kept list. Not 1:1 by name -- `elo` and `elo_career`
+    # share one Elo citation -- so the invariant is on the union: every
+    # `get_args(Method)` value is covered by exactly one credit, and no credit
+    # names a method that isn't registered (`compute_ratings.METHODS`).
+    # `methods[0]` is the credit's stable id downstream (the About page's
+    # article anchor, `/about#elo`), which is why this is an ordered tuple
+    # and never a set. Published as-is through apps/api's `CreditsOut` and
+    # apps/web's `types.ts` mirror.
+    methods: tuple[Method, ...]
 
 
 @dataclass(frozen=True)
