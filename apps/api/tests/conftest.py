@@ -25,13 +25,17 @@ API. Tests that care about narration behavior specifically (
 `test_verdict_persona.py`) override these two further, on top of this
 fixture, with their own scripted fakes.
 
+Since issue #296 that db also carries a real NFL 1999 + 2023 slice of games
+and player stats, with no NFL ratings, for the player endpoints
+(`test_players_*_endpoint.py`, helpers in `tests/fixtures/player_api_fixture.py`).
+
 `sport_client` (issue #59) is a second, function-scoped `TestClient` wired to
 a freshly built, throwaway db (`tests/fixtures/sport_fixture.py`) that has
-both CFB and NFL rows, plus a cross-sport name collision -- unlike
-`cfb_verdict_fixture.sqlite3`, which is a CFB-only slice and has no
-`sport='nfl'` rows at all. Tests that need to prove `sport` threads correctly
-through the HTTP layer (`test_verdict_sport.py`, `test_catalog_sport.py`) use
-this fixture instead of `client`.
+both CFB and NFL ratings, plus a cross-sport name collision --
+`cfb_verdict_fixture.sqlite3` rates only CFB, so it has no NFL verdict to
+give. Tests that need to prove `sport` threads correctly through the HTTP
+layer (`test_verdict_sport.py`, `test_catalog_sport.py`) use this fixture
+instead of `client`.
 
 `team_catalog_client` (issue #78) is a third such client, wired to
 `tests/fixtures/team_catalog_fixture.py` -- two seasons either side of three

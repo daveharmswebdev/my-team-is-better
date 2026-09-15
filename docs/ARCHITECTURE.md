@@ -110,7 +110,8 @@ by this.
 
 Inside `apps/api` the layering is checked too (issue #209), by the
 `api-internal-layers` `layers` contract in the same `.importlinter`:
-`api.main` > `api.verdict` | `api.catalog` (independent siblings) > `api.deps`
+`api.main` > `api.verdict` | `api.catalog` | `api.players` (independent siblings;
+`api.players` serves the player read layer, #296) > `api.deps`
 > `api.persona` > `api.repositories` (the app's own SQL, e.g. the team
 catalog queries). `api.models`, `api.errors`, `api.config`,
 `api.rating_display` and `api.openapi_vocabularies` are leaves any layer may

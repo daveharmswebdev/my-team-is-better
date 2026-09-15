@@ -107,10 +107,11 @@ allow_indirect_imports = true
 ; indirectly; a lower layer may never import a higher one. Modules joined by
 ; `|` on one line are INDEPENDENT siblings in import-linter's layers
 ; semantics: neither may import the other, on top of neither importing
-; anything above. `api.verdict` and `api.catalog` are the two route modules
-; `api.main` mounts, and they must stay independent -- a route module that
-; imports the other is starting to be a second `api.main`. (`:` would declare
-; siblings that MAY import each other; not what is wanted here.)
+; anything above. `api.verdict`, `api.catalog` and `api.players` (issue #296)
+; are the route modules `api.main` mounts, and they must stay independent --
+; a route module that imports another is starting to be a second `api.main`.
+; (`:` would declare siblings that MAY import each other; not what is wanted
+; here.)
 ;
 ; Leaves are deliberately not listed: `api.models`, `api.errors`,
 ; `api.config`, `api.rating_display` and `api.openapi_vocabularies` are
@@ -130,11 +131,11 @@ allow_indirect_imports = true
 ; because it has to be written that way. The other is an `ignore_imports`
 ; entry on this contract, equally visible. Neither is wanted.
 [importlinter:contract:api-internal-layers]
-name = api's internal layers: main > routes (verdict | catalog) > deps > persona > repositories
+name = api's internal layers: main > routes (verdict | catalog | players) > deps > persona > repositories
 type = layers
 layers =
     api.main
-    api.verdict | api.catalog
+    api.verdict | api.catalog | api.players
     api.deps
     api.persona
     api.repositories
