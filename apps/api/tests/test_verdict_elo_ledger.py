@@ -27,6 +27,12 @@ regenerated `cfb_verdict_fixture.sqlite3`:
   they must not reach the prompt or grounding's accepted-number set.
 - **The published schema.** `apps/web` builds against `EloLedgerOut` /
   `EloGameStepOut` from `/openapi.json`, in exactly the field order below.
+- **The denominator floor is published, not hand-copied (#194).** The
+  margin-of-victory denominator is clamped at a fraction of `mov_scale`; the
+  engine stores that fraction with the other constants, and the response
+  carries it as `mov_denom_floor_fraction` so the panel can print the floor
+  the walk actually used. The calculator below reads it off the ledger, the
+  same way it reads `k` or `mov_scale`, never a literal "half".
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cfb_strength.contracts import EloLedger
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.method_fixture import TEAM_A, TEAM_B, YEAR, make_method_fixture_db
@@ -46,12 +53,22 @@ from pydantic.main import IncEx
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
-from api.models import ComparisonResultOut, TeamCaseOut
+from api.models import ComparisonResultOut, EloLedgerOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
+FIXTURE_ELO_YEARS = [2001, 2003, 2004, 2005, 2013, 2017, 2019]
 
-LEDGER_FIELDS = ["starting_rating", "k", "hfa", "scale", "mov_scale", "mov_autocorr", "steps"]
+LEDGER_FIELDS = [
+    "starting_rating",
+    "k",
+    "hfa",
+    "scale",
+    "mov_scale",
+    "mov_autocorr",
+    "mov_denom_floor_fraction",
+    "steps",
+]
 STEP_FIELDS = [
     "game_number",
     "week",
@@ -110,7 +127,8 @@ def _fixture_ledger_config(year: int, method: str) -> dict[str, float]:
     try:
         row = conn.execute(
             """
-            SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr
+            SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr,
+                   mov_denom_floor_fraction
             FROM elo_ledger_configs WHERE year = ? AND method = ? AND sport = 'cfb'
             """,
             (year, method),
@@ -139,6 +157,9 @@ def _assert_steps_recompute(ledger: dict[str, Any]) -> None:
     scale = ledger["scale"]
     mov_scale = ledger["mov_scale"]
     mov_autocorr = ledger["mov_autocorr"]
+    # #194: the floor the walk actually used, read off the ledger like every
+    # other constant -- not the hand-copied "half" this file used to carry.
+    denom_floor = ledger["mov_denom_floor_fraction"] * mov_scale
     for step in ledger["steps"]:
         label = f"game {step['game_number']}"
         gap = step["rating_gap"]
@@ -152,7 +173,7 @@ def _assert_steps_recompute(ledger: dict[str, Any]) -> None:
             denom = 1.0
         else:
             winner_gap = gap if step["result"] == "W" else -gap
-            denom = max(winner_gap * mov_autocorr + mov_scale, mov_scale / 2)
+            denom = max(winner_gap * mov_autocorr + mov_scale, denom_floor)
         mov = math.log(max(abs(margin), 1) + 1) * (mov_scale / denom)
         assert step["mov_multiplier"] == pytest.approx(mov, abs=TOLERANCE), label
 
@@ -184,6 +205,51 @@ def test_elo_team_case_ledger_constants_match_the_stored_config(client: TestClie
     ledger = _team_case(client, "Texas", "elo")["elo_ledger"]
 
     assert {key: ledger[key] for key in LEDGER_FIELDS[:-1]} == _fixture_ledger_config(2005, "elo")
+
+
+def test_elo_ledger_publishes_the_stored_denominator_floor_fraction(client: TestClient) -> None:
+    """#194: the response's fraction is the stored config row's, for every
+    elo ledger the fixture serves, and the fixture stores 0.5 -- which is the
+    engine constant (`ratings/elo.py::_MIN_DENOM_FRACTION`) as written into
+    `elo_ledger_configs` when the fixture was rated, not a default anything
+    on the API side fills in. `EloLedgerOut` declares the field required
+    with no default, so a missing column would be an error, never a 0.5."""
+    for team in ("Texas", "USC"):
+        ledger = _team_case(client, team, "elo")["elo_ledger"]
+        stored = _fixture_ledger_config(2005, "elo")["mov_denom_floor_fraction"]
+        assert ledger["mov_denom_floor_fraction"] == stored, team
+        assert ledger["mov_denom_floor_fraction"] == 0.5, team
+
+    for year in FIXTURE_ELO_YEARS:
+        response = client.post("/api/verdict/champion", json={"year": year, "method": "elo"})
+        assert response.status_code == 200, response.json()
+        ledger = response.json()["evidence"]["elo_ledger"]
+        stored = _fixture_ledger_config(year, "elo")["mov_denom_floor_fraction"]
+        assert ledger["mov_denom_floor_fraction"] == stored, year
+        assert ledger["mov_denom_floor_fraction"] == 0.5, year
+
+
+def test_elo_ledger_out_copies_the_floor_fraction_as_stored() -> None:
+    """#194, fixture-independent: `from_dataclass` carries whatever fraction
+    the engine read back, so a stored 0.375 comes through as 0.375. A model
+    that defaulted the field to the engine constant would pass every
+    fixture-backed test above (they all store 0.5) and mask exactly this."""
+    ledger = EloLedger(
+        starting_rating=1500.0,
+        k=20.0,
+        hfa=65.0,
+        scale=400.0,
+        mov_scale=2.2,
+        mov_autocorr=0.001,
+        mov_denom_floor_fraction=0.375,
+        steps=[],
+    )
+
+    out = EloLedgerOut.from_dataclass(ledger)
+
+    assert out.mov_denom_floor_fraction == 0.375
+    assert out.model_dump()["mov_denom_floor_fraction"] == 0.375
+    assert list(out.model_dump()) == LEDGER_FIELDS
 
 
 def test_elo_team_case_ledger_names_every_opponent(client: TestClient) -> None:
