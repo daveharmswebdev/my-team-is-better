@@ -61,9 +61,7 @@ mis-scoped: fix the brief, don't ship the violation.
   every push to `main`, and nothing merges with a red check. Known exceptions, listed so
   nobody assumes more coverage than exists:
   - the persona smoke eval step always skips in CI, because there is no API key secret
-    (#203);
-  - nothing in CI runs `prettier --check` (#116), or ruff on `packages/cfb-engine`
-    (#141). Run those locally.
+    (#203).
 
   A new app gets its own CI job with its first line of code. The process hooks have one
   (`claude-process`).
