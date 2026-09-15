@@ -44,6 +44,13 @@
         "packages/cfb-engine/tests/**"
       ]
     },
+    "players-agent": {
+      "kind": "implementation",
+      "owns": [
+        "packages/cfb-engine/src/cfb_strength/players/**",
+        "packages/cfb-engine/tests/**"
+      ]
+    },
     "mcp-agent": {
       "kind": "implementation",
       "owns": [

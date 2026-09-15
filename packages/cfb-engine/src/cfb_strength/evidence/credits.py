@@ -87,6 +87,7 @@ def get_credits() -> Credits:
         ],
         data_sources=[
             DataSourceCredit(
+                id="cfbd",
                 name="CollegeFootballData.com (CFBD)",
                 url="https://collegefootballdata.com",
                 note=(
@@ -96,6 +97,7 @@ def get_credits() -> Credits:
                 ),
             ),
             DataSourceCredit(
+                id="nflverse_games",
                 name="nflverse (Lee Sharpe's NFL schedule/game data)",
                 url="https://github.com/nflverse/nflverse-data",
                 note=(

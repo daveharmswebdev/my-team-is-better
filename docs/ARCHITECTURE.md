@@ -50,7 +50,7 @@ my-team-is-better/
   packages/
     cfb-engine/      # cfb-strength-orchestrated, absorbed near-verbatim
       src/cfb_strength/
-        ingest/ ratings/ evidence/ mcp_server/ db/ contracts.py config.py cli.py
+        ingest/ ratings/ evidence/ players/ mcp_server/ db/ contracts.py config.py cli.py
       .importlinter
       pyproject.toml
   docs/
@@ -77,8 +77,9 @@ change together in one PR instead of a cross-repo version bump dance.
 
 **Layering stays enforced, just extended.** `apps/api` is a new top-layer
 consumer exactly like `cli.py` and `mcp_server/` are today. It **may** import
-`cfb_strength.evidence`, `cfb_strength.db`, `cfb_strength.contracts` and
-`cfb_strength.config`, and **no other** top-level engine module (today:
+`cfb_strength.evidence`, `cfb_strength.players` (the player read layer, #296),
+`cfb_strength.db`, `cfb_strength.contracts` and `cfb_strength.config`, and
+**no other** top-level engine module (today:
 `ratings`, `ingest`, `mcp_server`, `cli`, and `credit_math` — the last
 forbidden only as a *direct* import, since the permitted evidence layer uses
 it internally).

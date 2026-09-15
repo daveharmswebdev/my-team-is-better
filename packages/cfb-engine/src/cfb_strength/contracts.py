@@ -269,6 +269,152 @@ class PlayerSeasonStatRow:
 
 
 # ---------------------------------------------------------------------------
+# player read layer (issue #296, epic #288 step 2): `cfb_strength.players`
+# reads the tables above and returns these; apps/api publishes them. No rating
+# math: a leaderboard is a stat column sorted descending.
+#
+# Coordinator-assigned signatures, implemented by players-agent and exported
+# from `cfb_strength.players`:
+#
+#   def get_player_leaders(conn: sqlite3.Connection, *, sport: Sport,
+#                          season_type: PlayerSeasonType = "regular",
+#                          sort: PlayerLeaderSort = "passing_yards",
+#                          limit: int = 50, offset: int = 0) -> PlayerLeaders: ...
+#       Raises ValueError unless 1 <= limit <= PLAYER_LEADERS_MAX_LIMIT and
+#       offset >= 0.
+#
+#   def get_player_career(conn: sqlite3.Connection, *, sport: Sport,
+#                         player_id: int) -> PlayerCareer: ...
+#       Raises UnknownPlayerError when no `players` row has that id and sport.
+#
+# Rules both functions share:
+#   * Totals come from `player_season_stats` (older eras have season totals
+#     and no game logs); W-L-T comes from `game_starters` joined to completed
+#     games with both scores.
+#   * A summed stat is None when any season row it sums is NULL for that stat,
+#     or when there are no season rows: a partial total must not read as a
+#     career. (No 1999-2025 nflverse row is NULL; the rule is for later
+#     sources.)
+#   * A leaders row and the same player's career totals for that season type
+#     agree exactly (games, record, every stat), and a career's totals equal
+#     the sum of its season lines.
+# ---------------------------------------------------------------------------
+
+PlayerLeaderSort = Literal["passing_yards", "passing_tds", "wins"]
+"""The v1 leaderboards. With `PlayerSeasonType` that covers passing yards,
+passing TDs, regular-season starter wins and playoff starter wins. Always
+descending; ties break by `display_name`, then `player_id`."""
+
+PLAYER_LEADERS_MAX_LIMIT = 100
+
+
+@dataclass(frozen=True)
+class StarterRecord:
+    """W-L-T in the games a player started at QB (`game_starters`), counting
+    completed games with both scores. A tie is equal scores, the same
+    definition as `TeamRating.ties` (#83)."""
+
+    wins: int
+    losses: int
+    ties: int
+
+    @property
+    def starts(self) -> int:
+        return self.wins + self.losses + self.ties
+
+
+@dataclass(frozen=True)
+class PlayerLeaderRow:
+    """One qualifying player on a leaderboard for one season type.
+
+    Qualifies: at least one pass attempt or one QB start in that season type.
+    No minimum: every v1 board is a counting stat (#296)."""
+
+    # Competition ranking on the sort value (1, 2, 2, 4) across the whole
+    # qualifying population, not the page. None when the sort value is None;
+    # those rows sort after every ranked row.
+    rank: int | None
+    player_id: int
+    display_name: str
+    position: str | None
+    # The span of seasons with a season row or a start in this season type.
+    first_season: int
+    last_season: int
+    # Sum of `player_season_stats.games`; None under the NULL rule above.
+    games: int | None
+    record: StarterRecord
+    stats: PlayerStats
+
+
+@dataclass(frozen=True)
+class PlayerLeaders:
+    sport: Sport
+    season_type: PlayerSeasonType
+    sort: PlayerLeaderSort
+    limit: int
+    offset: int
+    # Size of the whole qualifying population, so a client can page.
+    total: int
+    rows: list[PlayerLeaderRow]
+
+
+@dataclass(frozen=True)
+class PlayerSeasonLine:
+    """A player's season in one season type: a line exists when the player has
+    a season row or at least one start in it."""
+
+    season: int
+    season_type: PlayerSeasonType
+    # `teams.school` for every team the player has a stat line or a start for
+    # in this season and season type, in order of first game. Falls back to
+    # the season row's team when there are no game rows; empty when neither
+    # names one.
+    teams: list[str]
+    games: int | None
+    record: StarterRecord
+    # All None when the player started games but has no season row.
+    stats: PlayerStats
+    # Disclosure, not correction (#289's accepted limit): completed games in
+    # this season and season type played by one of this line's teams that
+    # have no `player_game_stats` rows at all, so these totals undercount
+    # them (e.g. Warner 1999: 1999_01_BAL_STL).
+    games_without_stat_lines: int
+
+
+@dataclass(frozen=True)
+class PlayerCareerTotals:
+    season_type: PlayerSeasonType
+    # Number of season lines of this type.
+    seasons: int
+    games: int | None
+    record: StarterRecord
+    stats: PlayerStats
+
+
+@dataclass(frozen=True)
+class PlayerCareer:
+    sport: Sport
+    player_id: int
+    display_name: str
+    position: str | None
+    # Chronological; within a season, regular before postseason.
+    seasons: list[PlayerSeasonLine]
+    # None when the player has no line of that type.
+    regular_season: PlayerCareerTotals | None
+    postseason: PlayerCareerTotals | None
+
+
+class UnknownPlayerError(ValueError):
+    """Raised by `players.get_player_career` when no player has that id in
+    that sport."""
+
+    def __init__(self, player_id: int, sport: Sport):
+        super().__init__(f"no {sport} player with id {player_id}")
+        self.player_id = player_id
+        self.sport = sport
+
+
+# ---------------------------------------------------------------------------
 # ratings input/output (ratings-agent implements RatingMethod; the CLI reads
 # `games` from the db, the compute-and-store step writes to `ratings`)
 # ---------------------------------------------------------------------------
@@ -842,6 +988,11 @@ class MethodologyCredit:
 
 @dataclass(frozen=True)
 class DataSourceCredit:
+    # Issue #296: a stable, unique id ("cfbd", "nflverse_games",
+    # "nflverse_player_stats"), so a page that shows one source's data can
+    # pick that source's credit without keying on a display name that could
+    # be reworded -- the role `MethodologyCredit.methods[0]` plays for methods.
+    id: str
     name: str
     url: str
     note: str
