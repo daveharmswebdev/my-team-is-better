@@ -60,6 +60,10 @@ def search_players(
             f"query must have at least {PLAYER_SEARCH_MIN_QUERY_LENGTH} characters, "
             f"got {stripped!r}"
         )
+    if "\x00" in stripped:
+        # SQLite's LIKE stops reading its pattern at a NUL, which would widen the
+        # match; no name contains one, so the literal answer is no rows (#301 review).
+        return PlayerSearch(sport=sport, query=stripped, limit=limit, rows=[])
     params = {"sport": sport, "pattern": _like_substring(stripped), "limit": limit}
     rows = [
         PlayerSearchRow(

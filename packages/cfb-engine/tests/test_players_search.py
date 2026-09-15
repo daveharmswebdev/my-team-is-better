@@ -91,6 +91,16 @@ def test_percent_and_underscore_in_the_query_match_literally(db: PlayerDb) -> No
     assert _names(db, "k\\s") == ["Back\\Slash"]
 
 
+def test_a_nul_in_the_query_matches_literally_so_nothing(db: PlayerDb) -> None:
+    # SQLite's LIKE stops reading its pattern at a NUL, so unguarded 'a\0b'
+    # would search '%a' (names ending in 'a') and '\0\0' would search '%'
+    # (everyone). No name contains a NUL (#301 review).
+    _passer(db, "Tua Tagovailoa", 300)
+    _passer(db, "Josh Allen", 200)
+    assert _names(db, "a\x00b") == []
+    assert _names(db, "\x00\x00") == []
+
+
 # --- who qualifies ------------------------------------------------------------
 
 
