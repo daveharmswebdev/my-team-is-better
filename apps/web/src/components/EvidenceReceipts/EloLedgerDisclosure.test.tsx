@@ -180,7 +180,7 @@ describe('EloLedgerDisclosure', () => {
       within(dialog).getByRole('link', {
         name: "Arpad Elo's system, in the football form FiveThirtyEight published",
       }),
-    ).toHaveAttribute('href', '/about')
+    ).toHaveAttribute('href', '/about#elo')
 
     expect(
       within(dialog).getByText('Every team starts the season at 1,500'),
@@ -394,7 +394,9 @@ describe('EloLedgerDisclosure', () => {
     })
   })
 
-  it('links the provenance line through the router when there is one', async () => {
+  // Issue #227: the link lands on the Elo article, not the top of the page,
+  // in both the router and the plain-anchor variant.
+  it('links the provenance line to /about#elo through the router when there is one', async () => {
     mockMatchMedia(false)
     render(
       <MemoryRouter>
@@ -406,6 +408,9 @@ describe('EloLedgerDisclosure', () => {
       </MemoryRouter>,
     )
     const { dialog } = await openOnDesktop()
-    expect(within(dialog).getByRole('link')).toHaveAttribute('href', '/about')
+    expect(within(dialog).getByRole('link')).toHaveAttribute(
+      'href',
+      '/about#elo',
+    )
   })
 })

@@ -271,4 +271,96 @@ describe('AboutPage', () => {
       expect(screen.queryByRole('status')).not.toBeInTheDocument()
     })
   })
+
+  /**
+   * Issue #227: the Elo ledger's provenance link is `/about#elo`. The ids
+   * are slugged from the API's display names (see `methodologyId.ts`), and
+   * because the articles only exist once the credits resolve, the page has
+   * to do the hash scroll itself -- the browser and React Router both gave
+   * up long before the element was there.
+   */
+  describe('landing on a method by hash (issue #227)', () => {
+    /** The elements `scrollIntoView` was called on, in order. */
+    let scrolledInto: Element[]
+
+    beforeEach(() => {
+      scrolledInto = []
+      // jsdom has no `scrollIntoView`; the page feature-detects it.
+      Element.prototype.scrollIntoView = function scrollIntoView(
+        this: Element,
+      ) {
+        scrolledInto.push(this)
+      }
+    })
+
+    afterEach(() => {
+      // Cast: the DOM lib types the method as required, but here it is our
+      // own stand-in, and removing it restores jsdom's state.
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+      window.history.replaceState(null, '', '/')
+    })
+
+    it('gives each method article an id slugged from its name, and the section the id "methods"', async () => {
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      const eloHeading = await screen.findByRole('heading', { name: 'Elo' })
+      expect(eloHeading.closest('article')).toHaveAttribute('id', 'elo')
+      expect(
+        screen
+          .getByRole('heading', { name: "Keener's method" })
+          .closest('article'),
+      ).toHaveAttribute('id', 'keeners-method')
+      expect(
+        screen.getByRole('heading', { name: 'The Methods' }).closest('section'),
+      ).toHaveAttribute('id', 'methods')
+    })
+
+    it('scrolls the Elo article into view once the credits resolve when the hash is #elo', async () => {
+      window.location.hash = '#elo'
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      // Nothing to scroll to while the request is in flight.
+      expect(screen.getByRole('status')).toBeInTheDocument()
+      expect(scrolledInto).toEqual([])
+
+      const eloHeading = await screen.findByRole('heading', { name: 'Elo' })
+      expect(scrolledInto).toEqual([eloHeading.closest('article')])
+    })
+
+    it('scrolls nothing when there is no hash', async () => {
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await screen.findByRole('heading', { name: 'Elo' })
+      expect(scrolledInto).toEqual([])
+    })
+
+    it('scrolls nothing, and does not throw, when the hash names no element', async () => {
+      window.location.hash = '#colley'
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await screen.findByRole('heading', { name: 'Elo' })
+      expect(scrolledInto).toEqual([])
+    })
+
+    it('keeps the page mounted, and scrolls nothing, when the hash is not valid percent-encoding', async () => {
+      // `decodeURIComponent('100%')` throws URIError; with no error boundary
+      // in the app, an effect that let it escape would unmount the page.
+      window.location.hash = '#100%'
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await screen.findByRole('heading', { name: 'Elo' })
+      expect(screen.getByRole('heading', { name: 'Elo' })).toBeInTheDocument()
+      expect(scrolledInto).toEqual([])
+    })
+  })
 })

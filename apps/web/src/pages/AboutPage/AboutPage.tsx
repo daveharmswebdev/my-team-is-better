@@ -7,11 +7,27 @@ import {
 } from '../../lib/api/client'
 import type { CreditsOut } from '../../lib/api/types'
 import styles from './AboutPage.module.css'
+import { methodologyId } from './methodologyId'
 
 type CreditsState =
   | { status: 'loading' }
   | { status: 'success'; credits: CreditsOut }
   | { status: 'error'; message: string }
+
+/**
+ * The element id a location hash names. A fragment that is not valid
+ * percent-encoding (`#100%`) makes `decodeURIComponent` throw, and an
+ * uncaught error in an effect unmounts the page (there is no error boundary),
+ * so such a hash is taken literally instead and simply names nothing.
+ */
+function fragmentId(hash: string): string {
+  const raw = hash.slice(1)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
 
 /**
  * The site's "How this works / Credits" surface -- PRD §5.6 requires this be
@@ -52,6 +68,28 @@ export function AboutPage() {
     }
   }, [])
 
+  // Issue #227: a link like `/about#elo` (the Elo ledger's provenance line)
+  // has to land on that article. Neither the browser nor React Router can do
+  // it: the browser only scrolls to a hash on a full page load, and even
+  // then the method articles don't exist until the credits resolve; a
+  // client-side `<Link>` never scrolls at all. So once the credits are on
+  // the page, scroll to whatever `window.location.hash` names (read from
+  // `window`, not the router, so the page also renders outside one).
+  // `scrollIntoView` is feature-detected because jsdom lacks it.
+  useEffect(() => {
+    if (state.status !== 'success') {
+      return
+    }
+    const hash = window.location.hash
+    if (hash.length < 2) {
+      return
+    }
+    const target = document.getElementById(fragmentId(hash))
+    if (target !== null && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView()
+    }
+  }, [state.status])
+
   return (
     <main className={styles.wrap}>
       <h1 className={styles.title}>How This Works</h1>
@@ -74,7 +112,7 @@ export function AboutPage() {
         </p>
       </section>
 
-      <section className={styles.section}>
+      <section id="methods" className={styles.section}>
         <h2 className={styles.heading}>The Methods</h2>
         {state.status === 'loading' && (
           <p role="status" className={styles.loading}>
@@ -92,10 +130,15 @@ export function AboutPage() {
               Rendered in the order the API sends them -- Keener's method
               first as the validated default, Elo second as the second
               opinion -- and never sorted. Keyed on `name`, not `url`: two
-              methodologies could plausibly share a DOI host.
+              methodologies could plausibly share a DOI host. The id is the
+              link target for `/about#elo` and the like (issue #227).
             */}
             {state.credits.methodologies.map((methodology) => (
-              <article className={styles.method} key={methodology.name}>
+              <article
+                id={methodologyId(methodology.name)}
+                className={styles.method}
+                key={methodology.name}
+              >
                 <h3 className={styles.methodName}>{methodology.name}</h3>
                 <p className={styles.body}>{methodology.summary}</p>
                 <p className={styles.citation}>
