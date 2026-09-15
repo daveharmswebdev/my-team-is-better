@@ -19,6 +19,12 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: cfb-engine-ruff
+        name: cfb-engine — ruff check + format --check
+        entry: bash -c 'cd packages/cfb-engine && uv run ruff check . && uv run ruff format --check .'
+        language: system
+        pass_filenames: false
+        always_run: true
       - id: apps-api-pytest
         name: apps/api — pytest
         entry: bash -c 'cd apps/api && uv run pytest'
