@@ -16,8 +16,10 @@ Run the same commands CI runs (`.github/workflows/ci.yml`), from the package dir
 | `apps/api` | `uv run pytest -q` · `uv run mypy --strict src/api tests` · `uv run ruff check .` · `uv run ruff format --check .` · `uv run lint-imports` |
 | `.claude/hooks` | see the `claude-process` job in ci.yml |
 
-- `uv` only — never `pip install`. Install with `uv sync --all-extras --dev` from the
-  package directory (#119: a bare `uv sync` in `apps/api` prunes root-only dev deps).
+- `uv` only — never `pip install`. Install with `uv sync --all-packages --all-extras --dev`
+  from the **repo root**. The workspace has one shared venv, and any `uv sync` run
+  inside `apps/api` or `packages/cfb-engine` resolves against that member alone and
+  uninstalls the other member's dev tools from it (#119: measured 9 and 18 packages).
 - `packages/cfb-engine` has no ruff gate yet (#141). Don't add new findings: run
   `uv run --with ruff ruff check <files you touched>`.
 - `mypy --strict` is not negotiable across a module boundary. Don't add

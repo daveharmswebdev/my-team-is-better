@@ -53,9 +53,15 @@ for the mocked unit test suite: unset, `pytest` still passes (a small
 number of tests that require a live Postgres connection and a real Claude
 API call auto-skip via `pytest.mark.skipif`).
 
+This repo is one `uv` workspace with a single shared venv at the repo root (there is
+no `apps/api/.venv`). Install from the **repo root** with `--all-packages`; a
+`uv sync` run inside `apps/api` resolves against this app's dependency set alone and
+silently uninstalls every other member's dev tools from the shared venv, `pre-commit`
+included (#119).
+
 ```bash
+uv sync --all-packages --all-extras --dev   # from the repo root
 cd apps/api
-uv sync --all-extras --dev
 uv run uvicorn api.main:app --reload
 uv run pytest
 uv run mypy --strict src/api tests
