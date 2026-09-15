@@ -18,7 +18,8 @@ from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.deps import list_all_team_names
 from api.models import ComparisonResultOut, Method, Sport, TeamCaseOut
-from api.persona.grounding import find_ungrounded_tokens
+from api.persona.grounding import _mismatch_message, find_ungrounded_tokens
+from api.persona.narrate import NarrationResult, narrate
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
 FACT_BLOCK = (
@@ -143,6 +144,9 @@ COMPARISON_FACT_BLOCK = (
     '], "rating_diff": 3.1, "verdict": "Texas"}'
 )
 COMPARISON_KNOWN_TEAMS = ["Vanderbilt", "Texas", "LSU"]
+# LSU carries three real tuples (31-24 and 17-20 from Vanderbilt's side, 20-17
+# from Texas's), so a wrong pair gets #255's multi-tuple form listing them all.
+LSU_24_31_MISMATCH = "LSU 24-31 matches no game; LSU's real scores are 17-20, 20-17 and 31-24"
 
 
 def test_head_to_head_meeting_swapped_order_is_flagged() -> None:
@@ -166,7 +170,7 @@ def test_common_opponent_swapped_order_is_flagged() -> None:
 
     mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
 
-    assert "LSU 24-31" in mismatches
+    assert LSU_24_31_MISMATCH in mismatches
 
 
 def test_common_opponent_correct_order_is_not_flagged() -> None:
@@ -207,8 +211,9 @@ def test_common_opponent_meeting_swapped_order_is_still_flagged() -> None:
 
     mismatches = find_ungrounded_tokens(response, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS)
 
-    # LSU has three real tuples, so the plainer multi-tuple message form.
-    assert "LSU 24-31" in mismatches
+    # LSU has three real tuples, so the multi-tuple message form (#255 lists
+    # them all, ascending).
+    assert LSU_24_31_MISMATCH in mismatches
 
 
 def test_earlier_common_opponent_meeting_is_grounded_the_issue_130_regression() -> None:
@@ -223,7 +228,7 @@ def test_earlier_common_opponent_meeting_is_grounded_the_issue_130_regression() 
     # The same claim, swapped, is a real mismatch and not a silently
     # unchecked pair: the walker did register (31, 24) for LSU.
     swapped = "Vanderbilt beat LSU (24-31) in week 5 before dropping the rematch."
-    assert "LSU 24-31" in find_ungrounded_tokens(
+    assert LSU_24_31_MISMATCH in find_ungrounded_tokens(
         swapped, COMPARISON_FACT_BLOCK, COMPARISON_KNOWN_TEAMS
     )
 
@@ -580,7 +585,9 @@ def test_per_opponent_breakdown_record_is_not_treated_as_a_subject_record(
     block = _team_case_block(cfb_conn, 2003, "LSU", "cfb")
     response = "LSU beat Georgia 2-0 that year."
 
-    assert _check(cfb_conn, response, block, "cfb") == ["Georgia 2-0"]
+    assert _check(cfb_conn, response, block, "cfb") == [
+        "Georgia 2-0 matches no game; Georgia's real scores are 17-10 and 34-13"
+    ]
 
 
 # --- parenthetical record ---------------------------------------------------
@@ -641,7 +648,9 @@ def test_w_l_t_fabricated_tie_score_beside_a_real_record_is_still_flagged(
     block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
     response = TIE_TEAM_CASE.format(tie_score="17-7", record="2-1-1")
 
-    assert _check(nfl_conn, response, block, "nfl") == ["Mike Mustangs 17-7"]
+    assert _check(nfl_conn, response, block, "nfl") == [
+        "Mike Mustangs 17-7 matches no game; Mike Mustangs's real scores are 17-17 and 31-14"
+    ]
 
 
 TIE_COMPARISON = (
@@ -893,3 +902,90 @@ def test_real_game_score_equal_to_a_reversed_record_is_not_read_as_a_record() ->
     response = "Texas went 3-1. They lost one 1-3."
 
     assert find_ungrounded_tokens(response, fact_block, KNOWN_TEAMS) == []
+
+
+# ---------------------------------------------------------------------------
+# issue #255: when a name carries two or more real score tuples, the retry
+# feedback used to name only the wrong pair ("Mike Mustangs 17-7"), so the
+# narrator was told what was wrong but not what the real pairs are. Since
+# #249 every NFL division opponent in a comparison carries both meetings, so
+# every wrong-order score against a division rival hit that bare form. The
+# message now lists the real tuples (ascending, so the set's iteration order
+# never leaks into the wording) while still not asserting a single "correct"
+# order. The one-tuple form is unchanged byte for byte.
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedNarrator:
+    def __init__(self, responses: list[str]) -> None:
+        self.responses = list(responses)
+        self.calls: list[list[dict[str, str]]] = []
+
+    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        return self.responses.pop(0)
+
+
+def test_two_tuple_mismatch_lists_both_real_scores_ascending() -> None:
+    message = _mismatch_message("Texas", (12, 45), {(45, 12), (24, 20)})
+
+    assert message == "Texas 12-45 matches no game; Texas's real scores are 24-20 and 45-12"
+
+
+def test_three_tuple_mismatch_lists_all_real_scores_ascending() -> None:
+    message = _mismatch_message("Texas", (12, 45), {(45, 12), (24, 20), (31, 7)})
+
+    assert message == "Texas 12-45 matches no game; Texas's real scores are 24-20, 31-7 and 45-12"
+
+
+def test_one_tuple_mismatch_message_is_unchanged() -> None:
+    """Byte-identical to the pre-#255 form, so every expectation on it above
+    stays green untouched."""
+    message = _mismatch_message("Texas", (12, 45), {(45, 12)})
+
+    assert message == "Texas's score should be stated 45-12, not 12-45"
+
+
+def test_two_tuple_mismatch_on_a_real_team_case_lists_both_meetings(
+    nfl_conn: sqlite3.Connection,
+) -> None:
+    """The fixture's Kilo Kings met Mike Mustangs twice (17-17, then 31-14),
+    so a Kilo Kings team case gives Mike Mustangs exactly two tuples."""
+    block = _team_case_block(nfl_conn, 2023, "Kilo Kings", "nfl")
+    response = "The Kilo Kings beat the Mike Mustangs 14-31 in the rematch."
+
+    assert _check(nfl_conn, response, block, "nfl") == [
+        "Mike Mustangs 14-31 matches no game; Mike Mustangs's real scores are 17-17 and 31-14"
+    ]
+
+
+def test_retry_feedback_lists_every_real_score_of_a_twice_met_rival(
+    nfl_conn: sqlite3.Connection,
+) -> None:
+    """End to end through `narrate()`: on the Kilo Kings vs Lima Lions
+    comparison, Mike Mustangs is the common opponent Kilo Kings met twice
+    (both meetings carried since #249) and Lima Lions met once, so the name
+    holds three real tuples. A wrong-order rematch score in the first draft
+    must send the retry a user turn naming all three, not just the wrong
+    pair."""
+    block = _comparison_block(nfl_conn, 2023, "Kilo Kings", "Lima Lions", "nfl")
+    grounded = "Kilo Kings beat Mike Mustangs 31-14 in the rematch."
+    narrator = _ScriptedNarrator(["Kilo Kings beat Mike Mustangs 14-31 in the rematch.", grounded])
+
+    result = narrate(
+        fact_block_json=block,
+        user_team=None,
+        contested=False,
+        known_team_names=list_all_team_names(nfl_conn, "nfl"),
+        narrator=narrator,
+        fallback_text="Kilo Kings over Lima Lions, says the math.",
+    )
+
+    assert result == NarrationResult(text=grounded, is_fallback=False)
+    assert len(narrator.calls) == 2
+    feedback = narrator.calls[1][-1]
+    assert feedback["role"] == "user"
+    assert (
+        "Mike Mustangs 14-31 matches no game; "
+        "Mike Mustangs's real scores are 17-17, 27-10 and 31-14" in feedback["content"]
+    )

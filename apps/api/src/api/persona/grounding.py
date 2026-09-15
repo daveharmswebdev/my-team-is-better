@@ -1264,9 +1264,14 @@ def _mismatch_message(
     issue #26 follow-up Finding 3). When there's exactly one real tuple for
     `name`, the correction is unambiguous, so say it outright instead of
     just naming the wrong pair. When there's more than one (e.g. a common
-    opponent recorded from both compared teams' perspectives), asserting a
-    single "correct" order wouldn't be true, so fall back to the plainer,
-    still-honest form that just names the wrong pair.
+    opponent recorded from both compared teams' perspectives, or a division
+    rival met twice -- every NFL comparison since #249), asserting a single
+    "correct" order wouldn't be true, so name the wrong pair and then list
+    every real tuple (issue #255: the bare "Texas 12-45" told the retry what
+    was wrong but not what the real pairs are). The tuples are sorted so the
+    set's iteration order never leaks into the wording, and the message is a
+    clause with no trailing period because `api.persona.narrate` joins these
+    with "; " inside a sentence.
     """
     if len(valid_for_name) == 1:
         (correct,) = valid_for_name
@@ -1274,7 +1279,9 @@ def _mismatch_message(
             f"{name}'s score should be stated {correct[0]}-{correct[1]}, "
             f"not {claimed[0]}-{claimed[1]}"
         )
-    return f"{name} {claimed[0]}-{claimed[1]}"
+    real = [_hyphenated(pair) for pair in sorted(valid_for_name)]
+    listed = f"{', '.join(real[:-1])} and {real[-1]}"
+    return f"{name} {_hyphenated(claimed)} matches no game; {name}'s real scores are {listed}"
 
 
 def _nearest_name(
