@@ -1,0 +1,123 @@
+/*
+ * docs/design-system.html has no table pattern, so this is built from its
+ * tokens: label type for headers, tabular figures for numbers (the "Stat"
+ * row of its type scale), rules for row lines.
+ */
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+/*
+ * Busy: a gold rule along the top and a progress cursor. Not dimmed with
+ * opacity, which drops the text below 4.5:1 contrast while it stays readable
+ * and focusable (the page's status line says it is loading).
+ */
+.scroll:has(.table[aria-busy='true']) {
+  border-color: var(--gold);
+  box-shadow: inset 0 3px 0 var(--gold);
+  cursor: progress;
+}
+
+.caption {
+  caption-side: top;
+  text-align: left;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--leather);
+}
+
+.table th,
+.table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.table thead th {
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border-top: none;
+  border-bottom: 1px solid var(--rule-strong);
+  vertical-align: bottom;
+}
+
+.table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.rank {
+  font-family: var(--font-label);
+  font-weight: 700;
+}
+
+.player {
+  font-weight: 600;
+}
+
+.player a {
+  color: var(--navy);
+}
+
+.notRecorded {
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+.sort,
+.sortActive {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 2rem;
+  padding: 0 var(--sp-1);
+  margin: 0 calc(-1 * var(--sp-1));
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--navy);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.sortActive {
+  color: var(--leather-strong);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.sort:hover {
+  color: var(--leather);
+}
+
+.arrow,
+.arrowActive {
+  fill: currentColor;
+}
+
+.arrow {
+  opacity: 0.35;
+}

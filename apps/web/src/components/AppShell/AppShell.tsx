@@ -18,6 +18,9 @@ export function AppShell() {
           My Team Is Better
         </Link>
         <nav className={styles.nav} aria-label="Primary">
+          <Link to="/nfl/leaders" className={styles.navLink}>
+            NFL Leaders
+          </Link>
           <Link to="/about" className={styles.navLink}>
             How This Works
           </Link>

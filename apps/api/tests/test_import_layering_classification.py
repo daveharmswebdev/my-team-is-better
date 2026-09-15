@@ -2,7 +2,7 @@
 (issue #54, epic #113).
 
 `docs/ARCHITECTURE.md` §2 states the layering rule as an allow list: this app
-may import `evidence`, `db`, `contracts` and `config` from the engine, and
+may import `evidence`, `players`, `db`, `contracts` and `config` from the engine, and
 nothing else. import-linter has no "source may import only these" contract
 type, so `.importlinter` enforces it as `forbidden` contracts naming every
 other top-level module. A deny list like that silently goes stale the moment
@@ -24,7 +24,7 @@ from pathlib import Path
 
 import cfb_strength
 
-PERMITTED = frozenset({"evidence", "db", "contracts", "config"})
+PERMITTED = frozenset({"evidence", "players", "db", "contracts", "config"})
 
 IMPORTLINTER_CONFIG = Path(__file__).resolve().parents[1] / ".importlinter"
 

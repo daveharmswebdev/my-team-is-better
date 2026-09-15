@@ -15,17 +15,20 @@ type = layers
 layers =
     cfb_strength.cli
     cfb_strength.mcp_server
-    cfb_strength.evidence | cfb_strength.ratings | cfb_strength.ingest
+    cfb_strength.evidence | cfb_strength.ratings | cfb_strength.ingest | cfb_strength.players
     cfb_strength.db
     cfb_strength.contracts | cfb_strength.config | cfb_strength.credit_math
 
+; `players` (issue #296) reads the player tables the nflverse ingest writes.
+; Like `evidence`, its boundary with `ingest` is the database, never an import.
 [importlinter:contract:no-sibling-imports]
-name = ingest, ratings, and evidence must not import each other
+name = ingest, ratings, evidence, and players must not import each other
 type = independence
 modules =
     cfb_strength.ingest
     cfb_strength.ratings
     cfb_strength.evidence
+    cfb_strength.players
 
 ; NOTE for the coordinator: the brief for issue #51 specified this contract
 ; verbatim as a single `type = independence` block listing all four modules

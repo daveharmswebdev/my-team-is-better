@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { expect, within } from 'storybook/test'
 import { AppShell } from './AppShell'
 
 const meta = {
@@ -28,4 +29,17 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
+/** The primary nav: the NFL leaders (issue #296) and How This Works. */
+export const Default: Story = {
+  play: async ({ canvasElement }) => {
+    const nav = within(canvasElement).getByRole('navigation', {
+      name: 'Primary',
+    })
+    await expect(
+      within(nav).getByRole('link', { name: 'NFL Leaders' }),
+    ).toHaveAttribute('href', '/nfl/leaders')
+    await expect(
+      within(nav).getByRole('link', { name: 'How This Works' }),
+    ).toHaveAttribute('href', '/about')
+  },
+}

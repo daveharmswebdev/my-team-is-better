@@ -1,0 +1,74 @@
+/*
+ * A segmented control built from docs/design-system.html's tokens (it has no
+ * such pattern): the checked segment is filled leather, like `.btn--primary`.
+ */
+.switch {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.legend {
+  padding: 0;
+  margin-bottom: var(--sp-2);
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.segments {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1.5px solid var(--leather);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.segment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--leather-strong);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.segment + .segment {
+  border-left: 1.5px solid var(--leather);
+}
+
+/* Visually hidden, still focusable and in the accessibility tree. */
+.input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segment:has(.input:checked) {
+  background: var(--leather);
+  color: var(--on-leather);
+}
+
+.segment:has(.input:focus-visible) {
+  outline: 2px solid var(--navy);
+  outline-offset: -4px;
+}
+
+.segment:hover:not(:has(.input:checked)) {
+  background: var(--surface-alt);
+}

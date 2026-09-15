@@ -1,0 +1,40 @@
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.range {
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* After docs/design-system.html's `.chip--year`: an outlined leather button. */
+.button {
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border: 1.5px solid var(--leather);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--leather-strong);
+  font-family: var(--font-label);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.button:hover:not([aria-disabled='true']) {
+  background: var(--leather);
+  color: var(--on-leather);
+}
+
+.button[aria-disabled='true'] {
+  border-color: var(--rule-strong);
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}

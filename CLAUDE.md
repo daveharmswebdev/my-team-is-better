@@ -92,16 +92,17 @@ each time, they see only their brief plus CLAUDE.md, the rules and the preloaded
 `spoke-protocol`, and only their final message comes back.
 
 Start **coarse, deliberately.** Split an owner only when a real seam appears with its own
-checked boundary, not preemptively. `packages/cfb-engine` earned four spokes because it
-has four independent modules behind `import-linter` contracts.
+checked boundary, not preemptively. `packages/cfb-engine` earned five spokes because it
+has five independent modules behind `import-linter` contracts.
 
 | Agent | Owns | Must not touch |
 |---|---|---|
 | `api-agent` | `apps/api/` | `apps/web/`, `packages/cfb-engine/`, `.github/`, branch protection |
 | `web-agent` | `apps/web/` | `apps/api/`, `packages/cfb-engine/`, `.github/`, branch protection |
-| `ingest-agent` | `cfb_strength/ingest/`, `data/raw/` | ratings/, evidence/, mcp_server/, contracts.py, db/ |
-| `ratings-agent` | `cfb_strength/ratings/` | ingest/, evidence/, mcp_server/, contracts.py, db/ |
-| `evidence-agent` | `cfb_strength/evidence/` | ingest/, ratings/, mcp_server/, contracts.py, db/ |
+| `ingest-agent` | `cfb_strength/ingest/`, `data/raw/` | ratings/, evidence/, players/, mcp_server/, contracts.py, db/ |
+| `ratings-agent` | `cfb_strength/ratings/` | ingest/, evidence/, players/, mcp_server/, contracts.py, db/ |
+| `evidence-agent` | `cfb_strength/evidence/` | ingest/, ratings/, players/, mcp_server/, contracts.py, db/ |
+| `players-agent` | `cfb_strength/players/` | ingest/, ratings/, evidence/, mcp_server/, contracts.py, db/ |
 | `mcp-agent` | `cfb_strength/mcp_server/` + its integration test | everything else |
 | `validator` | nothing (read-only) | everything — golden dataset + persona smoke eval |
 | `reviewer` | nothing (read-only) | everything — independent review of a diff and its seams |

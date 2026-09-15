@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { CreditsOut } from '../../lib/api/types'
+import { DATA_SOURCES } from '../../lib/playerFixtures'
 import { AboutPage } from './AboutPage'
 
 /**
@@ -34,18 +35,9 @@ const mockCredits: CreditsOut = {
       methods: ['elo', 'elo_career'],
     },
   ],
-  data_sources: [
-    {
-      name: 'CollegeFootballData.com (CFBD)',
-      url: 'https://collegefootballdata.com',
-      note: 'All game results are ingested from the CFBD API. This project performs no independent data collection and claims no ownership of the underlying game data.',
-    },
-    {
-      name: 'nflverse (Lee Sharpe)',
-      url: 'https://github.com/nflverse/nflverse-data',
-      note: 'NFL game results are ingested from nflverse, built on play-by-play data originated by Lee Sharpe.',
-    },
-  ],
+  // The live `/api/credits` data sources (issue #296 added `id` and the
+  // player-stats credit), so the story shows each source's own lead-in.
+  data_sources: DATA_SOURCES,
 }
 
 function installCreditsFetch(handler: () => Promise<Response>) {

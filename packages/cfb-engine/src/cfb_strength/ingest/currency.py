@@ -37,6 +37,18 @@ check that tells the two apart. It reports, per league:
      elo ratings predate them. `cfb rate --method elo` rewrites the ledger
      with the ratings. Never waivable for a season slice: a slice that stores
      elo ratings must store their ledger.
+  h. `season_missing_player_stats` -- a season with games, whose player-stats
+     file the league's committed raw cache holds (`PLAYER_STATS_CACHES`;
+     NFL: `nfl/stats_player_week_{year}.csv`, inside the nflverse ingest
+     window), but with no `player_season_stats` rows for that sport and
+     season (issue #296). The shape of a build that dropped or misordered
+     `cfb ingest-players`, or of a db built before it existed. A league with
+     no player-stats cache (CFB today) is never checked, and neither is a
+     season whose file isn't committed. Deliberately season-level: an
+     ingested season's per-game completeness and its agreement with official
+     totals are not this check's business (#289's accepted data limits).
+     Skipped while the league's cache is unrecognized or `--raw-dir` is
+     missing: those are already reported, and the cache can't be trusted.
 
 plus two problems about `--raw-dir` itself, because a check that silently
 skips is a false green:
@@ -102,6 +114,9 @@ from cfb_strength.ingest.client import cache_path as cfbd_games_cache_path
 from cfb_strength.ingest.client import teams_cache_path as cfbd_teams_cache_path
 from cfb_strength.ingest.nflverse import ingest_season as nflverse_ingest
 from cfb_strength.ingest.nflverse.client import games_cache_path as nflverse_games_cache_path
+from cfb_strength.ingest.nflverse.client import (
+    stats_player_week_cache_path as nflverse_stats_player_week_cache_path,
+)
 
 EXPECTED_SPORTS: tuple[Sport, ...] = get_args(Sport)
 EXPECTED_METHODS: tuple[Method, ...] = get_args(Method)
@@ -123,6 +138,7 @@ ProblemCode = Literal[
     "no_cfb_mascots",
     "cache_past_max_year",
     "season_missing_elo_ledger",
+    "season_missing_player_stats",
 ]
 
 Pair = tuple[int, str]
@@ -160,6 +176,11 @@ class LeagueReport:
     cache_max_year: int | None = None
     # Why `--raw-dir` doesn't look like this league's cache, when it doesn't.
     cache_unrecognized: str | None = None
+    # Seasons with at least one player_season_stats row for this sport.
+    player_stat_seasons: tuple[int, ...] = ()
+    # In-window seasons whose player-stats file the raw cache holds; always
+    # empty for a league without one (`PLAYER_STATS_CACHES`).
+    player_stats_cached_seasons: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -361,6 +382,33 @@ CACHED_SEASON_READERS: Mapping[Sport, Callable[[Path], CacheScan]] = {
 }
 
 
+@dataclass(frozen=True)
+class PlayerStatsCache:
+    """Where a league's committed raw cache keeps one season's player stats,
+    and the window its player ingest writes seasons for."""
+
+    path: Callable[[int, Path], Path]
+    min_year: int
+    max_year: int
+
+    def cached_seasons(self, raw_dir: Path) -> tuple[int, ...]:
+        return tuple(
+            year
+            for year in range(self.min_year, self.max_year + 1)
+            if self.path(year, raw_dir).is_file()
+        )
+
+
+# The leagues `cfb ingest-players` can fill from the committed cache (#296).
+# A league missing here has no player-stats check (h). tests/test_db_currency.py
+# pins the keys, and that they equal `cli.PLAYER_INGEST_ENTRY_POINTS`'.
+PLAYER_STATS_CACHES: Mapping[Sport, PlayerStatsCache] = {
+    "nfl": PlayerStatsCache(
+        nflverse_stats_player_week_cache_path, nflverse_ingest.MIN_YEAR, nflverse_ingest.MAX_YEAR
+    ),
+}
+
+
 # ---------------------------------------------------------------------------
 # schema: the db's actual shape vs. what ensure_schema would produce
 # ---------------------------------------------------------------------------
@@ -497,8 +545,22 @@ def _league_report(
             )
         )
 
+    # A db predating the player tables (#289) holds no player stats; (a)
+    # reports the schema gap, this reads it as the empty table the
+    # migration would leave.
+    player_stat_seasons: tuple[int, ...] = ()
+    if "player_season_stats" in actual.columns:
+        player_stat_seasons = tuple(
+            int(row[0])
+            for row in conn.execute(
+                "SELECT DISTINCT season FROM player_season_stats WHERE sport = ? ORDER BY season",
+                (sport,),
+            )
+        )
+
     scan: CacheScan | None = None
     unrecognized: str | None = None
+    player_stats_cached: tuple[int, ...] = ()
     if raw_dir.is_dir():
         reader = CACHED_SEASON_READERS.get(sport)
         if reader is None:
@@ -506,6 +568,9 @@ def _league_report(
         else:
             scan = reader(raw_dir)
             unrecognized = scan.unrecognized
+        player_cache = PLAYER_STATS_CACHES.get(sport)
+        if player_cache is not None:
+            player_stats_cached = player_cache.cached_seasons(raw_dir)
 
     return LeagueReport(
         sport=sport,
@@ -518,6 +583,8 @@ def _league_report(
         cache_finished_beyond_max_year=scan.finished_beyond_max_year if scan else (),
         cache_max_year=scan.max_year if scan else None,
         cache_unrecognized=unrecognized,
+        player_stat_seasons=player_stat_seasons,
+        player_stats_cached_seasons=player_stats_cached,
     )
 
 
@@ -552,6 +619,12 @@ def format_seasons(seasons: tuple[int, ...] | list[int]) -> str:
         start = prev = season
     runs.append((start, prev))
     return ", ".join(str(a) if a == b else f"{a}-{b}" for a, b in runs)
+
+
+def _years_arg(seasons: tuple[int, ...]) -> str:
+    """`(1999, 2013, 2014)` -> `"1999,2013-2014"`: one shell word that
+    `--years` parses back to exactly these seasons."""
+    return format_seasons(seasons).replace(", ", ",")
 
 
 def _pairs_of(by_type: Mapping[str, tuple[int, ...]]) -> set[Pair]:
@@ -680,6 +753,28 @@ def _find_problems(
                         f"them to write the ledger with the ratings "
                         f"(`cfb rate --sport {sport} --method {method} --years ...`)",
                         unledgered,
+                    )
+                )
+
+        # (h) Only against a cache this league's checks can trust: a missing
+        # or unrecognized --raw-dir is already its own problem above.
+        if raw_dir.is_dir() and league.cache_unrecognized is None:
+            cached_players = set(league.player_stats_cached_seasons)
+            with_players = set(league.player_stat_seasons)
+            without_players = tuple(
+                s for s in league.game_seasons if s in cached_players and s not in with_players
+            )
+            if without_players:
+                problems.append(
+                    Problem(
+                        "season_missing_player_stats",
+                        sport,
+                        f"{sport}: {len(without_players)} season(s) with games and a committed "
+                        f"player-stats cache have no player_season_stats rows: "
+                        f"{format_seasons(without_players)}; the player ingest never ran for "
+                        f"them (`cfb ingest-players --sport {sport} "
+                        f"--years {_years_arg(without_players)}`)",
+                        without_players,
                     )
                 )
 
@@ -832,6 +927,12 @@ def format_report(report: CurrencyReport) -> str:
             lines.append(f"  rated {method:<11} {format_seasons(seasons)}")
         for method, seasons in league.ledger_seasons.items():
             lines.append(f"  ledger {method:<10} {format_seasons(seasons)}")
+        if league.sport in PLAYER_STATS_CACHES:
+            lines.append(f"  players {'stats':<9} {format_seasons(league.player_stat_seasons)}")
+            if league.cache_unrecognized is None:
+                lines.append(
+                    f"  cache {'players':<11} {format_seasons(league.player_stats_cached_seasons)}"
+                )
         if league.sport == "cfb":
             aliases = report.cfb_aliases
             cache = "present" if aliases.teams_cache_present else "absent"
@@ -859,7 +960,8 @@ def main(argv: list[str] | None = None) -> int:
         description=(
             "Read-only check that a cfb-strength sqlite db's data is current: schema, "
             "every league ingested, no season/season-type batch behind the committed raw "
-            "cache, every method rated, every elo-rated season with its Elo ledger, at "
+            "cache, every method rated, every elo-rated season with its Elo ledger, every "
+            "season with a committed player-stats cache holding player stats, at "
             "least one CFB mascot, no finished season past an ingest's MAX_YEAR. Exits 0 "
             "only when it is."
         ),

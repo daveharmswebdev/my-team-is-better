@@ -45,7 +45,9 @@ from cfb_strength.contracts import Method, Sport
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest import currency
 from cfb_strength.ingest import ingest_season as cfbd_ingest
+from cfb_strength.ingest.nflverse import client as nflverse_client
 from cfb_strength.ingest.nflverse import ingest_season as nflverse_ingest
+from cfb_strength.ingest.nflverse.ingest_players import ingest_players
 from cfb_strength.ratings.compute_ratings import compute_and_store
 
 SPORTS: tuple[str, ...] = get_args(Sport)
@@ -55,6 +57,21 @@ METHODS: tuple[str, ...] = get_args(Method)
 # doctor's own list stops matching the contract's note (`TeamCase.elo_ledger`).
 LEDGER_METHODS: tuple[str, ...] = ("elo",)
 LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
+# The leagues whose committed raw cache holds per-season player stats (#296),
+# and each one's file for a season, as `cfb ingest-players` reads it. Written
+# out rather than imported, like LEDGER_METHODS: a league quietly gaining or
+# losing the player-stats check must fail here.
+PLAYER_STATS_CACHE_FILES: dict[str, str] = {"nfl": "nfl/stats_player_week_{year}.csv"}
+PLAYER_TABLES: tuple[str, ...] = (
+    "player_game_feats",
+    "player_season_stats",
+    "player_game_stats",
+    "game_starters",
+    "player_source_ids",
+    "players",
+)
+# Only the real-ingest test reads it; everything else stays in tmp_path.
+COMMITTED_RAW_DIR = Path(__file__).resolve().parents[1] / "data" / "raw"
 
 # Seasons each league's fixture db holds games (both season types) and every
 # method's ratings for, and that its fake raw cache holds. Deliberately in
@@ -153,9 +170,30 @@ def _build_current_db(path: Path) -> Path:
                         """,
                         (season, method, sport, team_id, opponent_id, venue, result),
                     )
+            # A league with a player-stats cache has player stats for each
+            # season it has games for (#296).
+            if sport in PLAYER_STATS_CACHE_FILES:
+                _insert_player_stats(conn, sport, season)
     conn.commit()
     conn.close()
     return path
+
+
+def _insert_player_stats(conn: sqlite3.Connection, sport: str, season: int) -> None:
+    """One player and his regular-season row, shaped like what
+    `cfb ingest-players` writes."""
+    home, _ = _team_ids(sport)
+    player_id = home + 100
+    conn.execute(
+        "INSERT OR IGNORE INTO players (id, sport, display_name, position) VALUES (?, ?, ?, 'QB')",
+        (player_id, sport, f"{sport} Passer"),
+    )
+    conn.execute(
+        "INSERT INTO player_season_stats (player_id, season, season_type, team_id, games, "
+        "source, sport, completions, attempts, passing_yards) "
+        "VALUES (?, ?, 'regular', ?, 1, 'nflverse', ?, 20, 30, 250)",
+        (player_id, season, home, sport),
+    )
 
 
 _ONE_GAME_JSON = '[{"id": 1}]'
@@ -234,7 +272,25 @@ def _build_raw_dir(
     raw_dir.mkdir()
     for sport, seasons in SEASONS.items():
         CACHE_WRITERS[sport](raw_dir, _pairs(*seasons) + (extra or {}).get(sport, []))
+        # Player-stats files only for the fixture's own seasons, never for
+        # `extra`: those seasons are about games, and have none in the db.
+        if sport in PLAYER_STATS_CACHE_FILES:
+            for season in seasons:
+                _write_player_stats_cache(raw_dir, sport, season)
     return raw_dir
+
+
+def _player_stats_cache_file(raw_dir: Path, sport: str, season: int) -> Path:
+    return raw_dir / PLAYER_STATS_CACHE_FILES[sport].format(year=season)
+
+
+def _write_player_stats_cache(raw_dir: Path, sport: str, season: int) -> None:
+    path = _player_stats_cache_file(raw_dir, sport, season)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "player_id,player_display_name,position,season,week,season_type,game_id,attempts\n"
+        f"00-0000001,{sport} Passer,QB,{season},1,REG,{season}_01_BUF_NE,30\n"
+    )
 
 
 def _problems(report: currency.CurrencyReport) -> set[tuple[str, str | None]]:
@@ -668,6 +724,8 @@ def test_a_missing_middle_season_is_flagged(tmp_path: Path, current_db: Path, sp
             f"UPDATE {table} SET year = {EXTRA_SEASON} WHERE sport = '{sport}' AND year = {middle}"
             for table in LEDGER_TABLES
         ),
+        f"UPDATE player_season_stats SET season = {EXTRA_SEASON} "
+        f"WHERE sport = '{sport}' AND season = {middle}",
     )
 
     problem = _behind(currency.check_currency(current_db, raw_dir), sport)
@@ -968,6 +1026,243 @@ def test_a_real_elo_run_on_the_regression_fixture_writes_the_ledger_the_doctor_r
     assert len(ledger) == 1
     assert ledger[0].sport == "cfb"
     assert ledger[0].seasons == (2005,)
+
+
+# ---------------------------------------------------------------------------
+# (h) a season with games and a committed player-stats cache file, but no
+#     player_season_stats rows (issue #296)
+# ---------------------------------------------------------------------------
+
+PLAYER_STATS_CODE = "season_missing_player_stats"
+_INGEST_PLAYERS = "`cfb ingest-players --sport {sport} --years "
+
+
+def _league(report: currency.CurrencyReport, sport: str) -> currency.LeagueReport:
+    return next(league for league in report.leagues if league.sport == sport)
+
+
+def _drop_player_stats(db: Path, sport: str, seasons: tuple[int, ...]) -> None:
+    years = ", ".join(str(season) for season in seasons)
+    _mutate(db, f"DELETE FROM player_season_stats WHERE sport = '{sport}' AND season IN ({years})")
+
+
+def _years_in_command(problem: currency.Problem) -> list[int]:
+    """The seasons the problem's own fix command would ingest, parsed the
+    way `cfb ingest-players` parses `--years`."""
+    prefix = _INGEST_PLAYERS.format(sport=problem.sport)
+    assert prefix in problem.message, problem.message
+    years = problem.message.split(prefix, 1)[1].split("`", 1)[0]
+    return nflverse_ingest.parse_years(years)
+
+
+def test_player_stats_leagues_match_the_committed_cache_layout() -> None:
+    assert tuple(currency.PLAYER_STATS_CACHES) == tuple(PLAYER_STATS_CACHE_FILES)
+    assert set(currency.PLAYER_STATS_CACHES) <= set(SPORTS)
+    # The problem's fix command must exist for every league it can name.
+    assert set(currency.PLAYER_STATS_CACHES) == set(cli.PLAYER_INGEST_ENTRY_POINTS)
+
+
+def test_player_stat_seasons_are_read_per_league(
+    current_db: Path, raw_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    for sport in SPORTS:
+        league = _league(report, sport)
+        expected = SEASONS[sport] if sport in PLAYER_STATS_CACHE_FILES else ()
+        assert league.player_stat_seasons == expected, sport
+        assert league.player_stats_cached_seasons == expected, sport
+
+    assert _run(current_db, raw_dir) == 0
+    out = capsys.readouterr().out
+    assert "players" in out
+    assert OK_LINE in out
+
+
+@pytest.mark.parametrize("which", ["first", "last", "both"])
+def test_seasons_with_a_player_cache_but_no_player_stats_are_reported(
+    current_db: Path, raw_dir: Path, which: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The render.yaml build that drops or misorders `cfb ingest-players`, or
+    # a db built before #296: games and a committed cache, no player rows.
+    first, last = SEASONS["nfl"]
+    missing = {"first": (first,), "last": (last,), "both": (first, last)}[which]
+    _drop_player_stats(current_db, "nfl", missing)
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {(PLAYER_STATS_CODE, "nfl")}
+    (problem,) = report.problems
+    assert problem.seasons == missing
+    assert currency.format_seasons(missing) in problem.message
+    assert _years_in_command(problem) == list(missing)
+    for kept in set(SEASONS["nfl"]) - set(missing):
+        assert str(kept) not in problem.message
+    assert _run(current_db, raw_dir) == 1
+    out = capsys.readouterr().out
+    assert problem.message in out
+    assert OK_LINE not in out
+
+
+def test_the_same_db_with_its_player_stats_is_current(current_db: Path, raw_dir: Path) -> None:
+    season = SEASONS["nfl"][-1]
+    _drop_player_stats(current_db, "nfl", (season,))
+    assert _problems(currency.check_currency(current_db, raw_dir)) == {(PLAYER_STATS_CODE, "nfl")}
+
+    conn = sqlite3.connect(current_db)
+    _insert_player_stats(conn, "nfl", season)
+    conn.commit()
+    conn.close()
+
+    assert currency.check_currency(current_db, raw_dir).problems == ()
+    assert _run(current_db, raw_dir) == 0
+
+
+def test_a_season_without_a_committed_player_cache_file_is_not_reported(
+    current_db: Path, raw_dir: Path
+) -> None:
+    # `cfb ingest-players` could not write that season from the committed
+    # cache, so a db without its player stats is not behind anything.
+    kept, uncached = SEASONS["nfl"]
+    _player_stats_cache_file(raw_dir, "nfl", uncached).unlink()
+    _drop_player_stats(current_db, "nfl", (uncached,))
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    assert _league(report, "nfl").player_stats_cached_seasons == (kept,)
+    assert _run(current_db, raw_dir) == 0
+
+
+def test_player_cache_files_outside_the_ingest_window_are_not_counted(
+    current_db: Path, raw_dir: Path
+) -> None:
+    min_year, max_year = WINDOWS["nfl"]
+    for season in (min_year - 1, min_year, max_year, max_year + 1):
+        _write_player_stats_cache(raw_dir, "nfl", season)
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert report.problems == ()
+    assert _league(report, "nfl").player_stats_cached_seasons == (
+        min_year,
+        *SEASONS["nfl"],
+        max_year,
+    )
+
+
+def test_cfb_never_reports_missing_player_stats(current_db: Path, raw_dir: Path) -> None:
+    # CFB seasons have games and no player rows at all, and the raw dir holds
+    # a player-stats file for each of those years (nfl's). Only the league
+    # whose cache it is may be reported.
+    assert set(SEASONS["cfb"]) <= set(SEASONS["nfl"])
+    _mutate(current_db, "DELETE FROM player_season_stats")
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {(PLAYER_STATS_CODE, "nfl")}
+    assert report.problems[0].seasons == SEASONS["nfl"]
+    cfb = _league(report, "cfb")
+    assert cfb.player_stats_cached_seasons == ()
+    assert cfb.player_stat_seasons == ()
+
+
+def test_another_leagues_player_stats_do_not_count(current_db: Path, raw_dir: Path) -> None:
+    season = SEASONS["nfl"][-1]
+    assert season in SEASONS["cfb"]
+    _drop_player_stats(current_db, "nfl", (season,))
+    conn = sqlite3.connect(current_db)
+    _insert_player_stats(conn, "cfb", season)
+    conn.commit()
+    conn.close()
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {(PLAYER_STATS_CODE, "nfl")}
+    assert report.problems[0].seasons == (season,)
+    assert _league(report, "cfb").player_stat_seasons == (season,)
+    assert _league(report, "nfl").player_stat_seasons == SEASONS["nfl"][:-1]
+
+
+def test_a_missing_raw_dir_does_not_also_report_missing_player_stats(
+    tmp_path: Path, current_db: Path
+) -> None:
+    _drop_player_stats(current_db, "nfl", SEASONS["nfl"])
+
+    report = currency.check_currency(current_db, tmp_path / "no-such-raw-dir")
+
+    assert _problems(report) == {("raw_cache_missing", None)}
+
+
+def test_an_unrecognized_nfl_cache_does_not_also_report_missing_player_stats(
+    current_db: Path, raw_dir: Path
+) -> None:
+    # The player-stats files are still there; the games cache beside them
+    # isn't, so the dir is not a cache this league's checks can trust.
+    _drop_player_stats(current_db, "nfl", SEASONS["nfl"])
+    (raw_dir / "nfl" / "games.csv").unlink()
+    assert all(_player_stats_cache_file(raw_dir, "nfl", s).is_file() for s in SEASONS["nfl"])
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("raw_cache_unrecognized", "nfl")}
+
+
+def test_a_db_whose_schema_predates_the_player_tables_is_reported_not_crashed(
+    current_db: Path, raw_dir: Path
+) -> None:
+    # A pre-#289 db before `ensure_schema` ever ran on it. Reported (a), and
+    # read as the empty player tables the migration would leave.
+    _mutate(current_db, *(f"DROP TABLE {table}" for table in PLAYER_TABLES))
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("schema_not_current", None), (PLAYER_STATS_CODE, "nfl")}
+    assert "player_season_stats" in report.missing_schema
+    assert _league(report, "nfl").player_stat_seasons == ()
+    assert _run(current_db, raw_dir) == 1
+
+
+def test_a_real_player_ingest_on_the_nfl_regression_fixture_is_what_the_doctor_reads(
+    nfl_regression_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The synthetic rows above are only as good as their resemblance to
+    what `cfb ingest-players` stores, and the fake player cache only as good
+    as its resemblance to the committed one: check the doctor against the
+    committed cache and a real ingest of one season."""
+
+    def refuse_live_fetch(url: str) -> str:
+        raise AssertionError(f"live fetch attempted: {url}")
+
+    monkeypatch.setattr(nflverse_client, "_fetch_csv_live", refuse_live_fetch)
+    # A no-op on today's fixture, which stores no player stats; keeps this
+    # test meaningful if the fixture ever does.
+    _mutate(nfl_regression_db, "DELETE FROM player_season_stats WHERE sport = 'nfl'")
+
+    report = currency.check_currency(nfl_regression_db, COMMITTED_RAW_DIR)
+    nfl = _league(report, "nfl")
+    seasons = nfl.game_seasons
+    assert len(seasons) >= 3
+    assert set(seasons) <= set(nfl.player_stats_cached_seasons)
+    (missing,) = [p for p in report.problems if p.code == PLAYER_STATS_CODE]
+    assert missing.sport == "nfl"
+    assert missing.seasons == seasons
+
+    ingested = seasons[1]
+    conn = get_conn(nfl_regression_db)
+    try:
+        ingest_players(conn, [ingested], raw_dir=COMMITTED_RAW_DIR)
+    finally:
+        conn.close()
+
+    report = currency.check_currency(nfl_regression_db, COMMITTED_RAW_DIR)
+    assert _league(report, "nfl").player_stat_seasons == (ingested,)
+    (missing,) = [p for p in report.problems if p.code == PLAYER_STATS_CODE]
+    rest = tuple(s for s in seasons if s != ingested)
+    assert missing.seasons == rest
+    # Not contiguous, so the fix command must list them the way --years parses.
+    assert _years_in_command(missing) == list(rest)
 
 
 # ---------------------------------------------------------------------------

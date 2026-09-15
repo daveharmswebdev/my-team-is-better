@@ -65,6 +65,7 @@ def test_credits_endpoint_returns_real_attribution_data(client: TestClient) -> N
         ],
         "data_sources": [
             {
+                "id": data_source.id,
                 "name": data_source.name,
                 "url": data_source.url,
                 "note": data_source.note,
@@ -72,6 +73,28 @@ def test_credits_endpoint_returns_real_attribution_data(client: TestClient) -> N
             for data_source in credits.data_sources
         ],
     }
+
+
+def test_credits_endpoint_publishes_each_data_source_id_in_order(client: TestClient) -> None:
+    """Issue #296: a page showing one source's data (the player pages show
+    nflverse player stats) picks that source's credit by `id`, never by a
+    display name that could be reworded. Pinned literally, in
+    `get_credits()`'s order, so a renamed or dropped id fails here."""
+    response = client.get("/api/credits")
+
+    assert response.status_code == 200
+    ids = [entry["id"] for entry in response.json()["data_sources"]]
+    assert ids == ["cfbd", "nflverse_games", "nflverse_player_stats"]
+    assert ids == [data_source.id for data_source in get_credits().data_sources]
+
+
+def test_openapi_publishes_data_source_id_as_required() -> None:
+    from api.main import app
+
+    schema = app.openapi()["components"]["schemas"]["DataSourceCreditOut"]
+
+    assert "id" in schema["required"], schema.get("required")
+    assert schema["properties"]["id"]["type"] == "string"
 
 
 def test_credits_endpoint_lists_both_keener_and_elo_in_order(client: TestClient) -> None:

@@ -114,6 +114,7 @@ import pytest
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     SameTeamComparisonError,
+    UnknownPlayerError,
     UnknownTeamError,
     UnknownYearError,
 )
@@ -137,10 +138,11 @@ UNKNOWN_TEAM = "UnknownTeamErrorResponse"
 AMBIGUOUS_TEAM = "AmbiguousTeamErrorResponse"
 SAME_TEAM = "SameTeamComparisonErrorResponse"
 MISSING_CHAMPION = "MissingChampionErrorResponse"
+UNKNOWN_PLAYER = "UnknownPlayerErrorResponse"
 HTTP_VALIDATION = "HTTPValidationError"
 
 # Every component that describes one of today's engine errors, envelope or
-# bare body. Used only by the by-name pin on today's verdict routes (check 2).
+# bare body. Used only by the by-name pins on today's routes (check 2).
 ENGINE_ERROR_COMPONENTS = frozenset(
     {
         UNKNOWN_YEAR,
@@ -148,11 +150,13 @@ ENGINE_ERROR_COMPONENTS = frozenset(
         AMBIGUOUS_TEAM,
         SAME_TEAM,
         MISSING_CHAMPION,
+        UNKNOWN_PLAYER,
         "UnknownYearErrorBody",
         "UnknownTeamErrorBody",
         "AmbiguousTeamErrorBody",
         "SameTeamComparisonErrorBody",
         "MissingChampionErrorBody",
+        "UnknownPlayerErrorBody",
     }
 )
 
@@ -193,6 +197,10 @@ KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
     ("/api/years", "get"): frozenset(),
     ("/api/teams", "get"): frozenset(),
     ("/api/credits", "get"): frozenset(),
+    # Issue #296. Leaders raises only ValueError for a bad limit/offset,
+    # which FastAPI's own bounds reject first (a 422, never reaching it).
+    ("/api/players/leaders", "get"): frozenset(),
+    ("/api/players/{player_id}", "get"): frozenset({UnknownPlayerError}),
     ("/health", "get"): frozenset(),
 }
 
@@ -225,6 +233,9 @@ EXAMPLE_EXCEPTIONS: dict[type[BaseException], BaseException] = {
     # must. tests/test_verdict_champion_missing.py triggers it for real on a
     # mutated copy and validates the body against the advertised schema.
     MissingChampionError: MissingChampionError(2004, "keener", "cfb"),
+    # Issue #296: GET /api/players/{player_id}. Triggered for real in
+    # test_player_errors_validate_against_advertised_schema below.
+    UnknownPlayerError: UnknownPlayerError(1, "nfl"),
 }
 
 # Only code in these top-level packages is followed by the derivation.
@@ -785,3 +796,63 @@ def test_validation_error_stand_ins_publish_fastapis_own_schema() -> None:
     schemas = openapi["components"]["schemas"]
     assert schemas.get(HTTP_VALIDATION) == validation_error_response_definition
     assert schemas.get("ValidationError") == validation_error_definition
+
+
+# ---------------------------------------------------------------------------
+# 5. the player routes (issue #296): GET, so outside RUNTIME_CASES' POSTs
+# ---------------------------------------------------------------------------
+
+PLAYER_CAREER_ROUTE = ("/api/players/{player_id}", "get")
+
+
+def test_player_career_route_advertises_exactly_the_unknown_player_404() -> None:
+    openapi = _openapi()
+    responses = openapi["paths"][PLAYER_CAREER_ROUTE[0]][PLAYER_CAREER_ROUTE[1]]["responses"]
+
+    assert _union_members(_json_schema(responses["404"])) == [UNKNOWN_PLAYER]
+    for status in sorted(s for s in responses if not s.startswith("2") and s != "404"):
+        leaked = _all_refs(responses[status]) & ENGINE_ERROR_COMPONENTS
+        assert not leaked, (
+            f"GET {PLAYER_CAREER_ROUTE[0]} {status} references engine errors: {leaked}"
+        )
+
+
+PLAYER_RUNTIME_CASES: list[tuple[str, str, dict[str, str | int], int, str | None]] = [
+    ("/api/players/1", PLAYER_CAREER_ROUTE[0], {}, 404, "unknown_player"),
+    # A request-validation 422 raised by the route's own sport dependency
+    # must still match the default 422 schema FastAPI advertises.
+    ("/api/players/2044124519", PLAYER_CAREER_ROUTE[0], {"sport": "cfb"}, 422, None),
+    ("/api/players/leaders", "/api/players/leaders", {"sport": "cfb"}, 422, None),
+    ("/api/players/leaders", "/api/players/leaders", {"limit": 101}, 422, None),
+]
+
+
+@pytest.mark.parametrize(
+    "url,path,params,status,error",
+    PLAYER_RUNTIME_CASES,
+    ids=[f"{u}-{s}-{e or 'request_validation'}-{p}" for u, _, p, s, e in PLAYER_RUNTIME_CASES],
+)
+def test_player_errors_validate_against_advertised_schema(
+    client: TestClient,
+    url: str,
+    path: str,
+    params: dict[str, str | int],
+    status: int,
+    error: str | None,
+) -> None:
+    response = client.get(url, params=params)
+
+    assert response.status_code == status, response.text
+    body = response.json()
+    if error is None:
+        assert isinstance(body["detail"], list) and body["detail"], body
+    else:
+        assert body["detail"]["error"] == error, body
+
+    openapi = _openapi()
+    schema = _advertised_schema(openapi, path, "get", str(status))
+    errors = sorted(_validator(openapi, schema).iter_errors(body), key=str)
+    assert not errors, (
+        f"GET {path} {status}: the real response does not match the advertised schema\n"
+        f"body: {body}\nschema: {schema}\nerrors: {[e.message for e in errors]}"
+    )

@@ -67,6 +67,14 @@ REQUIRED_LOCATIONS: dict[str, tuple[str, ...]] = {
         "#/components/schemas/UnknownTeamErrorBody/properties/sport",
         "GET /api/years query parameter 'sport'",
         "GET /api/teams query parameter 'sport'",
+        # Issue #296: the player read layer. Its routes accept only the
+        # leagues with player stats at runtime (a 422 otherwise), but the
+        # published enum is still the contract's whole `Sport`.
+        "GET /api/players/leaders query parameter 'sport'",
+        "GET /api/players/{player_id} query parameter 'sport'",
+        "#/components/schemas/PlayerLeadersOut/properties/sport",
+        "#/components/schemas/PlayerCareerOut/properties/sport",
+        "#/components/schemas/UnknownPlayerErrorBody/properties/sport",
     ),
     "method": (
         *(f"#/components/schemas/{model}/properties/method" for model in _VERDICT_REQUESTS),

@@ -66,6 +66,12 @@ services:
     # `ingest` legs, because `elo_career --sport nfl` loads `season <= ?`
     # across the full history rather than a single season.
     #
+    # `ingest-players --sport nfl` (issue #296) must follow the NFL games
+    # ingest: it joins stat lines and listed starters to the `games` rows
+    # that leg writes, and raises on a season with none. Cache-first from the
+    # projected nflverse files committed under data/raw/nfl/, so no live
+    # fetch (measured locally: the NFL games plus players legs take ~2s).
+    #
     # `cfb doctor` runs last (issue #159): it exits non-zero when the db it
     # just built is behind the committed raw cache, a league has no games,
     # a season is unrated under a registered method, or no CFB team has a
@@ -80,6 +86,7 @@ services:
       uv sync --frozen --no-dev &&
       uv run cfb ingest --years 1998-2025 &&
       uv run cfb ingest --sport nfl --years 1999-2025 &&
+      uv run cfb ingest-players --sport nfl --years 1999-2025 &&
       uv run cfb rate --years 1998-2025 &&
       uv run cfb rate --years 1998-2025 --method elo &&
       uv run cfb rate --years 1998-2025 --method elo_career &&

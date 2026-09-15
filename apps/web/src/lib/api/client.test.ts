@@ -5,16 +5,26 @@ import {
   NETWORK_ERROR_COPY,
   SERVER_ERROR_COPY,
   VERDICT_TIMEOUT_MS,
+  PlayerApiError,
   VerdictApiError,
   VerdictHttpError,
   VerdictNetworkError,
   fetchChampion,
   fetchCompare,
   fetchCredits,
+  fetchPlayerCareer,
+  fetchPlayerLeaders,
   fetchTeamCase,
   fetchTeams,
   fetchYears,
 } from './client'
+
+const LEADERS_QUERY = {
+  season_type: 'regular',
+  sort: 'passing_yards',
+  limit: 50,
+  offset: 0,
+} as const
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -373,6 +383,8 @@ describe('unmapped HTTP errors (issue #215)', () => {
     ['fetchCredits', () => fetchCredits()],
     ['fetchYears', () => fetchYears()],
     ['fetchTeams', () => fetchTeams()],
+    ['fetchPlayerLeaders', () => fetchPlayerLeaders(LEADERS_QUERY)],
+    ['fetchPlayerCareer', () => fetchPlayerCareer(2044124519)],
   ])(
     '%s rejects a 500 with a VerdictHttpError and the 5xx copy',
     async (_name, send) => {
@@ -523,6 +535,8 @@ describe('GET request timeout (issue #237)', () => {
     ['fetchCredits', () => fetchCredits()],
     ['fetchYears', () => fetchYears('nfl', 'elo')],
     ['fetchTeams', () => fetchTeams('cfb', 'keener', 2005)],
+    ['fetchPlayerLeaders', () => fetchPlayerLeaders(LEADERS_QUERY)],
+    ['fetchPlayerCareer', () => fetchPlayerCareer(2044124519)],
   ] as const
 
   it('is shorter than the verdict timeout', () => {
@@ -688,6 +702,157 @@ describe('fetchCredits', () => {
 
     await expect(fetchCredits()).rejects.toBeInstanceOf(VerdictHttpError)
   })
+})
+
+/** Issue #296: the NFL player read layer. */
+describe('fetchPlayerLeaders', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  const leaders = {
+    sport: 'nfl',
+    season_type: 'postseason',
+    sort: 'wins',
+    limit: 50,
+    offset: 100,
+    total: 30,
+    rows: [],
+  }
+
+  it('GETs /api/players/leaders with sport=nfl and exactly the query it was given, in that order', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, leaders))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchPlayerLeaders({
+      season_type: 'postseason',
+      sort: 'wins',
+      limit: 50,
+      offset: 100,
+    })
+
+    expect(result).toEqual(leaders)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const parsed = new URL(url)
+    expect(parsed.pathname).toBe('/api/players/leaders')
+    expect([...parsed.searchParams.entries()]).toEqual([
+      ['sport', 'nfl'],
+      ['season_type', 'postseason'],
+      ['sort', 'wins'],
+      ['limit', '50'],
+      ['offset', '100'],
+    ])
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('throws a VerdictNetworkError with the network copy when fetch itself rejects', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+    )
+
+    await expect(fetchPlayerLeaders(LEADERS_QUERY)).rejects.toThrow(
+      NETWORK_ERROR_COPY,
+    )
+  })
+
+  it('maps a request-validation 422 to the 4xx copy', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse(422, { detail: [{ loc: ['query', 'limit'] }] }),
+        ),
+    )
+
+    const error = await fetchPlayerLeaders(LEADERS_QUERY).catch(
+      (caught: unknown) => caught,
+    )
+
+    expect(error).toBeInstanceOf(VerdictHttpError)
+    expect((error as VerdictHttpError).message).toBe(CLIENT_ERROR_COPY)
+  })
+})
+
+describe('fetchPlayerCareer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('GETs /api/players/{id} with sport=nfl and nothing else', async () => {
+    const career = {
+      sport: 'nfl',
+      player_id: 2044124519,
+      display_name: 'Kurt Warner',
+      position: 'QB',
+      seasons: [],
+      regular_season: null,
+      postseason: null,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, career))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchPlayerCareer(2044124519)
+
+    expect(result).toEqual(career)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const parsed = new URL(url)
+    expect(parsed.pathname).toBe('/api/players/2044124519')
+    expect([...parsed.searchParams.entries()]).toEqual([['sport', 'nfl']])
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('throws a PlayerApiError carrying the typed body for a 404 unknown_player', async () => {
+    const detail = { error: 'unknown_player', player_id: 1, sport: 'nfl' }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
+    )
+
+    const error = await fetchPlayerCareer(1).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(PlayerApiError)
+    expect(error).not.toBeInstanceOf(VerdictHttpError)
+    expect(error).toMatchObject({ status: 404, body: detail })
+  })
+
+  it.each([
+    [
+      'a verdict error body',
+      { error: 'unknown_team', query: 'x', year: 1, sport: 'nfl' },
+    ],
+    [
+      'an unknown_player body with a non-numeric id',
+      { error: 'unknown_player', player_id: '1', sport: 'nfl' },
+    ],
+    [
+      'an unknown_player body with an unpublished sport',
+      { error: 'unknown_player', player_id: 1, sport: 'nba' },
+    ],
+    ['a plain string detail', 'Not Found'],
+  ])(
+    'treats a 404 with %s as an unmapped HTTP error with the 4xx copy',
+    async (_name, detail) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
+      )
+
+      const error = await fetchPlayerCareer(1).catch(
+        (caught: unknown) => caught,
+      )
+
+      expect(error).toBeInstanceOf(VerdictHttpError)
+      expect(error).not.toBeInstanceOf(PlayerApiError)
+      expect((error as VerdictHttpError).message).toBe(CLIENT_ERROR_COPY)
+    },
+  )
 })
 
 describe('fetchYears', () => {

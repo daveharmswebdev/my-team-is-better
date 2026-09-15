@@ -9,13 +9,16 @@ running it directly, from the repo root:
 
 `--source`, `--output` and `--raw-dir` override the three paths below (for a
 scratch build or a sabotage check); the defaults are the committed files.
+The NFL slice is always ingested from the committed cache, whatever
+`--raw-dir` says (see "The NFL player slice" below).
 
 This is the *only* place in `apps/api/` that imports `cfb_strength.ratings`
 (`compute_and_store`) or `cfb_strength.ingest` (`currency.check_currency`,
-the `cfb doctor` check) -- everything else in this app (route code and the
-actual pytest suite) only ever opens the pre-baked output db this script
-produces, via `get_conn`, which keeps the "no ratings/ingest import in
-app/test runtime" rule intact for every file pytest actually collects.
+the `cfb doctor` check, and the nflverse games and player ingests) --
+everything else in this app (route code and the actual pytest suite) only
+ever opens the pre-baked output db this script produces, via `get_conn`,
+which keeps the "no ratings/ingest import in app/test runtime" rule intact
+for every file pytest actually collects.
 
 That exception is sanctioned, and it is *structural* rather than suppressed:
 `apps/api/.importlinter` (issue #54) forbids `api -> cfb_strength.ratings`
@@ -42,6 +45,29 @@ through the HTTP layer, including the 2005 Texas-over-USC golden-dataset case
 and all seven years' champions (`tests/test_verdict_golden_years.py`, the
 ground issue #109's persona smoke eval stands on).
 
+The NFL player slice (issue #296)
+---------------------------------
+It also ingests a small real NFL slice, `NFL_YEARS` = 1999 and 2023, so the
+player endpoints (`/api/players/leaders`, `/api/players/{player_id}`) are
+exercised on real data by pytest and by the Playwright e2e run, which boots
+the API on this same file. The two seasons are chosen for what they cover:
+1999 has Kurt Warner's 1999_01_BAL_STL, a completed game with no player stat
+lines at all (`games_without_stat_lines`); 2023 is a modern season with
+playoffs. The slice goes through the real cache-first ingest in the order
+render.yaml runs it -- the nflverse games ingest (`cfb ingest --sport nfl`),
+then the player ingest (`cfb ingest-players --sport nfl`) -- by calling those
+two entry points' `main` with `--db-path` pointed at the build. Both read
+`config.RAW_DIR`, so the build refuses to run unless that is the committed
+cache, and every live nflverse fetch is replaced by a function that raises
+for the duration.
+
+No NFL ratings are stored (`NFL_RATED_METHODS` is empty): nothing the player
+endpoints read needs them, and rating two non-contiguous NFL seasons would
+have the same `elo_career` problem as the CFB seasons below. So `/api/years`
+and the verdict routes still answer `sport=nfl` exactly as before (no rated
+years), while `/api/teams?sport=nfl` without a year now lists the teams those
+two seasons' games name.
+
 Because the source is current-schema, `ensure_schema` must be a no-op on it.
 The build runs it with `StaleDatabaseWarning` raised as an error. If that
 warning fires, the engine fixture is stale and must be rebuilt first. It is a
@@ -55,16 +81,25 @@ season slice, so it can never pass the doctor outright. Exactly the findings
 `.claude/agents/validator.md` waives for a slice are allowed, and each only
 for the reason the slice gives:
 
-- `season_behind_cache`: only for seasons the fixture omits. NFL counts too,
-  since this fixture carries no NFL at all.
-- `season_missing_ratings`: on the source, every method for exactly the seven
-  seasons (the source stores no ratings); on the output, only the methods
-  deliberately not baked (`elo_career`, below).
-- `league_has_no_games`: only for NFL.
+- `season_behind_cache`: only for seasons the fixture omits, per league --
+  CFB seasons outside `YEARS`, NFL seasons outside `NFL_YEARS` (on the
+  source, which carries no NFL yet, every NFL season).
+- `season_missing_ratings`: for CFB, on the source every method for exactly
+  the seven seasons (the source stores no ratings), on the output only the
+  methods deliberately not baked (`elo_career`, below). For NFL, only on the
+  output, for exactly `NFL_YEARS`, and only because `NFL_RATED_METHODS` is
+  empty.
+- `league_has_no_games`: only for NFL, and only on the source.
 
+On top of the findings, the per-league report must show exactly the slice:
+CFB game seasons `YEARS`, NFL game seasons `NFL_YEARS` (none on the source),
+the rated seasons each method is expected to have, and player stats for
+exactly `NFL_YEARS` in NFL and none in CFB. `season_missing_player_stats` is
+never waived: the NFL slice must carry player stats for both its seasons.
 Anything else fails the build: `schema_not_current`, `no_cfb_mascots` (a
 source built without the #77 alias enrichment -- the old pre-#110 fixture had
-none), `raw_cache_*` and `cache_past_max_year`.
+none), `raw_cache_*`, `cache_past_max_year`, `season_missing_elo_ledger` and
+`season_missing_player_stats`.
 
 What that bracket does NOT check: it compares (season, season_type) *pairs*
 against the cache, never individual games. A source missing some games inside
@@ -75,7 +110,8 @@ record for each golden year), and it catches a missing game only when the
 game moves a #1 or that #1's record. A missing game that changes neither
 passes the whole build. Completeness of the games inside a season is the
 engine fixture generator's job (`build_regression_fixtures.py` ingests every
-cached game), not something this script verifies.
+cached game), not something this script verifies. For the NFL slice the
+ingest reads every cached game of both seasons itself.
 
 Two methods are baked, `keener` and `elo`, for each of the seven years. Elo
 was added when `method` became a validated Literal: `elo` is a shipped,
@@ -101,12 +137,15 @@ steps, a config row, and a final `rating_after` equal to its rating -- so a
 fixture whose ledger writer skipped a team, or whose chain drifted from the
 rating, never gets committed for the API tests to trust.
 
-Determinism: `compute_and_store` stamps `computed_at` with the wall clock,
-the only run-dependent value it writes, in every table in `STAMPED_TABLES`.
-The build overwrites it with `FIXTURE_COMPUTED_AT` and VACUUMs, so rerunning
-on an unchanged source and engine produces a byte-identical file (with the
-same SQLite build). Nothing
-in `apps/api` or `apps/web` reads `computed_at`.
+Determinism: `compute_and_store` stamps `computed_at` with the wall clock in
+every table it writes, and the nflverse games ingest stamps
+`ingestion_log.fetched_at` the same way. Those are the only run-dependent
+values the build writes (the player ingest mints ids from the source's own
+ids), listed in `STAMPED_COLUMNS`. The build overwrites each with
+`FIXTURE_COMPUTED_AT` -- the same placeholder the engine fixture already
+carries in `fetched_at` -- and VACUUMs, so rerunning on an unchanged source,
+cache and engine produces a byte-identical file (with the same SQLite build).
+Nothing in `apps/api` or `apps/web` reads either column.
 """
 
 from __future__ import annotations
@@ -117,11 +156,18 @@ import os
 import shutil
 import sqlite3
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import NoReturn
 
-from cfb_strength.contracts import Method
+from cfb_strength import config
+from cfb_strength.contracts import Method, Sport
 from cfb_strength.db.connection import StaleDatabaseWarning, ensure_schema, get_conn
 from cfb_strength.ingest.currency import check_currency
+from cfb_strength.ingest.nflverse import client as nflverse_client
+from cfb_strength.ingest.nflverse import ingest_players as nflverse_players
+from cfb_strength.ingest.nflverse import ingest_season as nflverse_games
 from cfb_strength.ratings.compute_ratings import compute_and_store
 
 THIS_DIR = Path(__file__).resolve().parent
@@ -135,6 +181,11 @@ OUTPUT_FIXTURE = THIS_DIR / "cfb_verdict_fixture.sqlite3"
 YEARS: tuple[int, ...] = (2001, 2003, 2004, 2005, 2013, 2017, 2019)
 # See the module docstring for why `elo_career` is excluded.
 METHODS: tuple[Method, ...] = ("keener", "elo")
+
+# The NFL player slice (issue #296); see "The NFL player slice" above.
+NFL_YEARS: tuple[int, ...] = (1999, 2023)
+# Deliberately empty: the NFL slice stores games and player stats, no ratings.
+NFL_RATED_METHODS: tuple[Method, ...] = ()
 
 # A fixed placeholder, not a real computation time. See "Determinism" above.
 FIXTURE_COMPUTED_AT = "1970-01-01T00:00:00+00:00"
@@ -161,12 +212,13 @@ WAIVABLE_FOR_A_SLICE = frozenset(
 # `rating_breakdown` instead; `elo_career` records none and is not baked.
 LEDGER_METHODS: tuple[Method, ...] = ("elo",)
 
-# Every table `compute_and_store` stamps with the wall clock. See "Determinism".
-STAMPED_TABLES: tuple[str, ...] = (
-    "ratings",
-    "rating_breakdowns",
-    "elo_ledger_steps",
-    "elo_ledger_configs",
+# Every (table, column) the build writes with the wall clock. See "Determinism".
+STAMPED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("ratings", "computed_at"),
+    ("rating_breakdowns", "computed_at"),
+    ("elo_ledger_steps", "computed_at"),
+    ("elo_ledger_configs", "computed_at"),
+    ("ingestion_log", "fetched_at"),
 )
 
 
@@ -230,37 +282,60 @@ def _record(wins: int, losses: int, ties: int) -> str:
 
 
 def check_slice_currency(
-    db_path: Path, raw_dir: Path, *, rated_methods: tuple[Method, ...]
+    db_path: Path,
+    raw_dir: Path,
+    *,
+    rated_methods: tuple[Method, ...],
+    nfl_seasons: tuple[int, ...],
 ) -> None:
-    """Fail unless `db_path`'s only `cfb doctor` findings are the ones a
-    CFB-only slice of `YEARS`, rated for exactly `rated_methods`, explains.
-    See the module docstring for the rules."""
+    """Fail unless `db_path`'s only `cfb doctor` findings are the ones a slice
+    explains: CFB seasons `YEARS` rated for exactly `rated_methods`, plus NFL
+    seasons `nfl_seasons` (empty before the NFL slice is ingested) with player
+    stats and no ratings. See the module docstring for the rules."""
     report = check_currency(db_path, raw_dir)
-    years = set(YEARS)
+    slices: dict[Sport, tuple[int, ...]] = {"cfb": YEARS, "nfl": nfl_seasons}
+    league_rated_methods: dict[Sport, tuple[Method, ...]] = {
+        "cfb": rated_methods,
+        "nfl": NFL_RATED_METHODS,
+    }
     unexplained: list[str] = []
 
     for problem in report.problems:
         explained = False
-        if problem.code == "league_has_no_games":
-            explained = problem.sport != "cfb"
+        sliced = slices.get(problem.sport) if problem.sport is not None else None
+        if sliced is None:
+            explained = False
+        elif problem.code == "league_has_no_games":
+            explained = problem.sport == "nfl" and not sliced
         elif problem.code == "season_behind_cache":
-            explained = problem.sport != "cfb" or not set(problem.seasons) & years
+            explained = not set(problem.seasons) & set(sliced)
         elif problem.code == "season_missing_ratings":
-            explained = problem.sport == "cfb" and problem.seasons == YEARS
+            if problem.sport == "cfb":
+                explained = problem.seasons == YEARS
+            else:
+                explained = not NFL_RATED_METHODS and bool(sliced) and problem.seasons == sliced
         if problem.code not in WAIVABLE_FOR_A_SLICE or not explained:
             unexplained.append(f"{problem.code}: {problem.message}")
 
     for league in report.leagues:
-        if league.sport != "cfb":
-            if league.game_seasons:
-                unexplained.append(f"{league.sport} has games {league.game_seasons}")
-            continue
-        if league.game_seasons != YEARS:
-            unexplained.append(f"cfb game seasons are {league.game_seasons}, expected {YEARS}")
+        expected_games = slices.get(league.sport, ())
+        if league.game_seasons != expected_games:
+            unexplained.append(
+                f"{league.sport} game seasons are {league.game_seasons}, expected {expected_games}"
+            )
+        methods = league_rated_methods.get(league.sport, ())
         for method, rated in league.rated_seasons.items():
-            expected = YEARS if method in rated_methods else ()
+            expected = expected_games if method in methods else ()
             if rated != expected:
-                unexplained.append(f"cfb {method} rated seasons are {rated}, expected {expected}")
+                unexplained.append(
+                    f"{league.sport} {method} rated seasons are {rated}, expected {expected}"
+                )
+        expected_players = nfl_seasons if league.sport == "nfl" else ()
+        if league.player_stat_seasons != expected_players:
+            unexplained.append(
+                f"{league.sport} player-stat seasons are {league.player_stat_seasons}, "
+                f"expected {expected_players}"
+            )
 
     if unexplained:
         raise AssertionError(
@@ -269,9 +344,72 @@ def check_slice_currency(
             + "\n  - ".join(unexplained)
         )
     print(
-        f"currency check passed for {db_path.name} (rated: {', '.join(rated_methods) or 'none'}); "
+        f"currency check passed for {db_path.name} (rated: {', '.join(rated_methods) or 'none'}; "
+        f"nfl slice: {', '.join(map(str, nfl_seasons)) or 'none'}); "
         f"waived slice findings: {sorted({p.code for p in report.problems})}"
     )
+
+
+def _refuse_live_fetch(*args: object, **kwargs: object) -> NoReturn:
+    raise RuntimeError(
+        "build_fixture.py never fetches live data: the committed cache under "
+        f"{COMMITTED_RAW_DIR} is missing something the NFL ingest asked for"
+    )
+
+
+@contextmanager
+def _nflverse_live_fetch_disabled() -> Iterator[None]:
+    """Replace the nflverse client's one network call for the block. Every
+    `get_*` function looks `_fetch_csv_live` up as a module global at call
+    time, which is what `build_regression_fixtures.py` relies on too."""
+    original = getattr(nflverse_client, "_fetch_csv_live", None)
+    if not callable(original):
+        raise RuntimeError(
+            "refusing to build: nflverse client._fetch_csv_live is gone (renamed?), so live "
+            "fetching cannot be disabled"
+        )
+    nflverse_client._fetch_csv_live = _refuse_live_fetch
+    try:
+        yield
+    finally:
+        nflverse_client._fetch_csv_live = original
+
+
+def ingest_nfl_slice(db_path: Path) -> None:
+    """The NFL slice through the real ingest entry points, in render.yaml's
+    order: games, then player stats. Each `main` opens its own connection on
+    `db_path`, so no connection of this script's may be open meanwhile."""
+    # Both entry points read `config.RAW_DIR` and take no raw-dir argument.
+    if config.RAW_DIR.resolve() != COMMITTED_RAW_DIR.resolve():
+        raise RuntimeError(
+            f"config.RAW_DIR is {config.RAW_DIR}, not the committed cache {COMMITTED_RAW_DIR}; "
+            "unset CFB_DATA_DIR and rerun"
+        )
+    years = ",".join(str(year) for year in NFL_YEARS)
+    with _nflverse_live_fetch_disabled():
+        for name, entry_point in (
+            ("cfb ingest --sport nfl", nflverse_games.main),
+            ("cfb ingest-players --sport nfl", nflverse_players.main),
+        ):
+            status = entry_point(["--years", years, "--db-path", str(db_path)])
+            if status != 0:
+                raise AssertionError(f"`{name} --years {years}` exited {status}")
+
+    conn = get_conn(db_path)
+    try:
+        counts = {
+            table: conn.execute(f"SELECT COUNT(*) FROM {table} WHERE sport = 'nfl'").fetchone()[0]
+            for table in (
+                "games",
+                "players",
+                "player_season_stats",
+                "player_game_stats",
+                "game_starters",
+            )
+        }
+    finally:
+        conn.close()
+    print(f"nfl slice {years}: " + " ".join(f"{t}={n}" for t, n in counts.items()))
 
 
 def build(
@@ -284,7 +422,7 @@ def build(
 
     # Checked before anything is written: a stale source fails here, loudly,
     # rather than as a puzzling assertion in an unrelated test run later.
-    check_slice_currency(source, raw_dir, rated_methods=())
+    check_slice_currency(source, raw_dir, rated_methods=(), nfl_seasons=())
 
     # Built beside the output and moved into place only once every check
     # below has passed, so a failed build never leaves a half-built fixture.
@@ -295,7 +433,7 @@ def build(
         _bake(partial, raw_dir)
         os.replace(partial, output)
     except BaseException:
-        # Nothing gitignores the partial (an ~11 MB file next to the committed
+        # Nothing gitignores the partial (an ~15 MB file next to the committed
         # fixture), so a failed build must not leave it behind for a
         # `git add -A` to pick up.
         _remove_partial(partial)
@@ -311,17 +449,29 @@ def _remove_partial(partial: Path) -> None:
         leftover.unlink(missing_ok=True)
 
 
-def _bake(partial: Path, raw_dir: Path) -> None:
-    """Rate `partial` in place and run every build-time check on it. Raises
-    on any failure; `build` removes the partial when it does."""
-    conn: sqlite3.Connection = get_conn(partial)
+def _require_current_schema(partial: Path) -> None:
+    """A no-op on a current-schema source. If it would migrate anything, the
+    source is stale: fail, don't migrate past it (issue #97). Runs before the
+    NFL ingest, whose entry points call `ensure_schema` themselves and would
+    otherwise migrate a stale source silently."""
+    conn = get_conn(partial)
     try:
-        # A no-op on a current-schema source. If it would migrate anything,
-        # the source is stale: fail, don't migrate past it (issue #97).
         with warnings.catch_warnings():
             warnings.simplefilter("error", StaleDatabaseWarning)
             ensure_schema(conn)
+    finally:
+        conn.close()
 
+
+def _bake(partial: Path, raw_dir: Path) -> None:
+    """Ingest the NFL slice into `partial`, rate it in place and run every
+    build-time check on it. Raises on any failure; `build` removes the
+    partial when it does."""
+    _require_current_schema(partial)
+    ingest_nfl_slice(partial)
+
+    conn: sqlite3.Connection = get_conn(partial)
+    try:
         for method in METHODS:
             for year in YEARS:
                 count = compute_and_store(conn, year, method)
@@ -406,13 +556,13 @@ def _bake(partial: Path, raw_dir: Path) -> None:
         check_elo_ledgers(conn)
 
         with conn:
-            for table in STAMPED_TABLES:
-                conn.execute(f"UPDATE {table} SET computed_at = ?", (FIXTURE_COMPUTED_AT,))
+            for table, column in STAMPED_COLUMNS:
+                conn.execute(f"UPDATE {table} SET {column} = ?", (FIXTURE_COMPUTED_AT,))
         conn.execute("VACUUM")
     finally:
         conn.close()
 
-    check_slice_currency(partial, raw_dir, rated_methods=METHODS)
+    check_slice_currency(partial, raw_dir, rated_methods=METHODS, nfl_seasons=NFL_YEARS)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -9,6 +9,7 @@ persona copy for these is issue #4's job, not this one's).
 | `AmbiguousTeamError`       | 422, body includes `candidates` (never empty) |
 | `SameTeamComparisonError`  | 400                                           |
 | `MissingChampionError`     | 500, body echoes `year`/`method`/`sport`      |
+| `UnknownPlayerError`       | 404, body echoes `player_id`/`sport` (#296)   |
 
 Registered once on the app (`api.main`) rather than caught per-route, so
 there is exactly one place this mapping is spelled out:
@@ -75,6 +76,7 @@ from cfb_strength.contracts import (
     Method,
     SameTeamComparisonError,
     Sport,
+    UnknownPlayerError,
     UnknownTeamError,
     UnknownYearError,
 )
@@ -95,6 +97,8 @@ from api.models import (
     MissingChampionErrorResponse,
     SameTeamComparisonErrorBody,
     SameTeamComparisonErrorResponse,
+    UnknownPlayerErrorBody,
+    UnknownPlayerErrorResponse,
     UnknownTeamErrorBody,
     UnknownTeamErrorResponse,
     UnknownYearErrorBody,
@@ -133,6 +137,7 @@ ENGINE_ERROR_RESPONSES: dict[type[Exception], MappedError] = {
     AmbiguousTeamError: MappedError(422, AmbiguousTeamErrorResponse),
     SameTeamComparisonError: MappedError(400, SameTeamComparisonErrorResponse),
     MissingChampionError: MappedError(500, MissingChampionErrorResponse),
+    UnknownPlayerError: MappedError(404, UnknownPlayerErrorResponse),
 }
 
 
@@ -187,6 +192,14 @@ def register_exception_handlers(app: FastAPI) -> None:
         body = MissingChampionErrorBody(year=exc.year, method=exc.method, sport=exc.sport)
         return JSONResponse(
             status_code=ENGINE_ERROR_RESPONSES[MissingChampionError].status_code,
+            content={"detail": body.model_dump()},
+        )
+
+    @app.exception_handler(UnknownPlayerError)
+    def _unknown_player(request: Request, exc: UnknownPlayerError) -> JSONResponse:
+        body = UnknownPlayerErrorBody(player_id=exc.player_id, sport=exc.sport)
+        return JSONResponse(
+            status_code=ENGINE_ERROR_RESPONSES[UnknownPlayerError].status_code,
             content={"detail": body.model_dump()},
         )
 
@@ -282,3 +295,9 @@ COMPARISON_ERROR_RESPONSES = openapi_error_responses(
 CHAMPION_ERROR_RESPONSES = openapi_error_responses(
     UnknownYearError, UnknownTeamError, AmbiguousTeamError, MissingChampionError
 )
+
+# `GET /api/players/{player_id}` (issue #296): `players.get_player_career`
+# raises `UnknownPlayerError`, and `api.players` raises it itself for an id
+# outside SQLite's INTEGER range. Its 422s are request validation only, so
+# they keep FastAPI's default declaration.
+PLAYER_CAREER_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)

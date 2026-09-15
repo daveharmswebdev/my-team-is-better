@@ -16,9 +16,13 @@ def get_credits() -> Credits:
     """Return the project's static attribution data.
 
     Covers every methodology this engine implements -- Keener's method and
-    Elo -- and the data sources game results are ingested from:
-    CollegeFootballData.com for CFB, nflverse (originally Lee Sharpe's
-    schedule data) for NFL.
+    Elo -- and the three data sources, each with a stable `id` a page can
+    select it by (issue #296): `cfbd` (CollegeFootballData.com, CFB game
+    results), `nflverse_games` (nflverse, originally Lee Sharpe's schedule
+    data, NFL game results) and `nflverse_player_stats` (nflverse's
+    stats_player release, built with nflfastR, NFL player stats).
+    tests/test_evidence_credits.py pins the ids, their order and their
+    uniqueness.
 
     That coverage is checked, not hand-kept (issue #144): each
     `MethodologyCredit.methods` names the registered rating methods the
@@ -87,6 +91,7 @@ def get_credits() -> Credits:
         ],
         data_sources=[
             DataSourceCredit(
+                id="cfbd",
                 name="CollegeFootballData.com (CFBD)",
                 url="https://collegefootballdata.com",
                 note=(
@@ -96,6 +101,7 @@ def get_credits() -> Credits:
                 ),
             ),
             DataSourceCredit(
+                id="nflverse_games",
                 name="nflverse (Lee Sharpe's NFL schedule/game data)",
                 url="https://github.com/nflverse/nflverse-data",
                 note=(
@@ -104,6 +110,23 @@ def get_credits() -> Credits:
                     "and maintained by Lee Sharpe before nflverse took over "
                     "publishing it). This project performs no independent data "
                     "collection and claims no ownership of the underlying game "
+                    "data."
+                ),
+            ),
+            DataSourceCredit(
+                id="nflverse_player_stats",
+                name="nflverse player stats (nflfastR, by Sebastian Carl and Ben Baldwin)",
+                url="https://github.com/nflverse/nflfastR",
+                note=(
+                    "NFL player stats are ingested from nflverse's stats_player "
+                    "release (the weekly stats_player_week CSV files, 1999-2025), "
+                    "which nflverse creates with nflfastR's calculate_stats(). "
+                    "nflfastR is written by Sebastian Carl and Ben Baldwin, with "
+                    "contributions from Lee Sharpe, Maksim Horowitz, Ron Yurko, "
+                    "Samuel Ventura, Tan Ho and John Edwards, and is MIT licensed. "
+                    "Player identities come from nflverse's players release "
+                    "(players.csv). This project performs no independent data "
+                    "collection and claims no ownership of the underlying player "
                     "data."
                 ),
             ),

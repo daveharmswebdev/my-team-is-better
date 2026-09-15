@@ -34,7 +34,16 @@ from cfb_strength.contracts import (
     MethodologyCredit,
     OpponentCredit,
     OpponentResult,
+    PlayerCareer,
+    PlayerCareerTotals,
+    PlayerLeaderRow,
+    PlayerLeaders,
+    PlayerLeaderSort,
+    PlayerSeasonLine,
+    PlayerSeasonType,
+    PlayerStats,
     RatingBreakdown,
+    StarterRecord,
     TeamCase,
 )
 
@@ -606,6 +615,10 @@ class MethodologyCreditOut(BaseModel):
 
 
 class DataSourceCreditOut(BaseModel):
+    # Issue #296: the source's stable id ("cfbd", "nflverse_games",
+    # "nflverse_player_stats"), copied from `DataSourceCredit.id`, so a page
+    # showing one source's data picks its credit without keying on `name`.
+    id: str
     name: str
     url: str
     note: str
@@ -613,6 +626,7 @@ class DataSourceCreditOut(BaseModel):
     @classmethod
     def from_dataclass(cls, data_source: DataSourceCredit) -> DataSourceCreditOut:
         return cls(
+            id=data_source.id,
             name=data_source.name,
             url=data_source.url,
             note=data_source.note,
@@ -654,6 +668,185 @@ class CreditsOut(BaseModel):
                 DataSourceCreditOut.from_dataclass(data_source)
                 for data_source in credits.data_sources
             ],
+        )
+
+
+# ---------------------------------------------------------------------------
+# player read layer (issue #296) -- `cfb_strength.players`' leaders and career
+# dataclasses, published by `api.players`. Faithful field for field: same
+# names, same nesting, rows and season lines in the engine's order. The one
+# addition is `StarterRecordOut.starts`, the dataclass's own property
+# (wins + losses + ties), so apps/web never re-derives it. Every stat is
+# `int | None` and required: None means the source did not record it and
+# must reach the client as `null`, never 0 and never an omitted key.
+# ---------------------------------------------------------------------------
+
+
+class StarterRecordOut(BaseModel):
+    wins: int
+    losses: int
+    ties: int
+    starts: int
+
+    @classmethod
+    def from_dataclass(cls, record: StarterRecord) -> StarterRecordOut:
+        return cls(
+            wins=record.wins,
+            losses=record.losses,
+            ties=record.ties,
+            starts=record.starts,
+        )
+
+
+class PlayerStatsOut(BaseModel):
+    completions: int | None
+    attempts: int | None
+    passing_yards: int | None
+    passing_tds: int | None
+    passing_interceptions: int | None
+    sacks_suffered: int | None
+    sack_yards_lost: int | None
+    carries: int | None
+    rushing_yards: int | None
+    rushing_tds: int | None
+
+    @classmethod
+    def from_dataclass(cls, stats: PlayerStats) -> PlayerStatsOut:
+        return cls(
+            completions=stats.completions,
+            attempts=stats.attempts,
+            passing_yards=stats.passing_yards,
+            passing_tds=stats.passing_tds,
+            passing_interceptions=stats.passing_interceptions,
+            sacks_suffered=stats.sacks_suffered,
+            sack_yards_lost=stats.sack_yards_lost,
+            carries=stats.carries,
+            rushing_yards=stats.rushing_yards,
+            rushing_tds=stats.rushing_tds,
+        )
+
+
+class PlayerLeaderRowOut(BaseModel):
+    # The engine's competition rank over the whole qualifying population;
+    # null when the sort value is null (those rows come last).
+    rank: int | None
+    player_id: int
+    display_name: str
+    position: str | None
+    first_season: int
+    last_season: int
+    games: int | None
+    record: StarterRecordOut
+    stats: PlayerStatsOut
+
+    @classmethod
+    def from_dataclass(cls, row: PlayerLeaderRow) -> PlayerLeaderRowOut:
+        return cls(
+            rank=row.rank,
+            player_id=row.player_id,
+            display_name=row.display_name,
+            position=row.position,
+            first_season=row.first_season,
+            last_season=row.last_season,
+            games=row.games,
+            record=StarterRecordOut.from_dataclass(row.record),
+            stats=PlayerStatsOut.from_dataclass(row.stats),
+        )
+
+
+class PlayerLeadersOut(BaseModel):
+    sport: Sport
+    season_type: PlayerSeasonType
+    sort: PlayerLeaderSort
+    limit: int
+    offset: int
+    # The whole qualifying population's size, so a client can page.
+    total: int
+    rows: list[PlayerLeaderRowOut]
+
+    @classmethod
+    def from_dataclass(cls, leaders: PlayerLeaders) -> PlayerLeadersOut:
+        return cls(
+            sport=leaders.sport,
+            season_type=leaders.season_type,
+            sort=leaders.sort,
+            limit=leaders.limit,
+            offset=leaders.offset,
+            total=leaders.total,
+            rows=[PlayerLeaderRowOut.from_dataclass(row) for row in leaders.rows],
+        )
+
+
+class PlayerSeasonLineOut(BaseModel):
+    season: int
+    season_type: PlayerSeasonType
+    teams: list[str]
+    games: int | None
+    record: StarterRecordOut
+    stats: PlayerStatsOut
+    # Disclosure, not correction: completed games of this line's teams with
+    # no player stat lines at all, which these totals therefore undercount.
+    games_without_stat_lines: int
+
+    @classmethod
+    def from_dataclass(cls, line: PlayerSeasonLine) -> PlayerSeasonLineOut:
+        return cls(
+            season=line.season,
+            season_type=line.season_type,
+            teams=list(line.teams),
+            games=line.games,
+            record=StarterRecordOut.from_dataclass(line.record),
+            stats=PlayerStatsOut.from_dataclass(line.stats),
+            games_without_stat_lines=line.games_without_stat_lines,
+        )
+
+
+class PlayerCareerTotalsOut(BaseModel):
+    season_type: PlayerSeasonType
+    seasons: int
+    games: int | None
+    record: StarterRecordOut
+    stats: PlayerStatsOut
+
+    @classmethod
+    def from_dataclass(cls, totals: PlayerCareerTotals) -> PlayerCareerTotalsOut:
+        return cls(
+            season_type=totals.season_type,
+            seasons=totals.seasons,
+            games=totals.games,
+            record=StarterRecordOut.from_dataclass(totals.record),
+            stats=PlayerStatsOut.from_dataclass(totals.stats),
+        )
+
+
+class PlayerCareerOut(BaseModel):
+    sport: Sport
+    player_id: int
+    display_name: str
+    position: str | None
+    seasons: list[PlayerSeasonLineOut]
+    # Null when the player has no season line of that type.
+    regular_season: PlayerCareerTotalsOut | None
+    postseason: PlayerCareerTotalsOut | None
+
+    @classmethod
+    def from_dataclass(cls, career: PlayerCareer) -> PlayerCareerOut:
+        return cls(
+            sport=career.sport,
+            player_id=career.player_id,
+            display_name=career.display_name,
+            position=career.position,
+            seasons=[PlayerSeasonLineOut.from_dataclass(line) for line in career.seasons],
+            regular_season=(
+                PlayerCareerTotalsOut.from_dataclass(career.regular_season)
+                if career.regular_season is not None
+                else None
+            ),
+            postseason=(
+                PlayerCareerTotalsOut.from_dataclass(career.postseason)
+                if career.postseason is not None
+                else None
+            ),
         )
 
 
@@ -785,3 +978,17 @@ class SameTeamComparisonErrorResponse(BaseModel):
 
 class MissingChampionErrorResponse(BaseModel):
     detail: MissingChampionErrorBody
+
+
+class UnknownPlayerErrorBody(BaseModel):
+    """`GET /api/players/{player_id}` found no player with that id in that
+    sport (issue #296, `contracts.UnknownPlayerError`). Echoes what was asked,
+    like `UnknownTeamErrorBody`; `sport` is the request's validated literal."""
+
+    error: Literal["unknown_player"] = "unknown_player"
+    player_id: int
+    sport: Sport
+
+
+class UnknownPlayerErrorResponse(BaseModel):
+    detail: UnknownPlayerErrorBody

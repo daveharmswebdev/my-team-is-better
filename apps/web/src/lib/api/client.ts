@@ -24,13 +24,18 @@ import type {
   ComparisonEnvelope,
   CreditsOut,
   Method,
+  PlayerCareerOut,
+  PlayerLeaderSort,
+  PlayerLeadersOut,
+  PlayerSeasonType,
   Sport,
   TeamCaseEnvelope,
   TeamsOut,
+  UnknownPlayerErrorBody,
   VerdictErrorBody,
   YearsOut,
 } from './types'
-import { isVerdictErrorBody } from './types'
+import { isUnknownPlayerErrorBody, isVerdictErrorBody } from './types'
 
 const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -76,6 +81,22 @@ export class VerdictApiError extends Error {
   constructor(status: number, body: VerdictErrorBody) {
     super(`verdict API error (${status}): ${body.error}`)
     this.name = 'VerdictApiError'
+    this.status = status
+    this.body = body
+  }
+}
+
+/**
+ * `GET /api/players/{player_id}`'s typed 404 (issue #296). The user-facing
+ * copy lives with the page (`PLAYER_NOT_FOUND_COPY`), like `VerdictApiError`'s.
+ */
+export class PlayerApiError extends Error {
+  readonly status: number
+  readonly body: UnknownPlayerErrorBody
+
+  constructor(status: number, body: UnknownPlayerErrorBody) {
+    super(`player API error (${status}): ${body.error}`)
+    this.name = 'PlayerApiError'
     this.status = status
     this.body = body
   }
@@ -348,13 +369,23 @@ export function fetchCompare(
  * with a `VerdictNetworkError` too, so callers take the failure path they
  * already have. No caller signal: callers discard stale results themselves.
  */
-function getJson<T>(url: string): Promise<T> {
+function getJson<T>(url: string, typedError?: TypedErrorMapper): Promise<T> {
   return withDeadline(CATALOG_TIMEOUT_MS, (signal) =>
-    receiveJson<T>(url, signal),
+    receiveJson<T>(url, signal, typedError),
   )
 }
 
-async function receiveJson<T>(url: string, signal: AbortSignal): Promise<T> {
+/**
+ * Turns a non-OK response's `detail` into the endpoint's typed error, or
+ * `null` when it isn't one (which then stays a `VerdictHttpError`).
+ */
+type TypedErrorMapper = (status: number, detail: unknown) => Error | null
+
+async function receiveJson<T>(
+  url: string,
+  signal: AbortSignal,
+  typedError?: TypedErrorMapper,
+): Promise<T> {
   let response: Response
   try {
     response = await fetch(url, { signal })
@@ -363,11 +394,12 @@ async function receiveJson<T>(url: string, signal: AbortSignal): Promise<T> {
   }
 
   if (!response.ok) {
-    throw unmappedHttpError(
-      url,
-      response.status,
-      await readBodyText(response, signal),
-    )
+    const bodyText = await readBodyText(response, signal)
+    const typed = typedError?.(response.status, errorDetail(bodyText)) ?? null
+    if (typed !== null) {
+      throw typed
+    }
+    throw unmappedHttpError(url, response.status, bodyText)
   }
 
   return await untilAborted(response.json() as Promise<T>, signal)
@@ -380,6 +412,56 @@ async function receiveJson<T>(url: string, signal: AbortSignal): Promise<T> {
  */
 export function fetchCredits(): Promise<CreditsOut> {
   return getJson<CreditsOut>(`${API_BASE_URL}/api/credits`)
+}
+
+/**
+ * The query `GET /api/players/leaders` takes besides `sport` (issue #296),
+ * named as the API names it. The client always sends `sport=nfl`: the only
+ * league with player stats, and `cfb` is a 422.
+ */
+export interface PlayerLeadersQuery {
+  season_type: PlayerSeasonType
+  sort: PlayerLeaderSort
+  /** 1..100 on the API side. */
+  limit: number
+  /** >= 0 on the API side. */
+  offset: number
+}
+
+/**
+ * `GET /api/players/leaders` (issue #296): one page of a career leaderboard,
+ * sorted, ranked and paged by the API. Errors are `getJson`'s, bounded by
+ * `CATALOG_TIMEOUT_MS`.
+ */
+export function fetchPlayerLeaders(
+  query: PlayerLeadersQuery,
+): Promise<PlayerLeadersOut> {
+  const params = new URLSearchParams({
+    sport: 'nfl',
+    season_type: query.season_type,
+    sort: query.sort,
+    limit: String(query.limit),
+    offset: String(query.offset),
+  })
+  return getJson<PlayerLeadersOut>(
+    `${API_BASE_URL}/api/players/leaders?${params.toString()}`,
+  )
+}
+
+/**
+ * `GET /api/players/{player_id}?sport=nfl` (issue #296): a player's season
+ * lines and career totals. A typed 404 `unknown_player` rejects with a
+ * `PlayerApiError`; everything else is `getJson`'s.
+ */
+export function fetchPlayerCareer(playerId: number): Promise<PlayerCareerOut> {
+  const params = new URLSearchParams({ sport: 'nfl' })
+  return getJson<PlayerCareerOut>(
+    `${API_BASE_URL}/api/players/${encodeURIComponent(String(playerId))}?${params.toString()}`,
+    (status, detail) =>
+      isUnknownPlayerErrorBody(detail)
+        ? new PlayerApiError(status, detail)
+        : null,
+  )
 }
 
 /**
