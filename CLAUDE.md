@@ -65,11 +65,17 @@ mis-scoped: fix the brief, don't ship the violation.
 
   A new app gets its own CI job with its first line of code. The process hooks have one
   (`claude-process`).
-- **`main` is protected by process and a hook.** GitHub can't enforce branch protection
-  on this private repo without GitHub Pro; the founder chose to stay private. Every
-  change goes through a feature branch, a PR and green CI. `.claude/hooks/guard_bash.py`
-  blocks pushes to `main` from any session. If the repo goes public or moves to Pro, turn
-  on a ruleset requiring the CI jobs.
+- **`main` is protected by a GitHub ruleset.** The repo went public on 2026-09-15 (a
+  private repo ran out of Actions minutes). The ruleset, `.github/rulesets/main.json`,
+  requires a PR with every CI job green and blocks force-pushes and deletion. Nobody can
+  bypass it, admins included. `.claude/hooks/guard_bash.py` still blocks pushes to `main`
+  before they leave the session.
+  **Adding, renaming or removing a CI job** means updating that JSON in the same PR and
+  applying it before merging:
+  `gh api -X PUT repos/daveharmswebdev/my-team-is-better/rulesets/23503171 --input .github/rulesets/main.json`.
+  A required check that never reports leaves PRs waiting forever: on a rename, other open
+  PRs wait until they merge `main`. `test_ruleset.py` fails when the JSON and `ci.yml`
+  disagree, but it can't see the live ruleset.
 - **Python side**: `uv`; `mypy --strict` across module boundaries; `import-linter` for
   enforced boundaries; `pytest`; ruff; pre-commit mirroring CI. Commands:
   `.claude/rules/python.md`.
@@ -121,6 +127,8 @@ another (#105).
 | Rule | Enforced by | Mode |
 |---|---|---|
 | A spoke's edits stay inside its owned paths | PreToolUse `guard_edit_scope.py` | **warn**: a note in the spoke's context plus a log at `<git-common-dir>/claude-hooks/scope-warnings.jsonl`. Flip `edit_scope_mode` to `block` once the log stays clean (#205) |
+| Merging to `main` needs a PR and every CI job green; no force-push or deletion | GitHub ruleset `.github/rulesets/main.json` | block, no bypass |
+| The ruleset's required checks match `ci.yml`'s jobs | `claude-process` CI job | block (the file only; applying it to GitHub is manual) |
 | No push to `main`; no shared-stash use | PreToolUse `guard_bash.py` | block |
 | Brief shape; scope inside ownership; own scratch dir | `delegation.py render-brief` | block (the brief won't render) |
 | Return shape and its semantic rules | SubagentStop `delegation.py` sends the errors back to the spoke (2 retries); the coordinator re-checks with `delegation.py validate-return` | block; still invalid = `malformed-return` |

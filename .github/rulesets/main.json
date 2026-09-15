@@ -1,0 +1,34 @@
+{
+  "name": "protect main",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "bypass_actors": [],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "cfb-engine (pytest, mypy --strict, import-linter, ruff)", "integration_id": 15368 },
+          { "context": "apps/api (pytest, mypy --strict, ruff, import-linter)", "integration_id": 15368 },
+          { "context": "apps-web (eslint, tsc, vitest, dependency-cruiser, storybook build + a11y tests)", "integration_id": 15368 },
+          { "context": "claude-process (hooks + delegation contract: pytest, mypy --strict, ruff, conflict markers)", "integration_id": 15368 },
+          { "context": "e2e (Playwright, apps/api + apps/web)", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}
