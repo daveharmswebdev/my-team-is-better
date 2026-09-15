@@ -89,18 +89,54 @@ def test_elo_credit_expects_the_methods_to_differ_without_playing_it_up() -> Non
     )
 
 
-def _data_source_by_name(name_fragment: str) -> DataSourceCredit:
-    matches = [source for source in get_credits().data_sources if name_fragment in source.name]
-    assert len(matches) == 1, f"expected exactly one data source matching {name_fragment!r}"
+def _data_source_by_id(source_id: str) -> DataSourceCredit:
+    """Look a data source up by its stable id (issue #296), not a name
+    fragment: two credits now carry "nflverse" in their names."""
+    matches = [source for source in get_credits().data_sources if source.id == source_id]
+    assert len(matches) == 1, f"expected exactly one data source with id {source_id!r}"
     return matches[0]
 
 
-def test_data_sources_contains_exactly_two_entries() -> None:
-    assert len(get_credits().data_sources) == 2
+def test_data_sources_are_cfbd_nflverse_games_and_nflverse_player_stats_in_order() -> None:
+    """Exactly three sources, in this order (issue #296). The ids are what a
+    page selects a credit by, so they are pinned rather than hand-kept."""
+    assert [source.id for source in get_credits().data_sources] == [
+        "cfbd",
+        "nflverse_games",
+        "nflverse_player_stats",
+    ]
+
+
+def test_data_source_ids_are_unique_and_non_empty() -> None:
+    ids = [source.id for source in get_credits().data_sources]
+    assert all(source_id.strip() for source_id in ids), f"empty data source id in {ids}"
+    duplicated = sorted(source_id for source_id, n in Counter(ids).items() if n > 1)
+    assert not duplicated, f"duplicate data source ids: {duplicated}"
+
+
+def test_nflverse_player_stats_credit_names_its_sources_and_authors() -> None:
+    """PRD 5.6 and the founder's attribution preference: the people whose
+    work produced the player stats are named in the product, not only in the
+    README. nflverse publishes the release; nflfastR's calculate_stats(),
+    by Sebastian Carl and Ben Baldwin, produces the stats."""
+    data_source = _data_source_by_id("nflverse_player_stats")
+    text = f"{data_source.name} {data_source.note}"
+    for required in ("Sebastian Carl", "Ben Baldwin", "nflfastR", "nflverse"):
+        assert required in text, f"player stats credit does not name {required!r}"
+
+
+def test_nflverse_player_stats_credit_links_the_nflfastr_repo() -> None:
+    assert _data_source_by_id("nflverse_player_stats").url == "https://github.com/nflverse/nflfastR"
+
+
+def test_nflverse_player_stats_credit_claims_no_ownership() -> None:
+    note = _data_source_by_id("nflverse_player_stats").note
+    assert "claims no ownership" in note
+    assert "no independent data collection" in note
 
 
 def test_cfbd_data_source_credit_matches_exact_text() -> None:
-    data_source = _data_source_by_name("CollegeFootballData.com")
+    data_source = _data_source_by_id("cfbd")
     assert data_source.name == "CollegeFootballData.com (CFBD)"
     assert data_source.url == "https://collegefootballdata.com"
     assert data_source.note == (
@@ -111,7 +147,7 @@ def test_cfbd_data_source_credit_matches_exact_text() -> None:
 
 
 def test_nflverse_data_source_credit_matches_exact_text() -> None:
-    data_source = _data_source_by_name("nflverse")
+    data_source = _data_source_by_id("nflverse_games")
     assert data_source.name == "nflverse (Lee Sharpe's NFL schedule/game data)"
     assert data_source.url == "https://github.com/nflverse/nflverse-data"
     assert data_source.note == (
