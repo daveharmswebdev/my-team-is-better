@@ -176,7 +176,29 @@ def test_prompt_version_is_past_the_last_meeting_only_common_opponents() -> None
     would have kept being served unless the version moved."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v9"  # type: ignore[attr-defined]  # _reimport_config() -> object
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+        "persona-v4",
+        "persona-v5",
+        "persona-v6",
+        "persona-v7",
+        "persona-v8",
+    }
+
+
+def test_prompt_version_is_past_the_losing_score_first_rule_5() -> None:
+    """Issue #228 changed the system prompt itself: rule 5 used to demand
+    `team_score` first for every score, so a loss had to read
+    losing-score-first ("Florida got them 7-19"). It now says a loss
+    winner-first with a loss cue ("lost 19-7 to Florida"). Since #145 the
+    version means prompt wording only, and the wording changed, so
+    narrations cached under `persona-v9` were written under the old rule and
+    would keep being served unless the version moves."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v10"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:

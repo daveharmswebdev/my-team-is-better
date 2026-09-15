@@ -100,7 +100,12 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # Issue #145 (no bump): the cache key gained the fact block's sha256 and
 # `GROUNDING_VERSION`, which missed every pre-#145 row on its own. From here
 # on this moves for prompt wording only; see the module docstring.
-PROMPT_VERSION = "persona-v9"
+# persona-v10 (issue #228): the prompt changed -- rule 5 no longer demands
+# `team_score` first for every score (which made a loss read losing-score-first,
+# "Florida got them 7-19"); a score is said winner-first, and a loss in a
+# sentence that says it was lost ("lost 19-7 to Florida"). v9 narrations were
+# written under the old order.
+PROMPT_VERSION = "persona-v10"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

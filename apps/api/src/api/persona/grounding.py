@@ -54,6 +54,29 @@ opponent's `(own_score, other_score)`-shaped tuple recorded in the fact
 block -- order included, per the persona prompt's rule 5 convention
 (`team_score` first, `opponent_score` second).
 
+**A loss may be said winner-first, in a sentence that says it was lost
+(issue #228).** Rule 5 used to demand `team_score` first for every score,
+so a loss had to read losing-score-first ("Florida got them 7-19"), which
+nobody says; since persona-v10 it asks for the winner's points first, and a
+loss in a sentence that says the game was lost ("lost 19-7 to Florida"). So
+wherever a pair is checked against a name's tuples (the parenthetical and
+bare branches below, the bare branch's other-team rescue, and the
+game-score rule of the #166 record path), a claimed `(a, b)` that is not one
+of the name's tuples is also grounded when `(b, a)` is one of them with
+`b < a` -- a real loss for the subject, whose winner-first statement is
+`(a, b)` -- and the enclosing sentence contains a loss cue: `lost`, `fell`
+or `dropped` as a whole word, any case (`_LOSS_CUE_RE`). Nothing else
+moves: a reversed *win* in a lost-sentence ("Texas lost 38-41 to USC" when
+Texas won 41-38) is still flagged, a reversed loss with no cue ("Texas got
+them 41-38" on USC's block) is still a swapped score, a tie reverses to
+itself, and the subject-first loss form ("lost to Texas 38-41") stays
+grounded. The cue is sentence-scoped like every rule here, and a noun
+("the 41-38 loss") is not a cue. Which team the sentence says lost is not
+checked: "Texas lost 41-38" on USC's block passes, the same
+tuple-orientation limit as #26's two-team swap (epic #199). The mismatch
+messages are unchanged, so a cue-less reversed loss is still told the
+subject-first order, which the checker also accepts.
+
 The first version of that relational check attributed every score pair to
 its single nearest team-name mention by character distance, within a fixed
 window. Both of those choices turned out to be wrong in realistic persona
@@ -352,9 +375,13 @@ from typing import Any
 from api.models import Method
 from api.rating_display import RATING_DISPLAY, display_value
 
-GROUNDING_VERSION = "grounding-v1"
+GROUNDING_VERSION = "grounding-v2"
 """The version of this module's rules, part of the narration cache key
 (issue #145, `api.persona.cache.cache_key`).
+
+grounding-v2 (issue #228): the checker newly accepts a loss stated
+winner-first in a sentence with a loss cue ("lost 41-38 to Texas" on USC's
+block); v1 entries were checked under rules that flagged that form.
 
 Bump it whenever the checker's rules change -- whatever it newly accepts or
 newly rejects: a rounding or display allowance added or withdrawn, a new
@@ -417,6 +444,12 @@ _NAME_BOUNDARY = (r"(?<!\w)", r"(?!\w)")
 _SCORE_OR_RECORD_RE = re.compile(
     r"(?<!\d)(?<!\d\.)(\d+)\s*-\s*(\d+)(?:\s*-\s*(\d+))?(?!\d)(?!\.\d)"
 )
+
+# A sentence says a game was lost (issue #228): the founder's three cues as
+# whole words, any case. Only with one of these may a loss's score be said
+# winner-first ("lost 41-38 to Texas"); a noun ("the 41-38 loss") is not a
+# cue, and neither is a cue glued inside another word ("felled").
+_LOSS_CUE_RE = re.compile(r"\b(?:lost|fell|dropped)\b", re.IGNORECASE)
 
 # Naive sentence splitting (deliberately not real NLP -- see module
 # docstring) so a score pair and a team-name mention several sentences
@@ -992,13 +1025,16 @@ def _check_claim(
     first, second, third = claim_match.groups()
     span = claim_match.span()
     parenthetical = _is_parenthesized(sentence, span)
+    # Whether this sentence says a game was lost (#228): the only condition
+    # under which a loss's score may be stated winner-first.
+    loss_stated = _LOSS_CUE_RE.search(sentence) is not None
     attribution = _attribute_record_claim(span, parenthetical, name_occurrences, facts.subjects)
     if attribution.subject is not None:
         claimed_parts: tuple[int, ...] = (
             (int(first), int(second)) if third is None else (int(first), int(second), int(third))
         )
         return _check_attributed_record(
-            claimed_parts, attribution.subject, attribution, name_occurrences, facts
+            claimed_parts, attribution.subject, attribution, name_occurrences, facts, loss_stated
         )
 
     if third is not None:
@@ -1013,8 +1049,10 @@ def _check_claim(
     if not name_occurrences:
         return _check_unattributed_pair(claimed, facts)
     if parenthetical:
-        return _check_parenthetical_pair(span, claimed, name_occurrences, facts.valid_tuples)
-    return _check_bare_pair(span, claimed, name_occurrences, facts.valid_tuples)
+        return _check_parenthetical_pair(
+            span, claimed, name_occurrences, facts.valid_tuples, loss_stated
+        )
+    return _check_bare_pair(span, claimed, name_occurrences, facts.valid_tuples, loss_stated)
 
 
 def _attribute_record_claim(
@@ -1057,10 +1095,12 @@ def _check_attributed_record(
     attribution: _RecordAttribution,
     name_occurrences: list[_NameOccurrence],
     facts: _ClaimFacts,
+    loss_stated: bool,
 ) -> str | None:
     """A record-shaped claim attributed to `subject` (issue #166), in this
     order: grounded as the subject's record; grounded (bare) as another
-    named subject's record; grounded (two-part) as a game score; else
+    named subject's record; grounded (two-part) as a game score, which
+    since #228 includes a loss said winner-first when `loss_stated`; else
     flagged -- a subject record backwards keeps #181's message, a two-part
     claim nearest a non-subject opponent with game data is that opponent's
     score (#26's message), and anything else is not the subject's record.
@@ -1077,7 +1117,7 @@ def _check_attributed_record(
     ):
         return None
     if parts == 2 and _is_stated_game_score(
-        (claimed[0], claimed[1]), attribution, name_occurrences, facts
+        (claimed[0], claimed[1]), attribution, name_occurrences, facts, loss_stated
     ):
         return None
 
@@ -1106,9 +1146,12 @@ def _is_stated_game_score(
     attribution: _RecordAttribution,
     name_occurrences: list[_NameOccurrence],
     facts: _ClaimFacts,
+    loss_stated: bool,
 ) -> bool:
     """A two-part claim attributed to a subject may still be a game score:
-    one of the nearest name's tuples; bare, one of another named team's; in
+    one of the nearest name's tuples; bare, one of another named team's
+    (both since #228 also that name's real loss said winner-first, when
+    `loss_stated` -- see `_matches_for_name`); in
     order, any row's game score; or, in the order written, a hyphen pair
     inside some string value. Never a string pair in either order (round
     4): that branch rescued a swapped score beside the opponent's name
@@ -1127,10 +1170,12 @@ def _is_stated_game_score(
     either-order, are unchanged.
     """
     nearest = attribution.nearest
-    if nearest is not None and claimed in facts.valid_tuples.get(nearest, set()):
+    if nearest is not None and _matches_for_name(
+        claimed, facts.valid_tuples.get(nearest, set()), loss_stated
+    ):
         return True
     if not attribution.parenthetical and any(
-        claimed in facts.valid_tuples.get(other, set())
+        _matches_for_name(claimed, facts.valid_tuples.get(other, set()), loss_stated)
         for other, _ in name_occurrences
         if other != nearest
     ):
@@ -1214,6 +1259,7 @@ def _check_parenthetical_pair(
     claimed: tuple[int, int],
     name_occurrences: list[_NameOccurrence],
     valid_tuples: _ScoreTuplesByName,
+    loss_stated: bool,
 ) -> str | None:
     """A parenthetical score pair is attributed to its single nearest
     team-name mention (within `_PROXIMITY_WINDOW`), since the parens make
@@ -1227,7 +1273,7 @@ def _check_parenthetical_pair(
         return None
 
     valid_for_name = valid_tuples.get(name)
-    if not valid_for_name or claimed in valid_for_name:
+    if not valid_for_name or _matches_for_name(claimed, valid_for_name, loss_stated):
         # Either not a real opponent this fact block has game data for
         # (nothing relational to check -- the membership check elsewhere
         # already flags the mention itself if it isn't grounded at all),
@@ -1241,6 +1287,7 @@ def _check_bare_pair(
     claimed: tuple[int, int],
     name_occurrences: list[_NameOccurrence],
     valid_tuples: _ScoreTuplesByName,
+    loss_stated: bool,
 ) -> str | None:
     """A bare score pair (no enclosing parens) is syntactically ambiguous
     about which mentioned team it belongs to -- see module docstring. The
@@ -1250,7 +1297,9 @@ def _check_bare_pair(
     that guess is only flagged if no *other* team named in the same
     sentence has real data that matches the claim instead (Finding 2's
     rescue -- a bare score can plausibly belong to any team in its
-    sentence, not just whichever one is textually closest).
+    sentence, not just whichever one is textually closest). Both the first
+    guess and the rescue apply #228's winner-first loss rule
+    (`_matches_for_name`).
     """
     nearest = _nearest_name(pair_span, name_occurrences)
     if nearest is None:
@@ -1258,17 +1307,45 @@ def _check_bare_pair(
     name, _ = nearest
 
     valid_for_name = valid_tuples.get(name)
-    if not valid_for_name or claimed in valid_for_name:
+    if not valid_for_name or _matches_for_name(claimed, valid_for_name, loss_stated):
         return None
 
     for other_name, _ in name_occurrences:
         if other_name == name:
             continue
         other_valid = valid_tuples.get(other_name)
-        if other_valid and claimed in other_valid:
+        if other_valid and _matches_for_name(claimed, other_valid, loss_stated):
             return None
 
     return _mismatch_message(name, claimed, valid_for_name)
+
+
+def _matches_for_name(
+    claimed: tuple[int, int], valid_for_name: set[tuple[int, int]], loss_stated: bool
+) -> bool:
+    """Whether a pair claimed for a name is one of that name's real
+    `(team_score, opponent_score)` tuples as recorded, or (issue #228) the
+    winner-first statement of one of its real losses in a sentence that
+    says the game was lost. Only that: the reverse of a *win* is never
+    accepted, whatever the sentence says, and the reverse of a loss is not
+    accepted without a cue. A tie reverses to itself, so it needs nothing.
+    """
+    if claimed in valid_for_name:
+        return True
+    if not loss_stated:
+        return False
+    return _is_winner_first_loss(claimed, valid_for_name)
+
+
+def _is_winner_first_loss(claimed: tuple[int, int], valid_for_name: set[tuple[int, int]]) -> bool:
+    """Whether `claimed` is `(opponent_score, team_score)` of a recorded
+    tuple `(team_score, opponent_score)` for this name with `team_score <
+    opponent_score`: a game the subject really lost, said with the winner's
+    points first."""
+    team_score, opponent_score = claimed[1], claimed[0]
+    if not team_score < opponent_score:
+        return False
+    return (team_score, opponent_score) in valid_for_name
 
 
 def _mismatch_message(

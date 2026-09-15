@@ -43,6 +43,15 @@ It then asserts §8's four properties plus one anti-vacuity check, per year:
 The check functions are unit-tested offline, in CI, by
 `tests/test_persona_smoke_eval_checks.py`.
 
+**A team case with a loss (issue #228).** One more real-key case posts
+`POST /api/verdict/team-case` for 2005 USC (12-1, its one loss 38-41 to
+Texas) and asserts that if the narration cites that loss's score, the
+sentence says the winner's points first and says the game was lost (rule 5
+since persona-v10; `_loss_order_violations`, this module's own check), that
+the narration passes property 2, and that it was served by the narrator
+(property 5). The champion eval above is unchanged: it does not judge loss
+order. Skipped without the key like the rest of this module.
+
 **Key.** Gated on `ANTHROPIC_API_KEY` alone, as `api.config` resolves it: from
 the environment, or through `load_dotenv` from `apps/api/.env` (or the file
 named by `MY_TEAM_IS_BETTER_API_ENV_FILE`), which never overrides a variable
@@ -315,6 +324,94 @@ def _invented_claims(text: str, fact_block_json: str) -> list[str]:
     return sorted(invented)
 
 
+def _grounding_violations(text: str, fact_block_json: str, pattern: re.Pattern[str]) -> list[str]:
+    """§8 property 2, all three checks (see the module docstring), each
+    reported as its own violation."""
+    violations: list[str] = []
+
+    # 2a. grounded: every number is in the fact block verbatim, or is a rating
+    # rounded or displayed the way the site displays it
+    invented_numbers = _number_tokens(text) - _grounded_number_forms(fact_block_json)
+    if invented_numbers:
+        violations.append(
+            "grounded: numbers neither in the fact block nor a rounded/displayed rating "
+            f"{sorted(invented_numbers)}"
+        )
+
+    # 2b. grounded: every catalog team mentioned is mentioned in the fact block
+    invented_teams = _team_mentions(pattern, text) - _fact_block_team_mentions(
+        pattern, fact_block_json
+    )
+    if invented_teams:
+        violations.append(f"grounded: teams not in the fact block {sorted(invented_teams)}")
+
+    # 2c. grounded: every hyphen-joined pair is a stated score or record
+    invented_claims = _invented_claims(text, fact_block_json)
+    if invented_claims:
+        violations.append(f"grounded: scores/records not in the fact block {invented_claims}")
+
+    return violations
+
+
+# ---------------------------------------------------------------------------
+# #228: a loss is said winner-first, in a sentence that says it was lost
+# ---------------------------------------------------------------------------
+
+# Rule 5 of the persona prompt (persona-v10, issue #228): a loss's score is
+# the winner's points first, and the sentence says the game was lost. These
+# are the loss cues production's grounding accepts, restated here rather than
+# imported, like everything else this eval checks with.
+_LOSS_CUE_RE = re.compile(r"\b(?:lost|fell|dropped)\b", re.IGNORECASE)
+
+# The naive split production's grounding scopes its sentence rules with; a
+# loss cue counts only inside the sentence that cites the score.
+_LOSS_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _loss_order_violations(text: str, case: TeamCaseOut) -> list[str]:
+    """Every citation in `text` of the score of one of `case`'s losses that
+    breaks rule 5 (#228): said losing-score-first (`team_score` then
+    `opponent_score`, "Texas got them 38-41" for USC's 38-41 loss), or said
+    winner-first in a sentence with no loss cue ("Texas got them 41-38").
+    "USC lost 41-38 to Texas" is what the rule asks for.
+
+    Only a pair that is one of the case's `games[]` losses, in either order,
+    is judged, and never one that is also a win's `(team_score,
+    opponent_score)`: a season with a 41-38 win and a 38-41 loss would make
+    the pair ambiguous, and this check makes no attribution to a team (that
+    is production's #26 rule). A W-L record, a win's score and a pair from
+    no game of the case's are left to the other checks.
+    """
+    losses = {
+        (game.team_score, game.opponent_score): game.opponent_name
+        for game in case.games
+        if game.result == "L"
+    }
+    wins = {(game.team_score, game.opponent_score) for game in case.games if game.result == "W"}
+    violations: list[str] = []
+    for sentence in _LOSS_SENTENCE_SPLIT_RE.split(text.strip()):
+        lost = _LOSS_CUE_RE.search(sentence) is not None
+        for match in _SCORE_OR_RECORD_RE.finditer(sentence):
+            parts = _claim_parts(match)
+            if len(parts) != 2 or parts in wins:
+                continue
+            first, second = parts
+            written = match.group(0)
+            if parts in losses:
+                violations.append(
+                    f"loss-order: {written} says {case.team_name}'s loss to {losses[parts]} "
+                    f"losing-score-first; say it {second}-{first} in a sentence that says "
+                    "the game was lost"
+                )
+            elif (second, first) in losses and not lost:
+                violations.append(
+                    f"loss-order: {written} is {case.team_name}'s loss to "
+                    f"{losses[(second, first)]}, but the sentence never says it was lost "
+                    "(lost / fell / dropped)"
+                )
+    return violations
+
+
 # ---------------------------------------------------------------------------
 # length and banned words
 # ---------------------------------------------------------------------------
@@ -452,25 +549,34 @@ def _catalog_team_names(client: TestClient) -> list[str]:
     return names
 
 
-@pytest.mark.skipif(
+_NO_KEY = pytest.mark.skipif(
     not ANTHROPIC_API_KEY,
     reason=(
         "persona smoke eval requires ANTHROPIC_API_KEY (it makes real "
         f"{MODEL} calls); unset, so skipped"
     ),
 )
-@pytest.mark.parametrize("year", sorted(EXPECTED_KEENER_NUMBER_ONE))
-def test_champion_narration_meets_the_section_8_properties(client: TestClient, year: int) -> None:
+
+
+def _recording_production_narrator() -> _RecordingNarrator:
+    """The production narrator, wrapped in a recorder and installed as the
+    app's narrator for this test. `client` (conftest.py) already wires the
+    fixture db and a fresh InMemoryNarrationCache per request; only the
+    narrator is swapped, and the fixture's teardown pops this override."""
     production_narrator = get_narrator()
     assert isinstance(production_narrator, ClaudeNarrator), (
         "get_narrator() did not resolve the production ClaudeNarrator "
         f"(got {type(production_narrator).__name__}); is APP_TEST_MODE set?"
     )
     recorder = _RecordingNarrator(production_narrator)
-    # `client` (conftest.py) already wires the fixture db and a fresh
-    # InMemoryNarrationCache per request; only the narrator is swapped, and
-    # the fixture's teardown pops this override.
     app.dependency_overrides[get_narrator] = lambda: recorder
+    return recorder
+
+
+@_NO_KEY
+@pytest.mark.parametrize("year", sorted(EXPECTED_KEENER_NUMBER_ONE))
+def test_champion_narration_meets_the_section_8_properties(client: TestClient, year: int) -> None:
+    recorder = _recording_production_narrator()
 
     response = client.post("/api/verdict/champion", json={"year": year})
     assert response.status_code == 200, response.text
@@ -536,6 +642,72 @@ def test_champion_narration_meets_the_section_8_properties(client: TestClient, y
     assert not violations, f"{year}: " + "; ".join(violations) + f" -- text: {text!r}"
 
 
+# The team case with a loss for the #228 eval: 2005 USC, 12-1, whose one loss
+# is 38-41 to Texas in the Rose Bowl -- the game any narration of that season
+# cites. Pinned against the fixture in the test itself, so a fixture change
+# fails loudly rather than making the check vacuous.
+LOSS_CASE_YEAR = 2005
+LOSS_CASE_TEAM = "USC"
+LOSS_CASE_LOSSES = [("Texas", 38, 41)]
+
+
+@_NO_KEY
+def test_team_case_narration_states_its_loss_winner_first(client: TestClient) -> None:
+    """Issue #228: `POST /api/verdict/team-case` for a team with a loss. If
+    the narration cites the loss's score, that sentence says the winner's
+    points first and says the game was lost (rule 5, persona-v10), and the
+    narration is grounded by this module's own checks (§8 property 2) and was
+    served by the narrator, not the fallback (property 5). Which team the
+    score is credited to is production's rule (#26), not this eval's."""
+    recorder = _recording_production_narrator()
+
+    response = client.post(
+        "/api/verdict/team-case", json={"year": LOSS_CASE_YEAR, "team": LOSS_CASE_TEAM}
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    case = TeamCaseOut.model_validate(body["evidence"])
+    narration = body["narration"]
+    text: str = narration["text"]
+    fact_block_json = team_case_fact_block_json(case)
+    assert case.team_name == LOSS_CASE_TEAM
+    assert [
+        (game.opponent_name, game.team_score, game.opponent_score)
+        for game in case.games
+        if game.result == "L"
+    ] == LOSS_CASE_LOSSES, "the fixture's loss changed; this eval's premise no longer holds"
+    grounding_feedback = recorder.calls[1][-1]["content"] if len(recorder.calls) > 1 else None
+
+    cited = [m.group(0) for m in _SCORE_OR_RECORD_RE.finditer(text)]
+    lines = [
+        f"[persona-eval] {LOSS_CASE_YEAR} {LOSS_CASE_TEAM} team case chars={len(text)} "
+        f"claude_calls={len(recorder.calls)} pairs_cited={cited or 'none'}",
+        f"[persona-eval] {LOSS_CASE_YEAR} {LOSS_CASE_TEAM} text: {text}",
+    ]
+    if grounding_feedback is not None:
+        lines.append(f"[persona-eval] first attempt: {recorder.outputs[0]}")
+        lines.append(f"[persona-eval] grounding feedback: {grounding_feedback}")
+    print("\n".join(lines))
+
+    assert recorder.calls, "the narrator was never called"
+    first_user_turn = recorder.calls[0][0]["content"]
+    assert fact_block_json in first_user_turn, "the fact block was not sent to the narrator"
+    assert narration["cached"] is False
+
+    violations = _loss_order_violations(text, case)
+    violations += _grounding_violations(
+        text, fact_block_json, _team_mention_pattern(_catalog_team_names(client))
+    )
+    if text not in recorder.outputs:
+        violations.append(
+            "not-fallback: the served text is not any narrator output "
+            f"(matches team_case_fallback_text: {text == team_case_fallback_text(case)}; "
+            f"grounding feedback: {grounding_feedback!r})"
+        )
+    assert not violations, "; ".join(violations) + f" -- text: {text!r}"
+
+
 def _section_8_violations(
     *,
     year: int,
@@ -572,24 +744,8 @@ def _section_8_violations(
             f"{sorted(mentions)})"
         )
 
-    # 2a. grounded: every number is in the fact block verbatim, or is a rating
-    # rounded or displayed the way the site displays it
-    invented_numbers = _number_tokens(text) - _grounded_number_forms(fact_block_json)
-    if invented_numbers:
-        violations.append(
-            "grounded: numbers neither in the fact block nor a rounded/displayed rating "
-            f"{sorted(invented_numbers)}"
-        )
-
-    # 2b. grounded: every catalog team mentioned is mentioned in the fact block
-    invented_teams = mentions - _fact_block_team_mentions(pattern, fact_block_json)
-    if invented_teams:
-        violations.append(f"grounded: teams not in the fact block {sorted(invented_teams)}")
-
-    # 2c. grounded: every hyphen-joined pair is a stated score or record
-    invented_claims = _invented_claims(text, fact_block_json)
-    if invented_claims:
-        violations.append(f"grounded: scores/records not in the fact block {invented_claims}")
+    # 2. grounded (2a numbers, 2b teams, 2c scores and records)
+    violations += _grounding_violations(text, fact_block_json, pattern)
 
     # 3. length bounded
     sentences = _sentence_count(text)

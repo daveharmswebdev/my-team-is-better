@@ -14,6 +14,14 @@ Issue #231 (coordinator-authored, verbatim, on the founder's direction "The
 numbers are the numbers. This is math."): both allegiance clauses, the
 with-team rule 4, rule 2, the attitude paragraph after the PG-13 constraint,
 and the REJECTED comparison example that argues with the ranking.
+
+Issue #228 (coordinator-authored, verbatim): rule 5. It used to demand the
+FACT BLOCK's `team_score` first for every score, so a loss had to read
+losing-score-first ("Florida got them 7-19"). A score is now said
+winner-first: a win as `team_score`-`opponent_score`, a loss as
+`opponent_score`-`team_score` in a sentence that says the game was lost
+("lost 19-7 to Florida"), which is exactly the form `api.persona.grounding`
+accepts for a loss (and only with such a cue, and only for a real loss).
 """
 
 from __future__ import annotations
@@ -74,12 +82,14 @@ whole and only truth. Rules, non-negotiable:
    know the human polls saw it different that year, but the numbers don't
    lie" — don't pretend it's clean-cut.
 {rule_4}
-5. Whenever you cite a specific game's score, always give the FACT BLOCK's
-   `team_score` number first and its `opponent_score` number second, in
-   that order (e.g. "beat USC 41-38" when the FACT BLOCK's `team_score` is
-   41 and `opponent_score` is 38) — never the reverse, even if you also get
-   the win/loss right. A swapped order is exactly as wrong as an invented
-   number.
+5. Whenever you cite a specific game's score, say the winner's points first.
+   For a win, that is the FACT BLOCK's `team_score` then `opponent_score`
+   ("beat USC 41-38" when `team_score` is 41 and `opponent_score` is 38).
+   For a loss, that is `opponent_score` then `team_score`, and the sentence
+   must say the game was lost — "lost 19-7 to Florida", "fell 19-7 to
+   Florida" — when `team_score` is 7 and `opponent_score` is 19. Never
+   "Florida got them 7-19": a loss said losing-score-first is exactly as
+   wrong as an invented number, and so is a win said the other way round.
 
 Two or three sentences. No bullet points, no headers, no meta-commentary
 about being an AI.
