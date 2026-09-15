@@ -22,6 +22,8 @@ aliases (`tests/fixtures/claim_blocks.py`).
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fixtures.claim_blocks import (
     assert_an_error_says,
@@ -30,6 +32,7 @@ from fixtures.claim_blocks import (
     cfb_team_case_block,
     rejected,
     rendered,
+    submit,
 )
 
 from api.repositories.teams import TeamRecord
@@ -63,6 +66,11 @@ def virginia_2017() -> str:
 @pytest.fixture(scope="module")
 def fsu_msu_2013() -> str:
     return cfb_comparison_block(2013, "Florida State", "Michigan State")
+
+
+@pytest.fixture(scope="module")
+def texas_usc_2005() -> str:
+    return cfb_comparison_block(2005, "Texas", "USC")
 
 
 def test_catalog_facts_these_tests_rely_on(catalog: tuple[TeamRecord, ...]) -> None:
@@ -146,6 +154,54 @@ def test_a_number_inside_a_placeholder_id_is_not_prose(
 ) -> None:
     claim: dict[str, object] = {"id": "k12", "kind": "year"}
     assert rendered("Back in {k12}.", [claim], alabama_2017, catalog) == "Back in 2017."
+
+
+@pytest.mark.parametrize(
+    "record",
+    ["one-and-oh", "one-oh", "oh-and-one", "thirteen and oh", "twelve and one", "one and twelve"],
+)
+def test_a_number_word_record_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], record: str
+) -> None:
+    errors = rejected(f"They went {record} that year.", [], alabama_2017, catalog)
+    assert_an_error_says(errors, f'"{record}"', "spells out the number")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Oh and one more thing: Auburn got lucky.",
+        # Accepted gap (coordinator decision B2 on #290 round 3): when both sides
+        # are oh, one or zero, only a hyphen-joined form counts as a record.
+        "They went one and oh.",
+    ],
+)
+def test_oh_and_one_joined_by_a_plain_and_is_prose(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str
+) -> None:
+    assert rendered(text, [], alabama_2017, catalog) == text
+
+
+_DIGIT_HEAVY = (
+    "1 " * 10_000,
+    ("Alabama 13-1 over Auburn, then two more and 9 " * 500)[:20_000],
+)
+
+
+@pytest.mark.parametrize("text", _DIGIT_HEAVY, ids=["bare-digits", "names-digits-and-words"])
+def test_a_twenty_thousand_character_digit_heavy_text_is_checked_in_under_two_seconds(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str
+) -> None:
+    # Round 3 measured 78 s for "1 " * 10000: every error re-scanned the whole
+    # sentence for team names. The bound is generous so CI never flakes.
+    assert len(text) == 20_000
+    submit("Warm the catalog caches.", [], alabama_2017, catalog)
+    started = time.perf_counter()
+    outcome = submit(text, [], alabama_2017, catalog)
+    elapsed = time.perf_counter() - started
+    assert outcome.errors
+    assert outcome.text is None
+    assert elapsed < 2.0, f"took {elapsed:.2f} s"
 
 
 # ---------------------------------------------------------------------------
@@ -389,6 +445,71 @@ def test_a_different_team_beside_a_name_placeholder_is_not_a_duplicate(
         rendered("Alabama {k1}, and then some.", [claim], alabama_2017, catalog)
         == "Alabama No. 3 Georgia, and then some."
     )
+
+
+_ALABAMA_RECORD: dict[str, object] = {"id": "r", "kind": "record", "team": "Alabama"}
+
+
+@pytest.mark.parametrize(
+    ("text", "claim"),
+    [
+        # parenthetical: would render "Alabama (Alabama 13-1) rolled."
+        ("Alabama ({r}) rolled.", _ALABAMA_RECORD),
+        ("They beat Georgia ({k}).", {"id": "k", "kind": "rank", "team": "Georgia"}),
+        ("Alabama ({t}) is the pick.", {"id": "t", "kind": "rating", "team": "Alabama"}),
+        ("[{r}] Alabama rolled.", _ALABAMA_RECORD),
+        # possessive: would render "Alabama's Alabama 13-1 says it all."
+        ("Alabama's {r} says it all.", _ALABAMA_RECORD),
+        ("Alabama’s {r} says it all.", _ALABAMA_RECORD),
+        # commas, colons, semicolons, dashes and quotes, in either order
+        ("Alabama, {r}, rolled.", _ALABAMA_RECORD),
+        ("{r}, Alabama rolled.", _ALABAMA_RECORD),
+        ("Alabama: {r}.", _ALABAMA_RECORD),
+        ("{r}; Alabama rolled.", _ALABAMA_RECORD),
+        ("Alabama - {r}.", _ALABAMA_RECORD),
+        ("Alabama – {r}.", _ALABAMA_RECORD),
+        ("Alabama—{r}.", _ALABAMA_RECORD),
+        ('"Alabama" {r}.', _ALABAMA_RECORD),
+        ("'Alabama' {r}.", _ALABAMA_RECORD),
+        ("“Alabama” {r}.", _ALABAMA_RECORD),
+        ("‘Alabama’ {r}.", _ALABAMA_RECORD),
+    ],
+)
+def test_the_name_typed_beside_its_own_placeholder_across_punctuation_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str, claim: dict[str, object]
+) -> None:
+    errors = rejected(text, [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, "{" + str(claim["id"]) + "}", "already prints", str(claim["team"]))
+
+
+def test_both_names_typed_beside_their_own_placeholders_on_a_comparison_are_rejected(
+    texas_usc_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims: list[dict[str, object]] = [
+        {"id": "a", "kind": "record", "team": "Texas"},
+        {"id": "b", "kind": "record", "team": "USC"},
+    ]
+    errors = rejected("Texas ({a}) beat USC ({b}).", claims, texas_usc_2005, catalog)
+    assert_an_error_says(errors, "{a}", "already prints", '"Texas"')
+    assert_an_error_says(errors, "{b}", "already prints", '"USC"')
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # a sentence end breaks adjacency
+        ("Alabama rolled. {r} says it all.", "Alabama rolled. Alabama 13-1 says it all."),
+        ("They beat Alabama! {r} was no fluke.", "They beat Alabama! Alabama 13-1 was no fluke."),
+        ("Was it Alabama? {r} says so.", "Was it Alabama? Alabama 13-1 says so."),
+        # a different team beside the placeholder is never a duplicate
+        ("Auburn ({r}) is not the story.", "Auburn (Alabama 13-1) is not the story."),
+        ("Georgia's {r} line is wrong.", "Georgia's Alabama 13-1 line is wrong."),
+    ],
+)
+def test_a_name_beside_a_placeholder_across_a_sentence_end_or_for_another_team_is_accepted(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str, expected: str
+) -> None:
+    assert rendered(text, [_ALABAMA_RECORD], alabama_2017, catalog) == expected
 
 
 def test_the_longest_name_wins_for_a_team_outside_the_block(

@@ -23,6 +23,18 @@ Alabama"). This module:
    "second half") is rejected like any other, with an error saying the block
    holds no such detail.
 
+A name is "beside" its own record, rating or rank placeholder when only
+whitespace, brackets, commas, colons, semicolons, dashes or quotes separate
+them, in either order, or a possessive 's on the name ("Alabama ({r})",
+"Alabama's {r}", "{r}, Alabama"); a sentence end breaks it (#290 round 3).
+
+A count of meetings, and the wording of a game claim that doesn't match, rely
+on whether the block holds every game between the pair: a team case does for
+its subject, a comparison does for team_a vs team_b and for a subject vs a
+common opponent. Elsewhere a game can sit in the block only as a quality win
+or worst loss with its rematch missing, so no count is given and no error
+calls the one game held "that game" (#290 round 3).
+
 What counts as a team reference, so ordinary bar-stool prose passes (#290
 round 2): a block team's name in any case; any other catalog name only with
 its first letter uppercase (founder decision, no English-word exemption list:
@@ -56,6 +68,7 @@ this yet (#291 wires it), so no PROMPT_VERSION or GROUNDING_VERSION moves.
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
 from collections.abc import Collection, Mapping, Sequence
@@ -134,11 +147,19 @@ _NUMBER_WORD_RE: Final = re.compile(
     r"\b(?:" + "|".join(_NUMBER_WORDS) + r")\b",
     re.IGNORECASE,
 )
-_RECORD_TERMS: Final = "|".join(("zero", "oh", "one", *_NUMBER_WORDS))
-_RECORD_SEPARATOR: Final = rf"(?:\s*[{_DASHES}]\s*(?:and\s*[{_DASHES}]\s*)?|\s+and\s+)"
+_SMALL_RECORD_TERMS: Final = "zero|oh|one"
+_BIG_RECORD_TERMS: Final = "|".join(_NUMBER_WORDS)
+_RECORD_TERMS: Final = f"{_SMALL_RECORD_TERMS}|{_BIG_RECORD_TERMS}"
+_DASH_SEPARATOR: Final = rf"\s*[{_DASHES}]\s*(?:and\s*[{_DASHES}]\s*)?"
+_RECORD_SEPARATOR: Final = rf"(?:{_DASH_SEPARATOR}|\s+and\s+)"
 # "thirteen and oh", "one-and-one", "twelve-one": a record spelled in words.
+# When both sides are oh, one or zero, only the hyphen-joined form counts, so
+# "Oh and one more thing" is prose and "went one and oh" an accepted gap
+# (#290 round 3, decision B2).
 _WORD_RECORD_RE: Final = re.compile(
-    rf"\b(?:{_RECORD_TERMS}){_RECORD_SEPARATOR}(?:{_RECORD_TERMS})\b",
+    rf"\b(?:(?:{_BIG_RECORD_TERMS}){_RECORD_SEPARATOR}(?:{_RECORD_TERMS})"
+    rf"|(?:{_SMALL_RECORD_TERMS}){_RECORD_SEPARATOR}(?:{_BIG_RECORD_TERMS})"
+    rf"|(?:{_SMALL_RECORD_TERMS}){_DASH_SEPARATOR}(?:{_SMALL_RECORD_TERMS}))\b",
     re.IGNORECASE,
 )
 _ORDINAL_WORDS: Final = (
@@ -157,6 +178,14 @@ _NO_DETAIL_RE: Final = re.compile(
 )
 _THE: Final = ("the", "The")
 _WORD_CHAR_RE: Final = re.compile(r"\w")
+# Between a team name and its own record/rating/rank placeholder, these and
+# whitespace keep the two beside each other; . ! ? do not (decision B1).
+_JOINERS: Final = frozenset("()[],:;-–—\"'‘’“”")
+_POSSESSIVES: Final = ("'s", "’s")
+# A code point in the surrogate range is never valid text on its own, and
+# cannot be encoded as UTF-8.
+_SURROGATE_RE: Final = re.compile("[\ud800-\udfff]")
+_SURROGATE: Final = "a lone surrogate, which is not valid Unicode text"
 
 _AP_WORDS: Final = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 _FLIP: Final[Mapping[str, str]] = {"W": "L", "L": "W", "T": "T"}
@@ -278,7 +307,9 @@ def check_and_render(
 
     errors: list[str] = []
     for key in tool_input:
-        if key not in ("text", "claims"):
+        if _has_surrogate(key):
+            errors.append(f"{TOOL_NAME} input has a key holding {_SURROGATE}")
+        elif key not in ("text", "claims"):
             errors.append(f'{TOOL_NAME} does not take {_quote(key)}; it takes "text" and "claims"')
 
     text = tool_input.get("text")
@@ -286,6 +317,8 @@ def check_and_render(
         errors.append(f'{TOOL_NAME} needs "text"')
     elif not isinstance(text, str):
         errors.append(f'"text" must be a string, not {_type_name(text)}')
+    elif _has_surrogate(text):
+        errors.append(f'"text" holds {_SURROGATE}')
     elif not text.strip():
         errors.append('"text" is empty')
 
@@ -305,6 +338,13 @@ def check_and_render(
                 errors.append(f"claims[{position}] must be an object, not {_type_name(raw)}")
                 continue
             claim_id = raw.get("id")
+            if any(_has_surrogate(key) or _has_surrogate(value) for key, value in raw.items()):
+                errors.append(f"claims[{position}] holds {_SURROGATE}")
+                # Keep a well-formed id known, so its placeholder isn't also reported.
+                valid_id = isinstance(claim_id, str) and _ID_RE.fullmatch(claim_id)
+                if valid_id and claim_id not in claim_ids:
+                    claim_ids.append(cast(str, claim_id))
+                continue
             if not isinstance(claim_id, str) or not claim_id:
                 errors.append(f'claims[{position}] needs a string "id"')
                 continue
@@ -331,7 +371,7 @@ def check_and_render(
                 if kind == "rank":
                     rank_claims.add(claim_id)
 
-    if isinstance(text, str):
+    if isinstance(text, str) and not _has_surrogate(text):
         used = list(dict.fromkeys(match.group(1) for match in _PLACEHOLDER_RE.finditer(text)))
         known = ", ".join(_quote(claim_id) for claim_id in claim_ids) if claim_ids else "none"
         for placeholder in used:
@@ -433,6 +473,7 @@ class _Block:
     ranks: dict[str, int] = field(default_factory=dict)
     games: dict[tuple[str, str, int | None, str], _Game] = field(default_factory=dict)
     common_opponents: int | None = None
+    common_opponent_names: set[str] = field(default_factory=set)
 
     def add_team(self, name: str) -> None:
         if name not in self.teams:
@@ -440,17 +481,31 @@ class _Block:
 
     def add_game(self, game: _Game) -> None:
         """Index `game` from both sides, deduped by (team, opponent, week,
-        season_type). A row without `neutral_site` (a common-opponent meeting)
-        takes it from another row for the same game when one exists."""
+        season_type); the first row for a game is kept. The parsers add every
+        row that carries `neutral_site` (games[], quality_wins, worst_loss,
+        head_to_head) before the common-opponent rows that don't, so a
+        common-opponent meeting keeps `neutral_site` from another row for the
+        same game when one exists."""
         for side in (game, game.mirrored()):
-            existing = self.games.get(side.key)
-            if existing is None:
-                self.games[side.key] = side
-            elif existing.neutral_site is None and side.neutral_site is not None:
-                self.games[side.key] = replace(existing, neutral_site=side.neutral_site)
+            self.games.setdefault(side.key, side)
 
     def meetings(self, team: str, opponent: str) -> list[_Game]:
         return [g for g in self.games.values() if g.team == team and g.opponent == opponent]
+
+    def holds_every_meeting(self, team: str, opponent: str) -> bool:
+        """Whether the block lists every game between `team` and `opponent`: a
+        team case for its subject against anyone (games[]); a comparison for
+        team_a vs team_b (head_to_head) and for a subject vs a common opponent
+        (team_a_meetings / team_b_meetings). Any other pair's games are in the
+        block only as a quality win or worst loss, so a rematch can be missing
+        (#290 round 3, decision B3)."""
+        pair = {team, opponent}
+        subjects = set(self.subjects)
+        if not self.is_comparison:
+            return bool(pair & subjects)
+        if pair == subjects:
+            return True
+        return len(pair & subjects) == 1 and bool(pair & self.common_opponent_names)
 
     def holdings(self, names: Sequence[str]) -> str:
         """What the block holds for the subjects and for `names`, for an error
@@ -520,6 +575,7 @@ def _parse_comparison(data: Any, block: _Block) -> None:
     for common in data["common_opponents"]:
         opponent = str(common["opponent_name"])
         block.add_team(opponent)
+        block.common_opponent_names.add(opponent)
         if common["opponent_rank"] is not None:
             block.ranks.setdefault(opponent, int(common["opponent_rank"]))
         for side, meetings_key in (("team_a", "team_a_meetings"), ("team_b", "team_b_meetings")):
@@ -646,15 +702,21 @@ def _resolve_claim(
         return None, [_not_a_subject(where, kind, team, block)]
     if kind == "record":
         return f"{subject.name} {subject.record}", []
-    # win_pct (#108): a tie counts as half a win.
-    played = subject.wins + subject.losses + subject.ties
-    if played == 0:
+    if subject.wins + subject.losses + subject.ties == 0:
         return None, [f"{where}: {team} has no games in the fact block, so no winning percentage"]
-    pct = ((Decimal(subject.wins) + Decimal(subject.ties) / 2) / Decimal(played)).quantize(
+    return _format_win_pct(subject.wins, subject.losses, subject.ties), []
+
+
+def _format_win_pct(wins: int, losses: int, ties: int) -> str:
+    """A winning percentage to three places with no leading zero (".929",
+    "1.000"). A tie counts as half a win (#108); an exact half-thousandth
+    rounds up, so 9-7 (.5625) is ".563". `wins + losses + ties` must be > 0."""
+    played = wins + losses + ties
+    pct = ((Decimal(wins) + Decimal(ties) / 2) / Decimal(played)).quantize(
         Decimal("0.001"), rounding=ROUND_HALF_UP
     )
     shown = f"{pct:.3f}"
-    return (shown[1:] if shown.startswith("0") else shown), []
+    return shown[1:] if shown.startswith("0") else shown
 
 
 def _shape_errors(where: str, kind: str, raw: dict[Any, Any]) -> list[str]:
@@ -734,12 +796,24 @@ def _resolve_game_kind(
         and (season_type is None or game.season_type == season_type)
     ]
     listing = "; ".join(game.line for game in meetings)
+    asked = " ".join(
+        str(part)
+        for part in (season_type, "week" if week is not None else None, week)
+        if part is not None
+    )
+    # On a pair the block may not fully hold, never say the two did not meet,
+    # nor call the one game held "that game" (#290 round 3, decision B3).
+    partial = not block.holds_every_meeting(team, opponent)
+    may_not_hold = (
+        f"from {team}'s side it holds: {listing}, and it may not hold every game "
+        "between those teams"
+    )
     if not chosen:
-        asked = " ".join(
-            str(part)
-            for part in (season_type, "week" if week is not None else None, week)
-            if part is not None
-        )
+        if partial:
+            return None, [
+                f"{where}: the fact block holds no {team} vs {opponent} game in {asked}; "
+                f"{may_not_hold}"
+            ]
         return None, [
             f"{where}: {team} and {opponent} did not meet in {asked}; "
             f"the fact block holds {team}'s side as: {listing}"
@@ -751,6 +825,12 @@ def _resolve_game_kind(
         ]
     game = chosen[0]
     if raw["result"] != game.result:
+        if partial:
+            during = f" in {asked}" if asked else ""
+            return None, [
+                f"{where}: the fact block holds no {raw['result']} for {team} against "
+                f"{opponent}{during}; {may_not_hold}"
+            ]
         return None, [
             f"{where}: from {team}'s side that game ({game.label}) was "
             f"{game.result} {game.team_score}-{game.opponent_score}, not {raw['result']}"
@@ -833,18 +913,20 @@ def _resolve_count(where: str, raw: dict[Any, Any], block: _Block) -> tuple[str 
             return None, errors
         if opponent == team:
             return None, [f"{where}: a count of meetings needs two different teams"]
-        found = len(block.meetings(team, opponent))
-        complete = (
-            set(block.subjects) == {team, opponent}
-            if block.is_comparison
-            else any(
-                block.subjects[s].games is not None for s in (team, opponent) if s in block.subjects
+        meetings = block.meetings(team, opponent)
+        found = len(meetings)
+        complete = block.holds_every_meeting(team, opponent)
+        # An error even when some meetings are found: a comparison can hold one
+        # game of a pair as a quality win and miss the rematch (decision B3).
+        if not complete:
+            held = (
+                f"from {team}'s side it holds: {'; '.join(game.line for game in meetings)}"
+                if meetings
+                else "it holds no game between them"
             )
-        )
-        if found == 0 and not complete:
             return None, [
-                f"{where}: the fact block holds no game between {team} and {opponent}, "
-                "and does not hold either team's full schedule"
+                f"{where}: the fact block does not hold every game between {team} and "
+                f"{opponent}, so it has no count of their meetings; {held}"
             ]
         return _ap(found), []
 
@@ -981,18 +1063,32 @@ def _check_prose(
     if "{" in masked or "}" in masked:
         errors.append('the text has a "{" or "}" that is not part of a placeholder like {id}')
 
-    breaks = [(match.start(), match.end()) for match in _SENTENCE_BREAK_RE.finditer(masked)]
+    # Sentence breaks and no-detail phrases are sorted and never overlap, so
+    # each lookup is a bisection, and a sentence's holdings are built once:
+    # rebuilding them per error made a digit-heavy text quadratic (round 3).
+    breaks = list(_SENTENCE_BREAK_RE.finditer(masked))
+    break_starts = [match.start() for match in breaks]
+    break_ends = [match.end() for match in breaks]
     no_detail = [(m.start(), m.end(), m.group(0)) for m in _NO_DETAIL_RE.finditer(masked)]
+    no_detail_starts = [start for start, _, _ in no_detail]
+    holdings_by_sentence: dict[tuple[int, int], str] = {}
 
     def holdings(start: int, end: int) -> str:
-        left = max((b_end for _, b_end in breaks if b_end <= start), default=0)
-        right = min((b_start for b_start, _ in breaks if b_start >= end), default=len(masked))
-        return block.holdings(_block_teams_in(masked[left:right], block, index, name_re))
+        after = bisect.bisect_right(break_ends, start)
+        left = break_ends[after - 1] if after else 0
+        before = bisect.bisect_left(break_starts, end)
+        right = break_starts[before] if before < len(break_starts) else len(masked)
+        if (left, right) not in holdings_by_sentence:
+            names = _block_teams_in(masked[left:right], block, index, name_re)
+            holdings_by_sentence[(left, right)] = block.holdings(names)
+        return holdings_by_sentence[(left, right)]
 
     def typed(what: str, match: re.Match[str], rule: str) -> str:
         # The phrase only picks the wording: the token is rejected either way.
-        for start, end, phrase in no_detail:
-            if start <= match.start() and match.end() <= end:
+        at = bisect.bisect_right(no_detail_starts, match.start()) - 1
+        if at >= 0:
+            _, end, phrase = no_detail[at]
+            if match.end() <= end:
                 return (
                     f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; the FACT "
                     "BLOCK holds no conference or in-game detail, so leave it out"
@@ -1039,11 +1135,8 @@ def _check_prose(
                     f"{_quote(found)} must be written exactly as the fact block spells it: "
                     f"{_quote(spelled)}"
                 )
-            left, right = match.start(), match.end()
-            while left > 0 and masked[left - 1].isspace():
-                left -= 1
-            while right < len(masked) and masked[right].isspace():
-                right += 1
+            left = _joined_left(masked, match.start())
+            right = _joined_right(masked, match.end())
             for placeholder in (placeholder_ending.get(left), placeholder_starting.get(right)):
                 if placeholder is not None and name_claims.get(placeholder) == spelled:
                     errors.append(
@@ -1110,12 +1203,39 @@ def _block_teams_in(
     return found
 
 
+def _joined_left(masked: str, start: int) -> int:
+    """The offset left of `start` past whitespace and joining punctuation."""
+    left = start
+    while left > 0 and (masked[left - 1].isspace() or masked[left - 1] in _JOINERS):
+        left -= 1
+    return left
+
+
+def _joined_right(masked: str, end: int) -> int:
+    """The offset right of `end` past a possessive 's, whitespace and joining
+    punctuation."""
+    right = end
+    if masked[right : right + 2] in _POSSESSIVES and not _WORD_CHAR_RE.match(
+        masked[right + 2 : right + 3]
+    ):
+        right += 2
+    while right < len(masked) and (masked[right].isspace() or masked[right] in _JOINERS):
+        right += 1
+    return right
+
+
+def _has_surrogate(value: object) -> bool:
+    return isinstance(value, str) and _SURROGATE_RE.search(value) is not None
+
+
 def _mask_span(text: str, start: int, end: int) -> str:
     return text[:start] + _MASK * (end - start) + text[end:]
 
 
 def _quote(value: object) -> str:
     shown = value if isinstance(value, str) else repr(value)
+    # Never echo a lone surrogate: the errors must encode as UTF-8.
+    shown = shown.encode("utf-8", "backslashreplace").decode("utf-8")
     if len(shown) > _QUOTE_LIMIT:
         shown = shown[: _QUOTE_LIMIT - 3] + "..."
     return f'"{shown}"'

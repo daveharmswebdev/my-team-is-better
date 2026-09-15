@@ -98,6 +98,21 @@ def texas_usc_2005() -> str:
     return cfb_comparison_block(2005, "Texas", "USC")
 
 
+@pytest.fixture(scope="module")
+def auburn_2017() -> str:
+    return cfb_team_case_block(2017, "Auburn")
+
+
+@pytest.fixture(scope="module")
+def auburn_usc_2017() -> str:
+    return cfb_comparison_block(2017, "Auburn", "USC")
+
+
+@pytest.fixture(scope="module")
+def alabama_auburn_2017() -> str:
+    return cfb_comparison_block(2017, "Alabama", "Auburn")
+
+
 def _game(
     claim_id: str,
     kind: str,
@@ -401,6 +416,121 @@ def test_count_of_meetings_counts_a_rematch(
     assert rendered("{c}", [claim], texas_2005, catalog) == "two"
 
 
+def test_auburn_2017_facts_the_meeting_tests_rely_on(
+    auburn_2017: str, auburn_usc_2017: str, alabama_auburn_2017: str
+) -> None:
+    # Auburn played Georgia twice in 2017, and its team case holds both games.
+    games = [
+        (g["result"], g["team_score"], g["opponent_score"], g["week"], g["season_type"])
+        for g in json.loads(auburn_2017)["games"]
+        if g["opponent_name"] == "Georgia"
+    ]
+    assert games == [("W", 40, 17, 11, "regular"), ("L", 7, 28, 14, "regular")]
+    # On the Auburn vs USC comparison, Georgia is neither the other subject nor a
+    # common opponent: only Auburn's week-11 quality win over Georgia is there.
+    comparison = json.loads(auburn_usc_2017)
+    assert comparison["head_to_head"]["meetings"] == []
+    assert comparison["common_opponents"] == []
+    assert [
+        (q["opponent_name"], q["result"], q["week"]) for q in comparison["team_a"]["quality_wins"]
+    ] == [("Alabama", "W", 13), ("Georgia", "W", 11)]
+    assert comparison["team_a"]["worst_loss"]["opponent_name"] == "LSU"
+    # On the Alabama vs Auburn comparison, Georgia is a common opponent, so the
+    # block lists every meeting of each subject with Georgia.
+    iron_bowl = json.loads(alabama_auburn_2017)
+    assert len(iron_bowl["head_to_head"]["meetings"]) == 1
+    common = {c["opponent_name"]: c for c in iron_bowl["common_opponents"]}
+    assert [m["week"] for m in common["Georgia"]["team_a_meetings"]] == [1]
+    assert [m["week"] for m in common["Georgia"]["team_b_meetings"]] == [11, 14]
+
+
+@pytest.mark.parametrize(("team", "opponent"), [("Auburn", "Georgia"), ("Georgia", "Auburn")])
+def test_count_of_meetings_on_a_pair_the_comparison_may_not_fully_hold_is_rejected(
+    auburn_usc_2017: str, catalog: tuple[TeamRecord, ...], team: str, opponent: str
+) -> None:
+    # The block holds one Auburn-Georgia game (a quality win), but they played
+    # twice: a count here would print "one" for a pair that met two times.
+    claim: dict[str, object] = {
+        "id": "c",
+        "kind": "count",
+        "of": "meetings",
+        "team": team,
+        "opponent": opponent,
+    }
+    errors = rejected("They met {c} times.", [claim], auburn_usc_2017, catalog)
+    assert_an_error_says(errors, '"c"', "Auburn", "Georgia", "does not hold every game")
+
+
+def test_count_of_meetings_renders_on_the_team_case_that_holds_every_game(
+    auburn_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {
+        "id": "c",
+        "kind": "count",
+        "of": "meetings",
+        "team": "Auburn",
+        "opponent": "Georgia",
+    }
+    assert rendered("{c}", [claim], auburn_2017, catalog) == "two"
+
+
+@pytest.mark.parametrize(
+    ("team", "opponent", "expected"),
+    [
+        # head_to_head
+        ("Alabama", "Auburn", "one"),
+        ("Auburn", "Alabama", "one"),
+        # a subject vs a common opponent (team_a_meetings / team_b_meetings)
+        ("Auburn", "Georgia", "two"),
+        ("Georgia", "Alabama", "one"),
+    ],
+)
+def test_count_of_meetings_renders_on_a_comparison_for_a_pair_it_fully_holds(
+    alabama_auburn_2017: str,
+    catalog: tuple[TeamRecord, ...],
+    team: str,
+    opponent: str,
+    expected: str,
+) -> None:
+    claim: dict[str, object] = {
+        "id": "c",
+        "kind": "count",
+        "of": "meetings",
+        "team": team,
+        "opponent": opponent,
+    }
+    assert rendered("{c}", [claim], alabama_auburn_2017, catalog) == expected
+
+
+def test_a_result_the_comparison_does_not_hold_lists_its_meetings_without_one_only_game(
+    auburn_usc_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Auburn did lose to Georgia (week 14); this block just doesn't hold that
+    # game, so the error must not say the week-11 win was "that game".
+    claim = _game("g", "game_score", "Auburn", "Georgia", "L")
+    errors = rejected("Auburn lost {g}.", [claim], auburn_usc_2017, catalog)
+    assert_an_error_says(errors, '"g"', "W 40-17 (regular week 11)", "may not hold every game")
+    assert not any("that game" in error for error in errors), errors
+
+
+def test_a_week_the_comparison_does_not_hold_is_not_called_a_week_they_did_not_meet(
+    auburn_usc_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("m", "margin", "Auburn", "Georgia", "L", week=14, season_type="regular")
+    errors = rejected("Auburn lost by {m}.", [claim], auburn_usc_2017, catalog)
+    assert_an_error_says(errors, '"m"', "W 40-17 (regular week 11)", "may not hold every game")
+    assert not any("did not meet" in error for error in errors), errors
+
+
+def test_a_game_on_a_pair_the_block_may_not_fully_hold_still_resolves_when_it_matches(
+    auburn_2017: str, auburn_usc_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    win = _game("g", "game_score", "Auburn", "Georgia", "W")
+    assert rendered("{g}", [win], auburn_usc_2017, catalog) == "40-17"
+    loss = _game("g", "game_score", "Auburn", "Georgia", "L", week=14)
+    assert rendered("{g}", [loss], auburn_2017, catalog) == "28-7"
+
+
 @pytest.mark.parametrize(
     ("claim", "expected"),
     [
@@ -471,6 +601,27 @@ def test_win_pct_rounds_to_three_places(
     block = cfb_team_case_block(year, block_team)
     claim: dict[str, object] = {"id": "p", "kind": "win_pct", "team": block_team}
     assert rendered("{p}", [claim], block, catalog) == expected
+
+
+@pytest.mark.parametrize(
+    ("wins", "losses", "ties", "expected"),
+    [
+        # 9/16 is exactly .5625: .563 rounding half up, .562 half-even or float round
+        (9, 7, 0, ".563"),
+        # 5/16 is exactly .3125
+        (5, 11, 0, ".313"),
+        # 4.5/8 is exactly .5625, with the tie as half a win
+        (4, 3, 1, ".563"),
+    ],
+)
+def test_win_pct_rounds_an_exact_half_thousandth_up(
+    wins: int, losses: int, ties: int, expected: str
+) -> None:
+    """None of the fixture subjects these tests use has a record that lands on a
+    .0005 tie, so the module's formatter is pinned directly."""
+    from api.persona.claims import _format_win_pct
+
+    assert _format_win_pct(wins, losses, ties) == expected
 
 
 def test_win_pct_for_a_non_subject_is_rejected(
@@ -737,6 +888,39 @@ def test_a_hostile_value_is_never_echoed_in_full(
     ]
     errors = rejected("{x} and {y}", claims, alabama_2017, catalog)
     assert all(len(error) < 400 for error in errors), [len(error) for error in errors]
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        {"text": "\ud800{g}", "claims": [{"id": "g", "kind": "year"}]},
+        {"text": "{g} \udfff", "claims": [_GOOD_GAME]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "team": "Alabama\ud800"}]},
+        # a surrogate pair left as two code points is still not valid text
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "opponent": chr(0xD83D) + chr(0xDE00)}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "id": "g\ud800"}]},
+        {"text": "{c}", "claims": [{"id": "c", "kind": "count", "of": "\ud800"}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "kind": "\ud800"}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "\ud800": "x"}]},
+        {"text": "{g}", "claims": [_GOOD_GAME], "\ud800": True},
+    ],
+)
+def test_a_lone_surrogate_is_rejected_and_every_error_is_valid_utf8(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], tool_input: object
+) -> None:
+    outcome = check_and_render(tool_input, alabama_2017, catalog)
+    assert outcome.errors
+    assert outcome.text is None
+    assert any("surrogate" in error for error in outcome.errors), outcome.errors
+    for error in outcome.errors:
+        error.encode("utf-8")
+
+
+def test_a_character_outside_the_basic_plane_is_prose(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "y", "kind": "year"}
+    assert rendered("\U0001f525 {y}.", [claim], alabama_2017, catalog) == "\U0001f525 2017."
 
 
 # ---------------------------------------------------------------------------
