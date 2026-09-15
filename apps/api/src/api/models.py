@@ -36,9 +36,14 @@ from cfb_strength.contracts import (
     OpponentResult,
     PlayerCareer,
     PlayerCareerTotals,
+    PlayerComparison,
+    PlayerHeadToHead,
+    PlayerHeadToHeadGame,
     PlayerLeaderRow,
     PlayerLeaders,
     PlayerLeaderSort,
+    PlayerSearch,
+    PlayerSearchRow,
     PlayerSeasonLine,
     PlayerSeasonType,
     PlayerStats,
@@ -847,6 +852,125 @@ class PlayerCareerOut(BaseModel):
                 if career.postseason is not None
                 else None
             ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# player comparison and search (issue #301) -- `cfb_strength.players`'
+# comparison and search dataclasses, published by `api.players` under the
+# same rules as the read layer above: field for field, the engine's order,
+# and every optional value a required key that stays `null`. A head-to-head
+# game's `a_stats`/`b_stats` is null when that player has no stat line in
+# it, never a line of zeros. Nothing here compares `a` with `b`: no tally,
+# winner or rate stat (founder decision, #301).
+# ---------------------------------------------------------------------------
+
+
+class PlayerHeadToHeadGameOut(BaseModel):
+    season: int
+    season_type: PlayerSeasonType
+    week: int | None
+    start_date: str | None
+    source_id: str | None
+    a_team: str
+    b_team: str
+    a_points: int
+    b_points: int
+    a_stats: PlayerStatsOut | None
+    b_stats: PlayerStatsOut | None
+
+    @classmethod
+    def from_dataclass(cls, game: PlayerHeadToHeadGame) -> PlayerHeadToHeadGameOut:
+        return cls(
+            season=game.season,
+            season_type=game.season_type,
+            week=game.week,
+            start_date=game.start_date,
+            source_id=game.source_id,
+            a_team=game.a_team,
+            b_team=game.b_team,
+            a_points=game.a_points,
+            b_points=game.b_points,
+            a_stats=(
+                PlayerStatsOut.from_dataclass(game.a_stats) if game.a_stats is not None else None
+            ),
+            b_stats=(
+                PlayerStatsOut.from_dataclass(game.b_stats) if game.b_stats is not None else None
+            ),
+        )
+
+
+class PlayerHeadToHeadOut(BaseModel):
+    season_type: PlayerSeasonType
+    # `a`'s W-L-T against `b`.
+    record: StarterRecordOut
+    # Chronological, as the engine orders them.
+    games: list[PlayerHeadToHeadGameOut]
+
+    @classmethod
+    def from_dataclass(cls, head_to_head: PlayerHeadToHead) -> PlayerHeadToHeadOut:
+        return cls(
+            season_type=head_to_head.season_type,
+            record=StarterRecordOut.from_dataclass(head_to_head.record),
+            games=[PlayerHeadToHeadGameOut.from_dataclass(g) for g in head_to_head.games],
+        )
+
+
+class PlayerComparisonOut(BaseModel):
+    sport: Sport
+    a: PlayerCareerOut
+    b: PlayerCareerOut
+    # Always present: 0-0-0 with no games when the two never met.
+    regular_season_head_to_head: PlayerHeadToHeadOut
+    postseason_head_to_head: PlayerHeadToHeadOut
+
+    @classmethod
+    def from_dataclass(cls, comparison: PlayerComparison) -> PlayerComparisonOut:
+        return cls(
+            sport=comparison.sport,
+            a=PlayerCareerOut.from_dataclass(comparison.a),
+            b=PlayerCareerOut.from_dataclass(comparison.b),
+            regular_season_head_to_head=PlayerHeadToHeadOut.from_dataclass(
+                comparison.regular_season_head_to_head
+            ),
+            postseason_head_to_head=PlayerHeadToHeadOut.from_dataclass(
+                comparison.postseason_head_to_head
+            ),
+        )
+
+
+class PlayerSearchRowOut(BaseModel):
+    player_id: int
+    display_name: str
+    position: str | None
+    first_season: int
+    last_season: int
+
+    @classmethod
+    def from_dataclass(cls, row: PlayerSearchRow) -> PlayerSearchRowOut:
+        return cls(
+            player_id=row.player_id,
+            display_name=row.display_name,
+            position=row.position,
+            first_season=row.first_season,
+            last_season=row.last_season,
+        )
+
+
+class PlayerSearchOut(BaseModel):
+    sport: Sport
+    # The query as matched: stripped of surrounding whitespace.
+    query: str
+    limit: int
+    rows: list[PlayerSearchRowOut]
+
+    @classmethod
+    def from_dataclass(cls, search: PlayerSearch) -> PlayerSearchOut:
+        return cls(
+            sport=search.sport,
+            query=search.query,
+            limit=search.limit,
+            rows=[PlayerSearchRowOut.from_dataclass(row) for row in search.rows],
         )
 
 

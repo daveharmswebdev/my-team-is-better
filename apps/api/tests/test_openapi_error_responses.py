@@ -201,6 +201,11 @@ KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
     # which FastAPI's own bounds reject first (a 422, never reaching it).
     ("/api/players/leaders", "get"): frozenset(),
     ("/api/players/{player_id}", "get"): frozenset({UnknownPlayerError}),
+    # Issue #301. Compare reaches `get_player_career` through the engine and
+    # raises UnknownPlayerError itself for an out-of-range id. Search raises
+    # only ValueError, which the route's own validation rejects first.
+    ("/api/players/compare", "get"): frozenset({UnknownPlayerError}),
+    ("/api/players/search", "get"): frozenset(),
     ("/health", "get"): frozenset(),
 }
 
@@ -803,18 +808,21 @@ def test_validation_error_stand_ins_publish_fastapis_own_schema() -> None:
 # ---------------------------------------------------------------------------
 
 PLAYER_CAREER_ROUTE = ("/api/players/{player_id}", "get")
+PLAYER_COMPARE_ROUTE = ("/api/players/compare", "get")
+PLAYER_SEARCH_ROUTE = ("/api/players/search", "get")
 
 
-def test_player_career_route_advertises_exactly_the_unknown_player_404() -> None:
+@pytest.mark.parametrize(
+    "route", [PLAYER_CAREER_ROUTE, PLAYER_COMPARE_ROUTE], ids=lambda r: f"GET {r[0]}"
+)
+def test_player_route_advertises_exactly_the_unknown_player_404(route: tuple[str, str]) -> None:
     openapi = _openapi()
-    responses = openapi["paths"][PLAYER_CAREER_ROUTE[0]][PLAYER_CAREER_ROUTE[1]]["responses"]
+    responses = openapi["paths"][route[0]][route[1]]["responses"]
 
     assert _union_members(_json_schema(responses["404"])) == [UNKNOWN_PLAYER]
     for status in sorted(s for s in responses if not s.startswith("2") and s != "404"):
         leaked = _all_refs(responses[status]) & ENGINE_ERROR_COMPONENTS
-        assert not leaked, (
-            f"GET {PLAYER_CAREER_ROUTE[0]} {status} references engine errors: {leaked}"
-        )
+        assert not leaked, f"GET {route[0]} {status} references engine errors: {leaked}"
 
 
 PLAYER_RUNTIME_CASES: list[tuple[str, str, dict[str, str | int], int, str | None]] = [
@@ -824,6 +832,18 @@ PLAYER_RUNTIME_CASES: list[tuple[str, str, dict[str, str | int], int, str | None
     ("/api/players/2044124519", PLAYER_CAREER_ROUTE[0], {"sport": "cfb"}, 422, None),
     ("/api/players/leaders", "/api/players/leaders", {"sport": "cfb"}, 422, None),
     ("/api/players/leaders", "/api/players/leaders", {"limit": 101}, 422, None),
+    # Issue #301. The route's own a == b and stripped-q checks raise
+    # request-validation 422s, which must match the default 422 schema too.
+    ("/api/players/compare", PLAYER_COMPARE_ROUTE[0], {"a": 1, "b": 2}, 404, "unknown_player"),
+    (
+        "/api/players/compare",
+        PLAYER_COMPARE_ROUTE[0],
+        {"a": 2044124519, "b": 2044124519},
+        422,
+        None,
+    ),
+    ("/api/players/search", PLAYER_SEARCH_ROUTE[0], {"q": " a "}, 422, None),
+    ("/api/players/search", PLAYER_SEARCH_ROUTE[0], {"q": "mc", "sport": "cfb"}, 422, None),
 ]
 
 
