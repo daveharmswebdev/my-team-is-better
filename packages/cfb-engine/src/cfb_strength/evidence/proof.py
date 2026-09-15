@@ -303,7 +303,8 @@ def _elo_ledger(
     _require_elo_ledger_tables(conn)
     config = conn.execute(
         """
-        SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr
+        SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr,
+               mov_denom_floor_fraction
         FROM elo_ledger_configs c
         WHERE c.year = ? AND c.method = ? AND c.sport = ?
         """,
@@ -377,6 +378,7 @@ def _elo_ledger(
         scale=float(config["scale"]),
         mov_scale=float(config["mov_scale"]),
         mov_autocorr=float(config["mov_autocorr"]),
+        mov_denom_floor_fraction=float(config["mov_denom_floor_fraction"]),
         steps=steps,
     )
 
