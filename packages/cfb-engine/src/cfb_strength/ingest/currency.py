@@ -29,6 +29,14 @@ check that tells the two apart. It reports, per league:
      skips it, so no db can ever be current with it: MAX_YEAR needs a bump
      (the #9 class of bug). An unfinished season past MAX_YEAR -- the season
      in progress -- is only a note, which never changes the exit code.
+  g. `season_missing_elo_ledger` -- a season with `ratings` rows for a
+     ledger-writing method (`LEDGER_METHODS`, today exactly `elo`) but no
+     `elo_ledger_configs` row for that (year, method, sport), or zero
+     `elo_ledger_steps` rows for it (issue #193). The #97 false-green shape
+     after #183: `ensure_schema` adds the empty ledger tables to a db whose
+     elo ratings predate them. `cfb rate --method elo` rewrites the ledger
+     with the ratings. Never waivable for a season slice: a slice that stores
+     elo ratings must store their ledger.
 
 plus two problems about `--raw-dir` itself, because a check that silently
 skips is a false green:
@@ -97,6 +105,13 @@ from cfb_strength.ingest.nflverse.client import games_cache_path as nflverse_gam
 
 EXPECTED_SPORTS: tuple[Sport, ...] = get_args(Sport)
 EXPECTED_METHODS: tuple[Method, ...] = get_args(Method)
+# The methods whose ratings come with an Elo ledger (#183): `elo` writes
+# `elo_ledger_steps`/`elo_ledger_configs`; keener writes a rating_breakdown
+# instead and elo_career writes no ledger. The same list is stated by
+# `contracts.TeamCase.elo_ledger`'s note and by
+# apps/api/tests/fixtures/build_fixture.py's `LEDGER_METHODS`; keep all three
+# in step (tests/test_db_currency.py pins this one).
+LEDGER_METHODS: tuple[Method, ...] = ("elo",)
 
 ProblemCode = Literal[
     "schema_not_current",
@@ -107,6 +122,7 @@ ProblemCode = Literal[
     "season_missing_ratings",
     "no_cfb_mascots",
     "cache_past_max_year",
+    "season_missing_elo_ledger",
 ]
 
 Pair = tuple[int, str]
@@ -135,6 +151,9 @@ class LeagueReport:
     cached_seasons_by_type: Mapping[str, tuple[int, ...]]
     # method -> seasons with at least one ratings row, keyed in `Method` order.
     rated_seasons: Mapping[Method, tuple[int, ...]]
+    # method -> seasons with an elo_ledger_configs row AND at least one
+    # elo_ledger_steps row, keyed in `LEDGER_METHODS` order.
+    ledger_seasons: Mapping[Method, tuple[int, ...]]
     cache_beyond_max_year: tuple[int, ...] = ()
     # The subset of `cache_beyond_max_year` that is already finished.
     cache_finished_beyond_max_year: tuple[int, ...] = ()
@@ -456,6 +475,28 @@ def _league_report(
             )
         )
 
+    # A season's ledger is present only when both halves are: the config the
+    # walk ran with and at least one step. Both tables arrived together
+    # (#183), so a db lacking either predates the ledger and holds none;
+    # (a) reports the schema gap, this reads it as the empty ledger the
+    # migration would leave.
+    ledger_seasons: dict[Method, tuple[int, ...]] = {}
+    for method in LEDGER_METHODS:
+        if "elo_ledger_configs" not in actual.columns or "elo_ledger_steps" not in actual.columns:
+            ledger_seasons[method] = ()
+            continue
+        ledger_seasons[method] = tuple(
+            int(row[0])
+            for row in conn.execute(
+                "SELECT DISTINCT c.year FROM elo_ledger_configs AS c "
+                "WHERE c.sport = ? AND c.method = ? AND EXISTS ("
+                "  SELECT 1 FROM elo_ledger_steps AS s "
+                "  WHERE s.year = c.year AND s.method = c.method AND s.sport = c.sport"
+                ") ORDER BY c.year",
+                (sport, method),
+            )
+        )
+
     scan: CacheScan | None = None
     unrecognized: str | None = None
     if raw_dir.is_dir():
@@ -472,6 +513,7 @@ def _league_report(
         game_seasons_by_type=_by_type(game_pairs),
         cached_seasons_by_type=_by_type(scan.pairs if scan else frozenset()),
         rated_seasons=rated_seasons,
+        ledger_seasons=ledger_seasons,
         cache_beyond_max_year=scan.beyond_max_year if scan else (),
         cache_finished_beyond_max_year=scan.finished_beyond_max_year if scan else (),
         cache_max_year=scan.max_year if scan else None,
@@ -622,6 +664,25 @@ def _find_problems(
                     )
                 )
 
+        for method, ledgered in league.ledger_seasons.items():
+            ledgered_set = set(ledgered)
+            unledgered = tuple(
+                s for s in league.rated_seasons.get(method, ()) if s not in ledgered_set
+            )
+            if unledgered:
+                problems.append(
+                    Problem(
+                        "season_missing_elo_ledger",
+                        sport,
+                        f"{sport}: {len(unledgered)} season(s) have `{method}` ratings but no "
+                        f"Elo ledger (no elo_ledger_configs row or no elo_ledger_steps rows): "
+                        f"{format_seasons(unledgered)}; the ratings predate #183, so re-rate "
+                        f"them to write the ledger with the ratings "
+                        f"(`cfb rate --sport {sport} --method {method} --years ...`)",
+                        unledgered,
+                    )
+                )
+
     if aliases.teams > 0 and aliases.teams_cache_present and aliases.with_mascot == 0:
         problems.append(
             Problem(
@@ -769,6 +830,8 @@ def format_report(report: CurrencyReport) -> str:
                 lines.append(f"  cache {season_type:<11} {format_seasons(seasons)}")
         for method, seasons in league.rated_seasons.items():
             lines.append(f"  rated {method:<11} {format_seasons(seasons)}")
+        for method, seasons in league.ledger_seasons.items():
+            lines.append(f"  ledger {method:<10} {format_seasons(seasons)}")
         if league.sport == "cfb":
             aliases = report.cfb_aliases
             cache = "present" if aliases.teams_cache_present else "absent"
@@ -796,8 +859,9 @@ def main(argv: list[str] | None = None) -> int:
         description=(
             "Read-only check that a cfb-strength sqlite db's data is current: schema, "
             "every league ingested, no season/season-type batch behind the committed raw "
-            "cache, every method rated, at least one CFB mascot, no finished season past "
-            "an ingest's MAX_YEAR. Exits 0 only when it is."
+            "cache, every method rated, every elo-rated season with its Elo ledger, at "
+            "least one CFB mascot, no finished season past an ingest's MAX_YEAR. Exits 0 "
+            "only when it is."
         ),
     )
     parser.add_argument(

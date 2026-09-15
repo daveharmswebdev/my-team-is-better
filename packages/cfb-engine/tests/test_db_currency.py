@@ -46,9 +46,15 @@ from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest import currency
 from cfb_strength.ingest import ingest_season as cfbd_ingest
 from cfb_strength.ingest.nflverse import ingest_season as nflverse_ingest
+from cfb_strength.ratings.compute_ratings import compute_and_store
 
 SPORTS: tuple[str, ...] = get_args(Sport)
 METHODS: tuple[str, ...] = get_args(Method)
+# The methods whose ratings come with an Elo ledger (#183). Written out here
+# rather than imported from `currency` on purpose, so the tests fail if the
+# doctor's own list stops matching the contract's note (`TeamCase.elo_ledger`).
+LEDGER_METHODS: tuple[str, ...] = ("elo",)
+LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
 
 # Seasons each league's fixture db holds games (both season types) and every
 # method's ratings for, and that its fake raw cache holds. Deliberately in
@@ -118,6 +124,33 @@ def _build_current_db(path: Path) -> Path:
                         "ties, computed_at, sport) VALUES (?, ?, ?, ?, ?, ?, ?, 0, "
                         "'2026-01-01T00:00:00+00:00', ?)",
                         (season, method, team_id, 1.0 / rank, rank, 2 - rank, rank - 1, sport),
+                    )
+            # A ledger-writing method's ratings come with their ledger: the
+            # config the walk ran with, and one step per rated team (#183).
+            for method in LEDGER_METHODS:
+                conn.execute(
+                    "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, "
+                    "hfa, scale, mov_scale, mov_autocorr, computed_at) "
+                    "VALUES (?, ?, ?, 1500.0, 20.0, 55.0, 400.0, 2.2, 0.001, "
+                    "'2026-01-01T00:00:00+00:00')",
+                    (season, method, sport),
+                )
+                for team_id, opponent_id, venue, result in (
+                    (home, away, "home", "W"),
+                    (away, home, "away", "L"),
+                ):
+                    conn.execute(
+                        """
+                        INSERT INTO elo_ledger_steps (
+                            year, method, sport, team_id, game_number, week, season_type,
+                            opponent_team_id, venue, team_points, opponent_points, result,
+                            rating_before, opponent_rating_before, home_field_adjustment,
+                            rating_gap, win_expectancy, mov_multiplier, shift, rating_after,
+                            computed_at
+                        ) VALUES (?, ?, ?, ?, 1, 1, 'regular', ?, ?, 21, 14, ?, 1500.0, 1500.0,
+                                  55.0, 55.0, 0.5, 1.0, 10.0, 1510.0, '2026-01-01T00:00:00+00:00')
+                        """,
+                        (season, method, sport, team_id, opponent_id, venue, result),
                     )
     conn.commit()
     conn.close()
@@ -220,6 +253,19 @@ def _drop_season(db: Path, sport: str, season: int) -> None:
         db,
         f"DELETE FROM ratings WHERE sport = '{sport}' AND year = {season}",
         f"DELETE FROM games WHERE sport = '{sport}' AND season = {season}",
+    )
+
+
+def _drop_ledger(
+    db: Path, sport: str, seasons: tuple[int, ...], tables: tuple[str, ...] = LEDGER_TABLES
+) -> None:
+    years = ", ".join(str(season) for season in seasons)
+    _mutate(
+        db,
+        *(
+            f"DELETE FROM {table} WHERE sport = '{sport}' AND method = 'elo' AND year IN ({years})"
+            for table in tables
+        ),
     )
 
 
@@ -611,11 +657,16 @@ def test_a_missing_middle_season_is_flagged(tmp_path: Path, current_db: Path, sp
     first, middle = SEASONS[sport]
     raw_dir = _build_raw_dir(tmp_path, extra={sport: _pairs(EXTRA_SEASON)})
     # The db has the first and the last cached season, but not the one
-    # between them.
+    # between them. The whole season moves, ledger included, so the only
+    # defect is the gap (a moved rating without its ledger would be (g)'s).
     _mutate(
         current_db,
         f"UPDATE games SET season = {EXTRA_SEASON} WHERE sport = '{sport}' AND season = {middle}",
         f"UPDATE ratings SET year = {EXTRA_SEASON} WHERE sport = '{sport}' AND year = {middle}",
+        *(
+            f"UPDATE {table} SET year = {EXTRA_SEASON} WHERE sport = '{sport}' AND year = {middle}"
+            for table in LEDGER_TABLES
+        ),
     )
 
     problem = _behind(currency.check_currency(current_db, raw_dir), sport)
@@ -787,6 +838,135 @@ def test_season_missing_ratings_for_a_method_is_reported(
     assert problem.seasons == (season,)
     assert method in problem.message
     assert _run(current_db, raw_dir) == 1
+
+
+# ---------------------------------------------------------------------------
+# (g) elo ratings whose ledger is missing (issue #193)
+# ---------------------------------------------------------------------------
+
+
+def test_ledger_methods_match_the_contract_note() -> None:
+    # `contracts.TeamCase.elo_ledger`: only `elo` writes a ledger.
+    assert currency.LEDGER_METHODS == LEDGER_METHODS
+    assert set(currency.LEDGER_METHODS) <= set(METHODS)
+
+
+@pytest.mark.parametrize("sport", SPORTS)
+def test_ledger_seasons_are_read_per_ledger_method(
+    current_db: Path, raw_dir: Path, sport: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report = currency.check_currency(current_db, raw_dir)
+
+    league = next(league for league in report.leagues if league.sport == sport)
+    assert tuple(league.ledger_seasons) == LEDGER_METHODS
+    for method in LEDGER_METHODS:
+        assert league.ledger_seasons[method] == SEASONS[sport]
+    assert report.problems == ()
+
+    assert _run(current_db, raw_dir) == 0
+    assert "ledger" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "tables",
+    [
+        pytest.param(LEDGER_TABLES, id="both_tables"),
+        pytest.param(("elo_ledger_configs",), id="configs_only"),
+        pytest.param(("elo_ledger_steps",), id="steps_only"),
+    ],
+)
+@pytest.mark.parametrize("sport", SPORTS)
+def test_elo_ratings_without_their_ledger_are_reported(
+    current_db: Path, raw_dir: Path, sport: str, tables: tuple[str, ...]
+) -> None:
+    # The #97 false-green shape after #183: `ensure_schema` adds the empty
+    # ledger tables to a db whose elo ratings were computed before them.
+    _drop_ledger(current_db, sport, SEASONS[sport], tables)
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("season_missing_elo_ledger", sport)}
+    (problem,) = report.problems
+    assert problem.seasons == SEASONS[sport]
+    assert currency.format_seasons(SEASONS[sport]) in problem.message
+    assert f"cfb rate --sport {sport} --method elo" in problem.message
+    assert _run(current_db, raw_dir) == 1
+
+
+@pytest.mark.parametrize("sport", SPORTS)
+def test_missing_ledger_for_some_elo_seasons_names_exactly_those(
+    current_db: Path, raw_dir: Path, sport: str
+) -> None:
+    missing, kept = SEASONS[sport]
+    _drop_ledger(current_db, sport, (missing,))
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("season_missing_elo_ledger", sport)}
+    (problem,) = report.problems
+    assert problem.seasons == (missing,)
+    assert str(missing) in problem.message
+    assert str(kept) not in problem.message
+    assert _run(current_db, raw_dir) == 1
+
+
+@pytest.mark.parametrize("sport", SPORTS)
+def test_a_db_with_only_keener_ratings_has_no_ledger_problem(
+    current_db: Path, raw_dir: Path, sport: str
+) -> None:
+    # Keener writes a rating_breakdown, not a ledger: no elo ratings, no
+    # ledger to miss. The unrated methods are (d)'s problem, not (g)'s.
+    _mutate(current_db, f"DELETE FROM ratings WHERE sport = '{sport}' AND method != 'keener'")
+    _drop_ledger(current_db, sport, SEASONS[sport])
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    assert _problems(report) == {("season_missing_ratings", sport)}
+    league = next(league for league in report.leagues if league.sport == sport)
+    assert league.ledger_seasons["elo"] == ()
+
+
+def test_a_db_whose_schema_predates_the_ledger_tables_is_reported_not_crashed(
+    current_db: Path, raw_dir: Path
+) -> None:
+    # A pre-#183 db before `ensure_schema` ever ran on it: the tables the
+    # ledger check reads do not exist. Reported (a) plus (g), never raised.
+    _mutate(current_db, "DROP TABLE elo_ledger_steps", "DROP TABLE elo_ledger_configs")
+
+    report = currency.check_currency(current_db, raw_dir)
+
+    problems = _problems(report)
+    assert ("schema_not_current", None) in problems
+    for sport in SPORTS:
+        assert ("season_missing_elo_ledger", sport) in problems
+    assert _run(current_db, raw_dir) == 1
+
+
+def test_a_real_elo_run_on_the_regression_fixture_writes_the_ledger_the_doctor_reads(
+    regression_db: Path, raw_dir: Path
+) -> None:
+    """The synthetic fixture rows above are only as good as their resemblance
+    to what `cfb rate --method elo` stores: check the doctor against a real
+    run, then against that run with its steps deleted."""
+    conn = get_conn(regression_db)
+    try:
+        assert compute_and_store(conn, 2005, "elo") > 0
+    finally:
+        conn.close()
+
+    report = currency.check_currency(regression_db, raw_dir)
+    cfb = next(league for league in report.leagues if league.sport == "cfb")
+    assert cfb.rated_seasons["elo"] == (2005,)
+    assert cfb.ledger_seasons["elo"] == (2005,)
+    assert [p for p in report.problems if p.code == "season_missing_elo_ledger"] == []
+
+    _drop_ledger(regression_db, "cfb", (2005,), ("elo_ledger_steps",))
+
+    report = currency.check_currency(regression_db, raw_dir)
+    ledger = [p for p in report.problems if p.code == "season_missing_elo_ledger"]
+    assert len(ledger) == 1
+    assert ledger[0].sport == "cfb"
+    assert ledger[0].seasons == (2005,)
 
 
 # ---------------------------------------------------------------------------
