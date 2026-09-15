@@ -1,0 +1,788 @@
+"""Failing-first tests for issue #290 (epic #199, child 1 of 4): the typed-claim
+model, `api.persona.claims`.
+
+The narrator will (in #291) answer with one `submit_narration {text, claims}`
+tool call. `text` carries `{id}` placeholders and each claim says what a
+placeholder is; the server resolves every claim against the fact block and
+prints every value from the block itself, so the prose carries no number of
+its own. This file covers the claims: their shape, each kind's resolution and
+rendering, game resolution (the winner, a rematch, a game the block doesn't
+hold), malformed tool input and the tool schema. The checks on the prose
+outside the placeholders are in `test_persona_claims_prose.py`.
+
+Every block is the one production builds (`tests/fixtures/claim_blocks.py`):
+2017 Alabama, 2005 USC and 2005 Texas from the committed CFB fixture, 2023
+Kilo Kings vs Lima Lions from the NFL sport fixture's tie cluster, and Alpha
+State vs Bravo Tech under every rating method from the method fixture. The
+facts the tests lean on are pinned in `test_fixture_facts_these_tests_rely_on`.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import jsonschema
+import pytest
+from fixtures.claim_blocks import (
+    ALPHA_STATE,
+    BRAVO_TECH,
+    KILO_KINGS,
+    LIMA_LIONS,
+    MIKE_MUSTANGS,
+    assert_an_error_says,
+    catalog_of,
+    cfb_catalog,
+    cfb_comparison_block,
+    cfb_team_case_block,
+    method_comparison_block,
+    nfl_tie_comparison_block,
+    rejected,
+    rendered,
+)
+from fixtures.method_fixture import METHODS, make_method_fixture_db
+from fixtures.sport_fixture import make_sport_fixture_db
+
+from api.models import Method
+from api.persona.claims import TOOL_NAME, ClaimOutcome, check_and_render, tool_schema
+from api.repositories.teams import TeamRecord
+
+# ---------------------------------------------------------------------------
+# blocks
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def sport_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return make_sport_fixture_db(tmp_path_factory.mktemp("claims_sport"))
+
+
+@pytest.fixture(scope="module")
+def kilo_lima(sport_db: Path) -> str:
+    return nfl_tie_comparison_block(sport_db)
+
+
+@pytest.fixture(scope="module")
+def nfl_catalog(sport_db: Path) -> tuple[TeamRecord, ...]:
+    return catalog_of(sport_db, "nfl")
+
+
+@pytest.fixture(scope="module")
+def method_db(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return make_method_fixture_db(tmp_path_factory.mktemp("claims_method"))
+
+
+@pytest.fixture(scope="module")
+def catalog() -> tuple[TeamRecord, ...]:
+    return cfb_catalog()
+
+
+@pytest.fixture(scope="module")
+def alabama_2017() -> str:
+    return cfb_team_case_block(2017, "Alabama")
+
+
+@pytest.fixture(scope="module")
+def usc_2005() -> str:
+    return cfb_team_case_block(2005, "USC")
+
+
+@pytest.fixture(scope="module")
+def texas_2005() -> str:
+    return cfb_team_case_block(2005, "Texas")
+
+
+@pytest.fixture(scope="module")
+def texas_usc_2005() -> str:
+    return cfb_comparison_block(2005, "Texas", "USC")
+
+
+def _game(
+    claim_id: str,
+    kind: str,
+    team: str,
+    opponent: str,
+    result: str,
+    **extra: object,
+) -> dict[str, object]:
+    return {
+        "id": claim_id,
+        "kind": kind,
+        "team": team,
+        "opponent": opponent,
+        "result": result,
+        **extra,
+    }
+
+
+def _row(block: str, *path: str | int) -> Any:
+    node: Any = json.loads(block)
+    for step in path:
+        node = node[step]
+    return node
+
+
+def test_fixture_facts_these_tests_rely_on(
+    alabama_2017: str, usc_2005: str, texas_2005: str, kilo_lima: str
+) -> None:
+    alabama = json.loads(alabama_2017)
+    assert (alabama["rank"], alabama["wins"], alabama["losses"], alabama["ties"]) == (1, 13, 1, 0)
+    games = alabama["games"]
+    assert len(games) == 14
+    assert (games[0]["opponent_name"], games[0]["week"], games[0]["neutral_site"]) == (
+        "Florida State",
+        1,
+        True,
+    )
+    regular = [g for g in games if g["season_type"] == "regular"]
+    assert regular[-1]["opponent_name"] == "Auburn"
+    assert (regular[-1]["result"], regular[-1]["neutral_site"]) == ("L", False)
+    postseason = {g["opponent_name"]: g for g in games if g["season_type"] == "postseason"}
+    assert postseason["Georgia"]["week"] == postseason["Clemson"]["week"] == 1
+    assert postseason["Georgia"]["opponent_rank"] == 3
+    assert 9 not in {g["week"] for g in regular}
+    assert [q["opponent_name"] for q in alabama["quality_wins"]] == ["Georgia", "Clemson"]
+    assert all(g["opponent_name"] != "Georgia Tech" for g in games)
+
+    usc_loss = json.loads(usc_2005)["worst_loss"]
+    assert (usc_loss["opponent_name"], usc_loss["team_score"], usc_loss["opponent_score"]) == (
+        "Texas",
+        38,
+        41,
+    )
+    texas = json.loads(texas_2005)
+    assert (texas["wins"], texas["losses"]) == (13, 0)
+    assert [g["week"] for g in texas["games"] if g["opponent_name"] == "Colorado"] == [7, 14]
+
+    comparison = json.loads(kilo_lima)
+    kilo, lima = comparison["team_a"], comparison["team_b"]
+    assert (kilo["team_name"], kilo["rank"], kilo["rating"]) == (KILO_KINGS, 6, 0.25)
+    assert (kilo["wins"], kilo["losses"], kilo["ties"]) == (2, 1, 1)
+    assert (lima["team_name"], lima["rank"], lima["rating"]) == (LIMA_LIONS, 5, 0.35)
+    (common,) = comparison["common_opponents"]
+    assert common["opponent_name"] == MIKE_MUSTANGS
+    assert [(m["result"], m["week"]) for m in common["team_a_meetings"]] == [("T", 2), ("W", 4)]
+    assert [
+        (m["result"], m["team_score"], m["opponent_score"]) for m in common["team_b_meetings"]
+    ] == [("W", 27, 10)]
+    assert "neutral_site" not in common["team_a_meetings"][0]
+
+
+# ---------------------------------------------------------------------------
+# record / rating / rank: always printed with the team's name
+# ---------------------------------------------------------------------------
+
+
+def test_record_prints_the_name_and_a_tie_column_only_when_tied(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims: list[dict[str, object]] = [
+        {"id": "k", "kind": "record", "team": KILO_KINGS},
+        {"id": "l", "kind": "record", "team": LIMA_LIONS},
+    ]
+    assert (
+        rendered("Look at {k} next to {l}.", claims, kilo_lima, nfl_catalog)
+        == "Look at Kilo Kings 2-1-1 next to Lima Lions 2-0."
+    )
+
+
+def test_record_on_a_team_case(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    claim: dict[str, object] = {"id": "r", "kind": "record", "team": "Alabama"}
+    assert rendered("That was {r}.", [claim], alabama_2017, catalog) == "That was Alabama 13-1."
+
+
+def test_record_for_a_team_that_is_not_a_subject_is_rejected_listing_the_subjects(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "r", "kind": "record", "team": "Auburn"}
+    errors = rejected("Look at {r}.", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"r"', "Auburn", "Alabama 13-1")
+
+
+def test_rating_prints_the_name_and_the_display_value(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims: list[dict[str, object]] = [
+        {"id": "a", "kind": "rating", "team": LIMA_LIONS},
+        {"id": "b", "kind": "rating", "team": KILO_KINGS},
+    ]
+    assert (
+        rendered("{a} against {b}.", claims, kilo_lima, nfl_catalog)
+        == "Lima Lions 350.00 against Kilo Kings 250.00."
+    )
+
+
+def test_rating_of_an_opponent_comes_from_its_game_row(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Georgia's opponent_rating is 0.004746916581693488 -> keener x1000, 2dp.
+    claim: dict[str, object] = {"id": "g", "kind": "rating", "team": "Georgia"}
+    assert rendered("{g} is no joke.", [claim], alabama_2017, catalog) == "Georgia 4.75 is no joke."
+
+
+def test_method_fixture_methods_are_in_registry_order() -> None:
+    # The expected display values below are written out by method, so pin the
+    # offsets `make_method_fixture_db` derives from this order.
+    assert METHODS == ("keener", "elo", "elo_career")
+
+
+@pytest.mark.parametrize(
+    ("method", "alpha", "bravo"),
+    [
+        ("keener", "Alpha State 3000.00", "Bravo Tech 2000.00"),
+        ("elo", "Alpha State 4", "Bravo Tech 3"),
+        ("elo_career", "Alpha State 5", "Bravo Tech 4"),
+    ],
+)
+def test_rating_renders_under_every_method(
+    method_db: Path, method: Method, alpha: str, bravo: str
+) -> None:
+    block = method_comparison_block(method_db, method)
+    catalog = catalog_of(method_db, "cfb")
+    claims: list[dict[str, object]] = [
+        {"id": "a", "kind": "rating", "team": ALPHA_STATE},
+        {"id": "b", "kind": "rating", "team": BRAVO_TECH},
+    ]
+    assert rendered("{a}, {b}.", claims, block, catalog) == f"{alpha}, {bravo}."
+
+
+def test_rating_for_a_team_the_block_gives_no_rating_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Mercer is an unrated FCS opponent: its row has opponent_rating null.
+    claim: dict[str, object] = {"id": "m", "kind": "rating", "team": "Mercer"}
+    errors = rejected("{m} showed up.", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, "Mercer", "Georgia")
+
+
+def test_rank_prints_no_and_the_name(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    claims: list[dict[str, object]] = [
+        {"id": "k1", "kind": "rank", "team": "Georgia"},
+        _game("g1", "game_score", "Alabama", "Georgia", "W"),
+    ]
+    assert (
+        rendered("Alabama beat {k1} {g1}.", claims, alabama_2017, catalog)
+        == "Alabama beat No. 3 Georgia 26-23."
+    )
+
+
+def test_rank_for_an_unranked_team_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "m", "kind": "rank", "team": "Mercer"}
+    errors = rejected("{m} showed up.", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, "Mercer", "Georgia")
+
+
+# ---------------------------------------------------------------------------
+# game_score / margin: the winner is checked, the score is winner-first
+# ---------------------------------------------------------------------------
+
+
+def test_a_loss_prints_winner_first(usc_2005: str, catalog: tuple[TeamRecord, ...]) -> None:
+    claim = _game("g1", "game_score", "USC", "Texas", "L")
+    assert (
+        rendered("The {g1} loss to Texas still stings.", [claim], usc_2005, catalog)
+        == "The 41-38 loss to Texas still stings."
+    )
+
+
+def test_a_tie_prints_both_scores(kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]) -> None:
+    claim = _game("t", "game_score", KILO_KINGS, MIKE_MUSTANGS, "T", week=2)
+    assert rendered("A {t} tie.", [claim], kilo_lima, nfl_catalog) == "A 17-17 tie."
+
+
+def test_a_rematch_resolves_by_week(kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]) -> None:
+    claims = [
+        _game("s", "game_score", KILO_KINGS, MIKE_MUSTANGS, "W", week=4),
+        _game("m", "margin", KILO_KINGS, MIKE_MUSTANGS, "W", week=4, season_type="regular"),
+    ]
+    assert (
+        rendered("Kilo Kings won {s}, by {m}.", claims, kilo_lima, nfl_catalog)
+        == "Kilo Kings won 31-14, by 17."
+    )
+
+
+def test_a_rematch_without_a_week_is_rejected_listing_the_meetings(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("s", "game_score", KILO_KINGS, MIKE_MUSTANGS, "W")
+    errors = rejected("Kilo Kings won {s}.", [claim], kilo_lima, nfl_catalog)
+    assert_an_error_says(errors, '"s"', "week 2", "week 4", "regular")
+
+
+def test_a_rematch_with_a_week_they_did_not_meet_is_rejected(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("s", "game_score", KILO_KINGS, MIKE_MUSTANGS, "W", week=9)
+    errors = rejected("Kilo Kings won {s}.", [claim], kilo_lima, nfl_catalog)
+    assert_an_error_says(errors, '"s"', "week 2", "week 4")
+
+
+def test_the_wrong_winner_is_rejected_with_the_real_result(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Lima Lions beat Mike Mustangs 27-10: from Mike Mustangs' side, L 10-27.
+    claim = _game("g1", "game_score", MIKE_MUSTANGS, LIMA_LIONS, "W")
+    errors = rejected("Mike Mustangs went {g1} over Lima Lions.", [claim], kilo_lima, nfl_catalog)
+    assert_an_error_says(errors, '"g1"', "L 10-27")
+
+
+def test_the_wrong_winner_is_rejected_from_the_opponent_side_of_a_team_case(
+    usc_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("g1", "game_score", "Texas", "USC", "L")
+    errors = rejected("Texas lost {g1} to USC.", [claim], usc_2005, catalog)
+    assert_an_error_says(errors, '"g1"', "W 41-38")
+
+
+def test_margin_of_a_loss(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    claim = _game("m", "margin", "Alabama", "Auburn", "L")
+    assert rendered("Lost by {m}.", [claim], alabama_2017, catalog) == "Lost by 12."
+
+
+def test_a_head_to_head_meeting_resolves_from_both_sides(
+    texas_usc_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims = [
+        _game("a", "game_score", "Texas", "USC", "W"),
+        _game("b", "game_score", "USC", "Texas", "L"),
+    ]
+    assert rendered("{a}, or {b}.", claims, texas_usc_2005, catalog) == "41-38, or 41-38."
+
+
+def test_a_game_between_two_block_teams_that_never_met_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("g", "game_score", "Florida State", "Georgia", "W")
+    errors = rejected("{g}.", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"g"', "Florida State", "Georgia", "Alabama")
+
+
+# ---------------------------------------------------------------------------
+# year / count / win_pct
+# ---------------------------------------------------------------------------
+
+
+def test_year(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    claim: dict[str, object] = {"id": "y", "kind": "year"}
+    assert rendered("Back in {y}.", [claim], alabama_2017, catalog) == "Back in 2017."
+
+
+@pytest.mark.parametrize(
+    ("claim", "expected"),
+    [
+        ({"of": "quality_wins", "team": "Alabama"}, "two"),
+        ({"of": "wins", "team": "Alabama"}, "13"),
+        ({"of": "losses", "team": "Alabama"}, "one"),
+        ({"of": "ties", "team": "Alabama"}, "zero"),
+        ({"of": "games", "team": "Alabama"}, "14"),
+        ({"of": "meetings", "team": "Alabama", "opponent": "Auburn"}, "one"),
+    ],
+)
+def test_count_on_a_team_case_is_ap_style(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], claim: dict[str, object], expected: str
+) -> None:
+    full: dict[str, object] = {"id": "c", "kind": "count", **claim}
+    assert rendered("{c}", [full], alabama_2017, catalog) == expected
+
+
+def test_count_of_meetings_counts_a_rematch(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {
+        "id": "c",
+        "kind": "count",
+        "of": "meetings",
+        "team": "Texas",
+        "opponent": "Colorado",
+    }
+    assert rendered("{c}", [claim], texas_2005, catalog) == "two"
+
+
+@pytest.mark.parametrize(
+    ("claim", "expected"),
+    [
+        ({"of": "common_opponents"}, "one"),
+        ({"of": "meetings", "team": KILO_KINGS, "opponent": MIKE_MUSTANGS}, "two"),
+        ({"of": "meetings", "team": LIMA_LIONS, "opponent": KILO_KINGS}, "one"),
+        ({"of": "ties", "team": KILO_KINGS}, "one"),
+        ({"of": "quality_wins", "team": LIMA_LIONS}, "two"),
+    ],
+)
+def test_count_on_a_comparison(
+    kilo_lima: str,
+    nfl_catalog: tuple[TeamRecord, ...],
+    claim: dict[str, object],
+    expected: str,
+) -> None:
+    full: dict[str, object] = {"id": "c", "kind": "count", **claim}
+    assert rendered("{c}", [full], kilo_lima, nfl_catalog) == expected
+
+
+@pytest.mark.parametrize(
+    ("claim", "needles"),
+    [
+        # a comparison block has no games[] for either team
+        ({"of": "games", "team": KILO_KINGS}, (KILO_KINGS, "games")),
+        # wins are given only for the two subjects
+        ({"of": "wins", "team": MIKE_MUSTANGS}, (MIKE_MUSTANGS, KILO_KINGS, LIMA_LIONS)),
+        ({"of": "points", "team": KILO_KINGS}, ("points", "quality_wins")),
+        ({"of": "meetings", "team": KILO_KINGS}, ("opponent",)),
+    ],
+)
+def test_count_rejections_on_a_comparison(
+    kilo_lima: str,
+    nfl_catalog: tuple[TeamRecord, ...],
+    claim: dict[str, object],
+    needles: tuple[str, ...],
+) -> None:
+    full: dict[str, object] = {"id": "c", "kind": "count", **claim}
+    assert_an_error_says(rejected("{c}", [full], kilo_lima, nfl_catalog), '"c"', *needles)
+
+
+def test_count_of_common_opponents_on_a_team_case_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "c", "kind": "count", "of": "common_opponents"}
+    assert_an_error_says(rejected("{c}", [claim], alabama_2017, catalog), '"c"', "common")
+
+
+@pytest.mark.parametrize(
+    ("team", "expected"),
+    [(KILO_KINGS, ".625"), (LIMA_LIONS, "1.000")],
+)
+def test_win_pct_counts_a_tie_as_half(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...], team: str, expected: str
+) -> None:
+    claim: dict[str, object] = {"id": "p", "kind": "win_pct", "team": team}
+    assert rendered("{p}", [claim], kilo_lima, nfl_catalog) == expected
+
+
+@pytest.mark.parametrize(
+    ("block_team", "expected"),
+    [("Alabama", ".929"), ("Texas", "1.000"), ("USC", ".923")],
+)
+def test_win_pct_rounds_to_three_places(
+    catalog: tuple[TeamRecord, ...], block_team: str, expected: str
+) -> None:
+    year = 2017 if block_team == "Alabama" else 2005
+    block = cfb_team_case_block(year, block_team)
+    claim: dict[str, object] = {"id": "p", "kind": "win_pct", "team": block_team}
+    assert rendered("{p}", [claim], block, catalog) == expected
+
+
+def test_win_pct_for_a_non_subject_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "p", "kind": "win_pct", "team": "Auburn"}
+    assert_an_error_says(rejected("{p}", [claim], alabama_2017, catalog), '"p"', "Alabama")
+
+
+# ---------------------------------------------------------------------------
+# when / where (founder decision C on #199)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("opponent", "result", "expected"),
+    [
+        ("Florida State", "W", "to open the season"),
+        ("Auburn", "L", "in the regular-season finale"),
+        # 2017 Alabama's postseason games are both week 1: never "week 1"
+        ("Georgia", "W", "in the postseason"),
+        ("Clemson", "W", "in the postseason"),
+        ("Mississippi State", "W", "in week 11"),
+    ],
+)
+def test_when_on_the_subjects_full_game_list(
+    alabama_2017: str,
+    catalog: tuple[TeamRecord, ...],
+    opponent: str,
+    result: str,
+    expected: str,
+) -> None:
+    claim = _game("w", "when", "Alabama", opponent, result)
+    assert rendered("It happened {w}.", [claim], alabama_2017, catalog) == (
+        f"It happened {expected}."
+    )
+
+
+def test_when_from_the_opponent_side_has_no_season_position(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # The block holds Alabama's games[], not Auburn's, so Auburn's side of the
+    # Iron Bowl is only "week 13".
+    claim = _game("w", "when", "Auburn", "Alabama", "W")
+    assert rendered("{w}", [claim], alabama_2017, catalog) == "in week 13"
+
+
+def test_when_on_a_comparison(
+    kilo_lima: str,
+    nfl_catalog: tuple[TeamRecord, ...],
+    texas_usc_2005: str,
+    catalog: tuple[TeamRecord, ...],
+) -> None:
+    # A comparison holds no games[]: week 1 is "in week 1", not the opener.
+    claims = [
+        _game("a", "when", KILO_KINGS, MIKE_MUSTANGS, "W", week=4),
+        _game("b", "when", LIMA_LIONS, KILO_KINGS, "W"),
+    ]
+    assert rendered("{a}; {b}.", claims, kilo_lima, nfl_catalog) == "in week 4; in week 1."
+    postseason = _game("p", "when", "USC", "Texas", "L")
+    assert rendered("{p}", [postseason], texas_usc_2005, catalog) == "in the postseason"
+
+
+def test_when_for_a_week_the_block_does_not_hold_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Alabama had no week 9; LSU was week 10.
+    claim = _game("w", "when", "Alabama", "LSU", "W", week=9)
+    errors = rejected("{w}", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"w"', "LSU", "week 10")
+
+
+def test_when_for_a_game_the_block_does_not_hold_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("w", "when", "Florida State", "Georgia", "W")
+    errors = rejected("{w}", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"w"', "Florida State", "Alabama")
+
+
+def test_where_at_a_neutral_site(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], texas_usc_2005: str
+) -> None:
+    claim = _game("v", "where", "Alabama", "Georgia", "W")
+    assert rendered("{v}", [claim], alabama_2017, catalog) == "at a neutral site"
+    h2h = _game("v", "where", "USC", "Texas", "L")
+    assert rendered("{v}", [h2h], texas_usc_2005, catalog) == "at a neutral site"
+
+
+def test_where_for_a_game_that_was_not_neutral_is_rejected(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim = _game("v", "where", "Alabama", "Auburn", "L")
+    errors = rejected("Alabama lost {v}.", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"v"', "Auburn", "home", "neutral")
+
+
+def test_where_for_a_common_opponent_meeting_uses_another_row_for_the_same_game(
+    kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Lima Lions vs Mike Mustangs (week 2) is in common_opponents (no
+    # neutral_site) and in Lima Lions' quality_wins (neutral_site false), so
+    # the block does know it was not neutral.
+    lima = _game("v", "where", LIMA_LIONS, MIKE_MUSTANGS, "W")
+    assert_an_error_says(
+        rejected("{v}", [lima], kilo_lima, nfl_catalog), '"v"', "not at a neutral site"
+    )
+    # Kilo Kings' week-2 tie appears only in common_opponents: nothing says
+    # where it was played.
+    kilo = _game("v", "where", KILO_KINGS, MIKE_MUSTANGS, "T", week=2)
+    assert_an_error_says(
+        rejected("{v}", [kilo], kilo_lima, nfl_catalog), '"v"', "does not record where"
+    )
+
+
+# ---------------------------------------------------------------------------
+# claim shape and placeholders
+# ---------------------------------------------------------------------------
+
+
+def test_a_placeholder_may_be_used_more_than_once(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "y", "kind": "year"}
+    assert rendered("{y}, yes, {y}.", [claim], alabama_2017, catalog) == "2017, yes, 2017."
+
+
+def test_there_is_no_team_kind(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    claim: dict[str, object] = {"id": "t", "kind": "team", "team": "Alabama"}
+    errors = rejected("{t} rolled.", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"t"', '"team"', "record", "win_pct")
+
+
+def test_a_key_the_kind_does_not_take_is_rejected_naming_the_keys_it_takes(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claim: dict[str, object] = {"id": "r", "kind": "record", "team": "Alabama", "week": 3}
+    errors = rejected("{r}", [claim], alabama_2017, catalog)
+    assert_an_error_says(errors, '"r"', '"week"', "id, kind, team")
+
+
+@pytest.mark.parametrize(
+    ("text", "claims", "needles"),
+    [
+        ("{y}", [{"kind": "year"}], ("claims[0]", '"id"')),
+        (
+            "{y}",
+            [{"id": "y", "kind": "year"}, {"id": "y", "kind": "year"}],
+            ('"y"', "more than one"),
+        ),
+        ("{y} and {z}", [{"id": "y", "kind": "year"}], ("{z}", "y")),
+        ("Just prose.", [{"id": "y", "kind": "year"}], ('"y"', "not used")),
+        ("{y", [{"id": "y", "kind": "year"}], ("{",)),
+        ("{r}", [{"id": "r", "kind": "record"}], ('"r"', '"team"')),
+        ("{g}", [{"id": "g", "kind": "game_score", "team": "Alabama"}], ('"g"', '"opponent"')),
+        (
+            "{g}",
+            [{"id": "g", "kind": "game_score", "team": "Alabama", "opponent": "Auburn"}],
+            ('"g"', '"result"'),
+        ),
+        ("{r}", [{"id": "r", "kind": "record", "team": "texas"}], ('"texas"',)),
+        ("{r}", [{"id": "r", "kind": "record", "team": "alabama"}], ('"Alabama"',)),
+        ("   ", [], ("text",)),
+    ],
+)
+def test_malformed_claims_and_placeholders_are_rejected(
+    alabama_2017: str,
+    catalog: tuple[TeamRecord, ...],
+    text: str,
+    claims: list[dict[str, object]],
+    needles: tuple[str, ...],
+) -> None:
+    assert_an_error_says(rejected(text, claims, alabama_2017, catalog), *needles)
+
+
+_GOOD_GAME: dict[str, object] = {
+    "id": "g",
+    "kind": "game_score",
+    "team": "Alabama",
+    "opponent": "Auburn",
+    "result": "L",
+}
+
+
+@pytest.mark.parametrize(
+    "tool_input",
+    [
+        None,
+        "Alabama rolled.",
+        42,
+        [],
+        {},
+        {"text": "Alabama rolled."},
+        {"claims": []},
+        {"text": 5, "claims": []},
+        {"text": ["{g}"], "claims": [_GOOD_GAME]},
+        {"text": "{g}", "claims": {"g": _GOOD_GAME}},
+        {"text": "{g}", "claims": "g"},
+        {"text": "{g}", "claims": ["g"]},
+        {"text": "{g}", "claims": [None]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "week": "13"}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "week": True}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "week": 13.0}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "id": 7}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "kind": None}]},
+        # unhashable values where a string is expected
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "kind": ["rank"]}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "kind": {"record": True}}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "result": ["L"]}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "season_type": ["regular"]}]},
+        {"text": "{c}", "claims": [{"id": "c", "kind": "count", "of": {"wins": 1}}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "team": ["Alabama"]}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "opponent": {"name": "Auburn"}}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "result": "loss"}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, "season_type": "bowl"}]},
+        {"text": "{g}", "claims": [{**_GOOD_GAME, 3: "x"}]},
+        {"text": "{c}", "claims": [{"id": "c", "kind": "count", "of": ["wins"]}]},
+        {"text": "{g}\x00", "claims": [_GOOD_GAME]},
+        {"text": "{g}", "claims": [_GOOD_GAME], "extra": True},
+    ],
+)
+def test_malformed_tool_input_returns_errors_and_never_raises(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], tool_input: object
+) -> None:
+    outcome = check_and_render(tool_input, alabama_2017, catalog)
+    assert isinstance(outcome, ClaimOutcome)
+    assert outcome.errors
+    assert all(isinstance(error, str) and error for error in outcome.errors)
+    assert outcome.text is None
+
+
+def test_the_good_game_used_above_is_itself_accepted(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # Keeps every malformed case above a one-change mutation of a valid input.
+    outcome = check_and_render({"text": "{g}", "claims": [_GOOD_GAME]}, alabama_2017, catalog)
+    assert outcome == ClaimOutcome(errors=(), text="26-14")
+
+
+def test_a_hostile_value_is_never_echoed_in_full(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # The errors go back to the narrator as retry feedback, so a 5,000-character
+    # id must not be pasted back into the conversation.
+    huge = "x" * 5000
+    claims: list[dict[str, object]] = [
+        {"id": huge, "kind": "year"},
+        {"id": "y", "kind": "count", "of": huge},
+    ]
+    errors = rejected("{x} and {y}", claims, alabama_2017, catalog)
+    assert all(len(error) < 400 for error in errors), [len(error) for error in errors]
+
+
+# ---------------------------------------------------------------------------
+# the tool schema
+# ---------------------------------------------------------------------------
+
+
+def test_tool_schema_is_a_valid_anthropic_tool_definition() -> None:
+    schema = tool_schema()
+    assert schema["name"] == TOOL_NAME == "submit_narration"
+    assert isinstance(schema["description"], str) and schema["description"]
+    input_schema = schema["input_schema"]
+    jsonschema.Draft202012Validator.check_schema(input_schema)
+    assert input_schema["required"] == ["text", "claims"]
+
+
+def test_tool_schema_accepts_a_real_submission_and_names_every_kind() -> None:
+    input_schema = tool_schema()["input_schema"]
+    jsonschema.validate({"text": "{g}", "claims": [_GOOD_GAME]}, input_schema)
+    claim_schema = input_schema["properties"]["claims"]["items"]
+    assert set(claim_schema["properties"]["kind"]["enum"]) == {
+        "record",
+        "rating",
+        "rank",
+        "game_score",
+        "margin",
+        "year",
+        "count",
+        "win_pct",
+        "when",
+        "where",
+    }
+    assert set(claim_schema["properties"]) == {
+        "id",
+        "kind",
+        "team",
+        "opponent",
+        "result",
+        "week",
+        "season_type",
+        "of",
+    }
+    assert claim_schema["properties"]["of"]["enum"] == [
+        "wins",
+        "losses",
+        "ties",
+        "quality_wins",
+        "games",
+        "common_opponents",
+        "meetings",
+    ]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate({"text": "{t}", "claims": [{"id": "t", "kind": "team"}]}, input_schema)
+
+
+def test_check_and_render_is_pure_on_the_block(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    before = _row(alabama_2017, "games")
+    claim = _game("w", "when", "Alabama", "Auburn", "L")
+    first = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
+    second = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
+    assert first == second == ClaimOutcome(errors=(), text="in the regular-season finale")
+    assert _row(alabama_2017, "games") == before
