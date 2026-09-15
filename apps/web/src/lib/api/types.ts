@@ -361,6 +361,57 @@ export interface PlayerCareerOut {
   postseason: PlayerCareerTotalsOut | null
 }
 
+// `GET /api/players/compare` and `GET /api/players/search` (issue #301).
+
+/** One game both players started at quarterback, for opposite teams. */
+export interface PlayerHeadToHeadGameOut {
+  season: number
+  season_type: PlayerSeasonType
+  week: number | null
+  start_date: string | null
+  source_id: string | null
+  a_team: string
+  b_team: string
+  a_points: number
+  b_points: number
+  /** `null` when the source has no stat line for that starter in this game. */
+  a_stats: PlayerStatsOut | null
+  b_stats: PlayerStatsOut | null
+}
+
+export interface PlayerHeadToHeadOut {
+  season_type: PlayerSeasonType
+  /** `a`'s W-L-T against `b`. */
+  record: StarterRecordOut
+  /** Chronological, as the engine orders them. */
+  games: PlayerHeadToHeadGameOut[]
+}
+
+export interface PlayerComparisonOut {
+  sport: Sport
+  a: PlayerCareerOut
+  b: PlayerCareerOut
+  /** Always present: 0-0-0 with no games when the two never met. */
+  regular_season_head_to_head: PlayerHeadToHeadOut
+  postseason_head_to_head: PlayerHeadToHeadOut
+}
+
+export interface PlayerSearchRowOut {
+  player_id: number
+  display_name: string
+  position: string | null
+  first_season: number
+  last_season: number
+}
+
+export interface PlayerSearchOut {
+  sport: Sport
+  /** The query as matched: stripped of surrounding whitespace. */
+  query: string
+  limit: number
+  rows: PlayerSearchRowOut[]
+}
+
 // ---------------------------------------------------------------------------
 // catalog -- mirrors apps/api/src/api/models.py's `YearsOut`/`TeamsOut`
 // (`/api/years`, `/api/teams`), the year/team picker's valid-selection

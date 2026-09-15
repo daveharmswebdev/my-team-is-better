@@ -154,6 +154,12 @@ function Career({
         </p>
       </header>
 
+      <p className={styles.compare}>
+        <Link to={`/nfl/compare?a=${career.player_id}`}>
+          Compare {career.display_name} with another player
+        </Link>
+      </p>
+
       <p id={noteId} className={styles.note}>
         {STARTER_RECORD_NOTE}
       </p>

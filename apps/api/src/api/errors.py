@@ -301,3 +301,11 @@ CHAMPION_ERROR_RESPONSES = openapi_error_responses(
 # outside SQLite's INTEGER range. Its 422s are request validation only, so
 # they keep FastAPI's default declaration.
 PLAYER_CAREER_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
+
+# `GET /api/players/compare` (issue #301): `players.get_player_comparison`
+# loads both careers through `get_player_career`, so it raises
+# `UnknownPlayerError` for the first unknown id, and `api.players` raises it
+# itself for an id outside SQLite's INTEGER range. `a == b` is a
+# request-validation 422, so it keeps FastAPI's default declaration.
+# `GET /api/players/search` reaches no engine error and declares none.
+PLAYER_COMPARISON_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
