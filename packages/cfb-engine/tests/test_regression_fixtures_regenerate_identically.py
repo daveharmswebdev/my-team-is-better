@@ -113,7 +113,9 @@ def _differences(committed: dict[str, Table], regenerated: dict[str, Table]) -> 
             continue
         old, new = committed[name], regenerated[name]
         if old.columns != new.columns:
-            problems.append(f"{name}: columns differ: committed {old.columns} vs regenerated {new.columns}")
+            problems.append(
+                f"{name}: columns differ: committed {old.columns} vs regenerated {new.columns}"
+            )
             continue
         key = "/".join(new.key_columns)
         only_old = [k for k in old.rows if k not in new.rows]
@@ -121,7 +123,8 @@ def _differences(committed: dict[str, Table], regenerated: dict[str, Table]) -> 
         changed = [k for k in old.rows if k in new.rows and old.rows[k] != new.rows[k]]
         if only_old:
             problems.append(
-                f"{name}: {len(only_old)} row(s) only in the committed fixture, by {key}: {_first(only_old)}"
+                f"{name}: {len(only_old)} row(s) only in the committed fixture, "
+                f"by {key}: {_first(only_old)}"
             )
         if only_new:
             problems.append(
@@ -182,7 +185,9 @@ def test_the_comparison_reports_a_changed_row_a_missing_row_and_a_column(tmp_pat
 
     def make(path: Path, rows: list[tuple[int, str, int]], extra_column: bool = False) -> None:
         conn = sqlite3.connect(path)
-        cols = "id INTEGER PRIMARY KEY, school TEXT, points INTEGER" + (", mascot TEXT" if extra_column else "")
+        cols = "id INTEGER PRIMARY KEY, school TEXT, points INTEGER" + (
+            ", mascot TEXT" if extra_column else ""
+        )
         conn.execute(f"CREATE TABLE games ({cols})")
         conn.executemany("INSERT INTO games (id, school, points) VALUES (?, ?, ?)", rows)
         conn.commit()

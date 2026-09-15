@@ -39,9 +39,7 @@ def _make_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def _insert_team(
-    conn: sqlite3.Connection, team_id: int, school: str, sport: str = "cfb"
-) -> None:
+def _insert_team(conn: sqlite3.Connection, team_id: int, school: str, sport: str = "cfb") -> None:
     conn.execute(
         "INSERT INTO teams (id, school, classification, sport) VALUES (?, ?, ?, ?)",
         (team_id, school, None, sport),
@@ -114,7 +112,8 @@ def test_compute_and_store_writes_ranked_fbs_rows(tmp_path: Path) -> None:
     assert count == 3
 
     rows = conn.execute(
-        "SELECT team_id, rating, rank, wins, losses FROM ratings WHERE year = ? AND method = ? ORDER BY rank",
+        "SELECT team_id, rating, rank, wins, losses FROM ratings "
+        "WHERE year = ? AND method = ? ORDER BY rank",
         (year, "keener"),
     ).fetchall()
     assert len(rows) == 3
@@ -262,9 +261,7 @@ def test_main_signature_and_end_to_end(tmp_path: Path, monkeypatch: pytest.Monke
     assert exit_code == 0
 
     conn = get_conn(db_path)
-    rows = conn.execute(
-        "SELECT team_id, rank FROM ratings WHERE year = ?", (year,)
-    ).fetchall()
+    rows = conn.execute("SELECT team_id, rank FROM ratings WHERE year = ?", (year,)).fetchall()
     assert len(rows) == 2
     conn.close()
 
@@ -390,9 +387,9 @@ def test_recomputing_one_sport_does_not_delete_the_other_sports_rows(tmp_path: P
     compute_and_store(conn, year, "keener", "cfb")
     compute_and_store(conn, year, "keener", "nfl")
 
-    cfb_before = conn.execute(
-        "SELECT COUNT(*) AS c FROM ratings WHERE sport = 'cfb'"
-    ).fetchone()["c"]
+    cfb_before = conn.execute("SELECT COUNT(*) AS c FROM ratings WHERE sport = 'cfb'").fetchone()[
+        "c"
+    ]
     breakdown_cfb_before = conn.execute(
         "SELECT COUNT(*) AS c FROM rating_breakdowns WHERE sport = 'cfb'"
     ).fetchone()["c"]
@@ -402,15 +399,15 @@ def test_recomputing_one_sport_does_not_delete_the_other_sports_rows(tmp_path: P
     # Recomputing NFL alone must not touch CFB's rows for the same year.
     compute_and_store(conn, year, "keener", "nfl")
 
-    cfb_after = conn.execute(
-        "SELECT COUNT(*) AS c FROM ratings WHERE sport = 'cfb'"
-    ).fetchone()["c"]
+    cfb_after = conn.execute("SELECT COUNT(*) AS c FROM ratings WHERE sport = 'cfb'").fetchone()[
+        "c"
+    ]
     breakdown_cfb_after = conn.execute(
         "SELECT COUNT(*) AS c FROM rating_breakdowns WHERE sport = 'cfb'"
     ).fetchone()["c"]
-    nfl_after = conn.execute(
-        "SELECT COUNT(*) AS c FROM ratings WHERE sport = 'nfl'"
-    ).fetchone()["c"]
+    nfl_after = conn.execute("SELECT COUNT(*) AS c FROM ratings WHERE sport = 'nfl'").fetchone()[
+        "c"
+    ]
     assert cfb_after == cfb_before
     assert breakdown_cfb_after == breakdown_cfb_before
     assert nfl_after == 2
@@ -497,9 +494,7 @@ def test_main_sport_flag_scopes_to_nfl(tmp_path: Path, monkeypatch: pytest.Monke
     assert exit_code == 0
 
     conn = get_conn(db_path)
-    rows = conn.execute(
-        "SELECT team_id, sport FROM ratings WHERE year = ?", (year,)
-    ).fetchall()
+    rows = conn.execute("SELECT team_id, sport FROM ratings WHERE year = ?", (year,)).fetchall()
     assert len(rows) == 2
     assert all(r["sport"] == "nfl" for r in rows)
     conn.close()
@@ -827,9 +822,9 @@ def test_elo_and_keener_coexist_for_the_same_year_and_sport(tmp_path: Path) -> N
         "SELECT team_id, rating FROM ratings WHERE method = 'keener' ORDER BY team_id"
     ).fetchall()
     assert [tuple(r) for r in keener_after] == [tuple(r) for r in keener_before]
-    elo_rows = conn.execute(
-        "SELECT COUNT(*) AS c FROM ratings WHERE method = 'elo'"
-    ).fetchone()["c"]
+    elo_rows = conn.execute("SELECT COUNT(*) AS c FROM ratings WHERE method = 'elo'").fetchone()[
+        "c"
+    ]
     assert elo_rows == 3
     conn.close()
 
@@ -922,9 +917,7 @@ def test_load_games_history_spans_prior_seasons_in_order(tmp_path: Path) -> None
     conn.close()
 
 
-def test_main_accepts_elo_and_elo_career(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_accepts_elo_and_elo_career(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = _make_db(tmp_path)
     conn = get_conn(db_path)
     _seed_three_seasons(conn)
@@ -939,10 +932,7 @@ def test_main_accepts_elo_and_elo_career(
     assert main(["--years", "2002", "--method", "elo_career"]) == 0
 
     conn = get_conn(db_path)
-    methods = {
-        r["method"]
-        for r in conn.execute("SELECT DISTINCT method FROM ratings").fetchall()
-    }
+    methods = {r["method"] for r in conn.execute("SELECT DISTINCT method FROM ratings").fetchall()}
     assert methods == {"elo", "elo_career"}
     conn.close()
 
@@ -992,9 +982,7 @@ def test_franchise_successors_is_empty_for_cfb(tmp_path: Path) -> None:
     conn.close()
 
 
-def _insert_nfl_team(
-    conn: sqlite3.Connection, team_id: int, school: str, source_id: str
-) -> None:
+def _insert_nfl_team(conn: sqlite3.Connection, team_id: int, school: str, source_id: str) -> None:
     conn.execute(
         "INSERT INTO teams (id, school, classification, sport, source_id) "
         "VALUES (?, ?, NULL, 'nfl', ?)",
@@ -1043,9 +1031,7 @@ def test_elo_career_carries_a_relocated_franchise_end_to_end(tmp_path: Path) -> 
     assert set(stored) == {la, opponent}
 
     nfl = ELO_CONFIGS["nfl"]
-    stl_end_2015 = nfl.initial + rating_shift(
-        nfl.initial, nfl.initial, 28, 21, False, nfl
-    )
+    stl_end_2015 = nfl.initial + rating_shift(nfl.initial, nfl.initial, 28, 21, False, nfl)
     opponent_end_2015 = nfl.initial - (stl_end_2015 - nfl.initial)
     la_start_2016 = revert_between_seasons(stl_end_2015, nfl)
     opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
@@ -1056,9 +1042,7 @@ def test_elo_career_carries_a_relocated_franchise_end_to_end(tmp_path: Path) -> 
 
     # The assertion that actually catches a broken wire-up: with no lineage
     # LA would have entered 2016 cold, at `initial`, and finished lower.
-    no_carryover = nfl.initial + rating_shift(
-        nfl.initial, opponent_start_2016, 24, 20, False, nfl
-    )
+    no_carryover = nfl.initial + rating_shift(nfl.initial, opponent_start_2016, 24, 20, False, nfl)
     assert stored[la] != no_carryover
     assert stored[la] > no_carryover
     conn.close()
@@ -1095,9 +1079,7 @@ def test_elo_career_nfl_without_a_lineage_row_starts_cold(tmp_path: Path) -> Non
     }
 
     nfl = ELO_CONFIGS["nfl"]
-    opponent_end_2015 = nfl.initial - rating_shift(
-        nfl.initial, nfl.initial, 28, 21, False, nfl
-    )
+    opponent_end_2015 = nfl.initial - rating_shift(nfl.initial, nfl.initial, 28, 21, False, nfl)
     opponent_start_2016 = revert_between_seasons(opponent_end_2015, nfl)
     shift = rating_shift(nfl.initial, opponent_start_2016, 24, 20, False, nfl)
     assert stored[new_team] == nfl.initial + shift
@@ -1140,9 +1122,7 @@ def _ledger_row_counts(
     return int(steps), int(configs)
 
 
-def _assert_stored_ledger_matches_ratings(
-    conn: sqlite3.Connection, year: int, sport: str
-) -> None:
+def _assert_stored_ledger_matches_ratings(conn: sqlite3.Connection, year: int, sport: str) -> None:
     """The stored ledger for (year, 'elo', sport), against the stored
     ratings: one config row equal to the sport's EloConfig, steps for
     exactly the displayed teams, and an exact chain ending on each rating."""
@@ -1276,9 +1256,12 @@ def test_rerunning_elo_replaces_the_ledger_without_duplicates(tmp_path: Path) ->
 
 def _seed_stale_ledger(conn: sqlite3.Connection, year: int, method: str, sport: str) -> None:
     """One junk config row and one junk step row for (year, method, sport)."""
-    team_ids = [r["id"] for r in conn.execute(
-        "SELECT id FROM teams WHERE sport = ? ORDER BY id LIMIT 2", (sport,)
-    ).fetchall()]
+    team_ids = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM teams WHERE sport = ? ORDER BY id LIMIT 2", (sport,)
+        ).fetchall()
+    ]
     conn.execute(
         "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, hfa, "
         "scale, mov_scale, mov_autocorr, computed_at) "
@@ -1298,9 +1281,7 @@ def _seed_stale_ledger(conn: sqlite3.Connection, year: int, method: str, sport: 
 
 
 @pytest.mark.parametrize("method", ["keener", "elo_career"])
-def test_a_method_without_a_ledger_clears_stale_ledger_rows(
-    tmp_path: Path, method: str
-) -> None:
+def test_a_method_without_a_ledger_clears_stale_ledger_rows(tmp_path: Path, method: str) -> None:
     """The DELETE is unconditional: a method that writes no ledger leaves
     none behind for its (year, method, sport)."""
     conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")

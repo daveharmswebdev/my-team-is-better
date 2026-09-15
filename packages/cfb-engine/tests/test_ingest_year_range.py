@@ -62,8 +62,7 @@ def test_years_outside_the_new_range_are_still_skipped(
     conn: sqlite3.Connection = get_conn(db_path)
     try:
         years = {
-            r["year"]
-            for r in conn.execute("SELECT DISTINCT year FROM ingestion_log").fetchall()
+            r["year"] for r in conn.execute("SELECT DISTINCT year FROM ingestion_log").fetchall()
         }
     finally:
         conn.close()

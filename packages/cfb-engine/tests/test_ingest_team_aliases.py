@@ -408,9 +408,7 @@ def test_enrichment_does_not_insert_teams_that_never_appeared_in_games(
         after = conn.execute("SELECT COUNT(*) AS c FROM teams").fetchone()["c"]
         assert after == before
         for never_played in ("Avila University", "Alma", "Albany State", "NC State"):
-            row = conn.execute(
-                "SELECT id FROM teams WHERE school = ?", (never_played,)
-            ).fetchone()
+            row = conn.execute("SELECT id FROM teams WHERE school = ?", (never_played,)).fetchone()
             assert row is None, f"{never_played} was inserted but never played a fixture game"
     finally:
         conn.close()
@@ -427,13 +425,11 @@ def test_reingest_is_idempotent_and_preserves_school(
 
         first = enrich_team_aliases(conn, raw_dir=cached_teams_dir)
         snapshot_one = sorted(
-            tuple(r)
-            for r in conn.execute("SELECT id, school, mascot, alternate_names FROM teams")
+            tuple(r) for r in conn.execute("SELECT id, school, mascot, alternate_names FROM teams")
         )
         second = enrich_team_aliases(conn, raw_dir=cached_teams_dir)
         snapshot_two = sorted(
-            tuple(r)
-            for r in conn.execute("SELECT id, school, mascot, alternate_names FROM teams")
+            tuple(r) for r in conn.execute("SELECT id, school, mascot, alternate_names FROM teams")
         )
 
         assert first.rows_updated == second.rows_updated

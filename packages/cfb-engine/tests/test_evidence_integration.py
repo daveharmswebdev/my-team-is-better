@@ -263,9 +263,7 @@ def test_build_team_case_rating_breakdown_entries_have_explanations(
     # explanation cites that game's real score as a substring -- without
     # hardcoding the exact sentence, since this delegation doesn't control
     # the golden-fixture wording, only the template.
-    single_game_opponent = next(
-        e for e in case.rating_breakdown.entries if e.games_played == 1
-    )
+    single_game_opponent = next(e for e in case.rating_breakdown.entries if e.games_played == 1)
     matching_game = next(
         g for g in case.games if g.opponent_team_id == single_game_opponent.opponent_team_id
     )
@@ -294,7 +292,7 @@ def test_rating_breakdown_degrades_gracefully_with_no_rows(
 def test_unrated_team_raises_unknown_team_error_not_ambiguous(
     rated_conn: sqlite3.Connection,
 ) -> None:
-    """"Abilene Christian" is a real school that has no 2005 keener rating in
+    """ "Abilene Christian" is a real school that has no 2005 keener rating in
     this fixture -- a zero-match query, which used to come back as
     AmbiguousTeamError with an empty candidate list."""
     with pytest.raises(UnknownTeamError) as exc_info:
@@ -348,7 +346,15 @@ def test_ambiguous_team_error_never_carries_empty_candidates(
 ) -> None:
     """Invariant from contracts.py, swept against the real rated set:
     AmbiguousTeamError means "too many", never "none"."""
-    queries = ["Texas", "State", "Southern", "Tech", "A&M", "Abilene Christian", "Zzyzx Polytechnic"]
+    queries = [
+        "Texas",
+        "State",
+        "Southern",
+        "Tech",
+        "A&M",
+        "Abilene Christian",
+        "Zzyzx Polytechnic",
+    ]
     raised_at_least_one = False
     for query in queries:
         try:
@@ -817,8 +823,12 @@ def test_isolation_breakdown_rows_never_cross_methods(
             )
         )
         assert expected, method
-        breakdown = build_team_case(conn, ISOLATION_YEAR, "Penn State", method=method).rating_breakdown
-        assert sorted((e.opponent_team_id, e.contribution) for e in breakdown.entries) == expected, method
+        breakdown = build_team_case(
+            conn, ISOLATION_YEAR, "Penn State", method=method
+        ).rating_breakdown
+        assert (
+            sorted((e.opponent_team_id, e.contribution) for e in breakdown.entries) == expected
+        ), method
 
 
 def test_isolation_verdict_follows_the_requested_method(

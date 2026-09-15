@@ -257,8 +257,12 @@ class KeenerRating:
             only = team_ids[0]
             return {
                 only: TeamRating(
-                    team_id=only, rating=1.0, rank=1,
-                    wins=wins[only], losses=losses[only], ties=ties[only],
+                    team_id=only,
+                    rating=1.0,
+                    rank=1,
+                    wins=wins[only],
+                    losses=losses[only],
+                    ties=ties[only],
                 )
             }
 

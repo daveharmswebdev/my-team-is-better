@@ -79,12 +79,16 @@ def test_shift_is_zero_sum() -> None:
     for elo_home in (1200.0, 1345.5, 1500.0, 1712.25, 2000.0):
         for elo_away in (1100.0, 1500.0, 1633.75, 1890.0):
             for home_points, away_points in (
-                (0, 0), (21, 21), (3, 0), (35, 7), (7, 35), (70, 0), (1, 2),
+                (0, 0),
+                (21, 21),
+                (3, 0),
+                (35, 7),
+                (7, 35),
+                (70, 0),
+                (1, 2),
             ):
                 for neutral in (False, True):
-                    shift = rating_shift(
-                        elo_home, elo_away, home_points, away_points, neutral, CFB
-                    )
+                    shift = rating_shift(elo_home, elo_away, home_points, away_points, neutral, CFB)
                     assert (elo_home + shift) + (elo_away - shift) == elo_home + elo_away
 
 
@@ -152,6 +156,7 @@ def test_mov_multiplier_monotonic_in_margin() -> None:
 
 def test_mov_multiplier_has_diminishing_returns() -> None:
     """Logarithmic in margin: the 7->14 step is worth more than 21->28."""
+
     def f(point_diff: int) -> float:
         return mov_multiplier(point_diff, 0.0, 1.0, CFB)
 
@@ -198,9 +203,7 @@ def test_mov_denominator_guard_prevents_sign_inversion() -> None:
 
     # The guard must not bind in the normal range: at -1000 the raw denom
     # is 1.2, comfortably above the 1.1 floor.
-    assert mov_multiplier(35, -1000.0, 1.0, CFB) == pytest.approx(
-        undamped * (CFB.mov_scale / 1.2)
-    )
+    assert mov_multiplier(35, -1000.0, 1.0, CFB) == pytest.approx(undamped * (CFB.mov_scale / 1.2))
 
 
 def test_mov_multiplier_rejects_non_finite_inputs() -> None:
@@ -331,11 +334,13 @@ def test_wins_losses_and_ties() -> None:
     """Issue #83: a tie is tallied as a tie, identically to Keener. Before
     #83 it incremented neither wins nor losses and was silently dropped from
     the record."""
-    result = EloRating(CFB).rate([
-        _game(A, B, 28, 21),
-        _game(A, C, 17, 17),
-        _game(C, B, 10, 3),
-    ])
+    result = EloRating(CFB).rate(
+        [
+            _game(A, B, 28, 21),
+            _game(A, C, 17, 17),
+            _game(C, B, 10, 3),
+        ]
+    )
     assert (result[A].wins, result[A].losses, result[A].ties) == (1, 0, 1)
     assert (result[B].wins, result[B].losses, result[B].ties) == (0, 2, 0)
     assert (result[C].wins, result[C].losses, result[C].ties) == (1, 0, 1)
@@ -367,17 +372,17 @@ def test_ratings_sum_is_conserved() -> None:
         _game(A, C, 21, 20),
     ]
     result = EloRating(CFB).rate(games)
-    assert sum(tr.rating for tr in result.values()) == pytest.approx(
-        len(result) * CFB.initial
-    )
+    assert sum(tr.rating for tr in result.values()) == pytest.approx(len(result) * CFB.initial)
 
 
 def test_ranks_are_dense_and_rating_ordered() -> None:
-    result = EloRating(CFB).rate([
-        _game(A, B, 28, 21),
-        _game(B, C, 35, 7),
-        _game(C, A, 3, 40),
-    ])
+    result = EloRating(CFB).rate(
+        [
+            _game(A, B, 28, 21),
+            _game(B, C, 35, 7),
+            _game(C, A, 3, 40),
+        ]
+    )
     ordered = sorted(result.values(), key=lambda tr: tr.rank)
     assert [tr.rank for tr in ordered] == [1, 2, 3]
     assert ordered[0].rating >= ordered[1].rating >= ordered[2].rating
@@ -476,12 +481,8 @@ def test_carried_rating_survives_a_skipped_season() -> None:
     result = EloCareerRating(CFB, {}).rate_through(games, 2003)
     assert set(result) == {A, C}
 
-    a_end_2001 = CFB.initial + rating_shift(
-        CFB.initial, CFB.initial, 28, 21, False, CFB
-    )
-    c_end_2002 = CFB.initial + rating_shift(
-        CFB.initial, CFB.initial, 14, 10, False, CFB
-    )
+    a_end_2001 = CFB.initial + rating_shift(CFB.initial, CFB.initial, 28, 21, False, CFB)
+    c_end_2002 = CFB.initial + rating_shift(CFB.initial, CFB.initial, 14, 10, False, CFB)
     a_start_2003 = revert_across_offseasons(a_end_2001, CFB, 2)
     c_start_2003 = revert_between_seasons(c_end_2002, CFB)
     shift = rating_shift(a_start_2003, c_start_2003, 21, 20, False, CFB)
@@ -514,9 +515,7 @@ def test_reversion_count_is_elapsed_offseasons_not_observed_transitions() -> Non
     ]
     result = EloCareerRating(CFB, {}).rate_through(gapped, 2005)
 
-    a_end_2001 = CFB.initial + rating_shift(
-        CFB.initial, CFB.initial, 42, 0, False, CFB
-    )
+    a_end_2001 = CFB.initial + rating_shift(CFB.initial, CFB.initial, 42, 0, False, CFB)
     b_end_2001 = CFB.initial - (a_end_2001 - CFB.initial)
     a_start = revert_across_offseasons(a_end_2001, CFB, 4)
     b_start = revert_across_offseasons(b_end_2001, CFB, 4)
@@ -548,9 +547,7 @@ def test_closed_form_matches_repeated_reversion() -> None:
             carried = elo
             for n in range(1, 13):
                 carried = revert_between_seasons(carried, cfg)
-                assert revert_across_offseasons(elo, cfg, n) == pytest.approx(
-                    carried, abs=1e-9
-                )
+                assert revert_across_offseasons(elo, cfg, n) == pytest.approx(carried, abs=1e-9)
 
     # n == 1 is bit-identical, not merely approximate: the common case must
     # not be perturbed by the closed form's different rounding.
@@ -864,6 +861,7 @@ def _ledger_season() -> list[Game]:
     field populated so the copy-through can be checked. A plays five games
     (home, away and neutral), so its chain is long enough to catch a
     swapped or dropped step anywhere in the middle."""
+
     def g(
         home: int,
         away: int,
@@ -929,9 +927,7 @@ def test_elo_ledger_chain_is_exact_for_every_team() -> None:
             assert after.rating_before == before.rating_after
         for step in ledger.steps:
             assert step.rating_after == step.rating_before + step.shift
-        assert [s.game_number for s in ledger.steps] == list(
-            range(1, len(ledger.steps) + 1)
-        )
+        assert [s.game_number for s in ledger.steps] == list(range(1, len(ledger.steps) + 1))
         assert ledger.steps[-1].rating_after == tr.rating
         assert ledger.starting_rating + sum(s.shift for s in ledger.steps) == pytest.approx(
             tr.rating
@@ -947,7 +943,11 @@ def test_elo_ledger_steps_re_derive_from_their_own_fields() -> None:
         assert ledger is not None
         assert ledger.starting_rating == CFB.initial
         assert (ledger.k, ledger.hfa, ledger.scale, ledger.mov_scale, ledger.mov_autocorr) == (
-            CFB.k, CFB.hfa, CFB.scale, CFB.mov_scale, CFB.mov_autocorr,
+            CFB.k,
+            CFB.hfa,
+            CFB.scale,
+            CFB.mov_scale,
+            CFB.mov_autocorr,
         )
         for step in ledger.steps:
             result_score = _RESULT_SCORE[step.result]
@@ -991,7 +991,8 @@ def test_elo_ledger_records_what_the_walk_used_and_copies_the_game() -> None:
         assert home.win_expectancy + away.win_expectancy == pytest.approx(1.0)
 
         assert (home.opponent_team_id, away.opponent_team_id) == (
-            game.away_team_id, game.home_team_id,
+            game.away_team_id,
+            game.home_team_id,
         )
         assert (home.team_points, home.opponent_points) == (game.home_points, game.away_points)
         assert (away.team_points, away.opponent_points) == (game.away_points, game.home_points)
@@ -999,7 +1000,9 @@ def test_elo_ledger_records_what_the_walk_used_and_copies_the_game() -> None:
         assert away.opponent_rating_before == home.rating_before
         for step in (home, away):
             assert (step.week, step.season_type, step.start_date) == (
-                game.week, game.season_type, game.start_date,
+                game.week,
+                game.season_type,
+                game.start_date,
             )
             assert step.opponent_name == ""
         if game.neutral_site:

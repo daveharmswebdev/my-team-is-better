@@ -86,7 +86,8 @@ def _build_current_db(path: Path) -> Path:
             # scoped to CFB, and an NFL mascot is what proves it is.
             mascot = "Mascots" if team_id == home else None
             conn.execute(
-                "INSERT INTO teams (id, school, classification, sport, mascot) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO teams (id, school, classification, sport, mascot) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (team_id, school, "fbs" if sport == "cfb" else None, sport, mascot),
             )
         for season in seasons:
@@ -146,7 +147,14 @@ def _write_cfb_cache(raw_dir: Path, pairs: list[Pair]) -> None:
 # the tests must fail if ingest's own sets ever stop matching the real data.
 NFL_POSTSEASON_GAME_TYPES = ("WC", "DIV", "CON", "SB")
 _NFL_HEADER = [
-    "game_id", "season", "game_type", "week", "away_team", "home_team", "away_score", "home_score",
+    "game_id",
+    "season",
+    "game_type",
+    "week",
+    "away_team",
+    "home_team",
+    "away_score",
+    "home_score",
 ]
 
 
@@ -1094,7 +1102,9 @@ def test_a_corrupt_file_with_a_wal_looking_header_gets_the_generic_message(
         pytest.param(ROLLBACK_HEADER, False, id="rollback"),
         pytest.param(WAL_HEADER[:19], False, id="truncated_header"),
         pytest.param(b"not a sqlite file, although long enough", False, id="not_sqlite"),
-        pytest.param(b"Not SQLite form" + b"\x00\x10\x00\x02\x02" + b"\x00" * 80, False, id="bad_magic"),
+        pytest.param(
+            b"Not SQLite form" + b"\x00\x10\x00\x02\x02" + b"\x00" * 80, False, id="bad_magic"
+        ),
     ],
 )
 def test_is_wal_mode_reads_the_header_bytes(tmp_path: Path, content: bytes, expected: bool) -> None:

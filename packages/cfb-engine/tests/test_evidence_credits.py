@@ -80,9 +80,7 @@ def test_elo_credit_expects_the_methods_to_differ_without_playing_it_up() -> Non
 
 
 def _data_source_by_name(name_fragment: str) -> DataSourceCredit:
-    matches = [
-        source for source in get_credits().data_sources if name_fragment in source.name
-    ]
+    matches = [source for source in get_credits().data_sources if name_fragment in source.name]
     assert len(matches) == 1, f"expected exactly one data source matching {name_fragment!r}"
     return matches[0]
 

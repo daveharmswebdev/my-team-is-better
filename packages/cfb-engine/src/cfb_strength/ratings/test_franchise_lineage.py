@@ -19,9 +19,7 @@ import pytest
 
 from cfb_strength.ratings.franchise_lineage import FRANCHISE_LINEAGE
 
-_GAMES_CSV = (
-    Path(__file__).resolve().parents[3] / "data" / "raw" / "nfl" / "games.csv"
-)
+_GAMES_CSV = Path(__file__).resolve().parents[3] / "data" / "raw" / "nfl" / "games.csv"
 
 
 def _seasons_by_abbreviation() -> dict[str, set[int]]:

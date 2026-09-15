@@ -51,13 +51,10 @@ def _fetch_games_live(year: int, season_type: str) -> list[dict[str, Any]]:
     try:
         resp = requests.get(url, params=params, headers=headers, timeout=_TIMEOUT_SECONDS)
     except requests.RequestException as e:
-        raise CFBDClientError(
-            f"Could not reach CFBD API for {year} {season_type}: {e}"
-        ) from e
+        raise CFBDClientError(f"Could not reach CFBD API for {year} {season_type}: {e}") from e
     if resp.status_code != 200:
         raise CFBDClientError(
-            f"CFBD API returned HTTP {resp.status_code} for {year} {season_type}: "
-            f"{resp.text[:500]}"
+            f"CFBD API returned HTTP {resp.status_code} for {year} {season_type}: {resp.text[:500]}"
         )
     try:
         data = resp.json()
@@ -127,15 +124,12 @@ def _fetch_teams_live() -> list[dict[str, Any]]:
         raise CFBDClientError(f"Could not reach CFBD API for {TEAMS_ENDPOINT}: {e}") from e
     if resp.status_code != 200:
         raise CFBDClientError(
-            f"CFBD API returned HTTP {resp.status_code} for {TEAMS_ENDPOINT}: "
-            f"{resp.text[:500]}"
+            f"CFBD API returned HTTP {resp.status_code} for {TEAMS_ENDPOINT}: {resp.text[:500]}"
         )
     try:
         data = resp.json()
     except ValueError as e:
-        raise CFBDClientError(
-            f"CFBD API returned non-JSON response for {TEAMS_ENDPOINT}"
-        ) from e
+        raise CFBDClientError(f"CFBD API returned non-JSON response for {TEAMS_ENDPOINT}") from e
     if not isinstance(data, list):
         raise CFBDClientError(
             f"Unexpected CFBD {TEAMS_ENDPOINT} response shape: expected a list, "

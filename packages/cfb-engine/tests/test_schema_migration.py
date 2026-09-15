@@ -132,7 +132,8 @@ def pre_51_db(tmp_path: Path) -> Path:
         "INSERT INTO rating_breakdowns "
         "(year, method, team_id, opponent_team_id, games_played, wins, losses, credit, "
         "contribution, computed_at) "
-        "VALUES (2005, 'keener', 333, NULL, NULL, NULL, NULL, NULL, 0.1, '2026-01-01T00:00:00+00:00')"
+        "VALUES (2005, 'keener', 333, NULL, NULL, NULL, NULL, NULL, 0.1, "
+        "'2026-01-01T00:00:00+00:00')"
     )
     conn.execute(
         "INSERT INTO ingestion_log (year, season_type, fetched_at, game_count, status) "

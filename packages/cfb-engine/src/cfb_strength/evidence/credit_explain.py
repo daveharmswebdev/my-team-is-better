@@ -112,11 +112,11 @@ def _explain_pair(games: list[tuple[int, int]], outcome: Outcome) -> str:
         )
 
     if c1.bonus > c2.bonus:
-        bigger, smaller = "first", "second"
+        bigger = "first"
         pct_bigger, pct_smaller = _pct(c1), _pct(c2)
         bonus_bigger, bonus_smaller = c1.bonus, c2.bonus
     else:
-        bigger, smaller = "second", "first"
+        bigger = "second"
         pct_bigger, pct_smaller = _pct(c2), _pct(c1)
         bonus_bigger, bonus_smaller = c2.bonus, c1.bonus
 

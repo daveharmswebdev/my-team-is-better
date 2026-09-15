@@ -94,7 +94,9 @@ def test_1999_rams_case_cites_the_super_bowl_win_over_titans(
     Bowl win, unprompted, when asked about the greatest team of 1999."""
     compute_and_store(nfl_regression_conn, 1999, "keener", sport="nfl")
 
-    case = build_team_case(nfl_regression_conn, 1999, "St. Louis Rams", method="keener", sport="nfl")
+    case = build_team_case(
+        nfl_regression_conn, 1999, "St. Louis Rams", method="keener", sport="nfl"
+    )
     assert case.rank == 1
 
     titans_wins = [g for g in case.quality_wins if g.opponent_name == "Tennessee Titans"]
@@ -434,14 +436,21 @@ def test_2013_verdict_states_every_meeting_against_a_common_opponent(
     compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
 
     comparison = build_comparison(
-        nfl_regression_conn, 2013, "Seattle Seahawks", "Arizona Cardinals",
-        method="keener", sport="nfl",
+        nfl_regression_conn,
+        2013,
+        "Seattle Seahawks",
+        "Arizona Cardinals",
+        method="keener",
+        sport="nfl",
     )
 
     niners = comparison.common_opponents[0]
     assert niners.opponent_name == "San Francisco 49ers"
     assert niners.opponent_rank == 3
-    assert [(m.result, m.team_score, m.opponent_score, m.week, m.season_type) for m in niners.team_a_meetings] == [
+    assert [
+        (m.result, m.team_score, m.opponent_score, m.week, m.season_type)
+        for m in niners.team_a_meetings
+    ] == [
         ("W", 29, 3, 2, "regular"),
         ("L", 17, 19, 14, "regular"),
         ("W", 23, 17, 20, "postseason"),
@@ -460,7 +469,10 @@ def test_2013_verdict_states_every_meeting_against_a_common_opponent(
     # has every meeting's team-perspective score pair in the prose.
     for cited in comparison.common_opponents[:3]:
         for meeting in cited.team_a_meetings + cited.team_b_meetings:
-            assert f"{meeting.result} {meeting.team_score}-{meeting.opponent_score}" in comparison.verdict
+            assert (
+                f"{meeting.result} {meeting.team_score}-{meeting.opponent_score}"
+                in comparison.verdict
+            )
 
 
 def test_2013_packers_vikings_comparison_verdict_names_the_tie(
@@ -471,8 +483,12 @@ def test_2013_packers_vikings_comparison_verdict_names_the_tie(
     compute_and_store(nfl_regression_conn, 2013, "keener", sport="nfl")
 
     comparison = build_comparison(
-        nfl_regression_conn, 2013, "Green Bay Packers", "Minnesota Vikings",
-        method="keener", sport="nfl",
+        nfl_regression_conn,
+        2013,
+        "Green Bay Packers",
+        "Minnesota Vikings",
+        method="keener",
+        sport="nfl",
     )
 
     assert [m.winner for m in comparison.head_to_head.meetings] == ["Green Bay Packers", None]

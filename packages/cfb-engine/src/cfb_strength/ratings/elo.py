@@ -130,13 +130,10 @@ class EloConfig:
         for name in ("k", "scale", "mov_scale"):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0.0:
-                raise ValueError(
-                    f"EloConfig.{name} must be finite and positive; got {value!r}"
-                )
+                raise ValueError(f"EloConfig.{name} must be finite and positive; got {value!r}")
         if not math.isfinite(self.revert) or not 0.0 <= self.revert <= 1.0:
             raise ValueError(
-                f"EloConfig.revert must be a finite fraction in [0, 1]; "
-                f"got {self.revert!r}"
+                f"EloConfig.revert must be a finite fraction in [0, 1]; got {self.revert!r}"
             )
 
 
@@ -153,8 +150,7 @@ class _EloConfigRegistry(dict[str, EloConfig]):
 
     def __missing__(self, sport: str) -> EloConfig:
         raise ValueError(
-            f"no Elo configuration registered for sport {sport!r}; "
-            f"available: {sorted(self)}"
+            f"no Elo configuration registered for sport {sport!r}; available: {sorted(self)}"
         )
 
 
@@ -221,9 +217,7 @@ def expected_score(elo_diff: float, cfg: EloConfig) -> float:
     return 1.0 / (math.pow(10.0, -elo_diff / cfg.scale) + 1.0)
 
 
-def mov_multiplier(
-    point_diff: float, elo_diff: float, result: float, cfg: EloConfig
-) -> float:
+def mov_multiplier(point_diff: float, elo_diff: float, result: float, cfg: EloConfig) -> float:
     """Margin-of-victory multiplier with 538's autocorrelation correction.
 
     Two shaping decisions, both from the published model:
@@ -352,9 +346,7 @@ def rating_shift(
     Delegates to `_game_update`, which `_walk` calls directly so that the
     ledger records the intermediates this function discards.
     """
-    return _game_update(
-        elo_home, elo_away, home_points, away_points, neutral_site, cfg
-    ).shift
+    return _game_update(elo_home, elo_away, home_points, away_points, neutral_site, cfg).shift
 
 
 def revert_between_seasons(elo: float, cfg: EloConfig) -> float:
@@ -616,9 +608,7 @@ def _walk(
                     # has sat out four offseasons and must not carry a
                     # four-year-stale rating. See
                     # `revert_across_offseasons`.
-                    elo[root] = revert_across_offseasons(
-                        elo[root], cfg, season - previous
-                    )
+                    elo[root] = revert_across_offseasons(elo[root], cfg, season - previous)
                     last_season[root] = season
 
         home_before = elo[home_root]
@@ -778,15 +768,11 @@ class EloCareerRating:
     Chains are collapsed and cycles rejected at construction time.
     """
 
-    def __init__(
-        self, cfg: EloConfig, successors: Mapping[int, int] | None = None
-    ) -> None:
+    def __init__(self, cfg: EloConfig, successors: Mapping[int, int] | None = None) -> None:
         self.cfg = cfg
         self.roots = _resolve_roots(successors or {})
 
-    def rate_through(
-        self, games: list[Game], target_season: int
-    ) -> dict[int, TeamRating]:
+    def rate_through(self, games: list[Game], target_season: int) -> dict[int, TeamRating]:
         return _walk(
             games,
             self.cfg,
