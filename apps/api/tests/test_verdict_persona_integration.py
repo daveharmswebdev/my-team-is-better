@@ -28,7 +28,7 @@ from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import TeamCaseOut
 from api.persona.cache import cache_key, ensure_schema
-from api.persona.grounding import GROUNDING_VERSION
+from api.persona.claims import GROUNDING_VERSION
 from api.persona.service import team_case_fact_block_json
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"

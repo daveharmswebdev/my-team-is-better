@@ -34,12 +34,17 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.team_catalog_fixture import NEW_YEAR, OLD_YEAR, RELOCATED_PAIRS, UNINGESTED_YEAR
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
+
+    from api.persona.claude_client import NarratorReply
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -193,36 +198,50 @@ def test_teams_year_stays_within_its_sport(team_catalog_client: TestClient) -> N
 
 
 # ---------------------------------------------------------------------------
-# THE TRAP: the persona grounding check's team universe must stay unscoped
+# THE TRAP: the narration layer's team universe must stay unscoped
 # ---------------------------------------------------------------------------
 
 
 class _RecordingNarrator:
-    """Narrator double that returns a scripted sequence and records the
-    messages of every call it received (so a grounding retry is visible as a
-    second call carrying the retry feedback)."""
+    """Narrator double that submits a scripted sequence of claim-less texts
+    and records the messages of every call it received (so a claim retry is
+    visible as a second call carrying the retry feedback)."""
 
     def __init__(self, responses: list[str]) -> None:
         self.responses = list(responses)
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append(messages)
-        return self.responses.pop(0)
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        from api.persona.claude_client import tool_reply
+
+        self.calls.append(list(messages))
+        return tool_reply({"text": self.responses.pop(0), "claims": []})
+
+
+def _retry_feedback(message: MessageParam) -> str:
+    """The claim errors a retry's `is_error` tool_result carries."""
+    content = message["content"]
+    assert not isinstance(content, str)
+    (block,) = list(content)
+    assert isinstance(block, dict) and block["type"] == "tool_result"
+    feedback = dict(block)["content"]
+    assert isinstance(feedback, str)
+    return feedback
 
 
 def test_grounding_team_universe_is_still_unscoped(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Behavioral half of the trap: "Abilene Christian" is a real team in
-    the db that has no rating in *any* season, so it is in the grounding
-    check's known-team-name universe but not in a 2005 Texas fact block.
-    Mentioning it must still be caught as ungrounded and trigger the retry.
+    the db that has no rating in *any* season, so it is in the team catalog
+    the claim validator is handed (issue #291; the grounding check's
+    known-team-name universe before it) but not in a 2005 Texas fact block.
+    Mentioning it must still be caught and trigger the retry.
 
     If `/api/teams`' new year scoping had been pushed down into the shared
-    `list_all_team_names`, this name would no longer be a known
-    team name at all, the mention would sail through as an arbitrary
-    capitalized phrase, and there would be exactly one Claude call.
+    catalog query, this name would no longer be a known team at all, the
+    mention would sail through as an arbitrary capitalized phrase, and there
+    would be exactly one Claude call.
     """
     from api.deps import get_narration_cache, get_narrator
     from api.main import app
@@ -242,8 +261,8 @@ def test_grounding_team_universe_is_still_unscoped(
     response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "Texas"})
 
     assert response.status_code == 200
-    assert len(narrator.calls) == 2, "grounding check did not flag the unrated-team mention"
-    assert "Abilene Christian" in narrator.calls[1][-1]["content"]
+    assert len(narrator.calls) == 2, "the claim validator did not flag the unrated-team mention"
+    assert "Abilene Christian" in _retry_feedback(narrator.calls[1][-1])
     assert response.json()["narration"]["text"] == "Nobody in the country could hang with them."
 
 
@@ -253,8 +272,8 @@ def test_grounding_is_handed_the_whole_unscoped_team_universe(
     """Structural half of the trap, exercised through the real caller
     (`api.persona.service.narrate_team_case` via the route) rather than by
     re-calling the helper with default args: whatever the route did to
-    `/api/teams`, the list handed to the grounding check is still every
-    CFB team name in the db, in the pre-#78 order."""
+    `/api/teams`, the catalog handed to the narration layer is still every
+    CFB team in the db (issue #291: the full records, as `catalog`)."""
     from api.persona.narrate import NarrationResult
 
     captured: dict[str, Any] = {}
@@ -268,8 +287,9 @@ def test_grounding_is_handed_the_whole_unscoped_team_universe(
     response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "Texas"})
 
     assert response.status_code == 200
-    assert captured["known_team_names"] == _pre_issue_78_team_names(FIXTURE_DB, "cfb")
-    assert len(captured["known_team_names"]) == 451
+    names = [record.name for record in captured["catalog"]]
+    assert sorted(names) == sorted(_pre_issue_78_team_names(FIXTURE_DB, "cfb"))
+    assert len(names) == 451
 
 
 def test_list_all_team_names_signature_stays_year_free() -> None:

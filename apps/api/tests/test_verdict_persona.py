@@ -5,6 +5,9 @@ the Claude call (a `FakeNarrator` test double for `api.persona.claude_client
 connection or `ANTHROPIC_API_KEY` required. The one real, non-mocked
 round-trip lives in `tests/test_verdict_persona_integration.py`, gated on
 `DATABASE_URL`/`ANTHROPIC_API_KEY` being set.
+
+Since issue #291 the narrator submits a typed-claim `submit_narration` tool
+call, and the route serves the server's rendering of it.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from pathlib import Path
 
 import anthropic
 import httpx2
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_team_case
 from fastapi.testclient import TestClient
@@ -24,10 +28,24 @@ from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore, cache_key
-from api.persona.grounding import GROUNDING_VERSION
+from api.persona.claims import GROUNDING_VERSION
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import team_case_fact_block_json
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
+
+_YEAR: dict[str, object] = {"id": "yr", "kind": "year"}
+
+
+def _record(team: str) -> dict[str, object]:
+    return {"id": "rec", "kind": "record", "team": team}
+
+
+TEXAS_RAN_THE_TABLE: dict[str, object] = {
+    "text": "Look at {rec} in {yr}.",
+    "claims": [_record("Texas"), _YEAR],
+}
+TEXAS_RAN_THE_TABLE_RENDERED = "Look at Texas 13-0 in 2005."
 
 
 def _usc_2005_team_case_key() -> str:
@@ -56,22 +74,35 @@ def _usc_2005_team_case_key() -> str:
 
 
 class FakeNarrator:
-    """Test double for `Narrator` -- returns a scripted sequence of
-    responses (or raises a scripted exception on every call), and records
-    every call it received so tests can assert on call count and on the
-    retry feedback's content without a live API key.
+    """Test double for `Narrator` -- submits a scripted sequence of tool
+    inputs (or raises a scripted exception on every call), and records every
+    call it received so tests can assert on call count and on the retry
+    feedback's content without a live API key.
     """
 
-    def __init__(self, responses: list[str] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, responses: list[dict[str, object]] | None = None, error: Exception | None = None
+    ) -> None:
         self.responses = list(responses or [])
         self.error = error
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
         self.calls.append(messages)
         if self.error is not None:
             raise self.error
-        return self.responses.pop(0)
+        return tool_reply(self.responses.pop(0))
+
+
+def _retry_feedback(message: MessageParam) -> str:
+    """The claim errors a retry's `is_error` tool_result carries."""
+    content = message["content"]
+    assert not isinstance(content, str)
+    (block,) = list(content)
+    assert isinstance(block, dict) and block["type"] == "tool_result"
+    feedback = dict(block)["content"]
+    assert isinstance(feedback, str)
+    return feedback
 
 
 @contextmanager
@@ -94,7 +125,7 @@ def _wired(
 
 
 def test_champion_response_wraps_evidence_and_narration(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=["Texas ran the table at 13-0 in 2005."])
+    narrator = FakeNarrator(responses=[TEXAS_RAN_THE_TABLE])
 
     with _wired(narrator):
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -103,13 +134,17 @@ def test_champion_response_wraps_evidence_and_narration(client: TestClient) -> N
     body = response.json()
     assert body["evidence"]["team_name"] == "Texas"
     assert body["evidence"]["rank"] == 1
-    assert body["narration"]["text"] == "Texas ran the table at 13-0 in 2005."
+    assert body["narration"]["text"] == TEXAS_RAN_THE_TABLE_RENDERED
     assert body["narration"]["cached"] is False
     assert body["narration"]["contested"] is False
 
 
 def test_team_case_response_wraps_evidence_and_narration(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=["USC put up a real season in 2005."])
+    narrator = FakeNarrator(
+        responses=[
+            {"text": "{rec} put up a real season in {yr}.", "claims": [_record("USC"), _YEAR]}
+        ]
+    )
 
     with _wired(narrator):
         response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})
@@ -117,11 +152,11 @@ def test_team_case_response_wraps_evidence_and_narration(client: TestClient) -> 
     assert response.status_code == 200
     body = response.json()
     assert body["evidence"]["team_name"] == "USC"
-    assert body["narration"]["text"] == "USC put up a real season in 2005."
+    assert body["narration"]["text"] == "USC 12-1 put up a real season in 2005."
 
 
 def test_compare_response_wraps_evidence_and_narration(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=["Texas edges out USC in 2005."])
+    narrator = FakeNarrator(responses=[{"text": "Texas edges out USC in {yr}.", "claims": [_YEAR]}])
 
     with _wired(narrator):
         response = client.post(
@@ -141,7 +176,7 @@ def test_compare_response_wraps_evidence_and_narration(client: TestClient) -> No
 
 
 def test_cache_miss_calls_claude_and_stores_the_result(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=["Texas ran the table at 13-0 in 2005."])
+    narrator = FakeNarrator(responses=[TEXAS_RAN_THE_TABLE])
 
     with _wired(narrator) as cache:
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -154,7 +189,7 @@ def test_cache_miss_calls_claude_and_stores_the_result(client: TestClient) -> No
 
 
 def test_cache_hit_skips_the_claude_call_entirely(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=["Texas ran the table at 13-0 in 2005."])
+    narrator = FakeNarrator(responses=[TEXAS_RAN_THE_TABLE])
 
     with _wired(narrator):
         first = client.post("/api/verdict/champion", json={"year": 2005})
@@ -165,6 +200,7 @@ def test_cache_hit_skips_the_claude_call_entirely(client: TestClient) -> None:
     assert first.json()["narration"]["cached"] is False
     assert second.json()["narration"]["cached"] is True
     assert second.json()["narration"]["text"] == first.json()["narration"]["text"]
+    assert second.json()["narration"]["text"] == TEXAS_RAN_THE_TABLE_RENDERED
     # Only the first request should have ever called Claude.
     assert len(narrator.calls) == 1
 
@@ -179,7 +215,9 @@ def test_same_named_team_in_another_sport_does_not_get_the_other_sports_cached_n
     """
     nfl_text = "the pro version, no notes."
     cfb_text = "the college version, no notes."
-    narrator = FakeNarrator(responses=[nfl_text, cfb_text])
+    narrator = FakeNarrator(
+        responses=[{"text": nfl_text, "claims": []}, {"text": cfb_text, "claims": []}]
+    )
 
     with _wired(narrator):
         nfl = sport_client.post(
@@ -203,17 +241,18 @@ def test_same_named_team_in_another_sport_does_not_get_the_other_sports_cached_n
 
 
 # ---------------------------------------------------------------------------
-# grounding retry-then-fallback
+# claim retry-then-fallback
 # ---------------------------------------------------------------------------
 
 
-def test_grounding_failure_retries_once_with_the_mismatch_fed_back(
+def test_a_rejected_submission_retries_once_with_the_claim_errors_fed_back(
     client: TestClient,
 ) -> None:
     narrator = FakeNarrator(
         responses=[
-            "USC would have smoked Alabama too, probably.",  # ungrounded mention
-            "USC put together a real season in 2005.",
+            # Alabama is not a team in USC's 2005 fact block.
+            {"text": "USC would have smoked Alabama too, probably.", "claims": []},
+            {"text": "USC put together a real season in {yr}.", "claims": [_YEAR]},
         ]
     )
 
@@ -223,8 +262,7 @@ def test_grounding_failure_retries_once_with_the_mismatch_fed_back(
     assert response.status_code == 200
     assert response.json()["narration"]["text"] == "USC put together a real season in 2005."
     assert len(narrator.calls) == 2
-    retry_feedback = narrator.calls[1][-1]["content"]
-    assert "Alabama" in retry_feedback
+    assert "Alabama" in _retry_feedback(narrator.calls[1][-1])
     # A successful retry is cached under the key the fallback test below
     # checks, so that test's "not cached" can't pass on a wrong key.
     cached = cache.get(_usc_2005_team_case_key())
@@ -232,13 +270,13 @@ def test_grounding_failure_retries_once_with_the_mismatch_fed_back(
     assert cached.text == "USC put together a real season in 2005."
 
 
-def test_two_grounding_failures_serve_the_fallback_and_never_make_a_third_call(
+def test_two_rejected_submissions_serve_the_fallback_and_never_make_a_third_call(
     client: TestClient,
 ) -> None:
     narrator = FakeNarrator(
         responses=[
-            "USC would have smoked Alabama too, probably.",
-            "Honestly Alabama could have gone undefeated as well.",
+            {"text": "USC would have smoked Alabama too, probably.", "claims": []},
+            {"text": "Honestly Alabama could have gone undefeated as well.", "claims": []},
         ]
     )
 

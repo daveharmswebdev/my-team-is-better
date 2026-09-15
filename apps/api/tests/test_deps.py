@@ -108,7 +108,9 @@ def test_get_narrator_returns_stub_narrator_in_test_mode(
     narrator = deps.get_narrator()  # type: ignore[attr-defined]
 
     assert isinstance(narrator, StubNarrator)
-    assert narrator.complete(system="", messages=[]) == "Solid case, no notes."
+    reply = narrator.submit(system="", messages=[])
+    assert reply.tool_call is not None
+    assert reply.tool_call.input == {"text": "Solid case, no notes.", "claims": []}
 
 
 def test_get_narration_cache_serves_uncached_without_database_url_when_test_mode_unset(

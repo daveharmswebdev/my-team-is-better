@@ -1,33 +1,31 @@
 """issue #4's per-route orchestration: cache lookup, fact-block
 construction from issue #3's own evidence models (never a second
-hand-written representation), the "known team names" universe for the
-grounding check, and writing the result back to the cache.
+hand-written representation), and writing the result back to the cache.
 
 `api.verdict`'s routes call `narrate_team_case`/`narrate_comparison` after
 building the same `TeamCaseOut`/`ComparisonResultOut` issue #3 already
 returns -- this module never recomputes evidence itself.
 
-The grounding check's "known team names" universe (every team in the db, not
-just the ones in this particular fact block, so a mention of a real-but-
-wrong team, e.g. "Alabama" in a USC case, is recognized as a team-name
-mention and checked against the fact block rather than silently ignored as
-an arbitrary capitalized word) used to live here as a private
-`_all_team_names` helper; issue #13 promoted it to a shared
-`list_all_team_names` so `api.catalog`'s `/api/teams` route can share the
-same query instead of forking it, and issue #209 settled it in
-`api.repositories.teams`, below this layer (it had sat in `api.deps`, which
-imports this package, so importing it from there was an upward import).
-Since issue #245 this module does not run that query at all: the route
-already reads the sport's catalog to canonicalise `user_team`, and the same
-names are the grounding universe, so it derives them once and passes them in
-as `known_team_names`. Nothing here needs a database connection any more,
-so the entry points take none -- a second catalog read cannot come back
-without changing their signatures (`tests/test_verdict_catalog_reads.py`
-counts the reads per request and checks the signatures).
+A narration is checked against the sport's whole team catalog, not just the
+teams in this particular fact block, so a mention of a real-but-wrong team
+(e.g. "Alabama" in a USC case) is recognized as a team reference and rejected
+rather than silently ignored as an arbitrary capitalized word. The catalog
+query lived here once as a private `_all_team_names` helper; issue #13
+promoted it to a shared query for `api.catalog`'s `/api/teams` route, and
+issue #209 settled it in `api.repositories.teams`, below this layer. Since
+issue #245 this module does not run a catalog query at all: the route already
+reads the sport's catalog (`list_team_records`) to canonicalise `user_team`
+and passes it in. Since issue #291 it passes the records themselves, as
+`catalog`, because the typed-claim validator (`api.persona.claims`) reads
+their mascots and aliases; the lexical grounding check before it took only
+`known_team_names`. Nothing here needs a database connection, so the entry
+points take none -- a second catalog read cannot come back without changing
+their signatures (`tests/test_verdict_catalog_reads.py` counts the reads per
+request and checks the signatures).
 
 **The templated fallback is never cached (issue #65).** When `narrate()`
-degrades to the fallback (a Claude transport error, or two grounding
-failures), the fallback is returned to the user with `cached=False` and
+degrades to the fallback (a Claude transport error, or two submissions the
+claim validator rejects), the fallback is returned to the user with `cached=False` and
 nothing is written, so the next identical request asks Claude again instead
 of being served the fallback forever. Cache rows written before that fix
 may still hold fallback text. The fallback is a pure template of the
@@ -64,6 +62,7 @@ bust. #151 changed neither the cache key nor `CachedNarration`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 
 import psycopg
 from pydantic.main import IncEx
@@ -71,18 +70,19 @@ from pydantic.main import IncEx
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
+from api.persona.claims import GROUNDING_VERSION
 from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
-from api.persona.grounding import GROUNDING_VERSION
 from api.persona.narrate import narrate
+from api.repositories.teams import TeamRecord
 
 logger = logging.getLogger(__name__)
 
 # Issue #183: the Elo ledger is published to clients but kept out of both
 # fact blocks, so the narrator's input stays byte-identical to before #183.
 # Left in, every pre-game rating and per-game shift would reach the prompt
-# and, through `find_ungrounded_tokens(text, fact_block_json, ...)`,
-# grounding's accepted-number set -- quietly licensing the narrator to quote
+# and the facts a narration is checked against (the lexical grounding check's
+# accepted-number set before #291) -- quietly licensing the narrator to quote
 # figures nobody decided it should narrate (#175's open question). Removing an
 # entry here is that decision. It needs no PROMPT_VERSION bump: since #145
 # the cache key hashes the fact block, so the changed block misses on its own.
@@ -155,13 +155,14 @@ def narrate_team_case(
     question_type: str,
     method: str,
     sport: Sport = "cfb",
-    known_team_names: list[str],
+    catalog: Sequence[TeamRecord],
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
-    """Narrate a champion or team-case verdict. `known_team_names` is the
-    grounding check's universe, every canonical team name for `sport`,
-    derived by the route from the catalog it already read (issue #245)."""
+    """Narrate a champion or team-case verdict. `catalog` is every team
+    record (name, mascot, aliases) for `sport`, year-unrestricted: the claim
+    validator's team universe, which the route already read (issues #245,
+    #291)."""
     fact_block_json = team_case_fact_block_json(case)
     key = cache_key(
         question_type=question_type,
@@ -181,7 +182,7 @@ def narrate_team_case(
         fallback_text=team_case_fallback_text(case),
         user_team=user_team,
         sport=sport,
-        known_team_names=known_team_names,
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -193,12 +194,11 @@ def narrate_comparison(
     user_team: str | None,
     method: str,
     sport: Sport = "cfb",
-    known_team_names: list[str],
+    catalog: Sequence[TeamRecord],
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
-    """Narrate a compare verdict; `known_team_names` as in
-    `narrate_team_case`."""
+    """Narrate a compare verdict; `catalog` as in `narrate_team_case`."""
     fact_block_json = comparison_fact_block_json(comparison)
     key = cache_key(
         question_type="compare",
@@ -218,7 +218,7 @@ def narrate_comparison(
         fallback_text=comparison_fallback_text(comparison),
         user_team=user_team,
         sport=sport,
-        known_team_names=known_team_names,
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -232,7 +232,7 @@ def _cached_narration(
     fallback_text: str,
     user_team: str | None,
     sport: Sport,
-    known_team_names: list[str],
+    catalog: Sequence[TeamRecord],
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
@@ -261,7 +261,7 @@ def _cached_narration(
         fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
-        known_team_names=known_team_names,
+        catalog=catalog,
         narrator=narrator,
         fallback_text=fallback_text,
     )

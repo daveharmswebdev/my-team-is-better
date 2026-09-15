@@ -4,10 +4,15 @@ Before #245 each verdict route read the sport's catalog twice on a cold
 cache: `resolve_user_team` ran `list_team_records(conn, sport)` to
 canonicalise `user_team`, and `api.persona.service._cached_narration` ran
 `list_all_team_names(conn, sport)` for the grounding universe. Both are the
-same universe (every `teams.school` for the sport), so the route now reads
-the catalog once, hands the records to `resolve_user_team`, and passes the
-derived names into the persona layer through an explicit `known_team_names`
-argument. The persona layer no longer holds a connection at all.
+same universe (every `teams.school` for the sport), so the route reads the
+catalog once, hands the records to `resolve_user_team`, and passes them into
+the persona layer through an explicit argument. The persona layer holds no
+connection at all.
+
+Since issue #291 that argument is `catalog`, the full `TeamRecord`s (name,
+mascot, aliases) the typed-claim validator needs to recognise a nickname or
+an alias in the narrator's prose; before #291 it was `known_team_names`, the
+bare names the lexical grounding check took.
 
 What is measured: the statements the request's own `sqlite3.Connection`
 runs, recorded with `set_trace_callback`. A "catalog read" is a scan of the
@@ -18,14 +23,11 @@ runs, recorded with `set_trace_callback`. A "catalog read" is a scan of the
 the #245 base: 2 catalog reads per route with a `user_team`, 1 without
 (`resolve_user_team` returned before querying). The bar is exactly 1 in
 both cases: never 2, and never 0 without `user_team` either, because the
-grounding universe still needs the catalog.
+narration layer still needs the catalog.
 
-The equivalence the plumbing rests on is asserted directly: the names
-derived from `list_team_records(conn, sport)` equal
-`list_all_team_names(conn, sport)` as a set, for cfb on the committed
-verdict fixture and for nfl on the sport fixture. If that ever diverged,
-passing the derived list to grounding would narrow (or widen) the universe
-silently, so the test is the tripwire.
+The records a route reads are year-unrestricted: their names equal
+`list_all_team_names(conn, sport)` as a set, for cfb on the committed verdict
+fixture and for nfl on the sport fixture.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
@@ -48,10 +51,10 @@ from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona import service
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.narrate import NarrationResult
 from api.persona.service import narrate_comparison, narrate_team_case
-from api.repositories.teams import list_all_team_names, list_team_records
-from api.verdict import catalog_names
+from api.repositories.teams import TeamRecord, list_all_team_names, list_team_records
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -67,16 +70,17 @@ def catalog_reads(statements: list[str]) -> list[str]:
 
 
 class _RecordingNarrator:
-    """Grounded against any fact block (no numbers, no team names); records
-    how many times it was asked, so a test can prove the request really went
-    through the cache-miss path where the grounding universe is needed."""
+    """Passes the claim validator against any fact block (no numbers, no team
+    names, no claims); records how many times it was asked, so a test can
+    prove the request really went through the cache-miss path where the
+    catalog is needed."""
 
     def __init__(self) -> None:
         self.calls = 0
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
         self.calls += 1
-        return "Solid case, no notes."
+        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 class _Traced:
@@ -148,7 +152,7 @@ def test_a_request_with_a_user_team_reads_the_catalog_once(
 
 
 # ---------------------------------------------------------------------------
-# (b) without a user_team the grounding universe still needs exactly one
+# (b) without a user_team the narration layer still needs exactly one
 # ---------------------------------------------------------------------------
 
 
@@ -175,12 +179,8 @@ def test_the_traced_statements_include_the_evidence_queries(traced: _Traced) -> 
 
 
 # ---------------------------------------------------------------------------
-# (c) the derived names ARE the grounding universe, on both sports
+# (c) the records a route reads are the whole, year-unrestricted catalog
 # ---------------------------------------------------------------------------
-
-
-def _sport_db(tmp_path: Path) -> Path:
-    return make_sport_fixture_db(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -188,24 +188,23 @@ def _sport_db(tmp_path: Path) -> Path:
     [("cfb", "cfb"), ("sport", "nfl"), ("sport", "cfb")],
     ids=["verdict-fixture-cfb", "sport-fixture-nfl", "sport-fixture-cfb"],
 )
-def test_names_derived_from_the_records_equal_list_all_team_names(
-    tmp_path: Path, db: str, sport: str
-) -> None:
-    db_path = FIXTURE_DB if db == "cfb" else _sport_db(tmp_path)
+def test_the_records_names_equal_list_all_team_names(tmp_path: Path, db: str, sport: str) -> None:
+    db_path = FIXTURE_DB if db == "cfb" else make_sport_fixture_db(tmp_path)
     conn = get_conn(db_path, read_only=True)
     try:
-        derived = catalog_names(list_team_records(conn, sport))
+        derived = [record.name for record in list_team_records(conn, sport)]
         universe = list_all_team_names(conn, sport)
     finally:
         conn.close()
 
     assert derived, "an empty catalog would make the equality vacuous"
     assert set(derived) == set(universe)
-    assert len(derived) == len(set(derived)), "the derived list carries no duplicate names"
+    assert len(derived) == len(set(derived)), "the records carry no duplicate names"
 
 
 # ---------------------------------------------------------------------------
-# (d) an explicit known_team_names reaches narrate() unchanged
+# (d) the routes hand the narration layer the full TeamRecords, and the
+#     service hands narrate() exactly the catalog it was given
 # ---------------------------------------------------------------------------
 
 
@@ -218,7 +217,41 @@ class _NarrateRecorder:
         return NarrationResult(text="Solid case, no notes.", is_fallback=False)
 
 
-def test_narrate_team_case_hands_narrate_exactly_the_given_names(
+@pytest.mark.parametrize(("path", "body"), ROUTES, ids=ROUTE_IDS)
+def test_every_verdict_route_narrates_with_the_full_team_records(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any]
+) -> None:
+    recorder = _NarrateRecorder()
+    monkeypatch.setattr(service, "narrate", recorder)
+
+    response = client.post(path, json={**body, "user_team": "Texas"})
+
+    assert response.status_code == 200, response.text
+    (call,) = recorder.kwargs
+    conn = get_conn(FIXTURE_DB, read_only=True)
+    try:
+        expected = list_team_records(conn, "cfb")
+    finally:
+        conn.close()
+    catalog = list(call["catalog"])
+    assert catalog == expected
+    assert all(isinstance(record, TeamRecord) for record in catalog)
+    by_name = {record.name: record for record in catalog}
+    # Mascots and aliases intact: the claim validator reads both.
+    assert by_name["Texas"].mascot == "Longhorns"
+    assert by_name["Alabama"].mascot == "Crimson Tide"
+    assert any(record.aliases for record in catalog)
+    assert "known_team_names" not in call
+
+
+def _records() -> tuple[TeamRecord, ...]:
+    return (
+        TeamRecord(name="Only", mascot="Ones", aliases=("ON",)),
+        TeamRecord(name="These", mascot=None, aliases=()),
+    )
+
+
+def test_narrate_team_case_hands_narrate_exactly_the_given_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     conn = get_conn(FIXTURE_DB, read_only=True)
@@ -230,7 +263,7 @@ def test_narrate_team_case_hands_narrate_exactly_the_given_names(
         conn.close()
     recorder = _NarrateRecorder()
     monkeypatch.setattr(service, "narrate", recorder)
-    names = ["Only", "These", "Names"]
+    records = _records()
 
     narrate_team_case(
         case,
@@ -238,15 +271,15 @@ def test_narrate_team_case_hands_narrate_exactly_the_given_names(
         question_type="team_case",
         method="keener",
         sport="cfb",
-        known_team_names=names,
+        catalog=records,
         cache=InMemoryNarrationCache(),
         narrator=_RecordingNarrator(),
     )
 
-    assert [call["known_team_names"] for call in recorder.kwargs] == [names]
+    assert [call["catalog"] for call in recorder.kwargs] == [records]
 
 
-def test_narrate_comparison_hands_narrate_exactly_the_given_names(
+def test_narrate_comparison_hands_narrate_exactly_the_given_catalog(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     conn = get_conn(FIXTURE_DB, read_only=True)
@@ -258,19 +291,19 @@ def test_narrate_comparison_hands_narrate_exactly_the_given_names(
         conn.close()
     recorder = _NarrateRecorder()
     monkeypatch.setattr(service, "narrate", recorder)
-    names = ["Only", "These", "Names"]
+    records = _records()
 
     narrate_comparison(
         comparison,
         user_team=None,
         method="keener",
         sport="cfb",
-        known_team_names=names,
+        catalog=records,
         cache=InMemoryNarrationCache(),
         narrator=_RecordingNarrator(),
     )
 
-    assert [call["known_team_names"] for call in recorder.kwargs] == [names]
+    assert [call["catalog"] for call in recorder.kwargs] == [records]
 
 
 # ---------------------------------------------------------------------------
@@ -282,10 +315,11 @@ def test_the_persona_service_has_no_connection_to_query_the_catalog_with() -> No
     """The structural half of the guarantee: with no `conn` parameter and no
     catalog query in its namespace, `api.persona.service` cannot issue the
     second read again without changing its signature -- and a route passing
-    the names it already derived is the only way the universe gets in."""
+    the records it already read is the only way the catalog gets in."""
     for query in ("list_all_team_names", "list_team_records"):
         assert not hasattr(service, query), f"api.persona.service still names {query}"
     for fn in (narrate_team_case, narrate_comparison):
         parameters = inspect.signature(fn).parameters
         assert "conn" not in parameters, f"{fn.__name__} still takes a connection"
-        assert "known_team_names" in parameters
+        assert "catalog" in parameters
+        assert "known_team_names" not in parameters

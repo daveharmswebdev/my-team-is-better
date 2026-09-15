@@ -17,7 +17,9 @@ from typing import Any
 
 import anthropic
 import httpx2
+from anthropic.types import MessageParam
 from fastapi.testclient import TestClient
+from fixtures.narration import user_text
 from fixtures.sport_fixture import (
     TIE_OPPONENT,
     TIE_RIVAL,
@@ -29,22 +31,25 @@ from fixtures.sport_fixture import (
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 
 
 class _RecordingNarrator:
-    """Returns scripted responses (or raises `error` on every call), and
-    records every system prompt and message list it was handed."""
+    """Submits scripted tool inputs (or raises `error` on every call), and
+    records every message list it was handed."""
 
-    def __init__(self, responses: list[str] | None = None, error: Exception | None = None) -> None:
+    def __init__(
+        self, responses: list[dict[str, object]] | None = None, error: Exception | None = None
+    ) -> None:
         self.responses = list(responses or [])
         self.error = error
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append([dict(m) for m in messages])
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
         if self.error is not None:
             raise self.error
-        return self.responses.pop(0)
+        return tool_reply(self.responses.pop(0))
 
 
 @contextmanager
@@ -178,27 +183,37 @@ def test_openapi_schema_carries_ties_and_the_t_result() -> None:
 
 
 # ---------------------------------------------------------------------------
-# persona: fact block, grounding, fallback
+# persona: fact block, claims, fallback
 # ---------------------------------------------------------------------------
 
 
 def test_fact_block_given_to_claude_describes_the_tie_as_a_tie(
     sport_client: TestClient,
 ) -> None:
-    narrator = _RecordingNarrator(responses=[f"{TIE_TEAM} went 2-1-1 in {YEAR}."])
+    narrator = _RecordingNarrator(
+        responses=[
+            {
+                "text": "Look at {rec} in {yr}.",
+                "claims": [
+                    {"id": "rec", "kind": "record", "team": TIE_TEAM},
+                    {"id": "yr", "kind": "year"},
+                ],
+            }
+        ]
+    )
 
     with _wired(narrator):
         body = _team_case(sport_client)
 
-    facts = _fact_block(narrator.calls[0][0]["content"])
+    facts = _fact_block(user_text(narrator.calls[0][0]))
     assert facts["ties"] == 1
     # Kilo Kings met Mike Mustangs twice (#130); the week-2 tie is still a tie.
     mustangs_results = [g["result"] for g in facts["games"] if g["opponent_name"] == TIE_OPPONENT]
     assert mustangs_results == ["T", "W"]
     assert facts["worst_loss"]["opponent_name"] != TIE_OPPONENT
 
-    # The W-L-T record grounds on the first try: served verbatim, one call.
-    assert body["narration"]["text"] == f"{TIE_TEAM} went 2-1-1 in {YEAR}."
+    # The record claim renders the W-L-T record on the first try: one call.
+    assert body["narration"]["text"] == f"Look at {TIE_TEAM} 2-1-1 in {YEAR}."
     assert len(narrator.calls) == 1
 
 

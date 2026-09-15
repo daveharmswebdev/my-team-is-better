@@ -39,18 +39,23 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
+from fixtures.narration import user_text
 
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, Method, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -288,15 +293,16 @@ def test_comparison_fact_block_is_the_pre_218_block_byte_for_byte(
 
 
 class _RecordingNarrator:
-    """Records every user message it is handed and answers with a line that
-    has no numbers and no team names, so grounding always passes."""
+    """Records every user message it is handed and submits a line with no
+    numbers, no team names and no claims, so the claim validator always
+    accepts it."""
 
     def __init__(self) -> None:
         self.messages: list[str] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.messages.extend(m["content"] for m in messages)
-        return "Solid case, no notes."
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.messages.extend(user_text(m) for m in messages)
+        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 @contextmanager

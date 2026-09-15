@@ -25,25 +25,29 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.method_fixture import METHODS, TEAM_A, TEAM_B, YEAR, make_method_fixture_db
+from fixtures.narration import user_text
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 
 
 class _RecordingNarrator:
-    """Always returns a line with no numbers or team names (so it grounds on
-    the first try), and records every message list it was handed."""
+    """Always submits a line with no numbers, team names or claims (so it is
+    accepted on the first try), and records every message list it was
+    handed."""
 
     def __init__(self) -> None:
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append([dict(m) for m in messages])
-        return "Solid case, no notes."
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
+        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 @pytest.fixture
@@ -112,7 +116,7 @@ def test_fact_block_given_to_the_compare_narrator_names_the_method(
     _compare(method_client, method)
 
     assert len(narrator.calls) == 1
-    fact_block = _fact_block_text(narrator.calls[0][0]["content"])
+    fact_block = _fact_block_text(user_text(narrator.calls[0][0]))
     assert f'"method":"{method}"' in fact_block
     assert json.loads(fact_block)["method"] == method
 

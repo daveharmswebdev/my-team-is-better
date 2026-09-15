@@ -77,17 +77,22 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import pytest
+from anthropic.types import MessageParam
+from cfb_strength.db.connection import get_conn
+from conftest import FIXTURE_DB
 from fastapi.testclient import TestClient
 
 from api.config import ANTHROPIC_API_KEY
 from api.deps import get_narrator
 from api.main import app
 from api.models import TeamCaseOut
-from api.persona.claude_client import MODEL, ClaudeNarrator, Narrator
+from api.persona.claims import check_and_render
+from api.persona.claude_client import MODEL, ClaudeNarrator, Narrator, NarratorReply
 from api.persona.fallback import team_case_fallback_text
 from api.persona.prompt import build_user_message
 from api.persona.service import team_case_fact_block_json
 from api.rating_display import RATING_DISPLAY
+from api.repositories.teams import list_team_records
 
 # The Keener #1 per golden year, as the PRD's golden dataset and the fixture
 # db both have it (2003 and 2017 are the contested seasons).
@@ -524,21 +529,69 @@ def _issue_107_suspect(grounding_feedback: str | None, case: TeamCaseOut) -> boo
 
 class _RecordingNarrator:
     """Pass-through around the production narrator. Records every call's
-    messages and every returned text, so check 5 can require the served text
-    to be one of them, and the summary can say whether it was the first call
-    or the grounding retry, without touching production code.
+    messages and, for every reply, the text production would serve for it,
+    so check 5 can require the served text to be one of them, and the
+    summary can say whether it was the first call or the retry, without
+    touching production code.
+
+    Since #291 a reply is a `submit_narration` tool call, so the recorded
+    output is `check_and_render`'s rendering of it against the FACT BLOCK the
+    call carried and the fixture's CFB catalog; a rejected reply records its
+    raw `text` (or "" with no tool call), which production never serves.
+    #293 moves this eval onto the production validator properly.
     """
 
     def __init__(self, inner: Narrator) -> None:
         self._inner = inner
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
         self.outputs: list[str] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append([dict(message) for message in messages])
-        text = self._inner.complete(system=system, messages=messages)
-        self.outputs.append(text)
-        return text
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
+        reply = self._inner.submit(system=system, messages=messages)
+        self.outputs.append(_served_text(reply, messages))
+        return reply
+
+
+def _user_turn(message: MessageParam) -> str:
+    content = message["content"]
+    assert isinstance(content, str), content
+    return content
+
+
+def _served_text(reply: NarratorReply, messages: list[MessageParam]) -> str:
+    """What production serves for `reply`, or its raw text when rejected."""
+    if reply.tool_call is None:
+        return ""
+    first = _user_turn(messages[0])
+    header = "FACT BLOCK (JSON):\n"
+    fact_block_json = first[len(header) : first.rindex("\n\ncontested: ")]
+    conn = get_conn(FIXTURE_DB, read_only=True)
+    try:
+        catalog = list_team_records(conn, "cfb")
+    finally:
+        conn.close()
+    outcome = check_and_render(reply.tool_call.input, fact_block_json, catalog)
+    if outcome.text is not None:
+        return outcome.text
+    tool_input = reply.tool_call.input
+    raw = tool_input.get("text") if isinstance(tool_input, dict) else None
+    return raw if isinstance(raw, str) else ""
+
+
+def _retry_feedback(recorder: _RecordingNarrator) -> str | None:
+    """The feedback production sent before the retry, when there was one: an
+    `is_error` tool_result's content, or a plain user turn's text."""
+    if len(recorder.calls) < 2:
+        return None
+    content = recorder.calls[1][-1]["content"]
+    if isinstance(content, str):
+        return content
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "tool_result":
+            feedback = dict(block).get("content")
+            return feedback if isinstance(feedback, str) else repr(feedback)
+    return None
 
 
 def _catalog_team_names(client: TestClient) -> list[str]:
@@ -590,7 +643,7 @@ def test_champion_narration_meets_the_section_8_properties(client: TestClient, y
     fallback_text = team_case_fallback_text(case)
     # The retry's last user turn is production's grounding feedback, so a
     # retry or fallback shows what `api.persona.grounding` objected to.
-    grounding_feedback = recorder.calls[1][-1]["content"] if len(recorder.calls) > 1 else None
+    grounding_feedback = _retry_feedback(recorder)
 
     if recorder.outputs and text == recorder.outputs[0]:
         served = "first"
@@ -620,7 +673,7 @@ def test_champion_narration_meets_the_section_8_properties(client: TestClient, y
     # The fact block this test grounds against must be the one the model was
     # actually given, or check 2 would be checking the wrong thing.
     assert recorder.calls, "the narrator was never called"
-    first_user_turn = recorder.calls[0][0]["content"]
+    first_user_turn = _user_turn(recorder.calls[0][0])
     assert fact_block_json in first_user_turn, "the fact block was not sent to the narrator"
     assert first_user_turn == build_user_message(
         fact_block_json, contested=narration["contested"]
@@ -677,7 +730,7 @@ def test_team_case_narration_states_its_loss_winner_first(client: TestClient) ->
         for game in case.games
         if game.result == "L"
     ] == LOSS_CASE_LOSSES, "the fixture's loss changed; this eval's premise no longer holds"
-    grounding_feedback = recorder.calls[1][-1]["content"] if len(recorder.calls) > 1 else None
+    grounding_feedback = _retry_feedback(recorder)
 
     cited = [m.group(0) for m in _SCORE_OR_RECORD_RE.finditer(text)]
     lines = [
@@ -691,7 +744,7 @@ def test_team_case_narration_states_its_loss_winner_first(client: TestClient) ->
     print("\n".join(lines))
 
     assert recorder.calls, "the narrator was never called"
-    first_user_turn = recorder.calls[0][0]["content"]
+    first_user_turn = _user_turn(recorder.calls[0][0])
     assert fact_block_json in first_user_turn, "the fact block was not sent to the narrator"
     assert narration["cached"] is False
 

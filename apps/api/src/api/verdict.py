@@ -42,16 +42,17 @@ team names" universe, same justification -- promoted from a private
 `api.persona.service._all_team_names` helper by issue #13 so `api.catalog`'s
 `/api/teams` route can share it, and moved out of `api.deps` by issue #209).
 
-Since issue #245 the persona layer no longer runs that query itself. Each
+Since issue #245 the persona layer no longer runs a catalog query itself. Each
 route reads the sport's catalog exactly once, `list_team_records(conn,
 sport)`, and uses it twice: the records canonicalise `user_team`
-(`resolve_user_team`), and the names derived from them (`catalog_names`) are
-the grounding universe, handed to `narrate_team_case`/`narrate_comparison`
-as `known_team_names`. Before #245 a request with a `user_team` read the
-catalog twice on a cache miss -- the records here and `list_all_team_names`
-in `api.persona.service` -- for the same universe of names.
-`tests/test_verdict_catalog_reads.py` counts the reads on the request's own
-connection and pins the two queries' equivalence on both sports' fixtures.
+(`resolve_user_team`), and the same records -- year-unrestricted, with their
+mascots and aliases -- are handed to `narrate_team_case`/`narrate_comparison`
+as `catalog`, the typed-claim validator's team universe (issue #291; before
+it, the names derived from them were the lexical grounding check's
+`known_team_names`). Before #245 a request with a `user_team` read the
+catalog twice on a cache miss. `tests/test_verdict_catalog_reads.py` counts
+the reads on the request's own connection and checks that the records reach
+the narration layer intact.
 """
 
 from __future__ import annotations
@@ -111,8 +112,8 @@ def resolve_user_team(records: Sequence[TeamRecord], user_team: str | None) -> s
     `user_team` is interpolated into the Claude system prompt and is part of
     the narration cache key, and since share links (#184) a third party can
     set it. So it is resolved against the sport's team catalog, `records`
-    -- `list_team_records(conn, sport)` with no year, the same universe as
-    the grounding check's known team names, plus aliases -- and only a
+    -- `list_team_records(conn, sport)` with no year, the same records the
+    route hands the narration layer as its team catalog -- and only a
     canonical catalog name, `teams.school` verbatim, ever comes back. The
     route reads the catalog and passes it in (issue #245), so this never
     queries; the sport scoping is the caller's read.
@@ -162,18 +163,6 @@ def resolve_user_team(records: Sequence[TeamRecord], user_team: str | None) -> s
     if len(alias_owners) != 1:
         return None
     return next(iter(alias_owners))
-
-
-def catalog_names(records: Sequence[TeamRecord]) -> list[str]:
-    """The grounding check's "known team names" universe, derived from the
-    catalog a route already read (issue #245): every canonical name for the
-    sport, in catalog order. Equal as a set to `list_all_team_names(conn,
-    sport)` -- `list_team_records` without a `year` is that same
-    `DISTINCT school` list with two more columns, and
-    `tests/test_verdict_catalog_reads.py` pins the equality on both sports'
-    fixtures -- so the persona layer no longer needs a connection to build it.
-    """
-    return [record.name for record in records]
 
 
 def require_season_year(conn: sqlite3.Connection, year: int, method: str, sport: Sport) -> None:
@@ -254,7 +243,7 @@ def champion(
         question_type="champion",
         method=payload.method,
         sport=payload.sport,
-        known_team_names=catalog_names(catalog),
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -281,7 +270,7 @@ def team_case(
         question_type="team_case",
         method=payload.method,
         sport=payload.sport,
-        known_team_names=catalog_names(catalog),
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -312,7 +301,7 @@ def compare(
         user_team=resolve_user_team(catalog, payload.user_team),
         method=payload.method,
         sport=payload.sport,
-        known_team_names=catalog_names(catalog),
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )

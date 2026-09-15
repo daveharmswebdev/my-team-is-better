@@ -29,12 +29,13 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, get_args
+from typing import TYPE_CHECKING, Any, get_args
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
+from fixtures.narration import user_text
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
@@ -42,8 +43,12 @@ from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
-from api.persona.grounding import GROUNDING_VERSION
+from api.persona.claims import GROUNDING_VERSION
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 # No numbers and no team names: grounded against any fact block.
 NARRATION = "Solid case, no notes."
@@ -81,19 +86,19 @@ EXPECTED_CONTESTED: list[tuple[Sport, int, bool]] = [
 
 
 class _RecordingNarrator:
-    """Always returns `NARRATION`, and records the `contested:` value each
-    call's user message carried (the trailing line `build_user_message`
-    appends after the fact block)."""
+    """Always submits `NARRATION` with no claims, and records the
+    `contested:` value each call's user message carried (the trailing line
+    `build_user_message` appends after the fact block)."""
 
     def __init__(self) -> None:
         self.contested_seen: list[bool] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        content = messages[0]["content"]
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        content = user_text(messages[0])
         flag = content[content.rindex("\n\ncontested: ") + len("\n\ncontested: ") :]
         assert flag in {"true", "false"}, f"unexpected contested line: {flag!r}"
         self.contested_seen.append(flag == "true")
-        return NARRATION
+        return tool_reply({"text": NARRATION, "claims": []})
 
 
 @contextmanager
