@@ -28,6 +28,7 @@ from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 from api.persona.service import narrate_comparison, narrate_team_case
+from api.repositories.teams import list_all_team_names
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -79,23 +80,26 @@ def _ask(
     cache: InMemoryNarrationCache,
     narrator: _ScriptedNarrator,
 ) -> NarrationOut:
+    # The route derives this from the catalog it reads for `user_team`
+    # (issue #245); here it is the same universe, read directly.
+    known_team_names = list_all_team_names(conn, "cfb")
     if route == "team_case":
         return narrate_team_case(
-            conn,
             _case(conn),
             user_team=None,
             question_type="team_case",
             method="keener",
             sport="cfb",
+            known_team_names=known_team_names,
             cache=cache,
             narrator=narrator,
         )
     return narrate_comparison(
-        conn,
         _comparison(conn),
         user_team=None,
         method="keener",
         sport="cfb",
+        known_team_names=known_team_names,
         cache=cache,
         narrator=narrator,
     )

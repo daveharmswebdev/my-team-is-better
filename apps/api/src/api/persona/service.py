@@ -17,6 +17,13 @@ an arbitrary capitalized word) used to live here as a private
 same query instead of forking it, and issue #209 settled it in
 `api.repositories.teams`, below this layer (it had sat in `api.deps`, which
 imports this package, so importing it from there was an upward import).
+Since issue #245 this module does not run that query at all: the route
+already reads the sport's catalog to canonicalise `user_team`, and the same
+names are the grounding universe, so it derives them once and passes them in
+as `known_team_names`. Nothing here needs a database connection any more,
+so the entry points take none -- a second catalog read cannot come back
+without changing their signatures (`tests/test_verdict_catalog_reads.py`
+counts the reads per request and checks the signatures).
 
 **The templated fallback is never cached (issue #65).** When `narrate()`
 degrades to the fallback (a Claude transport error, or two grounding
@@ -57,7 +64,6 @@ bust. The cache key and `CachedNarration` are unchanged.
 from __future__ import annotations
 
 import logging
-import sqlite3
 
 import psycopg
 from pydantic.main import IncEx
@@ -68,7 +74,6 @@ from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claude_client import Narrator
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 from api.persona.narrate import narrate
-from api.repositories.teams import list_all_team_names
 
 logger = logging.getLogger(__name__)
 
@@ -141,16 +146,19 @@ def is_contested(sport: Sport, year: int) -> bool:
 
 
 def narrate_team_case(
-    conn: sqlite3.Connection,
     case: TeamCaseOut,
     *,
     user_team: str | None,
     question_type: str,
     method: str,
     sport: Sport = "cfb",
+    known_team_names: list[str],
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
+    """Narrate a champion or team-case verdict. `known_team_names` is the
+    grounding check's universe, every canonical team name for `sport`,
+    derived by the route from the catalog it already read (issue #245)."""
     key = cache_key(
         question_type=question_type,
         year=case.year,
@@ -161,28 +169,30 @@ def narrate_team_case(
         prompt_version=PROMPT_VERSION,
     )
     return _cached_narration(
-        conn,
         year=case.year,
         fact_block_json=team_case_fact_block_json(case),
         key=key,
         fallback_text=team_case_fallback_text(case),
         user_team=user_team,
         sport=sport,
+        known_team_names=known_team_names,
         cache=cache,
         narrator=narrator,
     )
 
 
 def narrate_comparison(
-    conn: sqlite3.Connection,
     comparison: ComparisonResultOut,
     *,
     user_team: str | None,
     method: str,
     sport: Sport = "cfb",
+    known_team_names: list[str],
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
+    """Narrate a compare verdict; `known_team_names` as in
+    `narrate_team_case`."""
     key = cache_key(
         question_type="compare",
         year=comparison.year,
@@ -193,20 +203,19 @@ def narrate_comparison(
         prompt_version=PROMPT_VERSION,
     )
     return _cached_narration(
-        conn,
         year=comparison.year,
         fact_block_json=comparison_fact_block_json(comparison),
         key=key,
         fallback_text=comparison_fallback_text(comparison),
         user_team=user_team,
         sport=sport,
+        known_team_names=known_team_names,
         cache=cache,
         narrator=narrator,
     )
 
 
 def _cached_narration(
-    conn: sqlite3.Connection,
     *,
     year: int,
     fact_block_json: str,
@@ -214,6 +223,7 @@ def _cached_narration(
     fallback_text: str,
     user_team: str | None,
     sport: Sport,
+    known_team_names: list[str],
     cache: NarrationCacheStore,
     narrator: Narrator,
 ) -> NarrationOut:
@@ -242,7 +252,7 @@ def _cached_narration(
         fact_block_json=fact_block_json,
         user_team=user_team,
         contested=contested,
-        known_team_names=list_all_team_names(conn, sport),
+        known_team_names=known_team_names,
         narrator=narrator,
         fallback_text=fallback_text,
     )

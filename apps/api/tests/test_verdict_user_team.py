@@ -48,7 +48,15 @@ from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import USER_TEAM_MAX_LENGTH
 from api.persona.cache import InMemoryNarrationCache, cache_key
+from api.repositories.teams import list_team_records
 from api.verdict import resolve_user_team
+
+
+def _resolve(conn: sqlite3.Connection, user_team: str | None, sport: str) -> str | None:
+    """What a route does (issue #245): read the sport's catalog once, then
+    resolve against the records."""
+    return resolve_user_team(list_team_records(conn, sport), user_team)
+
 
 # Distinctive fragments of the two allegiance clauses in
 # `api.persona.prompt`. The with-team clause breaks the line before the team.
@@ -184,7 +192,7 @@ def test_a_long_value_that_would_otherwise_match_an_alias_is_not_a_team(tmp_path
     long_alias = "A" * (USER_TEAM_MAX_LENGTH + 1)
     conn = _catalog_db(tmp_path, [(1, "Alpha", [long_alias], "cfb")])
     try:
-        assert resolve_user_team(conn, long_alias, "cfb") is None
+        assert _resolve(conn, long_alias, "cfb") is None
     finally:
         conn.close()
 
@@ -481,9 +489,9 @@ def test_a_canonical_name_wins_over_another_teams_identical_alias(tmp_path: Path
         ],
     )
     try:
-        assert resolve_user_team(conn, "delta", "cfb") == "Delta"
-        assert resolve_user_team(conn, " DELTA ", "cfb") == "Delta"
-        assert resolve_user_team(conn, "du", "cfb") == "Delta University"
+        assert _resolve(conn, "delta", "cfb") == "Delta"
+        assert _resolve(conn, " DELTA ", "cfb") == "Delta"
+        assert _resolve(conn, "du", "cfb") == "Delta University"
     finally:
         conn.close()
 
@@ -498,11 +506,11 @@ def test_alias_resolution_is_scoped_to_the_sport(tmp_path: Path) -> None:
     )
     try:
         # The same alias in two sports is not ambiguous within either one.
-        assert resolve_user_team(conn, "echo", "cfb") == "Echo State"
-        assert resolve_user_team(conn, "echo", "nfl") == "Echo City Chargers"
+        assert _resolve(conn, "echo", "cfb") == "Echo State"
+        assert _resolve(conn, "echo", "nfl") == "Echo City Chargers"
         # Another sport's alias is not a team here.
-        assert resolve_user_team(conn, "ECC", "cfb") is None
-        assert resolve_user_team(conn, "ECC", "nfl") == "Echo City Chargers"
+        assert _resolve(conn, "ECC", "cfb") is None
+        assert _resolve(conn, "ECC", "nfl") == "Echo City Chargers"
     finally:
         conn.close()
 
@@ -520,9 +528,9 @@ def test_ambiguity_counts_teams_not_alias_entries(tmp_path: Path) -> None:
         ],
     )
     try:
-        assert resolve_user_team(conn, "fox", "cfb") == "Foxtrot"
-        assert resolve_user_team(conn, "GT", "cfb") is None
-        assert resolve_user_team(conn, "no aliases u", "cfb") == "No Aliases U"
+        assert _resolve(conn, "fox", "cfb") == "Foxtrot"
+        assert _resolve(conn, "GT", "cfb") is None
+        assert _resolve(conn, "no aliases u", "cfb") == "No Aliases U"
     finally:
         conn.close()
 
@@ -531,7 +539,7 @@ def test_no_partial_or_fuzzy_matching(tmp_path: Path) -> None:
     conn = _catalog_db(tmp_path, [(1, "Hotel State", ["HSU"], "cfb")])
     try:
         for value in ["Hotel", "Hotel State University", "HS", "HSUx", "hotelstate"]:
-            assert resolve_user_team(conn, value, "cfb") is None, value
-        assert resolve_user_team(conn, None, "cfb") is None
+            assert _resolve(conn, value, "cfb") is None, value
+        assert _resolve(conn, None, "cfb") is None
     finally:
         conn.close()
