@@ -130,10 +130,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
+from api.errors import MissingChampionError
+
 UNKNOWN_YEAR = "UnknownYearErrorResponse"
 UNKNOWN_TEAM = "UnknownTeamErrorResponse"
 AMBIGUOUS_TEAM = "AmbiguousTeamErrorResponse"
 SAME_TEAM = "SameTeamComparisonErrorResponse"
+MISSING_CHAMPION = "MissingChampionErrorResponse"
 HTTP_VALIDATION = "HTTPValidationError"
 
 # Every component that describes one of today's engine errors, envelope or
@@ -144,10 +147,12 @@ ENGINE_ERROR_COMPONENTS = frozenset(
         UNKNOWN_TEAM,
         AMBIGUOUS_TEAM,
         SAME_TEAM,
+        MISSING_CHAMPION,
         "UnknownYearErrorBody",
         "UnknownTeamErrorBody",
         "AmbiguousTeamErrorBody",
         "SameTeamComparisonErrorBody",
+        "MissingChampionErrorBody",
     }
 )
 
@@ -156,13 +161,18 @@ ENGINE_ERROR_COMPONENTS = frozenset(
 # `resolve_team` runs `_require_year` (unknown_year), then raises
 # ambiguous_team or unknown_team. `build_team_case` goes through
 # `resolve_team`, and `build_comparison` goes through it and can also raise
-# same_team_comparison.
+# same_team_comparison. /champion additionally raises the API-local
+# `MissingChampionError` (issue #172, `api.verdict._resolve_champion_name`)
+# for a rated year with no rank-1 row; it is the only route that can.
 _TEAM_CASE_COMPONENTS: dict[str, frozenset[str]] = {
     "404": frozenset({UNKNOWN_YEAR, UNKNOWN_TEAM}),
     "422": frozenset({HTTP_VALIDATION, AMBIGUOUS_TEAM}),
 }
 VERDICT_ROUTE_COMPONENTS: dict[tuple[str, str], dict[str, frozenset[str]]] = {
-    ("/api/verdict/champion", "post"): _TEAM_CASE_COMPONENTS,
+    ("/api/verdict/champion", "post"): {
+        **_TEAM_CASE_COMPONENTS,
+        "500": frozenset({MISSING_CHAMPION}),
+    },
     ("/api/verdict/team-case", "post"): _TEAM_CASE_COMPONENTS,
     ("/api/verdict/compare", "post"): {
         **_TEAM_CASE_COMPONENTS,
@@ -177,7 +187,7 @@ _TEAM_CASE_KINDS: frozenset[type[BaseException]] = frozenset(
     {UnknownYearError, UnknownTeamError, AmbiguousTeamError}
 )
 KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
-    ("/api/verdict/champion", "post"): _TEAM_CASE_KINDS,
+    ("/api/verdict/champion", "post"): _TEAM_CASE_KINDS | {MissingChampionError},
     ("/api/verdict/team-case", "post"): _TEAM_CASE_KINDS,
     ("/api/verdict/compare", "post"): _TEAM_CASE_KINDS | {SameTeamComparisonError},
     ("/api/years", "get"): frozenset(),
@@ -210,6 +220,11 @@ EXAMPLE_EXCEPTIONS: dict[type[BaseException], BaseException] = {
     UnknownTeamError: UnknownTeamError("Zzyzx Polytechnic", 2005, "cfb"),
     AmbiguousTeamError: AmbiguousTeamError("State", ["Ohio State", "Penn State"]),
     SameTeamComparisonError: SameTeamComparisonError("Texas"),
+    # API-local, not an engine exception (#172). RUNTIME_CASES cannot trigger
+    # it: the committed fixture has a rank-1 row for every rated year, and
+    # must. tests/test_verdict_champion_missing.py triggers it for real on a
+    # mutated copy and validates the body against the advertised schema.
+    MissingChampionError: MissingChampionError(2004, "keener", "cfb"),
 }
 
 # Only code in these top-level packages is followed by the derivation.

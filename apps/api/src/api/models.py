@@ -700,6 +700,26 @@ class SameTeamComparisonErrorBody(BaseModel):
     team_name: str
 
 
+class MissingChampionErrorBody(BaseModel):
+    """/champion's own error (issue #172), the one body here with no engine
+    exception behind it: the year IS rated for `method`/`sport` (so it is
+    not `unknown_year`), but no `rank = 1` row exists among its ratings.
+    That is a data-integrity fault in the db, not a client mistake, so
+    `api.errors` maps it to 500. Before #172 the route fell through to an
+    empty team query and answered a 422 `ambiguous_team` listing every rated
+    team as a candidate for a query the user never typed.
+
+    `method` and `sport` are the request's literals, not bare `str`, for the
+    same reason as `UnknownTeamErrorBody.sport`: the values are echoed from
+    a validated request, and the schema should say so.
+    """
+
+    error: Literal["missing_champion"] = "missing_champion"
+    year: int
+    method: Method
+    sport: Sport
+
+
 # ---------------------------------------------------------------------------
 # `{"detail": <Body>}` envelopes (issue #111) -- the error bodies as they
 # actually go over the wire. `api.errors`' handlers send
@@ -725,3 +745,7 @@ class UnknownTeamErrorResponse(BaseModel):
 
 class SameTeamComparisonErrorResponse(BaseModel):
     detail: SameTeamComparisonErrorBody
+
+
+class MissingChampionErrorResponse(BaseModel):
+    detail: MissingChampionErrorBody
