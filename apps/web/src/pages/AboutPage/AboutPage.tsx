@@ -25,6 +25,21 @@ type CreditsState =
  * Pages own composition/data-fetching; components do not import from pages
  * (enforced by dependency-cruiser -- see .dependency-cruiser.cjs).
  */
+/**
+ * The element id a location hash names. A fragment that is not valid
+ * percent-encoding (`#100%`) makes `decodeURIComponent` throw, and an
+ * uncaught error in an effect unmounts the page (there is no error boundary),
+ * so such a hash is taken literally instead and simply names nothing.
+ */
+function fragmentId(hash: string): string {
+  const raw = hash.slice(1)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
 export function AboutPage() {
   const [state, setState] = useState<CreditsState>({ status: 'loading' })
 
@@ -69,7 +84,7 @@ export function AboutPage() {
     if (hash.length < 2) {
       return
     }
-    const target = document.getElementById(decodeURIComponent(hash.slice(1)))
+    const target = document.getElementById(fragmentId(hash))
     if (target !== null && typeof target.scrollIntoView === 'function') {
       target.scrollIntoView()
     }

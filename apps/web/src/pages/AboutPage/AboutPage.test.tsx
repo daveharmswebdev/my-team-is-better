@@ -349,5 +349,18 @@ describe('AboutPage', () => {
       await screen.findByRole('heading', { name: 'Elo' })
       expect(scrolledInto).toEqual([])
     })
+
+    it('keeps the page mounted, and scrolls nothing, when the hash is not valid percent-encoding', async () => {
+      // `decodeURIComponent('100%')` throws URIError; with no error boundary
+      // in the app, an effect that let it escape would unmount the page.
+      window.location.hash = '#100%'
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await screen.findByRole('heading', { name: 'Elo' })
+      expect(screen.getByRole('heading', { name: 'Elo' })).toBeInTheDocument()
+      expect(scrolledInto).toEqual([])
+    })
   })
 })
