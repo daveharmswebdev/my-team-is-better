@@ -1423,3 +1423,73 @@ def test_ledger_rows_outside_the_cases_scope_never_appear(
     case = build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
 
     assert case.elo_ledger == _expected_ledger(_ALPHA_STEP_1, _ALPHA_STEP_2)
+
+
+# ---------------------------------------------------------------------------
+# (h) issue #192 -- a database built before #183 and opened read-only (the
+# apps/api and MCP path, which never runs ensure_schema) has no ledger tables
+# at all. That is a stale db and fails loudly, for every method, rather than
+# leaking a bare sqlite3.OperationalError or degrading to "no ledger".
+# ---------------------------------------------------------------------------
+
+_LEDGER_TABLES = ("elo_ledger_configs", "elo_ledger_steps")
+
+
+def _stale_db(tmp_path: Path, drop: tuple[str, ...] = _LEDGER_TABLES) -> Path:
+    """A db rated under every method whose ledger tables were then dropped:
+    what a pre-#183 build looks like to a reader that never migrates it."""
+    db_path = _make_db(tmp_path)
+    c = get_conn(db_path)
+    _build_fixture(c)
+    _insert_cfb_cycle_ratings(c, "elo", (1523.456789, 1498.04, 1400.0))
+    _insert_cfb_cycle_ratings(c, "elo_career", (1523.456789, 1498.04, 1400.0))
+    for table in drop:
+        c.execute(f"DROP TABLE {table}")
+    c.commit()
+    c.close()
+    return db_path
+
+
+@pytest.mark.parametrize("method", typing.get_args(Method))
+def test_stale_db_without_ledger_tables_fails_loudly_for_every_method(
+    tmp_path: Path, method: Method
+) -> None:
+    """Every method goes through `_elo_ledger`, and a stale db is stale
+    whichever method is asked, so keener fails exactly like elo. The error is
+    the named class, not a bare sqlite error, and its message names both
+    missing tables, the issue that added them, the diagnosis and the fix."""
+    conn = get_conn(_stale_db(tmp_path), read_only=True)
+
+    with pytest.raises(proof.StaleDatabaseError) as excinfo:
+        build_team_case(conn, YEAR, "Alpha State", method=method, sport="cfb")
+
+    assert not isinstance(excinfo.value, sqlite3.OperationalError)
+    assert excinfo.value.missing_tables == _LEDGER_TABLES
+    message = str(excinfo.value)
+    assert "elo_ledger_configs" in message
+    assert "elo_ledger_steps" in message
+    assert "#183" in message
+    assert "cfb doctor" in message
+    assert "cfb rate" in message
+
+
+@pytest.mark.parametrize("missing", _LEDGER_TABLES)
+def test_stale_db_error_names_exactly_the_missing_table(tmp_path: Path, missing: str) -> None:
+    """Half a schema is still stale. The error names the table that is
+    absent and not the one that is present."""
+    (present,) = (t for t in _LEDGER_TABLES if t != missing)
+    conn = get_conn(_stale_db(tmp_path, drop=(missing,)), read_only=True)
+
+    with pytest.raises(proof.StaleDatabaseError) as excinfo:
+        build_team_case(conn, YEAR, "Alpha State", method="elo", sport="cfb")
+
+    assert excinfo.value.missing_tables == (missing,)
+    assert missing in str(excinfo.value)
+    assert present not in str(excinfo.value)
+
+
+def test_stale_db_error_propagates_through_build_comparison(tmp_path: Path) -> None:
+    conn = get_conn(_stale_db(tmp_path), read_only=True)
+
+    with pytest.raises(proof.StaleDatabaseError):
+        build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener", sport="cfb")

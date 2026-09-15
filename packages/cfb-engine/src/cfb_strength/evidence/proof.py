@@ -74,6 +74,38 @@ VERDICT_RATING_FORMATS: dict[Method, str] = {
 }
 
 
+# The two tables issue #183 added. `_elo_ledger` checks both exist before it
+# queries either, so a pre-#183 database opened read-only (apps/api and the
+# MCP server never run ensure_schema) fails as `StaleDatabaseError` instead
+# of a bare `sqlite3.OperationalError: no such table` (issue #192).
+ELO_LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
+
+
+class StaleDatabaseError(RuntimeError):
+    """Raised by evidence functions when the database predates the schema
+    they read (issue #192): today, the Elo ledger tables from issue #183.
+
+    Deliberately loud rather than degrading to "no ledger" (the #97 spirit).
+    A reader that opens the db read-only cannot migrate it, and a stale db is
+    stale whichever method is asked -- `build_team_case` reads the ledger for
+    every method -- so every verdict fails, keener included, with a message
+    that names the missing table(s), the diagnosis and the fix. A
+    RuntimeError, not a ValueError: nothing about the request was wrong.
+    """
+
+    def __init__(self, missing_tables: tuple[str, ...]):
+        names = ", ".join(missing_tables)
+        noun = "table" if len(missing_tables) == 1 else "tables"
+        super().__init__(
+            f"stale database: missing {noun} {names}. This database was built "
+            "before the Elo ledger (issue #183) and is opened read-only, so nothing "
+            "has added the ledger tables to it. Run `cfb doctor` for the diagnosis; "
+            "the fix is a rebuild of the ratings (`cfb rate --years ... --method elo`, "
+            "or the full render.yaml build sequence)."
+        )
+        self.missing_tables = missing_tables
+
+
 # ---------------------------------------------------------------------------
 # internal helpers
 # ---------------------------------------------------------------------------
@@ -211,6 +243,27 @@ def _rating_breakdown(
     return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
+def _require_elo_ledger_tables(conn: sqlite3.Connection) -> None:
+    """Raise `StaleDatabaseError` unless both #183 ledger tables exist.
+
+    One `sqlite_master` lookup per call (so one per `_elo_ledger`, never one
+    per step). Checking before querying is what turns "no such table" into a
+    named, explained error; catching sqlite's OperationalError afterwards
+    would also have to guess which of several possible causes it was.
+    """
+    placeholders = ", ".join("?" for _ in ELO_LEDGER_TABLES)
+    present = {
+        row[0]
+        for row in conn.execute(
+            f"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ({placeholders})",
+            ELO_LEDGER_TABLES,
+        )
+    }
+    missing = tuple(t for t in ELO_LEDGER_TABLES if t not in present)
+    if missing:
+        raise StaleDatabaseError(missing)
+
+
 def _elo_ledger(
     conn: sqlite3.Connection,
     year: int,
@@ -228,8 +281,16 @@ def _elo_ledger(
     re-deriving them would be a second, possibly different, answer.
 
     Returns None when the (year, method, sport) has no config row and this
-    team has no steps. That is a method with no ledger (keener, elo_career) or
-    a database built before #183.
+    team has no steps. That is a method with no ledger (keener, elo_career),
+    or elo ratings computed before #183 in a database that `ensure_schema`
+    has since brought up to date (the tables exist, empty).
+
+    Raises `StaleDatabaseError` (issue #192) before any ledger query when
+    either ledger table is absent altogether: a pre-#183 database opened
+    read-only, which no caller on that path migrates. That fires for every
+    method, keener included, because a stale db is stale regardless of the
+    method asked, and a bare "no such table" from sqlite would say nothing
+    about why or what to do.
 
     Raises ValueError, naming the missing table, when only one side is
     present (a config row but no steps for this rated team, or steps with no
@@ -237,6 +298,7 @@ def _elo_ledger(
     a corrupt database. Inventing constants, dropping a step, or showing a
     blank opponent would present fabricated work as evidence.
     """
+    _require_elo_ledger_tables(conn)
     config = conn.execute(
         """
         SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr
