@@ -8,11 +8,25 @@ persona copy for these is issue #4's job, not this one's).
 | `UnknownTeamError`         | 404, body echoes `query`/`year`/`sport`       |
 | `AmbiguousTeamError`       | 422, body includes `candidates` (never empty) |
 | `SameTeamComparisonError`  | 400                                           |
+| `MissingChampionError`     | 500, body echoes `year`/`method`/`sport`      |
 
 Registered once on the app (`api.main`) rather than caught per-route, so
 there is exactly one place this mapping is spelled out:
 `ENGINE_ERROR_RESPONSES` below. The handlers take their status codes from it,
 and so do the `/openapi.json` declarations.
+
+`MissingChampionError` (issue #172) is the one entry that is not an engine
+exception: it is defined here, because the engine has no champion concept
+(`contracts.py` has none, and the rank-1 query lives in `api.verdict`,
+replicated from the MCP surface by design). It fires when the year IS rated
+for the requested method and sport, so `unknown_year` would be a lie, but
+no `rank = 1` row exists among its ratings. Nothing the client sent is
+wrong; the db is, so it is a 500, and `apps/web` renders its generic
+server-error line for it. Before #172 that state fell through to an empty
+team query and came back as a 422 `ambiguous_team` listing every rated team
+as a candidate for a query the user never typed. It is declared on the
+champion route only (`CHAMPION_ERROR_RESPONSES`), and the handler logs it
+at error level, since it is the operator's problem, not the user's.
 
 Why declarations are needed at all (issue #111): routes never raise or catch
 these exceptions themselves, so FastAPI cannot see them. Unless a route
@@ -49,6 +63,7 @@ client as a 422 "did you mean:" prompt with nothing to pick.
 from __future__ import annotations
 
 import copy
+import logging
 import operator
 from dataclasses import dataclass
 from functools import reduce
@@ -57,7 +72,9 @@ from typing import Any
 
 from cfb_strength.contracts import (
     AmbiguousTeamError,
+    Method,
     SameTeamComparisonError,
+    Sport,
     UnknownTeamError,
     UnknownYearError,
 )
@@ -74,6 +91,8 @@ from pydantic_core import CoreSchema
 from api.models import (
     AmbiguousTeamErrorBody,
     AmbiguousTeamErrorResponse,
+    MissingChampionErrorBody,
+    MissingChampionErrorResponse,
     SameTeamComparisonErrorBody,
     SameTeamComparisonErrorResponse,
     UnknownTeamErrorBody,
@@ -81,6 +100,25 @@ from api.models import (
     UnknownYearErrorBody,
     UnknownYearErrorResponse,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class MissingChampionError(RuntimeError):
+    """Raised by `api.verdict._resolve_champion_name` when `year` has ratings
+    for `method`/`sport` but none of them is `rank = 1` (issue #172; the
+    module docstring has the reasoning). A data-integrity fault, not a
+    client error, and API-local: the engine has no champion concept.
+
+    A `RuntimeError`, not a `ValueError` like the engine's four: the input
+    was valid, the data behind it is not.
+    """
+
+    def __init__(self, year: int, method: Method, sport: Sport):
+        super().__init__(f"{year} is rated for {method}/{sport} but has no rank-1 row")
+        self.year = year
+        self.method = method
+        self.sport = sport
 
 
 @dataclass(frozen=True)
@@ -94,6 +132,7 @@ ENGINE_ERROR_RESPONSES: dict[type[Exception], MappedError] = {
     UnknownTeamError: MappedError(404, UnknownTeamErrorResponse),
     AmbiguousTeamError: MappedError(422, AmbiguousTeamErrorResponse),
     SameTeamComparisonError: MappedError(400, SameTeamComparisonErrorResponse),
+    MissingChampionError: MappedError(500, MissingChampionErrorResponse),
 }
 
 
@@ -137,6 +176,17 @@ def register_exception_handlers(app: FastAPI) -> None:
         body = SameTeamComparisonErrorBody(team_name=exc.team_name)
         return JSONResponse(
             status_code=ENGINE_ERROR_RESPONSES[SameTeamComparisonError].status_code,
+            content={"detail": body.model_dump()},
+        )
+
+    @app.exception_handler(MissingChampionError)
+    def _missing_champion(request: Request, exc: MissingChampionError) -> JSONResponse:
+        # The one 500 this module maps on purpose. Logged because it is the
+        # db that is wrong, and nothing in the response tells the operator.
+        logger.error("missing champion: %s", exc)
+        body = MissingChampionErrorBody(year=exc.year, method=exc.method, sport=exc.sport)
+        return JSONResponse(
+            status_code=ENGINE_ERROR_RESPONSES[MissingChampionError].status_code,
             content={"detail": body.model_dump()},
         )
 
@@ -224,4 +274,11 @@ TEAM_CASE_ERROR_RESPONSES = openapi_error_responses(
 # `SameTeamComparisonError` if they are the same team.
 COMPARISON_ERROR_RESPONSES = openapi_error_responses(
     UnknownYearError, UnknownTeamError, AmbiguousTeamError, SameTeamComparisonError
+)
+
+# /champion resolves the rank-1 team itself (`MissingChampionError` when a
+# rated year has none, #172) and then hands that name to `build_team_case`,
+# so it can reach everything the team-case set can.
+CHAMPION_ERROR_RESPONSES = openapi_error_responses(
+    UnknownYearError, UnknownTeamError, AmbiguousTeamError, MissingChampionError
 )

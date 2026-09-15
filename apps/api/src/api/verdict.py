@@ -20,7 +20,9 @@ Because routes never raise those exceptions directly, FastAPI cannot infer
 them for `/openapi.json`, so each route declares them via `responses=` using
 the prebuilt sets in `api.errors` (issue #111). Pick the set that matches
 the engine function the route calls (`build_team_case` or
-`build_comparison`). For every route in the app,
+`build_comparison`); /champion has its own set, because it adds the one
+API-local error, `MissingChampionError` (#172, see
+`_resolve_champion_name`). For every route in the app,
 tests/test_openapi_error_responses.py works out which handled engine
 exceptions the endpoint can reach by following the functions it references.
 It fails if the route's declaration does not accept a reachable exception's
@@ -51,7 +53,12 @@ from cfb_strength.evidence.proof import build_comparison, build_team_case, list_
 from fastapi import APIRouter, Depends
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator, list_team_records
-from api.errors import COMPARISON_ERROR_RESPONSES, TEAM_CASE_ERROR_RESPONSES
+from api.errors import (
+    CHAMPION_ERROR_RESPONSES,
+    COMPARISON_ERROR_RESPONSES,
+    TEAM_CASE_ERROR_RESPONSES,
+    MissingChampionError,
+)
 from api.models import (
     MAX_SEASON_YEAR,
     MIN_SEASON_YEAR,
@@ -60,6 +67,7 @@ from api.models import (
     ComparisonEnvelope,
     ComparisonRequest,
     ComparisonResultOut,
+    Method,
     Sport,
     TeamCaseEnvelope,
     TeamCaseOut,
@@ -166,8 +174,22 @@ def require_season_year(conn: sqlite3.Connection, year: int, method: str, sport:
 
 
 def _resolve_champion_name(
-    conn: sqlite3.Connection, year: int, method: str, sport: str
-) -> str | None:
+    conn: sqlite3.Connection, year: int, method: Method, sport: Sport
+) -> str:
+    """The `teams.school` of the rank-1 row for `year`/`method`/`sport`.
+
+    No such row means one of two things, and they are told apart the way
+    the engine's `_require_year` would (issue #172):
+
+    * the year has no ratings at all for that method and sport --
+      `UnknownYearError`, built exactly as the engine builds it, so the
+      client sees the same `unknown_year` 404 it always has;
+    * the year IS rated but nothing in it is ranked first --
+      `MissingChampionError`, a data-integrity fault mapped to 500. Before
+      #172 this case returned `None`, the caller fell through to
+      `build_team_case(conn, year, "")`, and the empty query came back as a
+      422 `ambiguous_team` naming every rated team as a candidate.
+    """
     row = conn.execute(
         """
         SELECT t.school AS school
@@ -177,10 +199,15 @@ def _resolve_champion_name(
         """,
         (year, method, sport),
     ).fetchone()
-    return str(row["school"]) if row is not None else None
+    if row is not None:
+        return str(row["school"])
+    available_years = list_available_years(conn, method, sport)
+    if year not in available_years:
+        raise UnknownYearError(year, available_years)
+    raise MissingChampionError(year, method, sport)
 
 
-@router.post("/champion", response_model=TeamCaseEnvelope, responses=TEAM_CASE_ERROR_RESPONSES)
+@router.post("/champion", response_model=TeamCaseEnvelope, responses=CHAMPION_ERROR_RESPONSES)
 def champion(
     payload: ChampionRequest,
     conn: sqlite3.Connection = Depends(get_db_conn),
@@ -192,13 +219,7 @@ def champion(
     persona narration."""
     require_season_year(conn, payload.year, payload.method, payload.sport)
     name = _resolve_champion_name(conn, payload.year, payload.method, payload.sport)
-    # `name is None` (no ratings rows at all for year/method/sport) still
-    # needs to surface as UnknownYearError -- build_team_case raises it for
-    # us as soon as resolve_team's `_require_year` check runs, whether we
-    # pass a real name or any placeholder query string.
-    case = build_team_case(
-        conn, payload.year, name or "", method=payload.method, sport=payload.sport
-    )
+    case = build_team_case(conn, payload.year, name, method=payload.method, sport=payload.sport)
     case_out = TeamCaseOut.from_dataclass(case)
     narration = narrate_team_case(
         conn,
