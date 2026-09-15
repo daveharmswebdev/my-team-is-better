@@ -14,7 +14,9 @@ Layer map (enforced by .importlinter):
 the `ratings` table via SQL rather than importing `cfb_strength.ratings`.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Literal, Protocol, get_args, runtime_checkable
 
 # ---------------------------------------------------------------------------
@@ -277,11 +279,14 @@ class PlayerSeasonStatRow:
 # from `cfb_strength.players`:
 #
 #   def get_player_leaders(conn: sqlite3.Connection, *, sport: Sport,
+#                          category: PlayerLeaderCategory = "passing",
 #                          season_type: PlayerSeasonType = "regular",
-#                          sort: PlayerLeaderSort = "passing_yards",
+#                          sort: PlayerLeaderSort | None = None,
 #                          limit: int = 50, offset: int = 0) -> PlayerLeaders: ...
-#       Raises ValueError unless 1 <= limit <= PLAYER_LEADERS_MAX_LIMIT and
-#       offset >= 0.
+#       `sort=None` means the category's first sort in
+#       PLAYER_LEADER_SORTS_BY_CATEGORY. Raises ValueError unless
+#       1 <= limit <= PLAYER_LEADERS_MAX_LIMIT, offset >= 0, and `sort` is one
+#       of `category`'s sorts (#312).
 #
 #   def get_player_career(conn: sqlite3.Connection, *, sport: Sport,
 #                         player_id: int) -> PlayerCareer: ...
@@ -306,10 +311,32 @@ class PlayerSeasonStatRow:
 #     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
 # ---------------------------------------------------------------------------
 
-PlayerLeaderSort = Literal["passing_yards", "passing_tds", "wins"]
-"""The v1 leaderboards. With `PlayerSeasonType` that covers passing yards,
-passing TDs, regular-season starter wins and playoff starter wins. Always
-descending; ties break by `display_name`, then `player_id`."""
+PlayerLeaderCategory = Literal["passing", "rushing"]
+"""What a leaderboard ranks (epic #311, decision 1): a stat category, not a
+position. A board ranks every player with the category's base stat, whatever
+their position, so a QB's carries count on the rushing board.
+
+Qualifying (decision 2), per season type, with no minimum:
+  * passing: at least one pass attempt, or one QB start (#296);
+  * rushing: at least one carry (#312)."""
+
+PlayerLeaderSort = Literal[
+    "passing_yards", "passing_tds", "wins", "rushing_yards", "rushing_tds", "carries"
+]
+"""Every leaderboard sort. With `PlayerSeasonType` the passing ones cover
+passing yards, passing TDs, regular-season starter wins and playoff starter
+wins. Always descending; ties break by `display_name`, then `player_id`."""
+
+PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeaderSort, ...]] = (
+    MappingProxyType(
+        {
+            "passing": ("passing_yards", "passing_tds", "wins"),
+            "rushing": ("rushing_yards", "rushing_tds", "carries"),
+        }
+    )
+)
+"""The sorts each category accepts, its default first. Every
+`PlayerLeaderSort` belongs to exactly one category."""
 
 PLAYER_LEADERS_MAX_LIMIT = 100
 
@@ -331,10 +358,11 @@ class StarterRecord:
 
 @dataclass(frozen=True)
 class PlayerLeaderRow:
-    """One qualifying player on a leaderboard for one season type.
-
-    Qualifies: at least one pass attempt or one QB start in that season type.
-    No minimum: every v1 board is a counting stat (#296)."""
+    """One qualifying player on a leaderboard for one category and season
+    type. Qualifying is per category (`PlayerLeaderCategory`), with no
+    minimum: every board is a counting stat (#296, #312). `record` is the
+    player's QB starter record whatever the category (0-0-0 for most
+    rushers)."""
 
     # Competition ranking on the sort value (1, 2, 2, 4) across the whole
     # qualifying population, not the page. None when the sort value is None;
@@ -355,7 +383,10 @@ class PlayerLeaderRow:
 @dataclass(frozen=True)
 class PlayerLeaders:
     sport: Sport
+    category: PlayerLeaderCategory
     season_type: PlayerSeasonType
+    # Always the resolved sort, never None: a request without one echoes its
+    # category's default.
     sort: PlayerLeaderSort
     limit: int
     offset: int
