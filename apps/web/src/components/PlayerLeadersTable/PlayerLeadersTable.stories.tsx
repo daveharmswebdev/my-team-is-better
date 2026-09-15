@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter } from 'react-router-dom'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import {
+  LEADERS_BY_RUSHING_TDS,
+  LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
   LEADERS_WITH_NULL_STATS,
@@ -53,4 +55,28 @@ export const NullStats: Story = {
 /** The next page is on its way: the table stays, dimmed and `aria-busy`. */
 export const Busy: Story = {
   args: { busy: true },
+}
+
+/**
+ * The rushing board (issue #312): its own three sortable columns, no starter
+ * record and no passing stats.
+ */
+export const ByRushingYards: Story = {
+  args: { leaders: LEADERS_BY_RUSHING_YARDS },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'Rushing yards' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(
+      canvas.queryByRole('columnheader', { name: 'Starter record' }),
+    ).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Carries' }))
+    await expect(args.onSort).toHaveBeenCalledWith('carries')
+  },
+}
+
+/** Two quarterbacks tied at rank 3 on the rushing board, each with a position. */
+export const ByRushingTds: Story = {
+  args: { leaders: LEADERS_BY_RUSHING_TDS },
 }

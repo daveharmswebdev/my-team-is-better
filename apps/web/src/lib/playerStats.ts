@@ -4,10 +4,12 @@
  * rate from it.
  */
 import type {
+  PlayerLeaderCategory,
   PlayerLeaderSort,
   PlayerSeasonType,
   PlayerStatsOut,
 } from './api/types'
+import { PLAYER_LEADER_SORTS_BY_CATEGORY } from './api/types'
 
 /** What a stat the source didn't track reads as: never 0, never blank. */
 export const NOT_RECORDED = 'not recorded'
@@ -48,6 +50,66 @@ export const SORT_LABEL: Record<PlayerLeaderSort, string> = {
   passing_yards: 'passing yards',
   passing_tds: 'passing TDs',
   wins: 'starter wins',
+  rushing_yards: 'rushing yards',
+  rushing_tds: 'rushing TDs',
+  carries: 'carries',
+}
+
+/** How the category dropdown names each board (issue #312). */
+export const CATEGORY_LABEL: Record<PlayerLeaderCategory, string> = {
+  passing: 'Passing',
+  rushing: 'Rushing',
+}
+
+/** The stat keys the rushing board shows; their labels and order come from `STAT_COLUMNS`. */
+const RUSHING_STAT_KEYS: readonly (keyof PlayerStatsOut)[] = [
+  'carries',
+  'rushing_yards',
+  'rushing_tds',
+]
+
+export interface LeaderBoardColumns {
+  /**
+   * Whether this board shows the starter record and starts -- and so whether
+   * `STARTER_RECORD_NOTE` has anything to explain on it. Only the passing
+   * board does: a rushing board's rows are mostly 0-0-0 non-quarterbacks.
+   */
+  showsRecord: boolean
+  /** The stat columns, in order. */
+  stats: readonly StatColumn[]
+}
+
+/**
+ * What each leaderboard shows (issue #312), stated once. Which of these
+ * columns re-sorts the board is not repeated here: it follows from the
+ * category's own sorts -- see `sortForStat`.
+ */
+export const LEADER_BOARD_COLUMNS: Record<
+  PlayerLeaderCategory,
+  LeaderBoardColumns
+> = {
+  passing: { showsRecord: true, stats: STAT_COLUMNS },
+  rushing: {
+    showsRecord: false,
+    stats: STAT_COLUMNS.filter((column) =>
+      RUSHING_STAT_KEYS.includes(column.key),
+    ),
+  },
+}
+
+/**
+ * The sort a stat column re-sorts the board by, or `undefined` when this
+ * category doesn't sort on it. Read straight off the category's sort list,
+ * so a category gaining a sort makes its column sortable with no change
+ * here.
+ */
+export function sortForStat(
+  category: PlayerLeaderCategory,
+  key: keyof PlayerStatsOut,
+): PlayerLeaderSort | undefined {
+  const sorts: readonly PlayerLeaderSort[] =
+    PLAYER_LEADER_SORTS_BY_CATEGORY[category]
+  return sorts.find((sort) => sort === key)
 }
 
 /** One season, or a first–last span. */

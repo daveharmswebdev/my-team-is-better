@@ -20,6 +20,7 @@ import {
 } from './client'
 
 const LEADERS_QUERY = {
+  category: 'passing',
   season_type: 'regular',
   sort: 'passing_yards',
   limit: 50,
@@ -713,6 +714,7 @@ describe('fetchPlayerLeaders', () => {
 
   const leaders = {
     sport: 'nfl',
+    category: 'passing',
     season_type: 'postseason',
     sort: 'wins',
     limit: 50,
@@ -726,6 +728,7 @@ describe('fetchPlayerLeaders', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const result = await fetchPlayerLeaders({
+      category: 'passing',
       season_type: 'postseason',
       sort: 'wins',
       limit: 50,
@@ -739,12 +742,37 @@ describe('fetchPlayerLeaders', () => {
     expect(parsed.pathname).toBe('/api/players/leaders')
     expect([...parsed.searchParams.entries()]).toEqual([
       ['sport', 'nfl'],
+      ['category', 'passing'],
       ['season_type', 'postseason'],
       ['sort', 'wins'],
       ['limit', '50'],
       ['offset', '100'],
     ])
     expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  /** Issue #312: the board's category is the API's, sent on every request. */
+  it('sends the rushing category with a rushing sort', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse(200, { ...leaders, category: 'rushing', sort: 'carries' }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchPlayerLeaders({
+      category: 'rushing',
+      season_type: 'regular',
+      sort: 'carries',
+      limit: 50,
+      offset: 0,
+    })
+
+    expect(result.category).toBe('rushing')
+    const [url] = fetchMock.mock.calls[0] as [string]
+    const parsed = new URL(url)
+    expect(parsed.searchParams.get('category')).toBe('rushing')
+    expect(parsed.searchParams.get('sort')).toBe('carries')
   })
 
   it('throws a VerdictNetworkError with the network copy when fetch itself rejects', async () => {

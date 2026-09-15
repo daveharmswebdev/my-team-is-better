@@ -39,6 +39,7 @@ from cfb_strength.contracts import (
     PlayerComparison,
     PlayerHeadToHead,
     PlayerHeadToHeadGame,
+    PlayerLeaderCategory,
     PlayerLeaderRow,
     PlayerLeaders,
     PlayerLeaderSort,
@@ -761,7 +762,12 @@ class PlayerLeaderRowOut(BaseModel):
 
 class PlayerLeadersOut(BaseModel):
     sport: Sport
+    # What the board ranks (#312). Qualifying is per category, so `total`
+    # and the rows change with it, and `sort` belongs to exactly one.
+    category: PlayerLeaderCategory
     season_type: PlayerSeasonType
+    # Always the resolved sort: a request without one echoes the category's
+    # default, which the engine picks.
     sort: PlayerLeaderSort
     limit: int
     offset: int
@@ -773,6 +779,7 @@ class PlayerLeadersOut(BaseModel):
     def from_dataclass(cls, leaders: PlayerLeaders) -> PlayerLeadersOut:
         return cls(
             sport=leaders.sport,
+            category=leaders.category,
             season_type=leaders.season_type,
             sort=leaders.sort,
             limit=leaders.limit,

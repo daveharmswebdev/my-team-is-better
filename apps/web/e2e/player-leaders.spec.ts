@@ -131,6 +131,96 @@ test('paging reaches rank 51, survives a reload, and Back returns to the first p
   )
 })
 
+// Issue #312: the rushing board. Measured on the same fixture db: 653
+// regular-season qualifiers (every player with a carry, quarterbacks
+// included), Edgerrin James first on 1,553 yards and 369 carries, and a real
+// tie at rank 3 by rushing touchdowns between two quarterbacks.
+
+test('choosing Rushing ranks Edgerrin James first on 1,553 yards, with its own columns', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+
+  await page.getByLabel('Stat category').selectOption('rushing')
+
+  const table = leadersTable(page, 'regular season, by rushing yards')
+  await expectRow(table, 0, '1', 'Edgerrin James')
+  await expect(bodyRow(table, 0)).toContainText('1,553')
+  await expect(bodyRow(table, 0)).toContainText('369')
+  await expect(
+    table.getByRole('columnheader', { name: 'Rushing yards' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  await expect(
+    table.getByRole('columnheader', { name: 'Passing yards' }),
+  ).toHaveCount(0)
+  await expect(
+    table.getByRole('columnheader', { name: 'Starter record' }),
+  ).toHaveCount(0)
+  await expect(page.getByText('1–50 of 653')).toBeVisible()
+  await expect(page).toHaveURL(/category=rushing/)
+})
+
+test('Rushing TDs puts Raheem Mostert first and ties two quarterbacks at 3, and a reload shows the same board', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=rushing')
+  await expect(
+    leadersTable(page, 'regular season, by rushing yards'),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Rushing TDs' }).click()
+
+  const table = leadersTable(page, 'regular season, by rushing TDs')
+  await expectRow(table, 0, '1', 'Raheem Mostert')
+  await expectRow(table, 1, '2', 'Stephen Davis')
+  await expectRow(table, 2, '3', 'Jalen Hurts')
+  await expectRow(table, 3, '3', 'Josh Allen')
+  await expect(bodyRow(table, 2)).toContainText('QB')
+  await expect(bodyRow(table, 3)).toContainText('QB')
+  await expect(
+    table.getByRole('columnheader', { name: 'Rushing TDs' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  await expect(page).toHaveURL(
+    /category=rushing&season_type=regular&sort=rushing_tds&offset=0/,
+  )
+
+  await page.reload()
+  const reloaded = leadersTable(page, 'regular season, by rushing TDs')
+  await expectRow(reloaded, 0, '1', 'Raheem Mostert')
+  await expectRow(reloaded, 3, '3', 'Josh Allen')
+  await expect(
+    reloaded.getByRole('columnheader', { name: 'Rushing TDs' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  await expect(page.getByLabel('Stat category')).toHaveValue('rushing')
+})
+
+test('Back from the rushing board returns to the passing one', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+
+  await page.getByLabel('Stat category').selectOption('rushing')
+  await expect(
+    leadersTable(page, 'regular season, by rushing yards'),
+  ).toBeVisible()
+
+  await page.goBack()
+
+  await expectRow(
+    leadersTable(page, 'regular season, by passing yards'),
+    0,
+    '1',
+    'Tua Tagovailoa',
+  )
+  await expect(page.getByLabel('Stat category')).toHaveValue('passing')
+})
+
 test("Kurt Warner's name opens his career: 1999 St. Louis Rams, 4,044 yards, and the one-game disclosure", async ({
   page,
 }) => {

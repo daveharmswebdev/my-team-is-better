@@ -201,6 +201,45 @@ def test_brady_career_matches_his_leaders_rows(conn: sqlite3.Connection) -> None
         assert (row.games, row.record, row.stats) == (totals.games, totals.record, totals.stats)
 
 
+def test_rushing_boards_rank_every_position(conn: sqlite3.Connection) -> None:
+    """#312: a carry qualifies, whatever the position, so QBs rank among backs."""
+    regular = get_player_leaders(conn, sport="nfl", category="rushing", limit=100)
+    post = get_player_leaders(conn, sport="nfl", category="rushing", season_type="postseason")
+    assert (regular.total, regular.category, regular.sort) == (2568, "rushing", "rushing_yards")
+    assert post.total == 773
+
+    assert [(r.rank, r.display_name, r.stats.rushing_yards) for r in regular.rows[:3]] == [
+        (1, "Frank Gore", 16000),
+        (2, "Adrian Peterson", 14921),
+        (3, "LaDainian Tomlinson", 13686),
+    ]
+    assert [
+        (r.rank, r.display_name, r.stats.rushing_yards) for r in regular.rows if r.position == "QB"
+    ] == [
+        (46, "Lamar Jackson", 6522),
+        (55, "Mike Vick", 6122),
+        (68, "Cam Newton", 5628),
+        (69, "Russell Wilson", 5568),
+        (89, "Josh Allen", 4721),
+    ]
+
+    post_tds = get_player_leaders(
+        conn, sport="nfl", category="rushing", season_type="postseason", sort="rushing_tds", limit=4
+    ).rows
+    assert [(r.rank, r.display_name, r.position, r.stats.rushing_tds) for r in post_tds] == [
+        (1, "Marshawn Lynch", "RB", 12),
+        (2, "LeGarrette Blount", "RB", 11),
+        (3, "Jalen Hurts", "QB", 10),
+        (4, "Josh Allen", "QB", 9),
+    ]
+
+    (lamar,) = [r for r in regular.rows if r.display_name == "Lamar Jackson"]
+    totals = get_player_career(conn, sport="nfl", player_id=lamar.player_id).regular_season
+    assert totals is not None
+    assert (lamar.games, lamar.record, lamar.stats) == (totals.games, totals.record, totals.stats)
+    assert lamar.record.wins > 0
+
+
 # --- comparison and search (#301) ---------------------------------------------
 
 

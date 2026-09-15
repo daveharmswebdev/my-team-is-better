@@ -27,6 +27,7 @@ import type {
   PlayerCareerOut,
   PlayerComparisonOut,
   PlayerLeaderSort,
+  PlayerLeaderCategory,
   PlayerLeadersOut,
   PlayerSearchOut,
   PlayerSeasonType,
@@ -422,6 +423,12 @@ export function fetchCredits(): Promise<CreditsOut> {
  * league with player stats, and `cfb` is a 422.
  */
 export interface PlayerLeadersQuery {
+  /**
+   * Which board (#312). `sort` must be one of this category's own sorts --
+   * `isSortInCategory` in `./types` is the check; the API answers any other
+   * pair with a 422 at `sort`.
+   */
+  category: PlayerLeaderCategory
   season_type: PlayerSeasonType
   sort: PlayerLeaderSort
   /** 1..100 on the API side. */
@@ -440,6 +447,7 @@ export function fetchPlayerLeaders(
 ): Promise<PlayerLeadersOut> {
   const params = new URLSearchParams({
     sport: 'nfl',
+    category: query.category,
     season_type: query.season_type,
     sort: query.sort,
     limit: String(query.limit),

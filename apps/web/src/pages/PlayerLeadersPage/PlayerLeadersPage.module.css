@@ -21,6 +21,14 @@
   max-width: 60ch;
 }
 
+/* The stat category and the season type, side by side (issue #312). */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-6);
+}
+
 .notes {
   display: flex;
   flex-direction: column;

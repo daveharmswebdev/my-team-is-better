@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CATEGORY_LABEL,
+  LEADER_BOARD_COLUMNS,
   NOT_RECORDED,
   PLAYER_STATS_SOURCE_ID,
   SEASON_TYPE_LABEL,
@@ -7,6 +9,7 @@ import {
   STAT_COLUMNS,
   formatSeasonSpan,
   formatStat,
+  sortForStat,
   undercountNote,
 } from './playerStats'
 
@@ -79,10 +82,65 @@ describe('labels', () => {
       passing_yards: 'passing yards',
       passing_tds: 'passing TDs',
       wins: 'starter wins',
+      rushing_yards: 'rushing yards',
+      rushing_tds: 'rushing TDs',
+      carries: 'carries',
     })
   })
 
   it("selects the player credit by the API's id", () => {
     expect(PLAYER_STATS_SOURCE_ID).toBe('nflverse_player_stats')
+  })
+
+  it('names both categories for the dropdown', () => {
+    expect(CATEGORY_LABEL).toEqual({ passing: 'Passing', rushing: 'Rushing' })
+  })
+})
+
+/**
+ * Issue #312: each board's columns, stated once. The rushing board's labels
+ * are `STAT_COLUMNS`' own, so a column renamed there is renamed on both
+ * boards, and which columns re-sort a board follows from the category's
+ * sorts rather than a second list.
+ */
+describe('LEADER_BOARD_COLUMNS', () => {
+  it('gives the passing board every stat column, and the record', () => {
+    expect(LEADER_BOARD_COLUMNS.passing.showsRecord).toBe(true)
+    expect(LEADER_BOARD_COLUMNS.passing.stats).toEqual(STAT_COLUMNS)
+  })
+
+  it('gives the rushing board its three columns and no record', () => {
+    expect(LEADER_BOARD_COLUMNS.rushing.showsRecord).toBe(false)
+    expect(LEADER_BOARD_COLUMNS.rushing.stats).toEqual([
+      { key: 'carries', label: 'Carries' },
+      { key: 'rushing_yards', label: 'Rushing yards' },
+      { key: 'rushing_tds', label: 'Rushing TDs' },
+    ])
+  })
+
+  it('takes the rushing labels from STAT_COLUMNS, not a copy of them', () => {
+    for (const column of LEADER_BOARD_COLUMNS.rushing.stats) {
+      expect(STAT_COLUMNS).toContain(column)
+    }
+  })
+})
+
+describe('sortForStat', () => {
+  it('sorts a board only by the columns its own category sorts on', () => {
+    expect(sortForStat('passing', 'passing_yards')).toBe('passing_yards')
+    expect(sortForStat('passing', 'passing_tds')).toBe('passing_tds')
+    expect(sortForStat('passing', 'completions')).toBeUndefined()
+    // The passing board shows the rushing stats, but never sorts on them.
+    expect(sortForStat('passing', 'rushing_yards')).toBeUndefined()
+    expect(sortForStat('rushing', 'rushing_yards')).toBe('rushing_yards')
+    expect(sortForStat('rushing', 'rushing_tds')).toBe('rushing_tds')
+    expect(sortForStat('rushing', 'carries')).toBe('carries')
+    expect(sortForStat('rushing', 'passing_yards')).toBeUndefined()
+  })
+
+  it('makes every column of the rushing board sortable', () => {
+    for (const column of LEADER_BOARD_COLUMNS.rushing.stats) {
+      expect(sortForStat('rushing', column.key)).toBe(column.key)
+    }
   })
 })

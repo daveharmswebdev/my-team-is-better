@@ -4,6 +4,8 @@ import { expect, userEvent, within } from 'storybook/test'
 import type { PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
+  LEADERS_BY_RUSHING_TDS,
+  LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
   LEADERS_WITH_NULL_STATS,
@@ -38,15 +40,32 @@ function jsonResponse(body: unknown): Promise<Response> {
   )
 }
 
-/** Echoes the request's season type, sort and offset onto `page`, as the API does. */
+/** Echoes the request's category, season type, sort and offset onto `page`, as the API does. */
 function answering(page: PlayerLeadersOut) {
   return (url: URL) =>
     jsonResponse({
       ...page,
+      category: url.searchParams.get('category') ?? page.category,
       season_type: url.searchParams.get('season_type') ?? page.season_type,
       sort: url.searchParams.get('sort') ?? page.sort,
       offset: Number(url.searchParams.get('offset') ?? page.offset),
     })
+}
+
+/**
+ * The board each category asks for (issue #312): a different population and
+ * different columns, which is why the page cannot just re-render the rows it
+ * already has.
+ */
+function answeringByCategory(url: URL) {
+  if (url.searchParams.get('category') === 'rushing') {
+    const board =
+      url.searchParams.get('sort') === 'rushing_tds'
+        ? LEADERS_BY_RUSHING_TDS
+        : LEADERS_BY_RUSHING_YARDS
+    return answering(board)(url)
+  }
+  return answering(LEADERS_BY_YARDS)(url)
 }
 
 function atRoute(search = '') {
@@ -133,6 +152,52 @@ export const Playoffs: Story = {
       name: 'NFL career leaders: playoffs, by passing yards',
     })
     await expect(canvas.getByRole('radio', { name: 'Playoffs' })).toBeChecked()
+  },
+}
+
+/** The rushing board, reached by its own URL (issue #312). */
+export const Rushing: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute(
+      '?category=rushing&season_type=regular&sort=rushing_yards&offset=0',
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Edgerrin James' })
+    await expect(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+    ).toHaveValue('rushing')
+    await expect(
+      canvas.queryByRole('columnheader', { name: 'Passing yards' }),
+    ).toBeNull()
+  },
+}
+
+/** Picking Rushing from the dropdown swaps the board, columns and all. */
+export const CategorySwitch: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute(),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
+    await userEvent.selectOptions(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+      'rushing',
+    )
+    await canvas.findByRole('table', {
+      name: 'NFL career leaders: regular season, by rushing yards',
+    })
+    await canvas.findByRole('link', { name: 'Edgerrin James' })
   },
 }
 
