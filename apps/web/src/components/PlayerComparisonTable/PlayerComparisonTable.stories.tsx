@@ -22,7 +22,7 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-/** The committed fixture: Warner's 4,044 yards and his 11 interceptions are both marked. */
+/** The committed fixture: Warner's 4,044 yards and 11 interceptions are both marked. */
 export const RegularSeason: Story = {}
 
 /** McNair's 4 playoff games are marked; 3-0 against 3-1 is equal wins, so unmarked. */
@@ -46,7 +46,7 @@ export const NullStats: Story = {
   },
 }
 
-/** One player has no playoff games: his column says so, and nothing is marked. */
+/** One player has no playoff games: that player's column says so, and nothing is marked. */
 export const NoTotalsForOne: Story = {
   args: {
     caption: 'Kurt Warner and Unrecorded Player, playoffs',

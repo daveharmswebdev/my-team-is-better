@@ -49,7 +49,7 @@ type Story = StoryObj<typeof meta>
 
 export const Empty: Story = {}
 
-/** A picked player: the field shows his name. */
+/** A picked player: the field shows the player's name. */
 export const Picked: Story = {
   args: { label: 'Player A', value: 'Kurt Warner' },
 }

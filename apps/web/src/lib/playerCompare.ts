@@ -106,7 +106,7 @@ export const MARK_LEGEND =
 
 /** Which games count as head-to-head, verified against the data (#301). */
 export const HEAD_TO_HEAD_RULE =
-  "Only games both players started at quarterback, for opposite teams, count here. When a starter left early and the source lists his replacement as the starter, the game counts for the replacement: the source lists Jim Sorgi, not Peyton Manning, as the Colts' starter in week 17 of 2004, so that game isn't Manning against Jake Plummer."
+  "Only games both players started at quarterback, for opposite teams, count here. When a starter left early and the source lists the replacement as the starter, the game counts for the replacement: the source lists Jim Sorgi, not Peyton Manning, as the Colts' starter in week 17 of 2004, so that game isn't Manning against Jake Plummer."
 
 export const PICK_TWO_COPY =
   'Pick two players to put their careers side by side.'
@@ -118,7 +118,7 @@ export function pickOneMoreCopy(name: string | null): string {
 }
 
 export const SAME_PLAYER_COPY =
-  "That's the same guy twice, pal. A player can't go up against himself. Pick somebody else for one side."
+  "That's the same player twice, pal. Nobody goes up against themselves. Pick somebody else for one side."
 
 export const SEARCH_FAILED_COPY =
   "Can't look anybody up right now, pal. Give it a second and type again."

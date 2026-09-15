@@ -116,7 +116,7 @@ describe('PlayerComparePage (issue #301)', () => {
     expect(mockedCareer).not.toHaveBeenCalled()
   })
 
-  it('with one player picked, names him in his field and prompts for the other', async () => {
+  it('with one player picked, names that player in the field and prompts for the other', async () => {
     mockedCareer.mockResolvedValue(KURT_WARNER_CAREER)
 
     renderPage(`?a=${WARNER}`)
@@ -172,7 +172,7 @@ describe('PlayerComparePage (issue #301)', () => {
     ).not.toBeInTheDocument()
   })
 
-  it("links each player to his career page and discloses Warner's undercounted game", async () => {
+  it("links each player to the player's career page and discloses Warner's undercounted game", async () => {
     mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)

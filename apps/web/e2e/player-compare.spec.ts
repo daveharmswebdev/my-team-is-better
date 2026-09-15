@@ -21,7 +21,7 @@ function valueCells(table: Locator, label: string): Locator {
     .getByRole('cell')
 }
 
-test("from Kurt Warner's career, Compare and Player B's typeahead put him next to Steve McNair", async ({
+test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warner next to Steve McNair", async ({
   page,
 }) => {
   await page.goto(`/nfl/players/${WARNER}`)

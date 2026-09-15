@@ -118,7 +118,7 @@ export function PlayerComparePage() {
     typeof pickA === 'number' && typeof pickB === 'number' && pickA !== pickB
       ? `${pickA}:${pickB}`
       : null
-  // Exactly one player picked: his career gives the field his name.
+  // Exactly one player picked: that player's career gives the field a name.
   const loneId =
     typeof pickA === 'number' && pickB === null
       ? pickA
