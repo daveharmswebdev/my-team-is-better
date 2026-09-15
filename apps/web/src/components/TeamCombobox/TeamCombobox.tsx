@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, InputHTMLAttributes, KeyboardEvent } from 'react'
 import type { TeamDetail } from '../../lib/api/types'
 import styles from './TeamCombobox.module.css'
 import { matchTeams } from './teamMatching'
@@ -60,6 +60,14 @@ const DEFAULT_MAX_RESULTS = 50
  *    `VerdictError`) remain the correction mechanism for a genuinely
  *    mistyped name -- matching here is substring-only, deliberately not
  *    typo-tolerant.
+ *
+ * One structural rule follows from (2): the `<input>` is the same DOM
+ * element for the component's whole life. The catalog usually lands a
+ * beat after the field is on screen, so a user who has already started
+ * typing must not lose focus or keystrokes when it does (issue #156). The
+ * plain-input and combobox states therefore share one render tree and
+ * differ only in the attributes and handlers switched on -- never in an
+ * early return that would mount a different node.
  */
 export function TeamCombobox({
   label,
@@ -165,26 +173,25 @@ export function TeamCombobox({
 
   // No suggestions to offer: a plain input, with none of the combobox
   // semantics a screen reader would then have to reconcile with an
-  // always-empty listbox.
-  if (teams.length === 0) {
-    return (
-      <div className={styles.field}>
-        <label htmlFor={inputId}>{label}</label>
-        <input
-          id={inputId}
-          className={styles.input}
-          type="text"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          required={required}
-          disabled={disabled}
-          placeholder={placeholder}
-          autoComplete="off"
-        />
-        {hint !== undefined && <p className={styles.hint}>{hint}</p>}
-      </div>
-    )
-  }
+  // always-empty listbox. The attributes are switched on the one `<input>`
+  // below rather than rendered as a second element, so a field the user is
+  // already typing into keeps its focus and value when the catalog lands.
+  const hasSuggestions = teams.length > 0
+  const comboboxProps: InputHTMLAttributes<HTMLInputElement> = hasSuggestions
+    ? {
+        role: 'combobox',
+        'aria-expanded': isOpen,
+        'aria-controls': listboxId,
+        'aria-autocomplete': 'list',
+        'aria-activedescendant': activeDescendant,
+        onChange: handleInputChange,
+        onKeyDown: handleKeyDown,
+        onClick: () => setIsExpanded(true),
+        onBlur: close,
+      }
+    : {
+        onChange: (event) => onChange(event.target.value),
+      }
 
   return (
     <div className={styles.field}>
@@ -194,20 +201,12 @@ export function TeamCombobox({
           id={inputId}
           className={styles.input}
           type="text"
-          role="combobox"
-          aria-expanded={isOpen}
-          aria-controls={listboxId}
-          aria-autocomplete="list"
-          aria-activedescendant={activeDescendant}
           value={value}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onClick={() => setIsExpanded(true)}
-          onBlur={close}
           required={required}
           disabled={disabled}
           placeholder={placeholder}
           autoComplete="off"
+          {...comboboxProps}
         />
         {isOpen && (
           <ul
@@ -246,11 +245,13 @@ export function TeamCombobox({
           </ul>
         )}
       </div>
-      <div role="status" className={styles.srOnly}>
-        {isOpen
-          ? `${matches.length} ${matches.length === 1 ? 'team' : 'teams'} match`
-          : ''}
-      </div>
+      {hasSuggestions && (
+        <div role="status" className={styles.srOnly}>
+          {isOpen
+            ? `${matches.length} ${matches.length === 1 ? 'team' : 'teams'} match`
+            : ''}
+        </div>
+      )}
       {hint !== undefined && <p className={styles.hint}>{hint}</p>}
     </div>
   )

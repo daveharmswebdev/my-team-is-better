@@ -182,12 +182,55 @@ describe('TeamCombobox', () => {
 
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
     const input = screen.getByRole('textbox', { name: /team/i })
+    // None of the combobox semantics a screen reader would then have to
+    // reconcile with an always-empty listbox: no role, no popup wiring, no
+    // status region announcing match counts.
+    for (const attribute of [
+      'role',
+      'aria-expanded',
+      'aria-controls',
+      'aria-autocomplete',
+      'aria-activedescendant',
+    ]) {
+      expect(input).not.toHaveAttribute(attribute)
+    }
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
 
     await user.type(input, 'Texs')
+    await user.keyboard('{ArrowDown}')
 
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
     expect(onChange).toHaveBeenLastCalledWith('Texs')
     expect(input).toHaveValue('Texs')
+  })
+
+  it('test_catalog_arrival_keeps_the_focused_input_and_its_value (issue #156)', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const { rerender } = render(<Harness teams={[]} onChange={onChange} />)
+
+    const input = screen.getByRole('textbox', { name: /team/i })
+    await user.click(input)
+    await user.type(input, 'Tex')
+    expect(document.activeElement).toBe(input)
+
+    // `/api/teams` resolves mid-keystroke.
+    rerender(<Harness teams={CFB_TEAMS} onChange={onChange} />)
+
+    // The very same element (identity, not just role) is still focused,
+    // still holds what was typed, and has become the combobox.
+    expect(document.activeElement).toBe(input)
+    expect(screen.getByRole('combobox', { name: /team/i })).toBe(input)
+    expect(input).toHaveValue('Tex')
+
+    await user.keyboard('as')
+
+    expect(input).toHaveValue('Texas')
+    expect(onChange).toHaveBeenLastCalledWith('Texas')
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    expect(input).toHaveAttribute('aria-expanded', 'true')
+    expect(optionLabels()[0]).toBe('Texas · Longhorns')
   })
 
   it('matches diacritics insensitively: "san jose" finds San José State', async () => {
