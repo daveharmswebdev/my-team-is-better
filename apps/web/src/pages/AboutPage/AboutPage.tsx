@@ -14,6 +14,21 @@ type CreditsState =
   | { status: 'error'; message: string }
 
 /**
+ * The sentence that leads into each data source's credit, keyed by the
+ * credit's `id` (issue #296) -- never by its position or its name. Until the
+ * player stats arrived every source was introduced as "Every game result
+ * behind these rankings comes from ...", which is false for a source of
+ * player stats. A source with no entry here gets no lead-in at all rather
+ * than a sentence that might not fit it.
+ */
+const DATA_SOURCE_LEAD: Readonly<Record<string, string | undefined>> = {
+  cfbd: 'Every college game result behind these rankings comes from',
+  nflverse_games: 'Every NFL game result behind these rankings comes from',
+  nflverse_player_stats:
+    'The NFL player stats on the leaders and player pages come from',
+}
+
+/**
  * The element id a location hash names. A fragment that is not valid
  * percent-encoding (`#100%`) makes `decodeURIComponent` throw, and an
  * uncaught error in an effect unmounts the page (there is no error boundary),
@@ -154,7 +169,8 @@ export function AboutPage() {
         )}
       </section>
 
-      <section className={styles.section}>
+      {/* `id="data"`: the NFL player pages link here when their credit can't load (issue #296). */}
+      <section id="data" className={styles.section}>
         <h2 className={styles.heading}>The Data</h2>
         {state.status === 'loading' && (
           <p className={styles.loading}>Loading source&hellip;</p>
@@ -163,15 +179,18 @@ export function AboutPage() {
           <p className={styles.error}>{state.message}</p>
         )}
         {state.status === 'success' &&
-          state.credits.data_sources.map((source) => (
-            <p className={styles.body} key={source.url}>
-              Every game result behind these rankings comes from{' '}
-              <a href={source.url} target="_blank" rel="noreferrer">
-                {source.name}
-              </a>
-              . {source.note}
-            </p>
-          ))}
+          state.credits.data_sources.map((source) => {
+            const lead = DATA_SOURCE_LEAD[source.id]
+            return (
+              <p className={styles.body} key={source.id}>
+                {lead !== undefined && `${lead} `}
+                <a href={source.url} target="_blank" rel="noreferrer">
+                  {source.name}
+                </a>
+                . {source.note}
+              </p>
+            )
+          })}
       </section>
     </main>
   )

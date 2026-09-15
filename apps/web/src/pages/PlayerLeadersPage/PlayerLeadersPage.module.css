@@ -1,0 +1,93 @@
+.wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-block: var(--sp-8) var(--sp-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.8rem, 6vw, 2.6rem);
+  color: var(--leather-strong);
+}
+
+.lede {
+  font-style: italic;
+  font-size: 1.05rem;
+  color: var(--ink-muted);
+  max-width: 60ch;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: 72ch;
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 4px solid var(--gold);
+  background: var(--surface-alt);
+  border-radius: var(--radius);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.notesHeading {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--leather);
+}
+
+.status {
+  min-height: 1.5em;
+  margin-bottom: calc(-1 * var(--sp-4));
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--leather);
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--brick);
+  font-weight: 600;
+}
+
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  color: var(--ink-muted);
+}
+
+.topButton {
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border: 1.5px solid var(--leather);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--leather-strong);
+  font-family: var(--font-label);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.topButton:hover {
+  background: var(--leather);
+  color: var(--on-leather);
+}

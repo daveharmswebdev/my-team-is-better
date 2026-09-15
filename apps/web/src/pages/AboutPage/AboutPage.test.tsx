@@ -52,16 +52,32 @@ const credits: CreditsOut = {
   methodologies: [keener, elo],
   data_sources: [
     {
+      id: 'cfbd',
       name: 'CollegeFootballData.com (CFBD)',
       url: 'https://collegefootballdata.com/test-mock',
       note: 'All game results are ingested from the CFBD API. This project performs no independent data collection and claims no ownership of the underlying game data.',
     },
     {
+      id: 'nflverse_games',
       name: 'nflverse (Lee Sharpe)',
       url: 'https://github.com/nflverse/nflverse-data/test-mock',
       note: 'NFL game results are ingested from nflverse, built on play-by-play data originated by Lee Sharpe.',
     },
+    {
+      id: 'nflverse_player_stats',
+      name: 'nflverse player stats (nflfastR, by Sebastian Carl and Ben Baldwin)',
+      url: 'https://github.com/nflverse/nflfastR/test-mock',
+      note: 'NFL player stats are ingested from nflverse, built with nflfastR.',
+    },
   ],
+}
+
+/** The paragraph that credits the source whose link is named `name`. */
+async function creditParagraph(name: string): Promise<HTMLElement> {
+  const link = await screen.findByRole('link', { name })
+  const paragraph = link.closest('p')
+  expect(paragraph).not.toBeNull()
+  return paragraph as HTMLElement
 }
 
 describe('AboutPage', () => {
@@ -170,6 +186,83 @@ describe('AboutPage', () => {
         screen.getByText(source.note, { exact: false }),
       ).toBeInTheDocument()
     }
+  })
+
+  /**
+   * Issue #296: a third credit (the player stats) made "Every game result
+   * behind these rankings comes from ..." false for one of them, so each
+   * source's lead-in is chosen by its `id`, never by its position or name.
+   */
+  describe('data-source copy per credit id (issue #296)', () => {
+    const [cfbd, nflGames, playerStats] = credits.data_sources as [
+      (typeof credits.data_sources)[number],
+      (typeof credits.data_sources)[number],
+      (typeof credits.data_sources)[number],
+    ]
+
+    async function expectCopyPerId() {
+      expect(await creditParagraph(cfbd.name)).toHaveTextContent(
+        `Every college game result behind these rankings comes from ${cfbd.name}. ${cfbd.note}`,
+      )
+      expect(await creditParagraph(nflGames.name)).toHaveTextContent(
+        `Every NFL game result behind these rankings comes from ${nflGames.name}. ${nflGames.note}`,
+      )
+      const players = await creditParagraph(playerStats.name)
+      expect(players).toHaveTextContent(
+        `The NFL player stats on the leaders and player pages come from ${playerStats.name}. ${playerStats.note}`,
+      )
+      expect(players).not.toHaveTextContent(/every game result/i)
+    }
+
+    it('gives each source the lead-in that fits it', async () => {
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await expectCopyPerId()
+    })
+
+    it('keeps each lead-in with its id when the API reorders the sources', async () => {
+      mockedFetchCredits.mockResolvedValue({
+        ...credits,
+        data_sources: [playerStats, cfbd, nflGames],
+      })
+
+      render(<AboutPage />)
+
+      await expectCopyPerId()
+    })
+
+    it('never claims every game result for a source it does not know', async () => {
+      mockedFetchCredits.mockResolvedValue({
+        ...credits,
+        data_sources: [
+          {
+            id: 'some_future_source',
+            name: 'A future source',
+            url: 'https://example.com/future',
+            note: 'Its note.',
+          },
+        ],
+      })
+
+      render(<AboutPage />)
+
+      const paragraph = await creditParagraph('A future source')
+      expect(paragraph).toHaveTextContent('A future source. Its note.')
+      expect(paragraph).not.toHaveTextContent(/every .*game result/i)
+    })
+
+    it('gives The Data section the id "data", for the player pages\' fallback link', async () => {
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await creditParagraph(cfbd.name)
+      expect(
+        screen.getByRole('heading', { name: 'The Data' }).closest('section'),
+      ).toHaveAttribute('id', 'data')
+    })
   })
 
   it('shows an error state when the credits request fails', async () => {

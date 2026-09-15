@@ -1,0 +1,17 @@
+.credit {
+  max-width: 72ch;
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--rule);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.credit a {
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.note {
+  color: var(--ink-muted);
+}

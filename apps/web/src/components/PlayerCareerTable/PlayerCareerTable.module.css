@@ -1,0 +1,92 @@
+/* Same table treatment as PlayerLeadersTable.module.css, from the design tokens. */
+.scroll {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.caption {
+  caption-side: top;
+  text-align: left;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--leather);
+}
+
+.table th,
+.table td {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.table thead th {
+  font-family: var(--font-label);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border-top: none;
+  border-bottom: 1px solid var(--rule-strong);
+  vertical-align: bottom;
+}
+
+.table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.season {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.teams {
+  min-width: 12rem;
+}
+
+.teams > span {
+  display: block;
+}
+
+/* The per-line disclosure: plain, readable, and allowed to wrap. */
+.undercount {
+  margin-top: var(--sp-1);
+  max-width: 22rem;
+  white-space: normal;
+  font-size: 0.82rem;
+  color: var(--brick);
+}
+
+.table tfoot th,
+.table tfoot td {
+  border-top: 2px solid var(--rule-strong);
+  font-weight: 700;
+}
+
+.totals {
+  font-family: var(--font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.notRecorded {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--ink-muted);
+}

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 import { AppShell } from './AppShell'
@@ -29,6 +29,15 @@ describe('AppShell', () => {
     expect(
       screen.getByRole('link', { name: /how this works/i }),
     ).toHaveAttribute('href', '/about')
+  })
+
+  it('links to the NFL leaders from the nav (issue #296)', () => {
+    renderWithRoute('/')
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    expect(
+      within(nav).getByRole('link', { name: 'NFL Leaders' }),
+    ).toHaveAttribute('href', '/nfl/leaders')
   })
 
   it('links home from the site name', () => {

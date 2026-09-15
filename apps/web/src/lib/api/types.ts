@@ -235,6 +235,12 @@ export interface CreditsMethodologyOut {
 }
 
 export interface CreditsDataSourceOut {
+  /**
+   * The source's stable id (issue #296): `'cfbd'`, `'nflverse_games'`,
+   * `'nflverse_player_stats'` today. Pick a credit or its copy by this, never
+   * by `name` (which can be reworded) or by position.
+   */
+  id: string
   name: string
   url: string
   note: string
@@ -248,6 +254,111 @@ export interface CreditsOut {
    */
   methodologies: CreditsMethodologyOut[]
   data_sources: CreditsDataSourceOut[]
+}
+
+// ---------------------------------------------------------------------------
+// players -- mirrors apps/api/src/api/models.py's player read layer (issue
+// #296): `GET /api/players/leaders` and `GET /api/players/{player_id}`.
+// ---------------------------------------------------------------------------
+
+/**
+ * The engine's `PlayerSeasonType` literal, in its order. Not in
+ * `apps/api/openapi-vocabularies.json` (only `sport` and `method` are
+ * published), so nothing checks this list against the API yet; it is copied
+ * from `cfb_strength.contracts`.
+ */
+export const PLAYER_SEASON_TYPES = ['regular', 'postseason'] as const
+
+export type PlayerSeasonType = (typeof PLAYER_SEASON_TYPES)[number]
+
+/** The engine's `PlayerLeaderSort` literal, in its order; always descending. Same caveat as `PLAYER_SEASON_TYPES`. */
+export const PLAYER_LEADER_SORTS = [
+  'passing_yards',
+  'passing_tds',
+  'wins',
+] as const
+
+export type PlayerLeaderSort = (typeof PLAYER_LEADER_SORTS)[number]
+
+/** A W-L-T as the listed starter. `starts` is the API's own `wins + losses + ties`: render it, don't re-derive it. */
+export interface StarterRecordOut {
+  wins: number
+  losses: number
+  ties: number
+  starts: number
+}
+
+/**
+ * Every stat is `null` when the source did not record it -- never 0. Sack
+ * stats are mirrored faithfully but not shown in v1: the stored sack yards
+ * are negative against the column's name (#298).
+ */
+export interface PlayerStatsOut {
+  completions: number | null
+  attempts: number | null
+  passing_yards: number | null
+  passing_tds: number | null
+  passing_interceptions: number | null
+  sacks_suffered: number | null
+  sack_yards_lost: number | null
+  carries: number | null
+  rushing_yards: number | null
+  rushing_tds: number | null
+}
+
+export interface PlayerLeaderRowOut {
+  /** Competition rank over the whole population (ties share it: 1, 2, 2, 4); `null` only when the sort value is `null`. */
+  rank: number | null
+  player_id: number
+  display_name: string
+  position: string | null
+  first_season: number
+  last_season: number
+  games: number | null
+  record: StarterRecordOut
+  stats: PlayerStatsOut
+}
+
+export interface PlayerLeadersOut {
+  sport: Sport
+  season_type: PlayerSeasonType
+  sort: PlayerLeaderSort
+  limit: number
+  offset: number
+  /** The whole qualifying population's size, so a client can page. */
+  total: number
+  rows: PlayerLeaderRowOut[]
+}
+
+export interface PlayerSeasonLineOut {
+  season: number
+  season_type: PlayerSeasonType
+  teams: string[]
+  games: number | null
+  record: StarterRecordOut
+  stats: PlayerStatsOut
+  /** Completed games of this line's teams with no player stat lines at all, which these totals therefore undercount. */
+  games_without_stat_lines: number
+}
+
+export interface PlayerCareerTotalsOut {
+  season_type: PlayerSeasonType
+  seasons: number
+  games: number | null
+  record: StarterRecordOut
+  stats: PlayerStatsOut
+}
+
+export interface PlayerCareerOut {
+  sport: Sport
+  player_id: number
+  display_name: string
+  position: string | null
+  /** Chronological; regular season before postseason within a season. */
+  seasons: PlayerSeasonLineOut[]
+  /** `null` when the player has no season line of that type. */
+  regular_season: PlayerCareerTotalsOut | null
+  postseason: PlayerCareerTotalsOut | null
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +529,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function isSport(value: unknown): value is Sport {
   // Widened to `readonly unknown[]` so `includes` accepts an unvalidated value.
   return (SPORTS as readonly unknown[]).includes(value)
+}
+
+/**
+ * 404 from `GET /api/players/{player_id}` (issue #296): no player with that id
+ * in that sport. Echoes what was asked, like `UnknownTeamErrorBody`.
+ */
+export interface UnknownPlayerErrorBody {
+  error: 'unknown_player'
+  player_id: number
+  sport: Sport
+}
+
+export function isUnknownPlayerErrorBody(
+  value: unknown,
+): value is UnknownPlayerErrorBody {
+  return (
+    isRecord(value) &&
+    value['error'] === 'unknown_player' &&
+    typeof value['player_id'] === 'number' &&
+    isSport(value['sport'])
+  )
+}
+
+export function isPlayerSeasonType(value: unknown): value is PlayerSeasonType {
+  // Widened to `readonly unknown[]` so `includes` accepts an unvalidated value.
+  return (PLAYER_SEASON_TYPES as readonly unknown[]).includes(value)
+}
+
+export function isPlayerLeaderSort(value: unknown): value is PlayerLeaderSort {
+  return (PLAYER_LEADER_SORTS as readonly unknown[]).includes(value)
 }
 
 export function isVerdictErrorBody(value: unknown): value is VerdictErrorBody {
