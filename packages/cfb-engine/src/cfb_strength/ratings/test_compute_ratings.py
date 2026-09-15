@@ -23,6 +23,7 @@ from cfb_strength.ratings.compute_ratings import (
     main,
 )
 from cfb_strength.ratings.elo import (
+    _MIN_DENOM_FRACTION,
     ELO_CONFIGS,
     EloRating,
     rating_shift,
@@ -1128,12 +1129,21 @@ def _assert_stored_ledger_matches_ratings(conn: sqlite3.Connection, year: int, s
     exactly the displayed teams, and an exact chain ending on each rating."""
     cfg = ELO_CONFIGS[sport]
     configs = conn.execute(
-        "SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr "
+        "SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr, "
+        "mov_denom_floor_fraction "
         "FROM elo_ledger_configs WHERE year = ? AND method = 'elo' AND sport = ?",
         (year, sport),
     ).fetchall()
     assert [tuple(r) for r in configs] == [
-        (cfg.initial, cfg.k, cfg.hfa, cfg.scale, cfg.mov_scale, cfg.mov_autocorr)
+        (
+            cfg.initial,
+            cfg.k,
+            cfg.hfa,
+            cfg.scale,
+            cfg.mov_scale,
+            cfg.mov_autocorr,
+            _MIN_DENOM_FRACTION,
+        )
     ]
 
     ratings = {
@@ -1228,6 +1238,34 @@ def test_stored_elo_ledger_round_trips_the_in_memory_ledger(tmp_path: Path) -> N
     conn.close()
 
 
+def test_stored_elo_config_row_carries_the_floor_fraction_the_walk_ran_with(
+    tmp_path: Path,
+) -> None:
+    """Issue #194: the config row states the margin-of-victory denominator
+    floor as the constant the walk clamped with, so no reader of the row
+    has to hard-code 'half'. It is the in-memory ledger's number, and that
+    number is `elo._MIN_DENOM_FRACTION`."""
+    conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")
+    compute_and_store(conn, 2005, "elo")
+    stored = [
+        r["mov_denom_floor_fraction"]
+        for r in conn.execute(
+            "SELECT mov_denom_floor_fraction FROM elo_ledger_configs "
+            "WHERE year = 2005 AND method = 'elo' AND sport = 'cfb'"
+        ).fetchall()
+    ]
+    assert stored == [_MIN_DENOM_FRACTION]
+
+    expected = EloRating(ELO_CONFIGS["cfb"]).rate(_load_games(conn, 2005, "cfb"))
+    in_memory = {
+        tr.elo_ledger.mov_denom_floor_fraction
+        for tr in expected.values()
+        if tr.elo_ledger is not None
+    }
+    assert in_memory == set(stored)
+    conn.close()
+
+
 def test_keener_and_elo_career_write_no_ledger_rows(tmp_path: Path) -> None:
     conn = _fixture_conn(tmp_path, "cfb_regression.sqlite3")
     assert compute_and_store(conn, 2005, "keener") > 0
@@ -1264,8 +1302,8 @@ def _seed_stale_ledger(conn: sqlite3.Connection, year: int, method: str, sport: 
     ]
     conn.execute(
         "INSERT INTO elo_ledger_configs (year, method, sport, starting_rating, k, hfa, "
-        "scale, mov_scale, mov_autocorr, computed_at) "
-        "VALUES (?, ?, ?, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 'stale')",
+        "scale, mov_scale, mov_autocorr, mov_denom_floor_fraction, computed_at) "
+        "VALUES (?, ?, ?, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 'stale')",
         (year, method, sport),
     )
     conn.execute(

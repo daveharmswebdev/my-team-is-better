@@ -430,7 +430,7 @@ def _store_elo_ledgers(
     computed_at = datetime.now(UTC).isoformat()
     ledgers = [(tr.team_id, tr.elo_ledger) for tr in ratings if tr.elo_ledger is not None]
 
-    config_row: tuple[int, str, str, float, float, float, float, float, float, str] | None
+    config_row: tuple[int, str, str, float, float, float, float, float, float, float, str] | None
     config_row = None
     if ledgers:
         constants = {
@@ -441,6 +441,7 @@ def _store_elo_ledgers(
                 ledger.scale,
                 ledger.mov_scale,
                 ledger.mov_autocorr,
+                ledger.mov_denom_floor_fraction,
             )
             for _, ledger in ledgers
         }
@@ -449,7 +450,9 @@ def _store_elo_ledgers(
                 f"Elo ledgers for {year}/{method}/{sport} disagree on their "
                 f"constants: {sorted(constants)}"
             )
-        ((starting_rating, k, hfa, scale, mov_scale, mov_autocorr),) = constants
+        ((starting_rating, k, hfa, scale, mov_scale, mov_autocorr, mov_denom_floor_fraction),) = (
+            constants
+        )
         config_row = (
             year,
             method,
@@ -460,6 +463,7 @@ def _store_elo_ledgers(
             scale,
             mov_scale,
             mov_autocorr,
+            mov_denom_floor_fraction,
             computed_at,
         )
 
@@ -544,9 +548,9 @@ def _store_elo_ledgers(
                 """
                 INSERT INTO elo_ledger_configs (
                     year, method, sport, starting_rating, k, hfa, scale, mov_scale,
-                    mov_autocorr, computed_at
+                    mov_autocorr, mov_denom_floor_fraction, computed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 config_row,
             )
