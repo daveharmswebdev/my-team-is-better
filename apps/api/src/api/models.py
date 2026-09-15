@@ -156,6 +156,8 @@ class ComparisonRequest(BaseModel):
 
 
 class OpponentResultOut(BaseModel):
+    # `games.id` (issue #218) -- see `cfb_strength.contracts.OpponentResult.game_id`.
+    game_id: int
     opponent_team_id: int
     opponent_name: str
     opponent_rank: int | None
@@ -172,6 +174,7 @@ class OpponentResultOut(BaseModel):
     @classmethod
     def from_dataclass(cls, o: OpponentResult) -> OpponentResultOut:
         return cls(
+            game_id=o.game_id,
             opponent_team_id=o.opponent_team_id,
             opponent_name=o.opponent_name,
             opponent_rank=o.opponent_rank,
@@ -394,6 +397,8 @@ class ComparisonTeamSummaryOut(BaseModel):
 
 
 class HeadToHeadMeetingOut(BaseModel):
+    # `games.id` (issue #218) -- see `cfb_strength.contracts.OpponentResult.game_id`.
+    game_id: int
     week: int | None
     season_type: str
     neutral_site: bool
@@ -406,6 +411,7 @@ class HeadToHeadMeetingOut(BaseModel):
     @classmethod
     def from_dataclass(cls, meeting: HeadToHeadMeeting) -> HeadToHeadMeetingOut:
         return cls(
+            game_id=meeting.game_id,
             week=meeting.week,
             season_type=meeting.season_type,
             neutral_site=meeting.neutral_site,
@@ -438,6 +444,8 @@ class CommonOpponentMeetingOut(BaseModel):
     team's own points -- the order the persona grounding check accepts.
     """
 
+    # `games.id` (issue #218) -- see `cfb_strength.contracts.OpponentResult.game_id`.
+    game_id: int
     result: Literal["W", "L", "T"]
     team_score: int
     opponent_score: int
@@ -447,6 +455,7 @@ class CommonOpponentMeetingOut(BaseModel):
     @classmethod
     def from_dataclass(cls, meeting: CommonOpponentMeeting) -> CommonOpponentMeetingOut:
         return cls(
+            game_id=meeting.game_id,
             result=meeting.result,
             team_score=meeting.team_score,
             opponent_score=meeting.opponent_score,
