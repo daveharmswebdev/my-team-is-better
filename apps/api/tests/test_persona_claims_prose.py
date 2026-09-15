@@ -571,9 +571,9 @@ def test_bar_stool_prose_passes(
 
 
 def test_a_full_narration_renders(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    # Six claims, two of them scores: within the claim cap (#291).
     claims: list[dict[str, object]] = [
         {"id": "rec", "kind": "record", "team": "Alabama"},
-        {"id": "qw", "kind": "count", "of": "quality_wins", "team": "Alabama"},
         {"id": "uga", "kind": "rank", "team": "Georgia"},
         {"id": "s1", "kind": "game_score", "team": "Alabama", "opponent": "Georgia", "result": "W"},
         {"id": "w1", "kind": "when", "team": "Alabama", "opponent": "Georgia", "result": "W"},
@@ -587,11 +587,11 @@ def test_a_full_narration_renders(alabama_2017: str, catalog: tuple[TeamRecord, 
         {"id": "fin", "kind": "when", "team": "Alabama", "opponent": "Auburn", "result": "L"},
     ]
     text = (
-        "Look, {rec} with {qw} quality wins. They beat {uga} {s1} {w1}. "
+        "Look, {rec}. They beat {uga} {s1} {w1}. "
         "The one loss was {iron} to Auburn {fin}, and the numbers are the numbers."
     )
     assert rendered(text, claims, alabama_2017, catalog) == (
-        "Look, Alabama 13-1 with two quality wins. They beat No. 3 Georgia 26-23 in the "
-        "postseason. The one loss was 26-14 to Auburn in the regular-season finale, and the "
+        "Look, Alabama 13-1. They beat No. 3 Georgia 26-23 in the "
+        "postseason. The one loss was 26-14 to Auburn in week 13, and the "
         "numbers are the numbers."
     )

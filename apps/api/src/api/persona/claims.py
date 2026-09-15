@@ -1,7 +1,7 @@
 """Typed narration claims: the narrator's prose carries no numbers of its own
-(issue #290, epic #199, child 1 of 4).
+(issue #290, epic #199, child 1 of 4; wired into production by #291).
 
-The narrator will (from #291) answer with one `submit_narration` tool call,
+The narrator answers with one `submit_narration` tool call,
 `{text, claims[]}`. `text` holds `{id}` placeholders; each claim says what one
 placeholder is ("Alabama's record", "the score of Alabama vs Georgia, a W for
 Alabama"). This module:
@@ -49,8 +49,17 @@ A record, rating or rank always prints its team's name ("Lima Lions 350.00",
 score is resolved from a named team's side with its result, so the winner is
 checked; it prints winner-first. `when` and `where` follow founder decision C
 on #199: they print only what the block records ("in the postseason", "to
-open the season", "in week 11", "at a neutral site"), and a game row that
-isn't neutral cannot yet say home or away (#294).
+open the season" for the first game of a team case's games[], "in week 11",
+"at a neutral site"), and a game row that isn't neutral cannot yet say home or
+away (#294). `when` no longer prints "in the regular-season finale" (founder
+decision on #291, 2026-09-15): the last season_type 'regular' game is a
+conference title game in five of the nine fixture team cases measured, so
+until #300 tells the two apart it prints its week like any other.
+
+At most `MAX_CLAIMS` claims, and at most `MAX_GAME_SCORE_CLAIMS` of kind
+game_score, per submission (founder decision on #291, 2026-09-15): the
+validator enforces the cap, so production and #293's smoke eval share it, and
+the tool description states it.
 
 Accepted gaps, by decision: "first" and "last" are not treated as ordinals,
 so "first half" passes; NFL catalog rows carry no mascot, so an NFL nickname
@@ -62,8 +71,9 @@ Unicode look-alikes and non-English number words are deliberate evasion, out
 of scope; a prose verb that contradicts a claim's result ("beat {g1}" with an
 L) is #291's prompt and #293's measurement, not a check here.
 
-Pure: no IO, no database, no network, no logging. Nothing in production calls
-this yet (#291 wires it), so no PROMPT_VERSION or GROUNDING_VERSION moves.
+Pure: no IO, no database, no network, no logging. Since #291
+`api.persona.narrate` calls it on every narration, and `GROUNDING_VERSION`
+below is these rules' version in the narration cache key.
 """
 
 from __future__ import annotations
@@ -82,6 +92,17 @@ from api.rating_display import display_value
 from api.repositories.teams import TeamRecord
 
 TOOL_NAME: Final = "submit_narration"
+
+# These rules' version in the narration cache key (`api.persona.cache`,
+# issue #291): bump it when a change could accept or reject a narration
+# differently, so narrations checked under the old rules miss.
+GROUNDING_VERSION: Final = "claims-v1"
+
+# The claim cap (founder decision on #291, 2026-09-15). The good 2017 Alabama
+# spike narration used five claims with two scores; a 2019 narration with
+# five bare scores read as a schedule.
+MAX_CLAIMS: Final = 6
+MAX_GAME_SCORE_CLAIMS: Final = 3
 
 KINDS: Final[tuple[str, ...]] = (
     "record",
@@ -213,7 +234,9 @@ def tool_schema() -> dict[str, Any]:
             "count, date or venue as a {id} placeholder in text, and describe it with "
             "one claim; the server prints each value from the fact block. The prose "
             "itself must contain no digits, no spelled-out numbers and no ordinals, and "
-            "must write each team's name exactly as the fact block spells it."
+            "must write each team's name exactly as the fact block spells it. Use at most "
+            f"{MAX_CLAIMS} claims, and at most {MAX_GAME_SCORE_CLAIMS} of them game_score "
+            "claims: keep only the figures that make the case."
         ),
         "input_schema": {
             "type": "object",
@@ -334,6 +357,20 @@ def check_and_render(
     elif not isinstance(raw_claims, list):
         errors.append(f'"claims" must be a list of claim objects, not {_type_name(raw_claims)}')
     else:
+        # The cap comes first, so capped retry feedback always carries it.
+        if len(raw_claims) > MAX_CLAIMS:
+            errors.append(
+                f"{TOOL_NAME} has {len(raw_claims)} claims, over the limit of {MAX_CLAIMS}; "
+                "keep only the figures that make the case"
+            )
+        game_scores = sum(
+            1 for raw in raw_claims if isinstance(raw, dict) and raw.get("kind") == "game_score"
+        )
+        if game_scores > MAX_GAME_SCORE_CLAIMS:
+            errors.append(
+                f"{TOOL_NAME} has {game_scores} game_score claims, over the limit of "
+                f"{MAX_GAME_SCORE_CLAIMS}; keep only the games that make the case"
+            )
         duplicated: set[str] = set()
         for position, raw in enumerate(raw_claims):
             if not isinstance(raw, dict):
@@ -853,13 +890,11 @@ def _when(where: str, game: _Game, block: _Block) -> tuple[str | None, list[str]
     if game.season_type == "postseason":
         return "in the postseason", []
     subject = block.subjects.get(game.team)
-    if subject is not None and subject.games:
-        # games[] is the engine's order: regular season by week, then postseason.
-        if game.key == subject.games[0].key:
-            return "to open the season", []
-        regular = [g for g in subject.games if g.season_type == "regular"]
-        if regular and game.key == regular[-1].key:
-            return "in the regular-season finale", []
+    # games[] is the engine's order: regular season by week, then postseason.
+    # The last regular game prints its week, not "the regular-season finale":
+    # it is often a conference title game, which #300 will tell apart.
+    if subject is not None and subject.games and game.key == subject.games[0].key:
+        return "to open the season", []
     if game.week is not None:
         return f"in week {game.week}", []
     return None, [

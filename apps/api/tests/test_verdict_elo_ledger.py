@@ -42,7 +42,7 @@ import math
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from cfb_strength.contracts import EloLedger
@@ -55,6 +55,10 @@ from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, EloLedgerOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 FIXTURE_ELO_YEARS = [2001, 2003, 2004, 2005, 2013, 2017, 2019]
@@ -94,15 +98,16 @@ TOLERANCE = 1e-9
 
 
 class _RecordingNarrator:
-    """Grounds on the first try (no numbers, no team names) and records the
-    messages it was handed, so the fact block can be read back out."""
+    """Accepted on the first try (no numbers, no team names, no claims) and
+    records the messages it was handed, so the fact block can be read back
+    out."""
 
     def __init__(self) -> None:
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append([dict(m) for m in messages])
-        return "Solid case, no notes."
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
+        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 def _team_case(client: TestClient, team: str, method: str) -> Any:
@@ -361,6 +366,7 @@ def test_elo_career_verdicts_have_no_ledger(method_client: TestClient) -> None:
 def _fact_block(narrator: _RecordingNarrator) -> str:
     assert len(narrator.calls) == 1
     content = narrator.calls[0][0]["content"]
+    assert isinstance(content, str)
     prefix = "FACT BLOCK (JSON):\n"
     assert content.startswith(prefix)
     return content[len(prefix) : content.rindex("\n\ncontested: ")]

@@ -10,8 +10,13 @@ reworded verdict, a corrected score) had to be paid for with a
 leagues, and a change to what the grounding check accepts could not
 invalidate anything at all. Now the key also carries a sha256 of the exact
 block `team_case_fact_block_json` / `comparison_fact_block_json` produce
-and `api.persona.grounding.GROUNDING_VERSION`, so a changed block or
-tightened rules miss exactly the affected entries.
+and the grounding rules' version, so a changed block or tightened rules miss
+exactly the affected entries.
+
+Since issue #291 the rules that decide what may be served are the typed-claim
+validator's, so the version is `api.persona.claims.GROUNDING_VERSION`
+(`claims-v1`), not `api.persona.grounding`'s, which production no longer
+calls.
 
 Both service entry points are driven end to end with `InMemoryNarrationCache`
 and a counting fake narrator against real evidence from the committed
@@ -27,26 +32,28 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 
 from api.config import PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
-from api.persona import service
+from api.persona import claims, grounding, service
 from api.persona.cache import InMemoryNarrationCache, cache_key
-from api.persona.grounding import GROUNDING_VERSION
+from api.persona.claims import GROUNDING_VERSION
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import (
     comparison_fact_block_json,
     narrate_comparison,
     narrate_team_case,
     team_case_fact_block_json,
 )
-from api.repositories.teams import list_all_team_names
+from api.repositories.teams import TeamRecord, list_team_records
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
-# No numbers and no team names: grounded against any fact block, so a
-# second narrator call can only mean a cache miss, never a grounding retry.
+# No numbers, no team names, no claims: accepted against any fact block, so a
+# second narrator call can only mean a cache miss, never a claim retry.
 NARRATION = "Solid case, no notes."
 
 
@@ -54,9 +61,9 @@ class _CountingNarrator:
     def __init__(self) -> None:
         self.calls = 0
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
         self.calls += 1
-        return NARRATION
+        return tool_reply({"text": NARRATION, "claims": []})
 
 
 @pytest.fixture
@@ -69,9 +76,9 @@ def conn() -> Iterator[sqlite3.Connection]:
 
 
 @pytest.fixture
-def known_team_names(conn: sqlite3.Connection) -> list[str]:
-    # What the route derives from the catalog it reads (issue #245).
-    return list_all_team_names(conn, "cfb")
+def catalog(conn: sqlite3.Connection) -> list[TeamRecord]:
+    # What the route reads once and passes in (issues #245, #291).
+    return list_team_records(conn, "cfb")
 
 
 def _case(conn: sqlite3.Connection) -> TeamCaseOut:
@@ -88,7 +95,7 @@ def _comparison(conn: sqlite3.Connection) -> ComparisonResultOut:
 
 def _narrate_case(
     case: TeamCaseOut,
-    known_team_names: list[str],
+    catalog: list[TeamRecord],
     cache: InMemoryNarrationCache,
     narrator: _CountingNarrator,
 ) -> NarrationOut:
@@ -98,7 +105,7 @@ def _narrate_case(
         question_type="team_case",
         method="keener",
         sport="cfb",
-        known_team_names=known_team_names,
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -106,7 +113,7 @@ def _narrate_case(
 
 def _narrate_comparison(
     comparison: ComparisonResultOut,
-    known_team_names: list[str],
+    catalog: list[TeamRecord],
     cache: InMemoryNarrationCache,
     narrator: _CountingNarrator,
 ) -> NarrationOut:
@@ -115,7 +122,7 @@ def _narrate_comparison(
         user_team=None,
         method="keener",
         sport="cfb",
-        known_team_names=known_team_names,
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -127,54 +134,54 @@ def _narrate_comparison(
 
 
 def test_team_case_identical_block_hits_and_changed_block_misses(
-    conn: sqlite3.Connection, known_team_names: list[str]
+    conn: sqlite3.Connection, catalog: list[TeamRecord]
 ) -> None:
     cache = InMemoryNarrationCache()
     narrator = _CountingNarrator()
     case = _case(conn)
 
-    first = _narrate_case(case, known_team_names, cache, narrator)
+    first = _narrate_case(case, catalog, cache, narrator)
     assert first.cached is False
     assert narrator.calls == 1
 
     # Byte-identical block (a fresh instance built the same way): a hit.
-    again = _narrate_case(_case(conn), known_team_names, cache, narrator)
+    again = _narrate_case(_case(conn), catalog, cache, narrator)
     assert again.cached is True
     assert narrator.calls == 1
 
     # One field's content differs, everything in the old key is unchanged.
     changed = case.model_copy(update={"wins": case.wins + 1})
     assert team_case_fact_block_json(changed) != team_case_fact_block_json(case)
-    miss = _narrate_case(changed, known_team_names, cache, narrator)
+    miss = _narrate_case(changed, catalog, cache, narrator)
     assert miss.cached is False
     assert narrator.calls == 2
 
 
 def test_comparison_identical_block_hits_and_changed_block_misses(
-    conn: sqlite3.Connection, known_team_names: list[str]
+    conn: sqlite3.Connection, catalog: list[TeamRecord]
 ) -> None:
     cache = InMemoryNarrationCache()
     narrator = _CountingNarrator()
     comparison = _comparison(conn)
 
-    first = _narrate_comparison(comparison, known_team_names, cache, narrator)
+    first = _narrate_comparison(comparison, catalog, cache, narrator)
     assert first.cached is False
     assert narrator.calls == 1
 
-    again = _narrate_comparison(_comparison(conn), known_team_names, cache, narrator)
+    again = _narrate_comparison(_comparison(conn), catalog, cache, narrator)
     assert again.cached is True
     assert narrator.calls == 1
 
     # The verdict's wording changed; teams, year, method and sport did not.
     reworded = comparison.model_copy(update={"verdict": comparison.verdict + " Barely."})
     assert comparison_fact_block_json(reworded) != comparison_fact_block_json(comparison)
-    miss = _narrate_comparison(reworded, known_team_names, cache, narrator)
+    miss = _narrate_comparison(reworded, catalog, cache, narrator)
     assert miss.cached is False
     assert narrator.calls == 2
 
 
 def test_a_narration_cached_for_one_block_is_never_served_for_another(
-    conn: sqlite3.Connection, known_team_names: list[str]
+    conn: sqlite3.Connection, catalog: list[TeamRecord]
 ) -> None:
     """The two blocks' entries coexist: after both have been narrated, each
     is a hit on its own block and neither is served for the other."""
@@ -183,12 +190,12 @@ def test_a_narration_cached_for_one_block_is_never_served_for_another(
     case = _case(conn)
     changed = case.model_copy(update={"wins": case.wins + 1})
 
-    _narrate_case(case, known_team_names, cache, narrator)
-    _narrate_case(changed, known_team_names, cache, narrator)
+    _narrate_case(case, catalog, cache, narrator)
+    _narrate_case(changed, catalog, cache, narrator)
     assert narrator.calls == 2
 
-    assert _narrate_case(case, known_team_names, cache, narrator).cached is True
-    assert _narrate_case(changed, known_team_names, cache, narrator).cached is True
+    assert _narrate_case(case, catalog, cache, narrator).cached is True
+    assert _narrate_case(changed, catalog, cache, narrator).cached is True
     assert narrator.calls == 2
 
 
@@ -198,17 +205,17 @@ def test_a_narration_cached_for_one_block_is_never_served_for_another(
 
 
 def test_service_writes_under_the_key_built_from_the_production_fact_block(
-    conn: sqlite3.Connection, known_team_names: list[str]
+    conn: sqlite3.Connection, catalog: list[TeamRecord]
 ) -> None:
     """Guards every test that looks a service-written entry up by key:
     the key is `cache_key` over the block the service's own function
-    builds, with `PROMPT_VERSION` and `GROUNDING_VERSION`."""
+    builds, with `PROMPT_VERSION` and the claims' `GROUNDING_VERSION`."""
     cache = InMemoryNarrationCache()
     case = _case(conn)
     comparison = _comparison(conn)
 
-    _narrate_case(case, known_team_names, cache, _CountingNarrator())
-    _narrate_comparison(comparison, known_team_names, cache, _CountingNarrator())
+    _narrate_case(case, catalog, cache, _CountingNarrator())
+    _narrate_comparison(comparison, catalog, cache, _CountingNarrator())
 
     case_key = cache_key(
         question_type="team_case",
@@ -237,18 +244,20 @@ def test_service_writes_under_the_key_built_from_the_production_fact_block(
 
 
 # ---------------------------------------------------------------------------
-# (c) GROUNDING_VERSION exists and the service keys on it
+# (c) the grounding version the service keys on is the claims' (#291)
 # ---------------------------------------------------------------------------
 
 
-def test_grounding_version_is_a_non_empty_string() -> None:
-    assert isinstance(GROUNDING_VERSION, str)
-    assert GROUNDING_VERSION
+def test_the_service_keys_on_the_claims_grounding_version() -> None:
+    keyed_on = vars(service)["GROUNDING_VERSION"]
+    assert GROUNDING_VERSION == "claims-v1"
+    assert keyed_on == claims.GROUNDING_VERSION
+    assert keyed_on != grounding.GROUNDING_VERSION
 
 
 def test_a_new_grounding_version_misses_every_entry_checked_under_the_old_one(
     conn: sqlite3.Connection,
-    known_team_names: list[str],
+    catalog: list[TeamRecord],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Bumping the constant the service reads is enough: no PROMPT_VERSION
@@ -257,12 +266,12 @@ def test_a_new_grounding_version_misses_every_entry_checked_under_the_old_one(
     narrator = _CountingNarrator()
     case = _case(conn)
 
-    _narrate_case(case, known_team_names, cache, narrator)
-    assert _narrate_case(case, known_team_names, cache, narrator).cached is True
+    _narrate_case(case, catalog, cache, narrator)
+    assert _narrate_case(case, catalog, cache, narrator).cached is True
     assert narrator.calls == 1
 
     monkeypatch.setattr(service, "GROUNDING_VERSION", GROUNDING_VERSION + "-tightened")
 
-    bumped = _narrate_case(case, known_team_names, cache, narrator)
+    bumped = _narrate_case(case, catalog, cache, narrator)
     assert bumped.cached is False
     assert narrator.calls == 2

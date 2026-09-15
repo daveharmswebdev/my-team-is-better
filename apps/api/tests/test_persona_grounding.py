@@ -12,15 +12,17 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.models import ComparisonResultOut, Method, Sport, TeamCaseOut
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.grounding import _mismatch_message, find_ungrounded_tokens
 from api.persona.narrate import NarrationResult, narrate
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
-from api.repositories.teams import list_all_team_names
+from api.repositories.teams import list_all_team_names, list_team_records
 
 FACT_BLOCK = (
     '{"team_name": "Texas", "year": 2005, "wins": 13, "losses": 0, "rank": 1, '
@@ -917,13 +919,13 @@ def test_real_game_score_equal_to_a_reversed_record_is_not_read_as_a_record() ->
 
 
 class _ScriptedNarrator:
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
         self.responses = list(responses)
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append(messages)
-        return self.responses.pop(0)
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
+        return tool_reply(self.responses.pop(0))
 
 
 def test_two_tuple_mismatch_lists_both_real_scores_ascending() -> None:
@@ -965,27 +967,61 @@ def test_retry_feedback_lists_every_real_score_of_a_twice_met_rival(
     """End to end through `narrate()`: on the Kilo Kings vs Lima Lions
     comparison, Mike Mustangs is the common opponent Kilo Kings met twice
     (both meetings carried since #249) and Lima Lions met once, so the name
-    holds three real tuples. A wrong-order rematch score in the first draft
-    must send the retry a user turn naming all three, not just the wrong
-    pair."""
+    holds three real scores. A wrong-order rematch score typed into the first
+    draft must send the retry feedback naming all three, not just the wrong
+    pair.
+
+    Since #291 production narration goes through typed claims, so that
+    feedback is the claim validator's (a typed number is rejected with what
+    the block holds for the teams its sentence names), carried by an
+    `is_error` tool_result, and the retry claims the score instead of typing
+    it. #292 retires this file's lexical checks."""
     block = _comparison_block(nfl_conn, 2023, "Kilo Kings", "Lima Lions", "nfl")
-    grounded = "Kilo Kings beat Mike Mustangs 31-14 in the rematch."
-    narrator = _ScriptedNarrator(["Kilo Kings beat Mike Mustangs 14-31 in the rematch.", grounded])
+    typed: dict[str, object] = {
+        "text": "Kilo Kings beat Mike Mustangs 14-31 in the rematch.",
+        "claims": [],
+    }
+    claimed: dict[str, object] = {
+        "text": "Kilo Kings beat Mike Mustangs {g} in the rematch.",
+        "claims": [
+            {
+                "id": "g",
+                "kind": "game_score",
+                "team": "Kilo Kings",
+                "opponent": "Mike Mustangs",
+                "result": "W",
+                "week": 4,
+                "season_type": "regular",
+            }
+        ],
+    }
+    narrator = _ScriptedNarrator([typed, claimed])
 
     result = narrate(
         fact_block_json=block,
         user_team=None,
         contested=False,
-        known_team_names=list_all_team_names(nfl_conn, "nfl"),
+        catalog=list_team_records(nfl_conn, "nfl"),
         narrator=narrator,
         fallback_text="Kilo Kings over Lima Lions, says the math.",
     )
 
-    assert result == NarrationResult(text=grounded, is_fallback=False)
-    assert len(narrator.calls) == 2
-    feedback = narrator.calls[1][-1]
-    assert feedback["role"] == "user"
-    assert (
-        "Mike Mustangs 14-31 matches no game; "
-        "Mike Mustangs's real scores are 17-17, 27-10 and 31-14" in feedback["content"]
+    assert result == NarrationResult(
+        text="Kilo Kings beat Mike Mustangs 31-14 in the rematch.", is_fallback=False
     )
+    assert len(narrator.calls) == 2
+    retry_turn = narrator.calls[1][-1]
+    assert retry_turn["role"] == "user"
+    content = retry_turn["content"]
+    assert not isinstance(content, str)
+    (tool_result,) = list(content)
+    assert isinstance(tool_result, dict)
+    feedback = dict(tool_result)["content"]
+    assert isinstance(feedback, str)
+    assert '"14-31"' in feedback
+    for real_score in (
+        "Kilo Kings vs Mike Mustangs: T 17-17",
+        "Kilo Kings vs Mike Mustangs: W 31-14",
+        "Lima Lions vs Mike Mustangs: W 27-10",
+    ):
+        assert real_score in feedback

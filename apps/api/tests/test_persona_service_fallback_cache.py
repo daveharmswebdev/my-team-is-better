@@ -1,7 +1,7 @@
 """Issue #65: `api.persona.service` must never cache the templated fallback.
 
-A fallback (a Claude transport error, or two grounding failures) is served to
-the user with `cached=False` and not written to the cache, so the next
+A fallback (a Claude transport error, or two rejected submissions) is served
+to the user with `cached=False` and not written to the cache, so the next
 identical request asks the narrator again. A legacy cache row whose text is
 exactly this request's fallback text (written before the fix) is treated as a
 miss, and a later successful narration overwrites it.
@@ -9,6 +9,8 @@ miss, and a later successful narration overwrites it.
 Both service entry points (`narrate_team_case`, `narrate_comparison`) are
 exercised against real evidence from the committed fixture, with
 `InMemoryNarrationCache` and a scripted narrator: no Postgres, no Claude.
+Since issue #291 the narrator submits typed-claim tool calls, and what may be
+served or cached is decided by `api.persona.claims`.
 """
 
 from __future__ import annotations
@@ -20,43 +22,45 @@ from pathlib import Path
 import anthropic
 import httpx2
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 
 from api.config import PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
+from api.persona.claims import GROUNDING_VERSION
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
-from api.persona.grounding import GROUNDING_VERSION
 from api.persona.service import (
     comparison_fact_block_json,
     narrate_comparison,
     narrate_team_case,
     team_case_fact_block_json,
 )
-from api.repositories.teams import list_all_team_names
+from api.repositories.teams import list_team_records
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
 ROUTES = ["team_case", "compare"]
 
-# No numbers and no team names: grounded against any fact block.
+# No numbers, no team names, no claims: accepted against any fact block.
 REAL_NARRATION = "Solid case, no notes."
-# "987654" appears in no fact block, so this fails grounding every time.
-UNGROUNDED_NARRATION = "They won that one by 987654 points."
+# A number typed into the prose instead of claimed: rejected every time.
+REJECTED_NARRATION = "They won that one by 987654 points."
 
 
 class _ScriptedNarrator:
     def __init__(self, responses: list[str] | None = None, error: Exception | None = None) -> None:
         self.responses = list(responses or [])
         self.error = error
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
         self.calls.append(messages)
         if self.error is not None:
             raise self.error
-        return self.responses.pop(0)
+        return tool_reply({"text": self.responses.pop(0), "claims": []})
 
 
 @pytest.fixture
@@ -86,9 +90,8 @@ def _ask(
     cache: InMemoryNarrationCache,
     narrator: _ScriptedNarrator,
 ) -> NarrationOut:
-    # The route derives this from the catalog it reads for `user_team`
-    # (issue #245); here it is the same universe, read directly.
-    known_team_names = list_all_team_names(conn, "cfb")
+    # The catalog the route reads once for `user_team` (issues #245, #291).
+    catalog = list_team_records(conn, "cfb")
     if route == "team_case":
         return narrate_team_case(
             _case(conn),
@@ -96,7 +99,7 @@ def _ask(
             question_type="team_case",
             method="keener",
             sport="cfb",
-            known_team_names=known_team_names,
+            catalog=catalog,
             cache=cache,
             narrator=narrator,
         )
@@ -105,7 +108,7 @@ def _ask(
         user_team=None,
         method="keener",
         sport="cfb",
-        known_team_names=known_team_names,
+        catalog=catalog,
         cache=cache,
         narrator=narrator,
     )
@@ -161,11 +164,11 @@ def test_real_narration_is_cached_under_the_expected_key(
 
 
 @pytest.mark.parametrize("route", ROUTES)
-def test_grounding_fallback_is_served_uncached_and_not_stored(
+def test_rejected_submission_fallback_is_served_uncached_and_not_stored(
     route: str, conn: sqlite3.Connection
 ) -> None:
     cache = InMemoryNarrationCache()
-    narrator = _ScriptedNarrator([UNGROUNDED_NARRATION, UNGROUNDED_NARRATION])
+    narrator = _ScriptedNarrator([REJECTED_NARRATION, REJECTED_NARRATION])
 
     out = _ask(route, conn, cache, narrator)
 
@@ -197,7 +200,7 @@ def test_request_after_a_fallback_asks_the_narrator_again(
     happens to catch a fallback that was wrongly cached. Hence the empty-cache
     check between the two requests."""
     cache = InMemoryNarrationCache()
-    narrator = _ScriptedNarrator([UNGROUNDED_NARRATION, UNGROUNDED_NARRATION, REAL_NARRATION])
+    narrator = _ScriptedNarrator([REJECTED_NARRATION, REJECTED_NARRATION, REAL_NARRATION])
 
     first = _ask(route, conn, cache, narrator)
 
@@ -235,12 +238,12 @@ def test_legacy_cached_fallback_is_a_miss_and_is_overwritten_by_a_real_narration
 def test_legacy_cached_fallback_that_fails_again_is_served_uncached(
     route: str, conn: sqlite3.Connection
 ) -> None:
-    """The accepted #65 trade-off: a key that keeps failing grounding costs up
+    """The accepted #65 trade-off: a key that keeps being rejected costs up
     to two narrator calls per request instead of being pinned to the fallback."""
     fallback = _fallback_text(route, conn)
     cache = InMemoryNarrationCache()
     cache.set(_key(route, conn), CachedNarration(text=fallback, contested=False))
-    narrator = _ScriptedNarrator([UNGROUNDED_NARRATION, UNGROUNDED_NARRATION])
+    narrator = _ScriptedNarrator([REJECTED_NARRATION, REJECTED_NARRATION])
 
     out = _ask(route, conn, cache, narrator)
 

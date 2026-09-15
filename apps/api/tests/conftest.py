@@ -50,25 +50,33 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.sport_fixture import make_sport_fixture_db
 
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
+
+    from api.persona.claude_client import NarratorReply
+
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
 
 class _StubNarrator:
-    """Default `Narrator` test double for the base `client` fixture. Its
-    response has no numbers and no proper-noun team names, so it always
-    passes the grounding check regardless of the fact block it's given,
-    and never needs a retry -- `test_verdict.py` only cares that a
+    """Default `Narrator` test double for the base `client` fixture. It
+    submits a line with no numbers, no proper-noun team names and no claims,
+    so the claim validator accepts it regardless of the fact block it's
+    given, and it never needs a retry -- `test_verdict.py` only cares that a
     `narration` key exists in the envelope, not what it says.
     """
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        return "Solid case, no notes."
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        from api.persona.claude_client import tool_reply
+
+        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 @pytest.fixture

@@ -198,7 +198,32 @@ def test_prompt_version_is_past_the_losing_score_first_rule_5() -> None:
     would keep being served unless the version moves."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v10"  # type: ignore[attr-defined]  # _reimport_config() -> object
+    assert config.PROMPT_VERSION not in {  # type: ignore[attr-defined]
+        "persona-v1",
+        "persona-v2",
+        "persona-v3",
+        "persona-v4",
+        "persona-v5",
+        "persona-v6",
+        "persona-v7",
+        "persona-v8",
+        "persona-v9",
+    }
+
+
+def test_prompt_version_is_past_the_typed_score_prompt() -> None:
+    """Issue #291 changed the system prompt itself: the narrator no longer
+    types numbers and has them checked by `api.persona.grounding`; it submits
+    a `submit_narration` tool call whose placeholders the server renders from
+    typed claims. Rule 1, rule 5 and the worked examples were rewritten, and
+    the tool schema's description strings are prompt-facing too. Since #145
+    the version means prompt wording only, and the wording changed, so
+    narrations cached under `persona-v10` were written under the old rules and
+    would keep being served unless the version moves (the cache key's
+    grounding version moved too, to `claims-v1`)."""
+    config = _reimport_config()
+
+    assert config.PROMPT_VERSION == "persona-v11"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:
