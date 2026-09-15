@@ -1,7 +1,7 @@
 """PreToolUse guard for Bash: the two git mistakes that hurt every concurrent session.
 
-1. Pushing to `main`. Branch protection can't be enforced by GitHub on this private
-   repo (CLAUDE.md), so the rule was prose only.
+1. Pushing to `main`. GitHub's ruleset rejects it too (CLAUDE.md); the hook stops it
+   before the push leaves the session, with a message that says why.
 2. Popping the shared stash. The stash stack is shared by every worktree, so a bare
    `git stash` / `git stash pop` can take another session's changes.
 
