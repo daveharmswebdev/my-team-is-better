@@ -20,6 +20,15 @@ def get_credits() -> Credits:
     CollegeFootballData.com for CFB, nflverse (originally Lee Sharpe's
     schedule data) for NFL.
 
+    That coverage is checked, not hand-kept (issue #144): each
+    `MethodologyCredit.methods` names the registered rating methods the
+    citation covers, and tests/test_evidence_credits.py fails if the union
+    across credits differs from `contracts.Method` or
+    `ratings.compute_ratings.METHODS`, if a method is covered twice, or if a
+    credit names a method that isn't registered. `methods[0]` is the credit's
+    stable id downstream (`keener`, `elo`), so the Elo tuple lists `elo`
+    before its career variant, which shares the citation.
+
     Takes no arguments and does not vary by the method that answered a given
     question: the About page credits the whole basis of the rankings, not
     whichever engine happened to run.
@@ -44,6 +53,7 @@ def get_credits() -> Credits:
                     "method checked against the golden dataset of undisputed "
                     "champions."
                 ),
+                methods=("keener",),
             ),
             MethodologyCredit(
                 name="Elo",
@@ -72,6 +82,7 @@ def get_credits() -> Credits:
                     "different methods will naturally rank teams differently "
                     "from time to time."
                 ),
+                methods=("elo", "elo_career"),
             ),
         ],
         data_sources=[
