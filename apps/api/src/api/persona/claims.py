@@ -152,14 +152,16 @@ _BIG_RECORD_TERMS: Final = "|".join(_NUMBER_WORDS)
 _RECORD_TERMS: Final = f"{_SMALL_RECORD_TERMS}|{_BIG_RECORD_TERMS}"
 _DASH_SEPARATOR: Final = rf"\s*[{_DASHES}]\s*(?:and\s*[{_DASHES}]\s*)?"
 _RECORD_SEPARATOR: Final = rf"(?:{_DASH_SEPARATOR}|\s+and\s+)"
+# A hyphen with nothing around it: "one-oh", "one-and-oh".
+_HYPHEN_SEPARATOR: Final = r"[-‐‑](?:and[-‐‑])?"
 # "thirteen and oh", "one-and-one", "twelve-one": a record spelled in words.
 # When both sides are oh, one or zero, only the hyphen-joined form counts, so
-# "Oh and one more thing" is prose and "went one and oh" an accepted gap
-# (#290 round 3, decision B2).
+# "Oh and one more thing" and "Oh — one more thing" are prose and "went one
+# and oh" is an accepted gap (#290 round 3, decision B2).
 _WORD_RECORD_RE: Final = re.compile(
     rf"\b(?:(?:{_BIG_RECORD_TERMS}){_RECORD_SEPARATOR}(?:{_RECORD_TERMS})"
     rf"|(?:{_SMALL_RECORD_TERMS}){_RECORD_SEPARATOR}(?:{_BIG_RECORD_TERMS})"
-    rf"|(?:{_SMALL_RECORD_TERMS}){_DASH_SEPARATOR}(?:{_SMALL_RECORD_TERMS}))\b",
+    rf"|(?:{_SMALL_RECORD_TERMS}){_HYPHEN_SEPARATOR}(?:{_SMALL_RECORD_TERMS}))\b",
     re.IGNORECASE,
 )
 _ORDINAL_WORDS: Final = (

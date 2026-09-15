@@ -171,6 +171,13 @@ def test_a_number_word_record_is_rejected(
     "text",
     [
         "Oh and one more thing: Auburn got lucky.",
+        # An em-dash, en-dash or spaced hyphen aside is prose too: B2 counts only
+        # a hyphen with no space around it (#290, final review).
+        "Oh — one more thing: Auburn got lucky.",
+        "Oh—one more thing: Auburn got lucky.",
+        "Oh – one more thing: Auburn got lucky.",
+        "Oh - one more thing: Auburn got lucky.",
+        "They lost one — oh, and it was Auburn.",
         # Accepted gap (coordinator decision B2 on #290 round 3): when both sides
         # are oh, one or zero, only a hyphen-joined form counts as a record.
         "They went one and oh.",
