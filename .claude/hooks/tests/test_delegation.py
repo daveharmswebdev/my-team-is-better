@@ -280,6 +280,26 @@ def test_render_brief_contains_every_section() -> None:
     assert "## GATE" in delegation.render_brief(brief)
 
 
+def test_render_brief_tells_an_implementation_spoke_to_fast_forward_to_base() -> None:
+    text = delegation.render_brief(_brief(), OWNERSHIP)
+    assert f"git merge --ff-only {_brief()['base_sha']}" in text
+    assert "do not change HEAD" not in text
+
+
+def test_render_brief_tells_a_read_only_spoke_to_review_against_base_without_moving_head() -> None:
+    """#239: a reviewer's checkout is always ahead of base_sha (it reviews a
+    range after it), so the fast-forward instruction can't apply, and a
+    literal reading ("if HEAD differs, move it") would review the wrong tree."""
+    brief = _brief()
+    brief["agent"] = "validator"
+    brief["scope"] = ["**"]
+    text = delegation.render_brief(brief, OWNERSHIP)
+    assert "## BASE" in text
+    assert f"Review against `{brief['base_sha']}`" in text
+    assert "do not change HEAD" in text
+    assert "git merge --ff-only" not in text
+
+
 # --- SubagentStop hook ------------------------------------------------------------------
 
 

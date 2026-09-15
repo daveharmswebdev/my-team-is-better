@@ -37,3 +37,8 @@ storybook-static/
 # Half-built fixture dbs a failed or interrupted generator run can leave behind (#110).
 **/tests/fixtures/.*.partial
 **/tests/fixtures/.*.partial-*
+
+# The Playwright MCP server writes console logs and page snapshots here, in the
+# coordinator's checkout, whenever a spoke drives the browser tools from its
+# worktree (#251).
+.playwright-mcp/
