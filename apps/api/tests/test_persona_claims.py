@@ -957,6 +957,7 @@ def test_tool_schema_accepts_a_real_submission_and_names_every_kind() -> None:
         "rank",
         "game_score",
         "margin",
+        "rating_gap",
         "year",
         "count",
         "win_pct",
@@ -1079,7 +1080,7 @@ def test_no_when_on_any_measured_block_says_finale(catalog: tuple[TeamRecord, ..
 
 
 def _texas_claims() -> list[dict[str, object]]:
-    """Six valid claims on the 2005 Texas team case, three of them game scores."""
+    """Eight valid claims on the 2005 Texas team case, three of them game scores."""
     return [
         {"id": "rec", "kind": "record", "team": "Texas"},
         {"id": "yr", "kind": "year"},
@@ -1087,38 +1088,41 @@ def _texas_claims() -> list[dict[str, object]]:
         _game("w1", "when", "Texas", "USC", "W"),
         _game("g2", "game_score", "Texas", "Ohio State", "W"),
         _game("g3", "game_score", "Texas", "Oklahoma", "W"),
+        {"id": "rk", "kind": "rank", "team": "Texas"},
+        {"id": "n", "kind": "count", "of": "wins", "team": "Texas"},
     ]
 
 
-_TEXAS_SIX = (
-    "Look at {rec} in {yr}: {g1} over USC {w1}, {g2} over Ohio State and {g3} over Oklahoma."
+_TEXAS_EIGHT = (
+    "Look at {rec} in {yr}: {g1} over USC {w1}, {g2} over Ohio State and {g3} over Oklahoma. "
+    "The math has {rk} with {n} wins."
 )
 
 
-def test_the_cap_is_six_claims_and_three_game_scores() -> None:
-    assert (MAX_CLAIMS, MAX_GAME_SCORE_CLAIMS) == (6, 3)
+def test_the_cap_is_eight_claims_and_three_game_scores() -> None:
+    assert (MAX_CLAIMS, MAX_GAME_SCORE_CLAIMS) == (8, 3)
 
 
-def test_six_claims_with_three_game_scores_are_accepted(
+def test_eight_claims_with_three_game_scores_are_accepted(
     texas_2005: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
-    assert rendered(_TEXAS_SIX, _texas_claims(), texas_2005, catalog) == (
+    assert rendered(_TEXAS_EIGHT, _texas_claims(), texas_2005, catalog) == (
         "Look at Texas 13-0 in 2005: 41-38 over USC in the postseason, 25-22 over Ohio State "
-        "and 45-12 over Oklahoma."
+        "and 45-12 over Oklahoma. The math has No. 1 Texas with 13 wins."
     )
 
 
-def test_a_seventh_claim_is_rejected_with_the_count_and_the_limit(
+def test_a_ninth_claim_is_rejected_with_the_count_and_the_limit(
     texas_2005: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
     claims: list[dict[str, object]] = [
         *_texas_claims(),
-        {"id": "rk", "kind": "rank", "team": "Texas"},
+        {"id": "pct", "kind": "win_pct", "team": "Texas"},
     ]
-    errors = rejected(_TEXAS_SIX + " The math has {rk}.", claims, texas_2005, catalog)
+    errors = rejected(_TEXAS_EIGHT + " That's {pct}.", claims, texas_2005, catalog)
     assert len(errors) == 1, errors
     assert_an_error_says(
-        errors, "7 claims", "limit of 6", "keep only the figures that make the case"
+        errors, "9 claims", "limit of 8", "keep only the figures that make the case"
     )
 
 
@@ -1128,8 +1132,11 @@ def test_a_fourth_game_score_is_rejected_with_the_count_and_the_limit(
     claims = [claim for claim in _texas_claims() if claim["id"] != "w1"] + [
         _game("g4", "game_score", "Texas", "Colorado", "W", week=14, season_type="regular")
     ]
-    assert len(claims) == 6
-    text = "Look at {rec} in {yr}: {g1} over USC, {g2}, {g3} and {g4} over Colorado."
+    assert len(claims) == 8
+    text = (
+        "Look at {rec} in {yr}: {g1} over USC, {g2}, {g3} and {g4} over Colorado. "
+        "The math has {rk} with {n} wins."
+    )
     errors = rejected(text, claims, texas_2005, catalog)
     assert len(errors) == 1, errors
     assert_an_error_says(
@@ -1149,20 +1156,30 @@ def test_both_caps_are_reported_first_so_capped_feedback_always_holds_them(
             "result": "W",
         }
         for week, opponent in enumerate(
-            ["Louisiana", "Ohio State", "Rice", "Missouri", "Oklahoma", "Baylor", "Kansas"]
+            [
+                "Louisiana",
+                "Ohio State",
+                "Rice",
+                "Missouri",
+                "Oklahoma",
+                "Texas Tech",
+                "Oklahoma State",
+                "Baylor",
+                "Kansas",
+            ]
         )
     ]
     # An error from the text as well, so the caps must come before it.
     text = "The Longhorns: " + ", ".join(f"{{{claim['id']}}}" for claim in claims) + "."
     errors = rejected(text, claims, texas_2005, catalog)
-    assert "7 claims" in errors[0] and "limit of 6" in errors[0], errors
-    assert "7 game_score claims" in errors[1] and "limit of 3" in errors[1], errors
+    assert "9 claims" in errors[0] and "limit of 8" in errors[0], errors
+    assert "9 game_score claims" in errors[1] and "limit of 3" in errors[1], errors
     assert any("Longhorns" in error for error in errors[2:]), errors
 
 
 def test_the_tool_description_states_both_limits() -> None:
     description = tool_schema()["description"]
-    assert "at most 6 claims" in description
+    assert "at most 8 claims" in description
     assert "at most 3 of them game_score" in description
 
 

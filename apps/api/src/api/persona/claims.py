@@ -18,15 +18,17 @@ Alabama"). This module:
    numbers or number-word records, no ordinal ranks, and every team reference
    spelled exactly as the block spells it (no alias of a block team, no
    mascot, no other case of a block team, no capitalized team the block
-   doesn't hold, no name typed again beside a placeholder that already prints
-   it). A number or ordinal inside a conference name or game phase ("Big Ten",
-   "second half") is rejected like any other, with an error saying the block
-   holds no such detail.
+   doesn't hold, no name typed again right after a placeholder that already
+   prints it). A number or ordinal inside a conference name or game phase
+   ("Big Ten", "second half") is rejected like any other, with an error saying
+   the block holds no such detail.
 
-A name is "beside" its own record, rating or rank placeholder when only
-whitespace, brackets, commas, colons, semicolons, dashes or quotes separate
-them, in either order, or a possessive 's on the name ("Alabama ({r})",
-"Alabama's {r}", "{r}, Alabama"); a sentence end breaks it (#290 round 3).
+A name is typed "beside" its own record, rating or rank placeholder, after
+it, when only whitespace, brackets, commas, colons, semicolons, dashes or
+quotes separate them ("{r}, Alabama", "{k1} Georgia"); a sentence end breaks
+it (#290 round 3). A name typed right before its own placeholder ("Alabama
+({r})", "Alabama's {r}") is not an error since #291 round 2: the placeholder
+leaves the name off, below.
 
 A count of meetings, and the wording of a game claim that doesn't match, rely
 on whether the block holds every game between the pair: a team case does for
@@ -44,8 +46,23 @@ Tide"); a single-word mascot, or a multi-word mascot's final word alone, only
 capitalized and right after "the"/"The" or a team name ("the Tide", "Texas
 Longhorns"), so "Pride goes before the fall" is prose.
 
-A record, rating or rank always prints its team's name ("Lima Lions 350.00",
-"No. 3 Georgia"), so a figure can no longer sit beside the wrong team. A game
+A record, rating or rank prints its team's name ("Lima Lions 350.00", "No. 3
+Georgia"), so a figure can no longer sit beside the wrong team, except where
+the sentence has just named that same team (founder decision 2 on #291, round
+2, after a live run served "Auburn went Auburn 10-4"): within one sentence,
+when the nearest team reference before the placeholder (a block team's name
+typed in the prose, or a placeholder) is that team, it prints the bare figure
+("Auburn went 10-4"). A game_score, margin, when, where or rating_gap
+placeholder refers to two teams and so resets the nearest reference; year,
+count and win_pct don't change it. A figure never loses its name when another
+team sits between it and its team's last mention.
+
+A rating_gap {team, opponent} (founder decision 3 on #291, round 2, after a
+live run served a rating as a gap) exists only on a comparison, between its
+two compared teams with the higher-rated as team. It prints the difference of
+the two ratings as displayed (`api.rating_display.display_value` of each), at
+the method's decimals, with no team names, so it always matches the two
+numbers on screen. A game
 score is resolved from a named team's side with its result, so the winner is
 checked; it prints winner-first. `when` and `where` follow founder decision C
 on #199: they print only what the block records ("in the postseason", "to
@@ -88,7 +105,7 @@ from functools import lru_cache
 from typing import Any, Final, cast, get_args
 
 from api.models import Method
-from api.rating_display import display_value
+from api.rating_display import RATING_DISPLAY, display_value
 from api.repositories.teams import TeamRecord
 
 TOOL_NAME: Final = "submit_narration"
@@ -98,10 +115,11 @@ TOOL_NAME: Final = "submit_narration"
 # differently, so narrations checked under the old rules miss.
 GROUNDING_VERSION: Final = "claims-v1"
 
-# The claim cap (founder decision on #291, 2026-09-15). The good 2017 Alabama
+# The claim cap (founder decisions on #291, 2026-09-15). The good 2017 Alabama
 # spike narration used five claims with two scores; a 2019 narration with
-# five bare scores read as a schedule.
-MAX_CLAIMS: Final = 6
+# five bare scores read as a schedule. Round 1's cap of 6 caused 5 of the 16
+# rejected attempts in the live run (7 to 9 claims), so round 2 raised it to 8.
+MAX_CLAIMS: Final = 8
 MAX_GAME_SCORE_CLAIMS: Final = 3
 
 KINDS: Final[tuple[str, ...]] = (
@@ -110,6 +128,7 @@ KINDS: Final[tuple[str, ...]] = (
     "rank",
     "game_score",
     "margin",
+    "rating_gap",
     "year",
     "count",
     "win_pct",
@@ -136,6 +155,7 @@ _KEYS_BY_KIND: Final[Mapping[str, tuple[str, ...]]] = {
     "rank": _TEAM_KEYS,
     "game_score": _GAME_KEYS,
     "margin": _GAME_KEYS,
+    "rating_gap": ("id", "kind", "team", "opponent"),
     "year": ("id", "kind"),
     "count": ("id", "kind", "of", "team", "opponent"),
     "win_pct": _TEAM_KEYS,
@@ -143,8 +163,11 @@ _KEYS_BY_KIND: Final[Mapping[str, tuple[str, ...]]] = {
     "where": _GAME_KEYS,
 }
 _GAME_KINDS: Final = frozenset({"game_score", "margin", "when", "where"})
-# Kinds whose rendering prints the team's name.
+# Kinds whose rendering prints the team's name, unless the nearest team
+# reference before it in the sentence is that same team.
 _NAME_KINDS: Final = frozenset({"record", "rating", "rank"})
+# Kinds that refer to two teams at once: a name kind right after one keeps its name.
+_PAIR_KINDS: Final = _GAME_KINDS | {"rating_gap"}
 
 _ID_PATTERN: Final = "[A-Za-z][A-Za-z0-9_]*"
 _ID_RE: Final = re.compile(_ID_PATTERN)
@@ -201,10 +224,10 @@ _NO_DETAIL_RE: Final = re.compile(
 )
 _THE: Final = ("the", "The")
 _WORD_CHAR_RE: Final = re.compile(r"\w")
-# Between a team name and its own record/rating/rank placeholder, these and
-# whitespace keep the two beside each other; . ! ? do not (decision B1).
+# Between a record/rating/rank placeholder and its own team's name typed after
+# it, these and whitespace keep the two beside each other; . ! ? do not
+# (decision B1).
 _JOINERS: Final = frozenset("()[],:;-–—\"'‘’“”")
-_POSSESSIVES: Final = ("'s", "’s")
 # A code point in the surrogate range is never valid text on its own, and
 # cannot be encoded as UTF-8.
 _SURROGATE_RE: Final = re.compile("[\ud800-\udfff]")
@@ -231,7 +254,7 @@ def tool_schema() -> dict[str, Any]:
         "name": TOOL_NAME,
         "description": (
             "Submit the narration. Write every number, record, rating, rank, score, "
-            "count, date or venue as a {id} placeholder in text, and describe it with "
+            "rating gap, count, date or venue as a {id} placeholder in text, and describe it with "
             "one claim; the server prints each value from the fact block. The prose "
             "itself must contain no digits, no spelled-out numbers and no ordinals, and "
             "must write each team's name exactly as the fact block spells it. Use at most "
@@ -259,9 +282,13 @@ def tool_schema() -> dict[str, Any]:
                                 "type": "string",
                                 "enum": list(KINDS),
                                 "description": (
-                                    "record, rating and rank print the team's name with "
-                                    "the value; game_score, margin, when and where name "
-                                    "one game; count needs of; year takes nothing else."
+                                    "record, rating and rank print the value with the "
+                                    "team's name, left off when the last team named "
+                                    "before it in the sentence is the same team; "
+                                    "game_score, margin, when and where name one game; "
+                                    "rating_gap takes the two compared teams, the "
+                                    "higher-rated as team; count needs of; year takes "
+                                    "nothing else."
                                 ),
                             },
                             "team": {
@@ -348,9 +375,12 @@ def check_and_render(
         errors.append('"text" is empty')
 
     raw_claims = tool_input.get("claims")
+    # A name kind's value here is the bare figure ("13-1", "No. 3"); the
+    # renderer adds the team's name where `_check_prose` keeps it.
     rendered: dict[str, str] = {}
     name_claims: dict[str, str] = {}
     rank_claims: set[str] = set()
+    pair_claims: set[str] = set()
     claim_ids: list[str] = []
     if "claims" not in tool_input:
         errors.append(f'{TOOL_NAME} needs "claims" (a list, which may be empty)')
@@ -409,7 +439,10 @@ def check_and_render(
                 name_claims[claim_id] = team
                 if kind == "rank":
                     rank_claims.add(claim_id)
+            elif isinstance(kind, str) and kind in _PAIR_KINDS:
+                pair_claims.add(claim_id)
 
+    bare_at: Collection[int] = ()
     if isinstance(text, str) and not _has_surrogate(text):
         used = list(dict.fromkeys(match.group(1) for match in _PLACEHOLDER_RE.finditer(text)))
         known = ", ".join(_quote(claim_id) for claim_id in claim_ids) if claim_ids else "none"
@@ -426,14 +459,23 @@ def check_and_render(
         if _MASK in text:
             errors.append("the text contains a NUL character")
         else:
-            errors.extend(_check_prose(text, name_claims, rank_claims, block, index, name_re))
+            prose_errors, bare_at = _check_prose(
+                text, name_claims, rank_claims, pair_claims, block, index, name_re
+            )
+            errors.extend(prose_errors)
 
     if errors or not isinstance(text, str):
         return ClaimOutcome(errors=tuple(dict.fromkeys(errors)), text=None)
-    return ClaimOutcome(
-        errors=(),
-        text=_PLACEHOLDER_RE.sub(lambda match: rendered[match.group(1)], text),
-    )
+
+    def show(match: re.Match[str]) -> str:
+        claim_id = match.group(1)
+        figure = rendered[claim_id]
+        team = name_claims.get(claim_id)
+        if team is None or match.start() in bare_at:
+            return figure
+        return f"{figure} {team}" if claim_id in rank_claims else f"{team} {figure}"
+
+    return ClaimOutcome(errors=(), text=_PLACEHOLDER_RE.sub(show, text))
 
 
 # ---------------------------------------------------------------------------
@@ -717,7 +759,11 @@ def _resolve_claim(
         return str(block.year), []
     if kind == "count":
         return _resolve_count(where, raw, block)
+    if kind == "rating_gap":
+        return _resolve_rating_gap(where, raw, block)
 
+    # record, rating and rank resolve to the bare figure; `check_and_render`
+    # adds the team's name unless the sentence has just named that team.
     team, errors = _team_key(where, kind, raw, "team", block)
     if team is None:
         return None, errors
@@ -728,22 +774,69 @@ def _resolve_claim(
         if rating is None:
             rated = ", ".join(block.ratings)
             return None, [f"{where}: the fact block gives no rating for {team}; it rates: {rated}"]
-        return f"{team} {display_value(rating, block.method)}", []
+        return display_value(rating, block.method), []
     if kind == "rank":
         rank = block.ranks.get(team)
         if rank is None:
             ranked = ", ".join(f"No. {r} {name}" for name, r in block.ranks.items())
             return None, [f"{where}: the fact block gives no rank for {team}; it ranks: {ranked}"]
-        return f"No. {rank} {team}", []
+        return f"No. {rank}", []
 
     subject = block.subjects.get(team)
     if subject is None:
         return None, [_not_a_subject(where, kind, team, block)]
     if kind == "record":
-        return f"{subject.name} {subject.record}", []
+        return subject.record, []
     if subject.wins + subject.losses + subject.ties == 0:
         return None, [f"{where}: {team} has no games in the fact block, so no winning percentage"]
     return _format_win_pct(subject.wins, subject.losses, subject.ties), []
+
+
+def _resolve_rating_gap(
+    where: str, raw: dict[Any, Any], block: _Block
+) -> tuple[str | None, list[str]]:
+    """How far `team`'s displayed rating sits above `opponent`'s, on a
+    comparison between its two compared teams (founder decision 3 on #291,
+    round 2). The gap is the difference of the two ratings as the site
+    displays them, so it always matches the two numbers on screen: 1933.4 and
+    1714.6 display as 1933 and 1715, a gap of 218, where the raw 218.8 would
+    display as 219."""
+    if not block.is_comparison:
+        return None, [
+            f"{where}: a rating gap needs a comparison of two teams; this fact block is "
+            "one team's case, so there is no gap to state"
+        ]
+    missing = [key for key in ("team", "opponent") if key not in raw]
+    if missing:
+        return None, [f'{where} (rating_gap) needs "{key}"' for key in missing]
+    compared = list(block.subjects)
+    team, opponent = cast(str, raw["team"]), cast(str, raw["opponent"])
+    if team == opponent or {team, opponent} != set(compared):
+        return None, [
+            f"{where}: a rating gap is only between the two teams compared, "
+            f"{compared[0]} and {compared[1]}, with the higher-rated one as team"
+        ]
+
+    shown = {name: display_value(block.subjects[name].rating, block.method) for name in compared}
+    high, low = Decimal(shown[team]), Decimal(shown[opponent])
+    if high == low:
+        team_rating, opponent_rating = block.subjects[team].rating, block.subjects[opponent].rating
+        if team_rating == opponent_rating:
+            hair = "they rate exactly the same"
+        else:
+            higher = team if team_rating > opponent_rating else opponent
+            hair = f"say {higher} rates a hair higher instead"
+        return None, [
+            f"{where}: {team} and {opponent} print the same rating ({shown[team]}), so there "
+            f"is no gap to state; {hair}"
+        ]
+    if high < low:
+        return None, [
+            f"{where}: {opponent} rates higher than {team} ({opponent} {shown[opponent]}, "
+            f"{team} {shown[team]}); a rating gap's team is the higher-rated one, so make "
+            f"{opponent} the team and {team} the opponent"
+        ]
+    return f"{high - low:.{RATING_DISPLAY[block.method].decimals}f}", []
 
 
 def _format_win_pct(wins: int, losses: int, ties: int) -> str:
@@ -1090,10 +1183,14 @@ def _check_prose(
     text: str,
     name_claims: Mapping[str, str],
     rank_claims: Collection[str],
+    pair_claims: Collection[str],
     block: _Block,
     index: _CatalogIndex,
     name_re: re.Pattern[str],
-) -> list[str]:
+) -> tuple[list[str], set[int]]:
+    """The errors in the prose outside the placeholders, and the offsets of
+    the record, rating and rank placeholders that render without their team's
+    name (`_bare_offsets`)."""
     placeholders = list(_PLACEHOLDER_RE.finditer(text))
     masked = _PLACEHOLDER_RE.sub(lambda match: _MASK * len(match.group(0)), text)
     errors: list[str] = []
@@ -1148,10 +1245,12 @@ def _check_prose(
         errors.append(typed("uses the ordinal", match, "a rank must come from a rank claim"))
 
     placeholder_ending = {match.end(): match.group(1) for match in placeholders}
-    placeholder_starting = {match.start(): match.group(1) for match in placeholders}
     # Where a team name ends: a mascot word right after one is a nickname.
-    # A rank placeholder prints "No. 3 Georgia", so it ends in a team name too.
+    # A rank placeholder prints "No. 3 Georgia", so it ends in a team name too
+    # (and "No. 3 Longhorns" is still a nickname when it leaves the name off).
     name_ends = {match.end() for match in placeholders if match.group(1) in rank_claims}
+    # Block team names typed in the prose, by offset, for the name-drop rule.
+    typed_teams: list[tuple[int, str]] = []
     names_masked = masked
     for match in name_re.finditer(masked):
         names_masked = _mask_span(names_masked, match.start(), match.end())
@@ -1167,19 +1266,21 @@ def _check_prose(
                 )
                 continue
             spelled = found if found in in_block else in_block[0]
+            typed_teams.append((match.start(), spelled))
             if found != spelled:
                 errors.append(
                     f"{_quote(found)} must be written exactly as the fact block spells it: "
                     f"{_quote(spelled)}"
                 )
-            left = _joined_left(masked, match.start())
-            right = _joined_right(masked, match.end())
-            for placeholder in (placeholder_ending.get(left), placeholder_starting.get(right)):
-                if placeholder is not None and name_claims.get(placeholder) == spelled:
-                    errors.append(
-                        f"{{{placeholder}}} already prints the name {_quote(spelled)}; delete "
-                        f"the {_quote(found)} typed beside it"
-                    )
+            # A name typed right AFTER its own placeholder reads twice. One typed
+            # right before it is fine: the placeholder leaves the name off
+            # (founder decision 2 on #291, round 2).
+            placeholder = placeholder_ending.get(_joined_left(masked, match.start()))
+            if placeholder is not None and name_claims.get(placeholder) == spelled:
+                errors.append(
+                    f"{{{placeholder}}} already prints the name {_quote(spelled)}; delete "
+                    f"the {_quote(found)} typed beside it"
+                )
             continue
         teams = index.alias_teams.get(found)
         if teams is not None:
@@ -1196,7 +1297,53 @@ def _check_prose(
             if len(form.split()) == 1 and not _introduced(masked, match.start(), name_ends):
                 continue
             errors.append(_nickname_error(form, "a nickname", teams, block))
-    return errors
+
+    bare_at = _bare_offsets(placeholders, typed_teams, name_claims, pair_claims, break_ends)
+    return errors, bare_at
+
+
+def _bare_offsets(
+    placeholders: Sequence[re.Match[str]],
+    typed_teams: Sequence[tuple[int, str]],
+    name_claims: Mapping[str, str],
+    pair_claims: Collection[str],
+    break_ends: Sequence[int],
+) -> set[int]:
+    """The offsets of the record, rating and rank placeholders that render
+    without their team's name (founder decision 2 on #291, round 2).
+
+    Within one sentence, left to right through the team references (a block
+    team's name typed in the prose, and every placeholder): a name-kind
+    placeholder for team T leaves T's name off when the nearest reference
+    before it refers to T, and then counts as a reference to T either way. A
+    game_score, margin, when, where or rating_gap placeholder refers to two
+    teams, so a name kind right after it keeps its name; year, count and
+    win_pct placeholders don't change the nearest reference. So a figure never
+    loses its name when another team sits between it and its team's last
+    mention."""
+    references = sorted(
+        [(start, team, False) for start, team in typed_teams]
+        + [(match.start(), match.group(1), True) for match in placeholders]
+    )
+    bare_at: set[int] = set()
+    sentence = 0
+    nearest: str | None = None
+    for start, reference, is_placeholder in references:
+        # A placeholder or a name never sits inside a break, which is whitespace.
+        at = bisect.bisect_right(break_ends, start)
+        if at != sentence:
+            sentence, nearest = at, None
+        if not is_placeholder:
+            nearest = reference
+            continue
+        team = name_claims.get(reference)
+        if team is not None:
+            if nearest == team:
+                bare_at.add(start)
+            nearest = team
+        elif reference in pair_claims:
+            nearest = None
+    return bare_at
 
 
 def _introduced(masked: str, start: int, name_ends: Collection[int]) -> bool:
@@ -1246,19 +1393,6 @@ def _joined_left(masked: str, start: int) -> int:
     while left > 0 and (masked[left - 1].isspace() or masked[left - 1] in _JOINERS):
         left -= 1
     return left
-
-
-def _joined_right(masked: str, end: int) -> int:
-    """The offset right of `end` past a possessive 's, whitespace and joining
-    punctuation."""
-    right = end
-    if masked[right : right + 2] in _POSSESSIVES and not _WORD_CHAR_RE.match(
-        masked[right + 2 : right + 3]
-    ):
-        right += 2
-    while right < len(masked) and (masked[right].isspace() or masked[right] in _JOINERS):
-        right += 1
-    return right
 
 
 def _has_surrogate(value: object) -> bool:

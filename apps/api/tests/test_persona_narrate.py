@@ -193,9 +193,10 @@ def test_a_second_rejection_serves_the_fallback_and_never_makes_a_third_call() -
 
 
 def test_an_over_cap_submission_is_never_served() -> None:
-    claims = [{"id": f"y{i}", "kind": "year"} for i in range(7)]
+    # Nine claims: one over the cap of 8 (#291 round 2).
+    claims = [{"id": f"y{i}", "kind": "year"} for i in range(9)]
     over_cap: dict[str, object] = {
-        "text": " ".join(f"{{y{i}}}" for i in range(7)),
+        "text": " ".join(f"{{y{i}}}" for i in range(9)),
         "claims": claims,
     }
     narrator = _ScriptedNarrator([tool_reply(over_cap), tool_reply(over_cap)])
@@ -204,7 +205,7 @@ def test_an_over_cap_submission_is_never_served() -> None:
 
     assert result == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     feedback = _tool_result(narrator.calls[1].messages[-1])["content"]
-    assert isinstance(feedback, str) and "7 claims" in feedback
+    assert isinstance(feedback, str) and "9 claims" in feedback
 
 
 def test_a_reply_with_no_tool_call_is_retried_with_a_text_turn() -> None:
