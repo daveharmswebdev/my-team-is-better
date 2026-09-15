@@ -16,9 +16,21 @@ Alabama"). This module:
    claim can only point at a fact, so a wrong number cannot be typed;
 4. checks the prose outside the placeholders: no digits, no spelled-out
    numbers or number-word records, no ordinal ranks, and every team reference
-   spelled exactly as the block spells it (no alias, no mascot, no other case,
-   no team the block doesn't hold, no name typed again beside a placeholder
-   that already prints it).
+   spelled exactly as the block spells it (no alias of a block team, no
+   mascot, no other case of a block team, no capitalized team the block
+   doesn't hold, no name typed again beside a placeholder that already prints
+   it). A number or ordinal inside a conference name or game phase ("Big Ten",
+   "second half") is rejected like any other, with an error saying the block
+   holds no such detail.
+
+What counts as a team reference, so ordinary bar-stool prose passes (#290
+round 2): a block team's name in any case; any other catalog name only with
+its first letter uppercase (founder decision, no English-word exemption list:
+"the pace" is prose, "Pace" is not); an alias only of a block team ("ME" is
+prose without Maine); a multi-word mascot capitalized anywhere ("Crimson
+Tide"); a single-word mascot, or a multi-word mascot's final word alone, only
+capitalized and right after "the"/"The" or a team name ("the Tide", "Texas
+Longhorns"), so "Pride goes before the fall" is prose.
 
 A record, rating or rank always prints its team's name ("Lima Lions 350.00",
 "No. 3 Georgia"), so a figure can no longer sit beside the wrong team. A game
@@ -28,8 +40,12 @@ on #199: they print only what the block records ("in the postseason", "to
 open the season", "in week 11", "at a neutral site"), and a game row that
 isn't neutral cannot yet say home or away (#294).
 
-Accepted gaps, by decision: "first" and "last" are not treated as ordinals;
-NFL catalog rows carry no mascot, so an NFL nickname alone is not caught;
+Accepted gaps, by decision: "first" and "last" are not treated as ordinals,
+so "first half" passes; NFL catalog rows carry no mascot, so an NFL nickname
+alone is not caught; a lowercase name of a team the block doesn't hold
+("alabama") is prose; a single-word mascot with neither "the" nor a team name
+before it ("Longhorns fans") is not caught, nor is a singular ("Longhorn") or a
+nickname the catalog doesn't hold ("Bama");
 Unicode look-alikes and non-English number words are deliberate evasion, out
 of scope; a prose verb that contradicts a claim's result ("beat {g1}" with an
 L) is #291's prompt and #293's measurement, not a check here.
@@ -42,7 +58,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
@@ -132,6 +148,15 @@ _ORDINAL_WORDS: Final = (
 ).split()
 _ORDINAL_RE: Final = re.compile(r"\b(?:" + "|".join(_ORDINAL_WORDS) + r")\b", re.IGNORECASE)
 _SENTENCE_BREAK_RE: Final = re.compile(r"(?<=[.!?])\s+")
+# Conference names and game phases whose number, number word or ordinal is
+# still rejected; this only picks a clearer error, never accept vs reject.
+_NO_DETAIL_RE: Final = re.compile(
+    rf"\bBig\s+(?:Ten|Twelve|12)\b|\bPac\s*[{_DASHES}]\s*(?:12|10)\b"
+    r"|\b(?:second\s+half|third\s+quarter|fourth\s+quarter)\b",
+    re.IGNORECASE,
+)
+_THE: Final = ("the", "The")
+_WORD_CHAR_RE: Final = re.compile(r"\w")
 
 _AP_WORDS: Final = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 _FLIP: Final[Mapping[str, str]] = {"W": "L", "L": "W", "T": "T"}
@@ -238,10 +263,10 @@ def check_and_render(
     fact block is a programming error and raises `ValueError`.
     """
     block = _parse_block(fact_block_json)
-    index = _catalog_index(
-        tuple(catalog),
-        tuple(sorted(set(block.teams) - {record.name for record in catalog})),
-    )
+    records = tuple(catalog)
+    extra_names = tuple(sorted(set(block.teams) - {record.name for record in records}))
+    index = _catalog_index(records, extra_names)
+    name_re = _name_re(records, extra_names, frozenset(block.teams))
     if not isinstance(tool_input, dict):
         return ClaimOutcome(
             errors=(
@@ -267,6 +292,7 @@ def check_and_render(
     raw_claims = tool_input.get("claims")
     rendered: dict[str, str] = {}
     name_claims: dict[str, str] = {}
+    rank_claims: set[str] = set()
     claim_ids: list[str] = []
     if "claims" not in tool_input:
         errors.append(f'{TOOL_NAME} needs "claims" (a list, which may be empty)')
@@ -302,6 +328,8 @@ def check_and_render(
             # isinstance first: a hostile list or dict "kind" is unhashable.
             if isinstance(kind, str) and kind in _NAME_KINDS and isinstance(team, str):
                 name_claims[claim_id] = team
+                if kind == "rank":
+                    rank_claims.add(claim_id)
 
     if isinstance(text, str):
         used = list(dict.fromkeys(match.group(1) for match in _PLACEHOLDER_RE.finditer(text)))
@@ -319,7 +347,7 @@ def check_and_render(
         if _MASK in text:
             errors.append("the text contains a NUL character")
         else:
-            errors.extend(_check_prose(text, name_claims, block, index))
+            errors.extend(_check_prose(text, name_claims, rank_claims, block, index, name_re))
 
     if errors or not isinstance(text, str):
         return ClaimOutcome(errors=tuple(dict.fromkeys(errors)), text=None)
@@ -762,10 +790,12 @@ def _where(where: str, game: _Game) -> tuple[str | None, list[str]]:
     if game.neutral_site is True:
         return "at a neutral site", []
     if game.neutral_site is False:
+        # A head-to-head row does carry home_team/away_team: the claim model just
+        # can't print it yet, so never say the block lacks it.
         return None, [
-            f"{where}: the fact block does not record home or away for {game.team} vs "
-            f"{game.opponent} ({game.label}), only that it was not at a neutral site; "
-            'a "where" claim can only state a neutral site'
+            f"{where}: {game.team} vs {game.opponent} ({game.label}) was not at a neutral "
+            'site, and a "where" claim can only say where a game was played when the fact '
+            "block marks it neutral-site; home/away rendering arrives with #294"
         ]
     return None, [
         f"{where}: the fact block does not record where {game.team} vs {game.opponent} "
@@ -852,17 +882,16 @@ class _CatalogIndex:
     names_by_fold: Mapping[str, tuple[str, ...]]
     alias_teams: Mapping[str, tuple[str, ...]]
     mascot_teams: Mapping[str, tuple[str, ...]]
-    name_re: re.Pattern[str]
     mascot_re: re.Pattern[str] | None
 
 
 @lru_cache(maxsize=8)
 def _catalog_index(catalog: tuple[TeamRecord, ...], extra_names: tuple[str, ...]) -> _CatalogIndex:
-    """Team references to look for in prose. Names match case-insensitively;
-    aliases match as the catalog spells them; mascots (the whole phrase and its
-    final word) match capitalized only, so "the tide turned" is prose. One
-    alternation per pass, longest first, so the leftmost match is the longest
-    ("West Virginia", never "Virginia"; "Texas A&M", never "Texas")."""
+    """Team references to look for in prose, before a block narrows the names
+    and aliases (`_name_re`). Mascots (the whole phrase and its final word)
+    match capitalized only, so "the tide turned" is prose; one alternation,
+    longest first, so the leftmost match is the longest ("Crimson Tide", never
+    "Tide"). Whether a mascot match counts is `_check_prose`'s call."""
     names: dict[str, list[str]] = {}
     for name in [record.name for record in catalog] + list(extra_names):
         if name.strip() and name not in names.setdefault(name.casefold(), []):
@@ -884,17 +913,53 @@ def _catalog_index(catalog: tuple[TeamRecord, ...], extra_names: tuple[str, ...]
                     if record.name not in teams:
                         teams.append(record.name)
 
-    alternatives = [(fold, f"(?i:{re.escape(fold)})") for fold in names]
-    alternatives += [(alias, re.escape(alias)) for alias in aliases]
     return _CatalogIndex(
         names_by_fold={fold: tuple(found) for fold, found in names.items()},
         alias_teams={alias: tuple(teams) for alias, teams in aliases.items()},
         mascot_teams={form: tuple(teams) for form, teams in mascots.items()},
-        name_re=_longest_first(alternatives),
         mascot_re=_longest_first([(form, re.escape(form)) for form in mascots])
         if mascots
         else None,
     )
+
+
+@lru_cache(maxsize=32)
+def _name_re(
+    catalog: tuple[TeamRecord, ...],
+    extra_names: tuple[str, ...],
+    block_teams: frozenset[str],
+) -> re.Pattern[str]:
+    """Team names and aliases to look for in prose, given the teams the block
+    mentions:
+
+    * a block team's name matches in any case, so "texas" is a spelling error;
+    * any other catalog name matches only when its first letter is uppercase
+      ("Alabama", "ALABAMA"), so "the pace" and "the assumption" are prose
+      (founder decision on #290, 2026-09-15: no English-word exemption list);
+    * an alias matches, exactly as the catalog spells it, only when it is an
+      alias of a block team, so "ME" and "UK" are prose on a block without
+      Maine or Kentucky (coordinator decision 4 on #290).
+
+    One alternation, longest first, so the leftmost match is the longest that
+    qualifies: "West Virginia", never "Virginia". Lowercase "west virginia" does
+    not qualify on a block without West Virginia, so it hides nothing, and the
+    block's "virginia" inside it is still checked."""
+    index = _catalog_index(catalog, extra_names)
+    alternatives: list[tuple[str, str]] = []
+    for fold, names in index.names_by_fold.items():
+        if any(name in block_teams for name in names):
+            alternatives.append((fold, f"(?i:{re.escape(fold)})"))
+        else:
+            alternatives.append((fold, _capitalized(names[0])))
+    for alias, teams in index.alias_teams.items():
+        if any(team in block_teams for team in teams):
+            alternatives.append((alias, re.escape(alias)))
+    return _longest_first(alternatives)
+
+
+def _capitalized(name: str) -> str:
+    """A pattern for `name` with its first character uppercase, the rest in any case."""
+    return re.escape(name[0].upper()) + f"(?i:{re.escape(name[1:])})"
 
 
 def _longest_first(alternatives: Sequence[tuple[str, str]]) -> re.Pattern[str]:
@@ -905,8 +970,10 @@ def _longest_first(alternatives: Sequence[tuple[str, str]]) -> re.Pattern[str]:
 def _check_prose(
     text: str,
     name_claims: Mapping[str, str],
+    rank_claims: Collection[str],
     block: _Block,
     index: _CatalogIndex,
+    name_re: re.Pattern[str],
 ) -> list[str]:
     placeholders = list(_PLACEHOLDER_RE.finditer(text))
     masked = _PLACEHOLDER_RE.sub(lambda match: _MASK * len(match.group(0)), text)
@@ -915,43 +982,50 @@ def _check_prose(
         errors.append('the text has a "{" or "}" that is not part of a placeholder like {id}')
 
     breaks = [(match.start(), match.end()) for match in _SENTENCE_BREAK_RE.finditer(masked)]
+    no_detail = [(m.start(), m.end(), m.group(0)) for m in _NO_DETAIL_RE.finditer(masked)]
 
     def holdings(start: int, end: int) -> str:
         left = max((b_end for _, b_end in breaks if b_end <= start), default=0)
         right = min((b_start for b_start, _ in breaks if b_start >= end), default=len(masked))
-        return block.holdings(_block_teams_in(masked[left:right], block, index))
+        return block.holdings(_block_teams_in(masked[left:right], block, index, name_re))
 
-    for match in _DIGITS_RE.finditer(masked):
-        errors.append(
-            f"the prose types the number {_quote(match.group(0))}; every number must come "
-            f"from a claim placeholder. {holdings(match.start(), match.end())}"
+    def typed(what: str, match: re.Match[str], rule: str) -> str:
+        # The phrase only picks the wording: the token is rejected either way.
+        for start, end, phrase in no_detail:
+            if start <= match.start() and match.end() <= end:
+                return (
+                    f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; the FACT "
+                    "BLOCK holds no conference or in-game detail, so leave it out"
+                )
+        return (
+            f"the prose {what} {_quote(match.group(0))}; {rule}. "
+            f"{holdings(match.start(), match.end())}"
         )
+
+    every_number = "every number must come from a claim placeholder"
+    for match in _DIGITS_RE.finditer(masked):
+        errors.append(typed("types the number", match, every_number))
     words_masked = masked
     for match in _WORD_RECORD_RE.finditer(masked):
-        errors.append(
-            f"the prose spells out the number {_quote(match.group(0))}; every number must "
-            f"come from a claim placeholder. {holdings(match.start(), match.end())}"
-        )
+        errors.append(typed("spells out the number", match, every_number))
         words_masked = _mask_span(words_masked, match.start(), match.end())
     for match in _NUMBER_WORD_RE.finditer(words_masked):
-        errors.append(
-            f"the prose spells out the number {_quote(match.group(0))}; every number must "
-            f"come from a claim placeholder. {holdings(match.start(), match.end())}"
-        )
+        errors.append(typed("spells out the number", match, every_number))
     for match in _ORDINAL_RE.finditer(masked):
-        errors.append(
-            f"the prose uses the ordinal {_quote(match.group(0))}; a rank must come from a "
-            f"rank claim. {holdings(match.start(), match.end())}"
-        )
+        errors.append(typed("uses the ordinal", match, "a rank must come from a rank claim"))
 
     placeholder_ending = {match.end(): match.group(1) for match in placeholders}
     placeholder_starting = {match.start(): match.group(1) for match in placeholders}
+    # Where a team name ends: a mascot word right after one is a nickname.
+    # A rank placeholder prints "No. 3 Georgia", so it ends in a team name too.
+    name_ends = {match.end() for match in placeholders if match.group(1) in rank_claims}
     names_masked = masked
-    for match in index.name_re.finditer(masked):
+    for match in name_re.finditer(masked):
         names_masked = _mask_span(names_masked, match.start(), match.end())
         found = match.group(0)
         names = index.names_by_fold.get(found.casefold())
         if names is not None:
+            name_ends.add(match.end())
             in_block = [name for name in names if name in block.teams]
             if not in_block:
                 errors.append(
@@ -983,10 +1057,31 @@ def _check_prose(
 
     if index.mascot_re is not None:
         for match in index.mascot_re.finditer(names_masked):
-            teams = index.mascot_teams.get(match.group(0))
-            if teams is not None:
-                errors.append(_nickname_error(match.group(0), "a nickname", teams, block))
+            form = match.group(0)
+            teams = index.mascot_teams.get(form)
+            if teams is None:
+                continue
+            # A multi-word mascot counts anywhere; a single word ("Pride",
+            # "Tide") only after "the" or a team name (coordinator decision 3).
+            if len(form.split()) == 1 and not _introduced(masked, match.start(), name_ends):
+                continue
+            errors.append(_nickname_error(form, "a nickname", teams, block))
     return errors
+
+
+def _introduced(masked: str, start: int, name_ends: Collection[int]) -> bool:
+    """Whether the word at `start` follows "the"/"The" or the end of a team
+    name, across whitespace ("the Tide", "Texas Longhorns")."""
+    left = start
+    while left > 0 and masked[left - 1].isspace():
+        left -= 1
+    if left == start:
+        return False
+    if left in name_ends:
+        return True
+    return masked[max(0, left - len("the")) : left] in _THE and (
+        left == len("the") or not _WORD_CHAR_RE.match(masked[left - len("the") - 1])
+    )
 
 
 def _nickname_error(found: str, what: str, teams: Sequence[str], block: _Block) -> str:
@@ -1004,9 +1099,11 @@ def _nickname_error(found: str, what: str, teams: Sequence[str], block: _Block) 
     )
 
 
-def _block_teams_in(sentence: str, block: _Block, index: _CatalogIndex) -> list[str]:
+def _block_teams_in(
+    sentence: str, block: _Block, index: _CatalogIndex, name_re: re.Pattern[str]
+) -> list[str]:
     found: list[str] = []
-    for match in index.name_re.finditer(sentence):
+    for match in name_re.finditer(sentence):
         for name in index.names_by_fold.get(match.group(0).casefold(), ()):
             if name in block.teams and name not in found:
                 found.append(name)

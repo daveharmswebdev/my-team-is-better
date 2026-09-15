@@ -26,6 +26,7 @@ import pytest
 from fixtures.claim_blocks import (
     assert_an_error_says,
     cfb_catalog,
+    cfb_comparison_block,
     cfb_team_case_block,
     rejected,
     rendered,
@@ -54,6 +55,16 @@ def texas_2005() -> str:
     return cfb_team_case_block(2005, "Texas")
 
 
+@pytest.fixture(scope="module")
+def virginia_2017() -> str:
+    return cfb_team_case_block(2017, "Virginia")
+
+
+@pytest.fixture(scope="module")
+def fsu_msu_2013() -> str:
+    return cfb_comparison_block(2013, "Florida State", "Michigan State")
+
+
 def test_catalog_facts_these_tests_rely_on(catalog: tuple[TeamRecord, ...]) -> None:
     by_name = {record.name: record for record in catalog}
     assert len(catalog) == 451
@@ -63,6 +74,26 @@ def test_catalog_facts_these_tests_rely_on(catalog: tuple[TeamRecord, ...]) -> N
     assert "FSU" in by_name["Florida State"].aliases
     assert "UGA" in by_name["Georgia"].aliases
     assert {"West Virginia", "Virginia", "Texas A&M", "Texas", "LSU"} <= set(by_name)
+    # English words the round-2 probes lean on: schools, mascots, aliases.
+    assert {"Pace", "Assumption"} <= set(by_name)
+    assert by_name["Hofstra"].mascot == "Pride"
+    assert by_name["Cornell"].mascot == "Big Red"
+    assert by_name["Dartmouth"].mascot == "Big Green"
+    assert by_name["Tulane"].mascot == "Green Wave"
+    assert "ME" in by_name["Maine"].aliases
+    assert "UK" in by_name["Kentucky"].aliases
+
+
+def test_block_facts_these_tests_rely_on(
+    alabama_2017: str, texas_2005: str, virginia_2017: str, fsu_msu_2013: str
+) -> None:
+    for block in (alabama_2017, texas_2005):
+        assert '"Maine"' not in block and '"Kentucky"' not in block
+        assert '"Hofstra"' not in block and '"Cornell"' not in block
+        assert '"Pace"' not in block and '"Assumption"' not in block
+    assert '"Alabama"' not in texas_2005
+    assert '"Virginia"' in virginia_2017 and '"West Virginia"' not in virginia_2017
+    assert '"Florida State"' in fsu_msu_2013
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +156,59 @@ def test_a_number_inside_a_placeholder_id_is_not_prose(
 def test_a_team_the_block_does_not_hold_is_rejected_listing_the_blocks_teams(
     texas_2005: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
-    errors = rejected("alabama wasn't even in this.", [], texas_2005, catalog)
-    assert_an_error_says(errors, '"alabama"', "Texas", "USC", "Ohio State")
+    errors = rejected("Alabama wasn't even in this.", [], texas_2005, catalog)
+    assert_an_error_says(errors, '"Alabama"', "Texas", "USC", "Ohio State")
+
+
+def test_a_shouted_team_the_block_does_not_hold_is_rejected(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    errors = rejected("ALABAMA wasn't even in this.", [], texas_2005, catalog)
+    assert_an_error_says(errors, '"ALABAMA"', "not a team in the fact block")
+
+
+def test_a_lowercase_team_the_block_does_not_hold_is_accepted_by_founder_decision(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    """Founder decision on #290, 2026-09-15: a catalog name for a team the block
+    does not mention is a team reference only when its first letter is
+    uppercase, with no English-word exemption list. So lowercase "alabama" on a
+    block without Alabama is prose, the price of "the pace" and "the
+    assumption" passing (an accepted gap)."""
+    text = "alabama wasn't even in this."
+    assert rendered(text, [], texas_2005, catalog) == text
+
+
+@pytest.mark.parametrize("text", ["They set the pace all year.", "That's the assumption."])
+@pytest.mark.parametrize("block_name", ["alabama_2017", "texas_2005"])
+def test_a_lowercase_school_name_that_is_an_english_word_is_prose(
+    request: pytest.FixtureRequest,
+    catalog: tuple[TeamRecord, ...],
+    block_name: str,
+    text: str,
+) -> None:
+    # Pace and Assumption are catalog schools; neither is in these blocks.
+    block: str = request.getfixturevalue(block_name)
+    assert rendered(text, [], block, catalog) == text
+
+
+def test_a_lowercase_longer_name_outside_the_block_does_not_hide_a_block_team(
+    virginia_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # West Virginia is not in the block, so lowercase "west virginia" is no team
+    # reference and does not shadow the block's Virginia inside it: that
+    # "virginia" is a misspelling of a block team.
+    errors = rejected("Nobody from west virginia cared.", [], virginia_2017, catalog)
+    assert_an_error_says(errors, '"virginia"', 'exactly as the fact block spells it: "Virginia"')
+    assert not any("west virginia" in error.casefold() for error in errors), errors
+
+
+def test_a_capitalized_longer_name_outside_the_block_still_wins_over_a_block_team(
+    virginia_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    errors = rejected("West Virginia never came up.", [], virginia_2017, catalog)
+    assert_an_error_says(errors, '"West Virginia"', "not a team in the fact block")
+    assert len(errors) == 1, errors
 
 
 def test_a_block_team_in_the_wrong_case_is_rejected_with_the_blocks_spelling(
@@ -156,19 +238,52 @@ def test_an_alias_of_a_block_team_is_rejected_with_the_blocks_spelling(
     assert_an_error_says(rejected(text, [], alabama_2017, catalog), *needles)
 
 
-def test_an_alias_of_a_team_outside_the_block_is_rejected(
+def test_an_alias_of_a_block_team_on_a_comparison_is_rejected(
+    fsu_msu_2013: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    errors = rejected("FSU was never in doubt.", [], fsu_msu_2013, catalog)
+    assert_an_error_says(errors, '"FSU"', '"Florida State"')
+
+
+def test_an_alias_of_a_team_outside_the_block_is_prose(
     usc_2005: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
-    assert_an_error_says(rejected("UGA fans agree.", [], usc_2005, catalog), '"UGA"', "Georgia")
+    """Coordinator decision 4 on #290 round 2: only an alias of a team the block
+    mentions is a team reference. Georgia is not in the 2005 USC block, so
+    "UGA" here is ignored (round 1 rejected it)."""
+    assert rendered("UGA fans agree.", [], usc_2005, catalog) == "UGA fans agree."
+
+
+@pytest.mark.parametrize("text", ["Don't tell ME that.", "the UK crowd"])
+@pytest.mark.parametrize("block_name", ["alabama_2017", "texas_2005"])
+def test_a_capital_letter_alias_of_a_team_outside_the_block_is_prose(
+    request: pytest.FixtureRequest,
+    catalog: tuple[TeamRecord, ...],
+    block_name: str,
+    text: str,
+) -> None:
+    # ME is Maine's alias and UK is Kentucky's; neither is in these blocks.
+    block: str = request.getfixturevalue(block_name)
+    assert rendered(text, [], block, catalog) == text
 
 
 @pytest.mark.parametrize(
     ("block_name", "text", "needles"),
     [
         ("alabama_2017", "The Tide rolled.", ('"Tide"', "Alabama")),
+        ("alabama_2017", "That was the Tide's year.", ('"Tide"', "Alabama")),
         ("alabama_2017", "The Crimson Tide rolled.", ('"Crimson Tide"', "Alabama")),
+        ("alabama_2017", "Nobody stops the Crimson Tide.", ('"Crimson Tide"', "Alabama")),
+        # a multi-word mascot needs no "the"
+        ("alabama_2017", "Crimson Tide fans were loud.", ('"Crimson Tide"', "Alabama")),
+        ("alabama_2017", "Alabama Crimson Tide football.", ('"Crimson Tide"', "Alabama")),
+        ("alabama_2017", "Even Green Wave fans knew.", ('"Green Wave"', "Tulane")),
         ("texas_2005", "The Longhorns ran the table.", ('"Longhorns"', "Texas")),
+        ("texas_2005", "Nobody stopped the Longhorns defense.", ('"Longhorns"', "Texas")),
+        ("texas_2005", "Texas Longhorns ran the table.", ('"Longhorns"', '"Texas"')),
         ("usc_2005", "The Longhorns ran the table.", ('"Longhorns"', "Texas")),
+        ("usc_2005", "Those Texas Longhorns were good.", ('"Longhorns"', '"Texas"')),
+        ("alabama_2017", "Hats off to the Pride.", ('"Pride"', "Hofstra")),
         # a nickname several teams share names the block's own
         ("alabama_2017", "The Tigers got them.", ('"Tigers"', "Auburn", "Clemson", "LSU")),
         ("alabama_2017", "The Seminoles were toast.", ('"Seminoles"', "Florida State")),
@@ -183,6 +298,72 @@ def test_a_mascot_is_rejected_naming_the_team(
 ) -> None:
     block: str = request.getfixturevalue(block_name)
     assert_an_error_says(rejected(text, [], block, catalog), *needles)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Pride goes before the fall.",
+        "Red flags everywhere.",
+        "Green light for the offense.",
+        "Cardinal sins, all of them.",
+        # Known gap (coordinator decision 3 on #290 round 2): a single-word
+        # mascot with neither "the" nor a team name before it is not caught.
+        "Longhorns fans were loud.",
+    ],
+)
+@pytest.mark.parametrize("block_name", ["alabama_2017", "texas_2005"])
+def test_a_single_word_mascot_without_the_or_a_team_name_before_it_is_prose(
+    request: pytest.FixtureRequest,
+    catalog: tuple[TeamRecord, ...],
+    block_name: str,
+    text: str,
+) -> None:
+    block: str = request.getfixturevalue(block_name)
+    assert rendered(text, [], block, catalog) == text
+
+
+def test_a_mascot_after_a_rank_placeholder_is_rejected(
+    usc_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    # {k} prints "No. 1 Texas", so "{k} Longhorns" reads "No. 1 Texas Longhorns".
+    claim: dict[str, object] = {"id": "k", "kind": "rank", "team": "Texas"}
+    errors = rejected("Then {k} Longhorns showed up.", [claim], usc_2005, catalog)
+    assert_an_error_says(errors, '"Longhorns"', "Texas")
+
+
+@pytest.mark.parametrize(
+    ("text", "token", "phrase"),
+    [
+        ("Big Ten teams never came up.", "Ten", "Big Ten"),
+        ("That Big 12 slate was soft.", "12", "Big 12"),
+        ("The Big Twelve was weak.", "Twelve", "Big Twelve"),
+        ("Pac-12 fans can argue.", "12", "Pac-12"),
+        ("Pac-10 fans can argue.", "10", "Pac-10"),
+        ("They pulled away in the second half.", "second", "second half"),
+        ("It was over by the third quarter.", "third", "third quarter"),
+        ("A fourth quarter comeback.", "fourth", "fourth quarter"),
+    ],
+)
+def test_a_conference_or_game_phase_is_rejected_saying_the_block_holds_no_such_detail(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str, token: str, phrase: str
+) -> None:
+    errors = rejected(text, [], alabama_2017, catalog)
+    assert_an_error_says(
+        errors,
+        f'"{token}"',
+        f'"{phrase}"',
+        "FACT BLOCK holds no conference or in-game detail",
+        "leave it out",
+    )
+
+
+def test_an_ordinal_outside_a_game_phase_keeps_the_rank_wording(
+    alabama_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    errors = rejected("They finished second in the league.", [], alabama_2017, catalog)
+    assert_an_error_says(errors, '"second"', "a rank must come from a rank claim")
+    assert not any("conference" in error for error in errors), errors
 
 
 @pytest.mark.parametrize(

@@ -568,6 +568,21 @@ def test_where_for_a_game_that_was_not_neutral_is_rejected(
     assert_an_error_says(errors, '"v"', "Auburn", "home", "neutral")
 
 
+def test_where_for_a_head_to_head_meeting_that_was_not_neutral_points_at_294(
+    catalog: tuple[TeamRecord, ...],
+) -> None:
+    # A head-to-head meeting row carries home_team / away_team (Auburn hosted
+    # the 2017 Iron Bowl), so the error must not claim the block lacks home or
+    # away: the claim model just can't print it until #294.
+    block = cfb_comparison_block(2017, "Alabama", "Auburn")
+    (meeting,) = _row(block, "head_to_head", "meetings")
+    assert (meeting["home_team"], meeting["neutral_site"]) == ("Auburn", False)
+    claim = _game("v", "where", "Alabama", "Auburn", "L")
+    errors = rejected("Alabama lost {v}.", [claim], block, catalog)
+    assert_an_error_says(errors, '"v"', "Auburn", "neutral-site", "home/away", "#294")
+    assert not any("does not record home or away" in error for error in errors), errors
+
+
 def test_where_for_a_common_opponent_meeting_uses_another_row_for_the_same_game(
     kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
 ) -> None:
