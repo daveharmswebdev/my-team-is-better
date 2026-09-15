@@ -1047,7 +1047,7 @@ def test_keener_verdict_text_is_byte_identical(conn: sqlite3.Connection) -> None
 def test_elo_verdict_uses_one_decimal_place(conn: sqlite3.Connection, method: str) -> None:
     """Elo lives around 1100-2000. `.6f` printed `1523.456789`, false
     precision nobody reads. One decimal place separates most neighbouring
-    teams. It can't separate every pair (near-ties are #149)."""
+    teams. It can't separate every pair; those get the #149 hedge (below)."""
     _insert_cfb_cycle_ratings(conn, method, (1523.456789, 1498.04, 1400.0))
 
     comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=method)
@@ -1078,6 +1078,67 @@ def test_verdict_precision_is_read_from_the_format_table(
         _ALPHA_BRAVO_PREFIX + "Alpha State rates higher overall "
         f"({team_a.rating:.3f} vs {team_b.rating:.3f}, rank 1 vs 2)."
     )
+
+
+@pytest.mark.parametrize("method", ["elo", "elo_career"])
+def test_near_tie_verdict_hedges_instead_of_naming_a_leader_beside_equal_numbers(
+    conn: sqlite3.Connection, method: str
+) -> None:
+    """Issue #149 (option 2). Two ratings that differ but print identically at
+    the method's format get "rates a hair higher overall"; the numbers, the
+    ranks and the rest of the verdict are unchanged. The leader is still the
+    exact-rating leader, whichever argument order the caller used, so the
+    rank text flips with the order while the name does not. The real-data
+    proof is tests/test_evidence_near_tie_verdicts.py; this is the unit twin
+    on a hand-built cycle."""
+    _insert_cfb_cycle_ratings(conn, method, (1531.24, 1531.16, 1400.0))
+
+    forward = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=method)
+    assert forward.rating_diff != 0
+    assert forward.verdict == (
+        _ALPHA_BRAVO_PREFIX
+        + "Alpha State rates a hair higher overall (1531.2 vs 1531.2, rank 1 vs 2)."
+    )
+
+    reverse = build_comparison(conn, YEAR, "Bravo Tech", "Alpha State", method=method)
+    assert reverse.rating_diff == -forward.rating_diff
+    assert reverse.verdict.endswith(
+        " Alpha State rates a hair higher overall (1531.2 vs 1531.2, rank 2 vs 1)."
+    )
+
+
+def test_keener_near_tie_verdict_hedges_at_six_places(conn: sqlite3.Connection) -> None:
+    """Keener's `.6f` collides for a few real pairs (measured: 56 ordered
+    pairs across the CFB fixtures). Different at the seventh place, identical
+    at the sixth: the hedge applies, at keener's own precision."""
+    conn.execute(
+        "UPDATE ratings SET rating = ? WHERE year = ? AND method = 'keener' AND team_id = 1",
+        (0.0069704, YEAR),
+    )
+    conn.execute(
+        "UPDATE ratings SET rating = ? WHERE year = ? AND method = 'keener' AND team_id = 2",
+        (0.0069696, YEAR),
+    )
+    conn.commit()
+
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener")
+
+    assert comparison.rating_diff > 0
+    assert comparison.verdict == (
+        _ALPHA_BRAVO_PREFIX
+        + "Alpha State rates a hair higher overall (0.006970 vs 0.006970, rank 1 vs 2)."
+    )
+
+
+def test_exact_tie_verdict_is_unchanged(conn: sqlite3.Connection) -> None:
+    """rating_diff == 0 keeps "Ratings are effectively tied." -- the hedge is
+    only for ratings that differ."""
+    _insert_cfb_cycle_ratings(conn, "elo", (1531.2, 1531.2, 1400.0))
+
+    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="elo")
+
+    assert comparison.rating_diff == 0
+    assert comparison.verdict == _ALPHA_BRAVO_PREFIX + "Ratings are effectively tied."
 
 
 def test_unregistered_method_verdict_raises_instead_of_falling_back(
