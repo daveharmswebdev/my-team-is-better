@@ -14,10 +14,13 @@ jobs:
       run:
         working-directory: packages/cfb-engine
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
+      # Issue #169: setup-uv publishes no bare major tag past v7 (v8-v10 exist
+      # only as full releases), so this pins the release; v10.1.0 declares
+      # the node24 runtime. The other actions use their node24 major tags.
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: "0.12.11"
 
@@ -62,10 +65,10 @@ jobs:
       run:
         working-directory: apps/api
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: "0.12.11"
 
@@ -118,10 +121,10 @@ jobs:
       run:
         working-directory: apps/web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
@@ -132,6 +135,14 @@ jobs:
 
       - name: ESLint
         run: npm run lint
+
+      # Issue #116: Prettier is a stated standard (CLAUDE.md) with a local
+      # pre-commit hook (#55), but a hook is bypassable and never runs on a
+      # PR, so this is the only gate that keeps `main` formatted. Uses the
+      # package script rather than a re-spelled `npx prettier --check .` so
+      # the CI and pre-commit halves can't drift apart.
+      - name: Prettier
+        run: npm run format:check
 
       - name: Type-check
         run: npx tsc -b
@@ -169,10 +180,10 @@ jobs:
     name: "claude-process (hooks + delegation contract: pytest, mypy --strict, ruff, conflict markers)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: "0.12.11"
 
@@ -202,10 +213,10 @@ jobs:
     name: e2e (Playwright, apps/api + apps/web)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@v10.1.0
         with:
           version: "0.12.11"
 
@@ -218,7 +229,7 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           cache: "npm"
@@ -244,7 +255,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: apps/web/playwright-report/
