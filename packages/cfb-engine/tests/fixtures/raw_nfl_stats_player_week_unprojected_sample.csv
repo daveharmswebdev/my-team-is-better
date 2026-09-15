@@ -1,0 +1,5 @@
+player_id,player_display_name,position,season,week,season_type,game_id,team,opponent_team,completions,attempts,passing_yards,passing_tds,passing_interceptions,sacks_suffered,sack_yards_lost,carries,rushing_yards,rushing_tds,player_name,position_group,receptions,receiving_yards
+00-0039164,Anthony Richardson,QB,2024,8,REG,2024_08_IND_HOU,IND,HOU,10,32,175,1,1,5,-35,6,45,0,A.Richardson,QB,0,0
+00-0038997,Josh Downs,WR,2024,8,REG,2024_08_IND_HOU,IND,HOU,0,0,0,0,0,0,0,0,13,0,J.Downs,WR,4,109
+00-0030431,Robert Woods,WR,2024,8,REG,2024_08_IND_HOU,HOU,IND,0,0,0,0,0,0,0,0,0,0,R.Woods,WR,2,18
+00-0031254,Denico Autry,DT,2024,8,REG,2024_08_IND_HOU,HOU,IND,0,0,0,0,0,0,0,0,0,0,D.Autry,DL,0,0
