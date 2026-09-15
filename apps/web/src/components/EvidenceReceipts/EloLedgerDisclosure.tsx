@@ -172,7 +172,7 @@ export function EloLedgerDisclosure({
         <ul className={styles.ruleLines}>
           <li>{`Gap = team rating ${MINUS} opponent rating, ± ${constant(ledger.hfa)} for home field (0 at a neutral site)`}</li>
           <li>{`Win expectancy = 1 ÷ (10^(${MINUS}gap ÷ ${constant(ledger.scale)}) + 1)`}</li>
-          <li>{`Margin multiplier = ln(max(margin, 1) + 1) × ${constant(ledger.mov_scale)} ÷ (winner's gap × ${constant(ledger.mov_autocorr)} + ${constant(ledger.mov_scale)}, floored at half of ${constant(ledger.mov_scale)}); a tie uses ln 2 × ${constant(ledger.mov_scale)}`}</li>
+          <li>{`Margin multiplier = ln(max(margin, 1) + 1) × ${constant(ledger.mov_scale)} ÷ (winner's gap × ${constant(ledger.mov_autocorr)} + ${constant(ledger.mov_scale)}, floored at ${constant(ledger.mov_denom_floor_fraction)} × ${constant(ledger.mov_scale)} = ${constant(ledger.mov_denom_floor_fraction * ledger.mov_scale)}); a tie uses ln 2 × ${constant(ledger.mov_scale)}`}</li>
           <li>{`Rating change = ${constant(ledger.k)} × multiplier × (result ${MINUS} win expectancy), where result is 1 for a win, ½ for a tie, 0 for a loss`}</li>
         </ul>
         <p className={styles.provenance}>

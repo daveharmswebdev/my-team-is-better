@@ -86,6 +86,12 @@ export interface EloLedgerOut {
   scale: number
   mov_scale: number
   mov_autocorr: number
+  /**
+   * The margin-of-victory denominator floor as a fraction of `mov_scale`,
+   * stored with the ledger (issue #194); the panel prints it rather than
+   * assuming a half.
+   */
+  mov_denom_floor_fraction: number
   steps: EloGameStepOut[]
 }
 

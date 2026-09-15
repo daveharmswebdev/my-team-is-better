@@ -12,6 +12,7 @@
       "scale": 400.0,
       "mov_scale": 2.2,
       "mov_autocorr": 0.001,
+      "mov_denom_floor_fraction": 0.5,
       "steps": [
         {
           "game_number": 1,
@@ -129,6 +130,7 @@
       "scale": 400.0,
       "mov_scale": 2.2,
       "mov_autocorr": 0.001,
+      "mov_denom_floor_fraction": 0.5,
       "steps": [
         {
           "game_number": 1,

@@ -171,7 +171,7 @@ describe('EloLedgerDisclosure', () => {
     for (const line of [
       'Gap = team rating − opponent rating, ± 100 for home field (0 at a neutral site)',
       'Win expectancy = 1 ÷ (10^(−gap ÷ 400) + 1)',
-      "Margin multiplier = ln(max(margin, 1) + 1) × 2.2 ÷ (winner's gap × 0.001 + 2.2, floored at half of 2.2); a tie uses ln 2 × 2.2",
+      "Margin multiplier = ln(max(margin, 1) + 1) × 2.2 ÷ (winner's gap × 0.001 + 2.2, floored at 0.5 × 2.2 = 1.1); a tie uses ln 2 × 2.2",
       'Rating change = 40 × multiplier × (result − win expectancy), where result is 1 for a win, ½ for a tie, 0 for a loss',
     ]) {
       expect(within(dialog).getByText(line)).toBeInTheDocument()
@@ -243,6 +243,33 @@ describe('EloLedgerDisclosure', () => {
       ),
     ).toBeInTheDocument()
   })
+
+  // Issue #194: the denominator floor is a stored constant the engine sends
+  // as a fraction of mov_scale, so the rule line prints the fraction it came
+  // from and the product it clamps at, both from the response. Two fractions
+  // on the same mov_scale, so a hand-copied "half" can never pass.
+  it.each([
+    { fraction: 0.5, floor: '1.1' },
+    { fraction: 0.25, floor: '0.55' },
+  ])(
+    '(b) prints the floor from the response: mov_denom_floor_fraction $fraction on mov_scale 2.2 reads "floored at $fraction × 2.2 = $floor"',
+    async ({ fraction, floor }) => {
+      mockMatchMedia(false)
+      renderTexas({
+        ...TEXAS_ELO.elo_ledger,
+        mov_scale: 2.2,
+        mov_denom_floor_fraction: fraction,
+      })
+      const { dialog } = await openOnDesktop()
+
+      expect(
+        within(dialog).getByText(
+          `Margin multiplier = ln(max(margin, 1) + 1) × 2.2 ÷ (winner's gap × 0.001 + 2.2, floored at ${fraction} × 2.2 = ${floor}); a tie uses ln 2 × 2.2`,
+        ),
+      ).toBeInTheDocument()
+      expect(within(dialog).queryByText(/half of/)).not.toBeInTheDocument()
+    },
+  )
 
   it('(c) touch: a tap opens a modal, focus moves to its close button, and Escape closes it and refocuses the trigger', async () => {
     mockMatchMedia(true)
