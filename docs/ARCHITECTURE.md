@@ -549,9 +549,11 @@ Single `render.yaml` blueprint:
 - **Static site** — `apps/web` build output.
 - **Web service** — `apps/api` (FastAPI via uvicorn), **entry-level Starter
   plan (~$7/mo)**, not free — build step runs
-  `uv run cfb ingest --years 1998-2025 && uv run cfb rate --years 1998-2025`
-  against the committed `data/raw/` cache (§3.1) so the SQLite reference
-  data is baked into every deploy with zero live CFBD calls.
+  the ingest and rate legs for both leagues and every method against the
+  committed `data/raw/` cache (§3.1), so the SQLite reference data is baked
+  into every deploy with zero live CFBD calls, and ends with `cfb doctor`
+  (#159), so a build whose data isn't current fails before it replaces the
+  live service.
 - **Postgres** — Render managed instance, **entry-level paid plan
   (Basic-256mb, ~$6–7/mo) from day one**. Today it holds only the persona
   narration cache; accounts and history are deferred (#201). Its Blueprint

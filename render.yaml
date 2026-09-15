@@ -65,6 +65,17 @@ services:
     # Order matters in one respect: every `rate` leg must follow BOTH
     # `ingest` legs, because `elo_career --sport nfl` loads `season <= ?`
     # across the full history rather than a single season.
+    #
+    # `cfb doctor` runs last (issue #159): it exits non-zero when the db it
+    # just built is behind the committed raw cache, a league has no games,
+    # a season is unrated under a registered method, or no CFB team has a
+    # mascot, so a deploy whose data isn't current fails at build time and
+    # the previous deploy keeps serving. It reads the same default DB_PATH
+    # the legs above wrote, needs no network, and its per-league year
+    # bounds are the ingest MIN_YEAR/MAX_YEAR the `--years` ranges above
+    # already match (cfb 1998-2025, nfl 1999-2025). Measured locally on a
+    # replay of this exact command: the whole chain plus the doctor takes
+    # ~6s and the doctor reports "OK: the db's data is current".
     buildCommand: >-
       uv sync --frozen --no-dev &&
       uv run cfb ingest --years 1998-2025 &&
@@ -74,7 +85,8 @@ services:
       uv run cfb rate --years 1998-2025 --method elo_career &&
       uv run cfb rate --years 1999-2025 --sport nfl &&
       uv run cfb rate --years 1999-2025 --method elo --sport nfl &&
-      uv run cfb rate --years 1999-2025 --method elo_career --sport nfl
+      uv run cfb rate --years 1999-2025 --method elo_career --sport nfl &&
+      uv run cfb doctor
     startCommand: uv run uvicorn api.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
