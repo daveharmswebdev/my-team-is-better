@@ -13,8 +13,13 @@ theorem applied to a win-graph) — the same mathematical idea behind PageRank.
 
 ## Setup
 
+This package is a member of the repo's single `uv` workspace, whose venv lives at the
+repo root. Install from the **repo root** with `--all-packages`: a `uv sync` run in
+this directory resolves against this package alone and silently uninstalls the other
+members' dev tools (`ruff`, `httpx`, ...) from the shared venv (#119).
+
 ```bash
-uv sync
+uv sync --all-packages --all-extras --dev   # from the repo root
 ```
 
 Sign up for a free API key at [collegefootballdata.com](https://collegefootballdata.com)
