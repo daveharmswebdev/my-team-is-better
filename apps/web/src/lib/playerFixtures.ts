@@ -160,9 +160,10 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
   },
 }
 
-/** `?sort=passing_yards`, regular season: the first four of 204. */
+/** `?category=passing&sort=passing_yards`, regular season: the first four of 204. */
 export const LEADERS_BY_YARDS: PlayerLeadersOut = {
   sport: 'nfl',
+  category: 'passing',
   season_type: 'regular',
   sort: 'passing_yards',
   limit: 50,
@@ -171,9 +172,10 @@ export const LEADERS_BY_YARDS: PlayerLeadersOut = {
   rows: [TUA_TAGOVAILOA, JARED_GOFF, DAK_PRESCOTT, STEVE_BEUERLEIN],
 }
 
-/** `?sort=passing_tds`, regular season: a real tie at rank 2. */
+/** `?category=passing&sort=passing_tds`, regular season: a real tie at rank 2. */
 export const LEADERS_BY_TDS: PlayerLeadersOut = {
   sport: 'nfl',
+  category: 'passing',
   season_type: 'regular',
   sort: 'passing_tds',
   limit: 50,
@@ -208,6 +210,7 @@ export const UNRECORDED_STATS: PlayerStatsOut = {
  */
 export const LEADERS_WITH_NULL_STATS: PlayerLeadersOut = {
   sport: 'nfl',
+  category: 'passing',
   season_type: 'regular',
   sort: 'passing_yards',
   limit: 50,
@@ -231,6 +234,166 @@ export const LEADERS_WITH_NULL_STATS: PlayerLeadersOut = {
       stats: UNRECORDED_STATS,
     },
   ],
+}
+
+// ---------------------------------------------------------------------------
+// The rushing category (issue #312). Copied from the same fixture db: every
+// player with a carry qualifies, whatever their position, so the QBs below
+// sit on the same board as the running backs. A rusher who never started at
+// quarterback carries a 0-0-0 `record` -- the rushing board doesn't show it.
+// ---------------------------------------------------------------------------
+
+/** Rushing stats only: the fixture records a 0, not a null, for a rusher's passing. */
+function rushingOnly(
+  carries: number,
+  rushingYards: number,
+  rushingTds: number,
+): PlayerStatsOut {
+  return {
+    completions: 0,
+    attempts: 0,
+    passing_yards: 0,
+    passing_tds: 0,
+    passing_interceptions: 0,
+    sacks_suffered: 0,
+    sack_yards_lost: 0,
+    carries,
+    rushing_yards: rushingYards,
+    rushing_tds: rushingTds,
+  }
+}
+
+const NO_RECORD = { wins: 0, losses: 0, ties: 0, starts: 0 }
+
+export const EDGERRIN_JAMES: PlayerLeaderRowOut = {
+  rank: 1,
+  player_id: 2425879833,
+  display_name: 'Edgerrin James',
+  position: 'RB',
+  first_season: 1999,
+  last_season: 1999,
+  games: 16,
+  record: NO_RECORD,
+  stats: rushingOnly(369, 1553, 13),
+}
+
+export const CURTIS_MARTIN: PlayerLeaderRowOut = {
+  rank: 2,
+  player_id: 2056460271,
+  display_name: 'Curtis Martin',
+  position: 'RB',
+  first_season: 1999,
+  last_season: 1999,
+  games: 16,
+  record: NO_RECORD,
+  stats: rushingOnly(367, 1464, 5),
+}
+
+export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
+  rank: 3,
+  player_id: 2034350752,
+  display_name: 'Christian McCaffrey',
+  position: 'RB',
+  first_season: 2023,
+  last_season: 2023,
+  games: 16,
+  record: NO_RECORD,
+  stats: rushingOnly(272, 1459, 14),
+}
+
+export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
+  rank: 1,
+  player_id: 2254464124,
+  display_name: 'Raheem Mostert',
+  position: 'RB',
+  first_season: 2023,
+  last_season: 2023,
+  games: 15,
+  record: NO_RECORD,
+  stats: rushingOnly(209, 1012, 18),
+}
+
+export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
+  rank: 2,
+  player_id: 2057513912,
+  display_name: 'Stephen Davis',
+  position: 'RB',
+  first_season: 1999,
+  last_season: 1999,
+  games: 14,
+  record: NO_RECORD,
+  stats: rushingOnly(290, 1405, 17),
+}
+
+/** A quarterback on the rushing board, tied at rank 3: he keeps his starter record. */
+export const JALEN_HURTS: PlayerLeaderRowOut = {
+  rank: 3,
+  player_id: 2284636265,
+  display_name: 'Jalen Hurts',
+  position: 'QB',
+  first_season: 2023,
+  last_season: 2023,
+  games: 17,
+  record: { wins: 11, losses: 6, ties: 0, starts: 17 },
+  stats: {
+    completions: 352,
+    attempts: 538,
+    passing_yards: 3858,
+    passing_tds: 23,
+    passing_interceptions: 15,
+    sacks_suffered: 36,
+    sack_yards_lost: -222,
+    carries: 157,
+    rushing_yards: 605,
+    rushing_tds: 15,
+  },
+}
+
+export const JOSH_ALLEN: PlayerLeaderRowOut = {
+  rank: 3,
+  player_id: 2449461859,
+  display_name: 'Josh Allen',
+  position: 'QB',
+  first_season: 2023,
+  last_season: 2023,
+  games: 17,
+  record: { wins: 11, losses: 6, ties: 0, starts: 17 },
+  stats: {
+    completions: 385,
+    attempts: 579,
+    passing_yards: 4306,
+    passing_tds: 29,
+    passing_interceptions: 18,
+    sacks_suffered: 24,
+    sack_yards_lost: -152,
+    carries: 111,
+    rushing_yards: 524,
+    rushing_tds: 15,
+  },
+}
+
+/** `?category=rushing`, regular season: the top three of 653, the default sort. */
+export const LEADERS_BY_RUSHING_YARDS: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'rushing',
+  season_type: 'regular',
+  sort: 'rushing_yards',
+  limit: 50,
+  offset: 0,
+  total: 653,
+  rows: [EDGERRIN_JAMES, CURTIS_MARTIN, CHRISTIAN_MCCAFFREY],
+}
+
+/** `?category=rushing&sort=rushing_tds`: two quarterbacks tied at rank 3. */
+export const LEADERS_BY_RUSHING_TDS: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'rushing',
+  season_type: 'regular',
+  sort: 'rushing_tds',
+  limit: 50,
+  offset: 0,
+  total: 653,
+  rows: [RAHEEM_MOSTERT, STEPHEN_DAVIS, JALEN_HURTS, JOSH_ALLEN],
 }
 
 export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {

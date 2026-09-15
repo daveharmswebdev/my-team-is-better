@@ -271,11 +271,35 @@ export const PLAYER_SEASON_TYPES = ['regular', 'postseason'] as const
 
 export type PlayerSeasonType = (typeof PLAYER_SEASON_TYPES)[number]
 
-/** The engine's `PlayerLeaderSort` literal, in its order; always descending. Same caveat as `PLAYER_SEASON_TYPES`. */
+/**
+ * The engine's `PlayerLeaderCategory` literal, in its order (issue #312):
+ * what a board ranks. A stat category, never a position -- the rushing board
+ * ranks everyone with a carry, quarterbacks included. Same caveat as
+ * `PLAYER_SEASON_TYPES`.
+ */
+export const PLAYER_LEADER_CATEGORIES = ['passing', 'rushing'] as const
+
+export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
+
+/**
+ * The sorts each category accepts, its default first: the mirror of the
+ * engine's `PLAYER_LEADER_SORTS_BY_CATEGORY`. Every sort belongs to exactly
+ * one category, and the API answers a pair from two categories with a 422 at
+ * `sort`, so this is the only list a caller may pick a sort from -- never a
+ * string check of its own.
+ */
+export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
+  passing: ['passing_yards', 'passing_tds', 'wins'],
+  rushing: ['rushing_yards', 'rushing_tds', 'carries'],
+} as const satisfies Record<PlayerLeaderCategory, readonly string[]>
+
+/**
+ * The engine's `PlayerLeaderSort` literal; always descending. Derived from
+ * the map above rather than restated, so the two cannot drift apart.
+ */
 export const PLAYER_LEADER_SORTS = [
-  'passing_yards',
-  'passing_tds',
-  'wins',
+  ...PLAYER_LEADER_SORTS_BY_CATEGORY.passing,
+  ...PLAYER_LEADER_SORTS_BY_CATEGORY.rushing,
 ] as const
 
 export type PlayerLeaderSort = (typeof PLAYER_LEADER_SORTS)[number]
@@ -321,7 +345,10 @@ export interface PlayerLeaderRowOut {
 
 export interface PlayerLeadersOut {
   sport: Sport
+  /** What this board ranks (#312): qualifying, the rows and the sort all belong to it. */
+  category: PlayerLeaderCategory
   season_type: PlayerSeasonType
+  /** Always the resolved sort: a request without one is answered with the category's default. */
   sort: PlayerLeaderSort
   limit: number
   offset: number
@@ -610,6 +637,33 @@ export function isPlayerSeasonType(value: unknown): value is PlayerSeasonType {
 
 export function isPlayerLeaderSort(value: unknown): value is PlayerLeaderSort {
   return (PLAYER_LEADER_SORTS as readonly unknown[]).includes(value)
+}
+
+export function isPlayerLeaderCategory(
+  value: unknown,
+): value is PlayerLeaderCategory {
+  return (PLAYER_LEADER_CATEGORIES as readonly unknown[]).includes(value)
+}
+
+/**
+ * Whether `value` is one of `category`'s own sorts -- the only pairing the
+ * API accepts (issue #312). A sort that belongs to another category is a 422,
+ * so this is what a caller checks before sending one.
+ */
+export function isSortInCategory(
+  category: PlayerLeaderCategory,
+  value: unknown,
+): value is PlayerLeaderSort {
+  return (
+    PLAYER_LEADER_SORTS_BY_CATEGORY[category] as readonly unknown[]
+  ).includes(value)
+}
+
+/** The sort a category defaults to: its first, which the API echoes when none is sent. */
+export function defaultSortFor(
+  category: PlayerLeaderCategory,
+): PlayerLeaderSort {
+  return PLAYER_LEADER_SORTS_BY_CATEGORY[category][0]
 }
 
 export function isVerdictErrorBody(value: unknown): value is VerdictErrorBody {

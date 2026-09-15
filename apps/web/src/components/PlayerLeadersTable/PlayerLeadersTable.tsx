@@ -1,18 +1,15 @@
 import { useId } from 'react'
 import { Link } from 'react-router-dom'
-import type {
-  PlayerLeaderSort,
-  PlayerLeadersOut,
-  PlayerStatsOut,
-} from '../../lib/api/types'
+import type { PlayerLeaderSort, PlayerLeadersOut } from '../../lib/api/types'
 import { formatRecord } from '../../lib/formatRecord'
 import {
+  LEADER_BOARD_COLUMNS,
   NOT_RECORDED,
   SEASON_TYPE_LABEL,
   SORT_LABEL,
-  STAT_COLUMNS,
   formatSeasonSpan,
   formatStat,
+  sortForStat,
 } from '../../lib/playerStats'
 import styles from './PlayerLeadersTable.module.css'
 
@@ -25,12 +22,6 @@ export interface PlayerLeadersTableProps {
   busy?: boolean
   /** The id of the note that explains the records (the pulled-early starter note). */
   describedBy?: string
-}
-
-/** The stat columns that re-sort the board. */
-const SORT_FOR_STAT: Partial<Record<keyof PlayerStatsOut, PlayerLeaderSort>> = {
-  passing_yards: 'passing_yards',
-  passing_tds: 'passing_tds',
 }
 
 function SortArrow({ active }: { active: boolean }) {
@@ -93,8 +84,15 @@ function statCellClass(value: number | null): string | undefined {
 /**
  * The NFL career leaderboard (issue #296): one page of rows in the API's
  * order, with the API's competition ranks (ties shared), sortable by the
- * three columns the API sorts on. A stat the source didn't track reads "not
+ * columns the API sorts on. A stat the source didn't track reads "not
  * recorded". Sack columns are left out in v1 (#298).
+ *
+ * Which columns those are is the API's `category` (issue #312), not this
+ * component's guesswork: the passing board carries the starter record and
+ * the passing stats, the rushing board the three rushing ones. Both come
+ * from `LEADER_BOARD_COLUMNS`, and a column is sortable exactly when the
+ * category sorts on it (`sortForStat`), so the headers can't offer a sort
+ * the API would refuse.
  */
 export function PlayerLeadersTable({
   leaders,
@@ -104,6 +102,8 @@ export function PlayerLeadersTable({
 }: PlayerLeadersTableProps) {
   const captionId = useId()
   const caption = `NFL career leaders: ${SEASON_TYPE_LABEL[leaders.season_type].toLowerCase()}, by ${SORT_LABEL[leaders.sort]}`
+  const { showsRecord, stats: statColumns } =
+    LEADER_BOARD_COLUMNS[leaders.category]
 
   return (
     <div
@@ -132,17 +132,21 @@ export function PlayerLeadersTable({
             <th scope="col" className={styles.numeric}>
               Games
             </th>
-            <SortHeader
-              label="Starter record"
-              sort="wins"
-              current={leaders.sort}
-              onSort={onSort}
-            />
-            <th scope="col" className={styles.numeric}>
-              Starts
-            </th>
-            {STAT_COLUMNS.map((column) => {
-              const sort = SORT_FOR_STAT[column.key]
+            {showsRecord && (
+              <>
+                <SortHeader
+                  label="Starter record"
+                  sort="wins"
+                  current={leaders.sort}
+                  onSort={onSort}
+                />
+                <th scope="col" className={styles.numeric}>
+                  Starts
+                </th>
+              </>
+            )}
+            {statColumns.map((column) => {
+              const sort = sortForStat(leaders.category, column.key)
               return sort === undefined ? (
                 <th scope="col" className={styles.numeric} key={column.key}>
                   {column.label}
@@ -189,17 +193,21 @@ export function PlayerLeadersTable({
               <td className={statCellClass(row.games)}>
                 {formatStat(row.games)}
               </td>
-              <td className={styles.numeric}>
-                {formatRecord(
-                  row.record.wins,
-                  row.record.losses,
-                  row.record.ties,
-                )}
-              </td>
-              <td className={styles.numeric}>
-                {formatStat(row.record.starts)}
-              </td>
-              {STAT_COLUMNS.map((column) => (
+              {showsRecord && (
+                <>
+                  <td className={styles.numeric}>
+                    {formatRecord(
+                      row.record.wins,
+                      row.record.losses,
+                      row.record.ties,
+                    )}
+                  </td>
+                  <td className={styles.numeric}>
+                    {formatStat(row.record.starts)}
+                  </td>
+                </>
+              )}
+              {statColumns.map((column) => (
                 <td
                   key={column.key}
                   className={statCellClass(row.stats[column.key])}

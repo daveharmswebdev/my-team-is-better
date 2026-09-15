@@ -19,6 +19,8 @@ import type { PlayerLeadersQuery } from '../../lib/api/client'
 import type { PlayerLeaderRowOut, PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
+  LEADERS_BY_RUSHING_TDS,
+  LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
   LEADERS_WITH_NULL_STATS,
@@ -121,6 +123,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
       name: 'NFL career leaders: regular season, by passing yards',
     })
     expect(lastQuery()).toEqual({
+      category: 'passing',
       season_type: 'regular',
       sort: 'passing_yards',
       limit: 50,
@@ -149,6 +152,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
 
     await screen.findByText('51–100 of 204')
     expect(lastQuery()).toEqual({
+      category: 'passing',
       season_type: 'postseason',
       sort: 'wins',
       limit: 50,
@@ -163,10 +167,13 @@ describe('PlayerLeadersPage (issue #296)', () => {
   it('falls back to the defaults for URL values the API would refuse', async () => {
     mockedFetchPlayerLeaders.mockResolvedValue(LEADERS_BY_YARDS)
 
-    renderPage('/nfl/leaders?season_type=playoffs&sort=sacks&offset=-3')
+    renderPage(
+      '/nfl/leaders?category=receiving&season_type=playoffs&sort=sacks&offset=-3',
+    )
 
     await screen.findByRole('table')
     expect(lastQuery()).toEqual({
+      category: 'passing',
       season_type: 'regular',
       sort: 'passing_yards',
       limit: 50,
@@ -191,6 +198,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
     await user.click(screen.getByRole('button', { name: 'Passing TDs' }))
 
     expect(lastQuery()).toEqual({
+      category: 'passing',
       season_type: 'regular',
       sort: 'passing_tds',
       limit: 50,
@@ -204,7 +212,9 @@ describe('PlayerLeadersPage (issue #296)', () => {
     expect(
       screen.getByRole('columnheader', { name: 'Passing yards' }),
     ).toHaveAttribute('aria-sort', 'none')
-    expect(search()).toBe('?season_type=regular&sort=passing_tds&offset=0')
+    expect(search()).toBe(
+      '?category=passing&season_type=regular&sort=passing_tds&offset=0',
+    )
     // The button keeps focus across the reload, for a keyboard user.
     expect(screen.getByRole('button', { name: 'Passing TDs' })).toHaveFocus()
   })
@@ -249,6 +259,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
     await user.click(screen.getByRole('radio', { name: 'Playoffs' }))
 
     expect(lastQuery()).toEqual({
+      category: 'passing',
       season_type: 'postseason',
       sort: 'passing_tds',
       limit: 50,
@@ -257,7 +268,9 @@ describe('PlayerLeadersPage (issue #296)', () => {
     await screen.findByRole('table', {
       name: 'NFL career leaders: playoffs, by passing TDs',
     })
-    expect(search()).toBe('?season_type=postseason&sort=passing_tds&offset=0')
+    expect(search()).toBe(
+      '?category=passing&season_type=postseason&sort=passing_tds&offset=0',
+    )
     expect(screen.getByRole('radio', { name: 'Playoffs' })).toBeChecked()
   })
 
@@ -277,7 +290,9 @@ describe('PlayerLeadersPage (issue #296)', () => {
 
     await screen.findByText('51–100 of 204')
     expect(lastQuery()).toMatchObject({ offset: 50, limit: 50 })
-    expect(search()).toBe('?season_type=regular&sort=passing_yards&offset=50')
+    expect(search()).toBe(
+      '?category=passing&season_type=regular&sort=passing_yards&offset=50',
+    )
     expect(screen.getByRole('link', { name: 'Player 51' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Browser back' }))
@@ -488,5 +503,185 @@ describe('PlayerLeadersPage (issue #296)', () => {
     for (const [query] of mockedFetchPlayerLeaders.mock.calls) {
       expect(query).toMatchObject({ sort: 'passing_yards', offset: 0 })
     }
+  })
+})
+
+/**
+ * Issue #312: the stat-category dropdown. Picking a category asks the API for
+ * a different board -- different qualifiers, different columns, its own sorts
+ * -- so the page resets the sort to that category's default rather than
+ * sending a pair the API would 422.
+ */
+describe('PlayerLeadersPage, the stat category (issue #312)', () => {
+  /** Answers each request with the board its category and sort name. */
+  function boardFor(query: PlayerLeadersQuery): PlayerLeadersOut {
+    const base =
+      query.category === 'rushing'
+        ? query.sort === 'rushing_tds'
+          ? LEADERS_BY_RUSHING_TDS
+          : LEADERS_BY_RUSHING_YARDS
+        : LEADERS_BY_YARDS
+    return {
+      ...base,
+      category: query.category,
+      season_type: query.season_type,
+      sort: query.sort,
+      offset: query.offset,
+    }
+  }
+
+  function categorySelect(): HTMLElement {
+    return screen.getByRole('combobox', { name: 'Stat category' })
+  }
+
+  beforeEach(() => {
+    mockedFetchPlayerLeaders.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    mockedFetchPlayerLeaders.mockImplementation((query) =>
+      Promise.resolve(boardFor(query)),
+    )
+  })
+
+  it('offers a labelled dropdown of both categories, set from the URL', async () => {
+    renderPage('/nfl/leaders?category=rushing')
+
+    await screen.findByRole('table')
+    const select = categorySelect()
+    expect(select).toHaveValue('rushing')
+    expect(
+      within(select)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['Passing', 'Rushing'])
+  })
+
+  it('starts on passing, and is the first control the keyboard reaches', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await screen.findByRole('table')
+    expect(categorySelect()).toHaveValue('passing')
+    await user.tab()
+    expect(categorySelect()).toHaveFocus()
+  })
+
+  it('switches to rushing, keeping the season type and resetting the sort and the page', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?season_type=postseason&sort=wins&offset=50')
+    await screen.findByRole('table')
+
+    await user.selectOptions(categorySelect(), 'rushing')
+
+    expect(lastQuery()).toEqual({
+      category: 'rushing',
+      season_type: 'postseason',
+      sort: 'rushing_yards',
+      limit: 50,
+      offset: 0,
+    })
+    expect(search()).toBe(
+      '?category=rushing&season_type=postseason&sort=rushing_yards&offset=0',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by rushing yards',
+    })
+    expect(screen.getByRole('radio', { name: 'Playoffs' })).toBeChecked()
+  })
+
+  it('shows the rushing board the API sent, quarterbacks and all', async () => {
+    renderPage('/nfl/leaders?category=rushing')
+
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by rushing yards',
+    })
+    const first = within(table).getAllByRole('row')[1] as HTMLElement
+    expect(within(first).getByRole('link')).toHaveTextContent('Edgerrin James')
+    expect(within(first).getByText('1,553')).toBeInTheDocument()
+    expect(
+      within(table).queryByRole('columnheader', { name: 'Passing yards' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('1–3 of 653')).toBeInTheDocument()
+  })
+
+  it('keeps the category when a rushing column is sorted', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=rushing')
+    await screen.findByRole('table')
+
+    await user.click(screen.getByRole('button', { name: 'Rushing TDs' }))
+
+    expect(lastQuery()).toEqual({
+      category: 'rushing',
+      season_type: 'regular',
+      sort: 'rushing_tds',
+      limit: 50,
+      offset: 0,
+    })
+    expect(search()).toBe(
+      '?category=rushing&season_type=regular&sort=rushing_tds&offset=0',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by rushing TDs',
+    })
+  })
+
+  it('never asks for a sort the category does not own', async () => {
+    renderPage('/nfl/leaders?category=rushing&sort=wins')
+
+    await screen.findByRole('table')
+    expect(lastQuery()).toEqual({
+      category: 'rushing',
+      season_type: 'regular',
+      sort: 'rushing_yards',
+      limit: 50,
+      offset: 0,
+    })
+  })
+
+  it('Back from the rushing board restores the passing board', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by passing yards',
+    })
+
+    await user.selectOptions(categorySelect(), 'rushing')
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by rushing yards',
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Browser back' }))
+
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by passing yards',
+    })
+    expect(search()).toBe('')
+    expect(categorySelect()).toHaveValue('passing')
+    expect(
+      screen.getByRole('columnheader', { name: 'Starter record' }),
+    ).toBeInTheDocument()
+  })
+
+  it('drops the starter-record note on a board with no records, keeping the other disclosures', async () => {
+    renderPage('/nfl/leaders?category=rushing')
+
+    const table = await screen.findByRole('table')
+    expect(table).not.toHaveAccessibleDescription()
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/only count games the source has stat lines for/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/didn.t track that stat/i)).toBeInTheDocument()
+  })
+
+  it('still describes the passing board by the starter-record note', async () => {
+    renderPage()
+
+    const table = await screen.findByRole('table')
+    expect(table).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
   })
 })

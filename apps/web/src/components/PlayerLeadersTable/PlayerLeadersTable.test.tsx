@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlayerLeadersOut } from '../../lib/api/types'
 import {
+  LEADERS_BY_RUSHING_TDS,
+  LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
   LEADERS_WITH_NULL_STATS,
@@ -188,10 +190,34 @@ describe('PlayerLeadersTable (issue #296)', () => {
     }
   })
 
-  it('marks the table busy while a new page is on its way', () => {
+  it('marks the table busy while a new page is on its way (passing)', () => {
     renderTable(LEADERS_BY_YARDS, { busy: true })
 
     expect(screen.getByRole('table')).toHaveAttribute('aria-busy', 'true')
+  })
+
+  it('keeps the passing board exactly as it was when the category is passing (#312)', () => {
+    renderTable(LEADERS_BY_YARDS)
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Rank',
+      'Player',
+      'Position',
+      'Seasons',
+      'Games',
+      'Starter record',
+      'Starts',
+      'Completions',
+      'Attempts',
+      'Passing yards',
+      'Passing TDs',
+      'Interceptions',
+      'Carries',
+      'Rushing yards',
+      'Rushing TDs',
+    ])
   })
 
   it('points the table at the note that explains its records', () => {
@@ -207,5 +233,131 @@ describe('PlayerLeadersTable (issue #296)', () => {
     )
 
     expect(screen.getByRole('table')).toHaveAccessibleDescription('A note.')
+  })
+})
+
+/**
+ * Issue #312: the same table, told by the API's `category` which board it is.
+ * The rushing board ranks everyone with a carry -- quarterbacks included --
+ * so it shows the rushing columns and none of the passing or starter ones.
+ */
+describe('PlayerLeadersTable, the rushing board (issue #312)', () => {
+  it('names itself by the rushing sort in its caption', () => {
+    renderTable(LEADERS_BY_RUSHING_YARDS)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by rushing yards',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the rushing columns only, in order, with no record or passing columns', () => {
+    renderTable(LEADERS_BY_RUSHING_YARDS)
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Rank',
+      'Player',
+      'Position',
+      'Seasons',
+      'Games',
+      'Carries',
+      'Rushing yards',
+      'Rushing TDs',
+    ])
+    for (const gone of [
+      'Starter record',
+      'Starts',
+      'Completions',
+      'Attempts',
+      'Passing yards',
+      'Passing TDs',
+      'Interceptions',
+    ]) {
+      expect(
+        screen.queryByRole('columnheader', { name: gone }),
+      ).not.toBeInTheDocument()
+    }
+  })
+
+  it('makes all three rushing columns sortable, with aria-sort on the active one', () => {
+    renderTable(LEADERS_BY_RUSHING_YARDS)
+
+    const expected: Record<string, string> = {
+      Carries: 'none',
+      'Rushing yards': 'descending',
+      'Rushing TDs': 'none',
+    }
+    for (const [name, sort] of Object.entries(expected)) {
+      const header = screen.getByRole('columnheader', { name })
+      expect(header).toHaveAttribute('aria-sort', sort)
+      expect(within(header).getByRole('button', { name })).toBeInTheDocument()
+    }
+    for (const name of ['Rank', 'Player', 'Position', 'Seasons', 'Games']) {
+      const header = screen.getByRole('columnheader', { name })
+      expect(header).not.toHaveAttribute('aria-sort')
+      expect(within(header).queryByRole('button')).not.toBeInTheDocument()
+    }
+  })
+
+  it('marks the pressed rushing column descending', () => {
+    renderTable(LEADERS_BY_RUSHING_TDS)
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Rushing TDs' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    expect(
+      screen.getByRole('columnheader', { name: 'Rushing yards' }),
+    ).toHaveAttribute('aria-sort', 'none')
+  })
+
+  it('asks for a rushing sort when its header is clicked', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_RUSHING_YARDS)
+
+    await user.click(screen.getByRole('button', { name: 'Rushing TDs' }))
+    await user.click(screen.getByRole('button', { name: 'Carries' }))
+
+    expect(onSort.mock.calls).toEqual([['rushing_tds'], ['carries']])
+  })
+
+  it('ranks quarterbacks alongside the backs, showing each position', () => {
+    renderTable(LEADERS_BY_RUSHING_TDS)
+
+    const rows = bodyRows()
+    expect(rows.map((row) => cellUnder(row, 'Rank').textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+      '3',
+    ])
+    expect(rows.map((row) => cellUnder(row, 'Player').textContent)).toEqual([
+      'Raheem Mostert',
+      'Stephen Davis',
+      'Jalen Hurts',
+      'Josh Allen',
+    ])
+    expect(rows.map((row) => cellUnder(row, 'Position').textContent)).toEqual([
+      'RB',
+      'RB',
+      'QB',
+      'QB',
+    ])
+    expect(cellUnder(rows[0] as HTMLElement, 'Rushing TDs')).toHaveTextContent(
+      /^18$/,
+    )
+  })
+
+  it('groups the thousands of a rushing total', () => {
+    renderTable(LEADERS_BY_RUSHING_YARDS)
+
+    expect(
+      cellUnder(bodyRows()[0] as HTMLElement, 'Rushing yards'),
+    ).toHaveTextContent('1,553')
+    expect(
+      cellUnder(bodyRows()[0] as HTMLElement, 'Carries'),
+    ).toHaveTextContent(/^369$/)
   })
 })
