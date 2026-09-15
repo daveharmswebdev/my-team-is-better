@@ -225,6 +225,18 @@ describe('PlayerCareerPage (issue #296)', () => {
     expect(alert).not.toHaveTextContent(/503/)
   })
 
+  it('links to the compare page with this player as Player A (issue #301)', async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(KURT_WARNER_CAREER)
+
+    renderPage()
+
+    expect(
+      await screen.findByRole('link', {
+        name: 'Compare Kurt Warner with another player',
+      }),
+    ).toHaveAttribute('href', '/nfl/compare?a=2044124519')
+  })
+
   it('credits the player data by id', async () => {
     mockedFetchPlayerCareer.mockResolvedValue(KURT_WARNER_CAREER)
 

@@ -11,8 +11,13 @@
 import type {
   CreditsDataSourceOut,
   PlayerCareerOut,
+  PlayerComparisonOut,
+  PlayerHeadToHeadGameOut,
+  PlayerHeadToHeadOut,
   PlayerLeaderRowOut,
   PlayerLeadersOut,
+  PlayerSearchOut,
+  PlayerSearchRowOut,
   PlayerSeasonLineOut,
   PlayerStatsOut,
 } from './api/types'
@@ -344,3 +349,279 @@ export const DATA_SOURCES: CreditsDataSourceOut[] = [
     note: "NFL player stats are ingested from nflverse's stats_player release (the weekly stats_player_week CSV files, 1999-2025), which nflverse creates with nflfastR's calculate_stats(). nflfastR is written by Sebastian Carl and Ben Baldwin, with contributions from Lee Sharpe, Maksim Horowitz, Ron Yurko, Samuel Ventura, Tan Ho and John Edwards, and is MIT licensed. Player identities come from nflverse's players release (players.csv). This project performs no independent data collection and claims no ownership of the underlying player data.",
   },
 ]
+
+// ---------------------------------------------------------------------------
+// Comparison and search (issue #301). Steve McNair's career, the Warner/McNair
+// comparison and the search rows are copied from `apps/api` booted on the
+// committed fixture db; the invented payloads say so.
+// ---------------------------------------------------------------------------
+
+const MCNAIR_1999_REGULAR: PlayerSeasonLineOut = {
+  season: 1999,
+  season_type: 'regular',
+  teams: ['Tennessee Titans'],
+  games: 11,
+  record: { wins: 9, losses: 2, ties: 0, starts: 11 },
+  stats: {
+    completions: 187,
+    attempts: 331,
+    passing_yards: 2179,
+    passing_tds: 12,
+    passing_interceptions: 8,
+    sacks_suffered: 16,
+    sack_yards_lost: -74,
+    carries: 72,
+    rushing_yards: 337,
+    rushing_tds: 8,
+  },
+  games_without_stat_lines: 0,
+}
+
+const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
+  season: 1999,
+  season_type: 'postseason',
+  teams: ['Tennessee Titans'],
+  games: 4,
+  record: { wins: 3, losses: 1, ties: 0, starts: 4 },
+  stats: {
+    completions: 62,
+    attempts: 107,
+    passing_yards: 514,
+    passing_tds: 1,
+    passing_interceptions: 2,
+    sacks_suffered: 5,
+    sack_yards_lost: -27,
+    carries: 30,
+    rushing_yards: 209,
+    rushing_tds: 3,
+  },
+  games_without_stat_lines: 0,
+}
+
+/** `GET /api/players/2385180619?sport=nfl` on the committed fixture. */
+export const STEVE_MCNAIR_CAREER: PlayerCareerOut = {
+  sport: 'nfl',
+  player_id: 2385180619,
+  display_name: 'Steve McNair',
+  position: 'QB',
+  seasons: [MCNAIR_1999_REGULAR, MCNAIR_1999_POSTSEASON],
+  regular_season: {
+    season_type: 'regular',
+    seasons: 1,
+    games: 11,
+    record: MCNAIR_1999_REGULAR.record,
+    stats: MCNAIR_1999_REGULAR.stats,
+  },
+  postseason: {
+    season_type: 'postseason',
+    seasons: 1,
+    games: 4,
+    record: MCNAIR_1999_POSTSEASON.record,
+    stats: MCNAIR_1999_POSTSEASON.stats,
+  },
+}
+
+/** `GET /api/players/compare?a=2044124519&b=2385180619&sport=nfl` on the committed fixture. */
+export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: KURT_WARNER_CAREER,
+  b: STEVE_MCNAIR_CAREER,
+  regular_season_head_to_head: {
+    season_type: 'regular',
+    record: { wins: 0, losses: 1, ties: 0, starts: 1 },
+    games: [
+      {
+        season: 1999,
+        season_type: 'regular',
+        week: 8,
+        start_date: '1999-10-31',
+        source_id: '1999_08_STL_TEN',
+        a_team: 'St. Louis Rams',
+        b_team: 'Tennessee Titans',
+        a_points: 21,
+        b_points: 24,
+        a_stats: {
+          completions: 29,
+          attempts: 46,
+          passing_yards: 328,
+          passing_tds: 3,
+          passing_interceptions: 0,
+          sacks_suffered: 6,
+          sack_yards_lost: -41,
+          carries: 2,
+          rushing_yards: 22,
+          rushing_tds: 0,
+        },
+        b_stats: {
+          completions: 13,
+          attempts: 29,
+          passing_yards: 186,
+          passing_tds: 2,
+          passing_interceptions: 0,
+          sacks_suffered: 1,
+          sack_yards_lost: -8,
+          carries: 12,
+          rushing_yards: 36,
+          rushing_tds: 1,
+        },
+      },
+    ],
+  },
+  postseason_head_to_head: {
+    season_type: 'postseason',
+    record: { wins: 1, losses: 0, ties: 0, starts: 1 },
+    games: [
+      {
+        season: 1999,
+        season_type: 'postseason',
+        week: 21,
+        start_date: '2000-01-30',
+        source_id: '1999_21_STL_TEN',
+        a_team: 'St. Louis Rams',
+        b_team: 'Tennessee Titans',
+        a_points: 23,
+        b_points: 16,
+        a_stats: {
+          completions: 24,
+          attempts: 45,
+          passing_yards: 414,
+          passing_tds: 2,
+          passing_interceptions: 0,
+          sacks_suffered: 2,
+          sack_yards_lost: -7,
+          carries: 1,
+          rushing_yards: 1,
+          rushing_tds: 0,
+        },
+        b_stats: {
+          completions: 22,
+          attempts: 36,
+          passing_yards: 214,
+          passing_tds: 0,
+          passing_interceptions: 0,
+          sacks_suffered: 1,
+          sack_yards_lost: -6,
+          carries: 8,
+          rushing_yards: 64,
+          rushing_tds: 0,
+        },
+      },
+    ],
+  },
+}
+
+/**
+ * Two players who never started against each other, one of them with null
+ * stats and no playoff games. Invented: the head-to-heads are the API's
+ * never-met shape (0-0-0, no games).
+ */
+export const NEVER_MET_COMPARISON: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: KURT_WARNER_CAREER,
+  b: CAREER_WITH_NULL_STATS,
+  regular_season_head_to_head: {
+    season_type: 'regular',
+    record: { wins: 0, losses: 0, ties: 0, starts: 0 },
+    games: [],
+  },
+  postseason_head_to_head: {
+    season_type: 'postseason',
+    record: { wins: 0, losses: 0, ties: 0, starts: 0 },
+    games: [],
+  },
+}
+
+const WARNER_MCNAIR_WEEK_8 = WARNER_VS_MCNAIR.regular_season_head_to_head
+  .games[0] as PlayerHeadToHeadGameOut
+
+/**
+ * A head-to-head the source only partly tracked: no stat line at all for one
+ * starter, and a missing touchdown count for the other. Invented.
+ */
+export const HEAD_TO_HEAD_WITH_UNRECORDED_STATS: PlayerHeadToHeadOut = {
+  season_type: 'regular',
+  record: { wins: 1, losses: 0, ties: 1, starts: 2 },
+  games: [
+    {
+      ...WARNER_MCNAIR_WEEK_8,
+      week: null,
+      a_points: 24,
+      b_points: 21,
+      a_stats: null,
+    },
+    {
+      ...WARNER_MCNAIR_WEEK_8,
+      season: 2000,
+      week: null,
+      start_date: null,
+      source_id: null,
+      a_points: 17,
+      b_points: 17,
+      b_stats: {
+        ...(WARNER_MCNAIR_WEEK_8.b_stats as PlayerStatsOut),
+        passing_tds: null,
+      },
+    },
+  ],
+}
+
+const STEVE_MCNAIR_ROW: PlayerSearchRowOut = {
+  player_id: 2385180619,
+  display_name: 'Steve McNair',
+  position: 'QB',
+  first_season: 1999,
+  last_season: 1999,
+}
+
+/** `GET /api/players/search?q=McNair&sport=nfl` on the committed fixture. */
+export const SEARCH_MCNAIR: PlayerSearchOut = {
+  sport: 'nfl',
+  query: 'McNair',
+  limit: 10,
+  rows: [STEVE_MCNAIR_ROW],
+}
+
+/** `GET /api/players/search?q=mc&sport=nfl` on the committed fixture, in the API's order. */
+export const SEARCH_MC: PlayerSearchOut = {
+  sport: 'nfl',
+  query: 'mc',
+  limit: 10,
+  rows: [
+    STEVE_MCNAIR_ROW,
+    {
+      player_id: 2396327401,
+      display_name: 'Mike Tomczak',
+      position: 'QB',
+      first_season: 1999,
+      last_season: 1999,
+    },
+    {
+      player_id: 2320243141,
+      display_name: 'Cade McNown',
+      position: 'QB',
+      first_season: 1999,
+      last_season: 1999,
+    },
+    {
+      player_id: 2363866023,
+      display_name: 'Donovan McNabb',
+      position: 'QB',
+      first_season: 1999,
+      last_season: 1999,
+    },
+    {
+      player_id: 2273944701,
+      display_name: 'AJ McCarron',
+      position: 'QB',
+      first_season: 2023,
+      last_season: 2023,
+    },
+    {
+      player_id: 2014816368,
+      display_name: 'Jerick McKinnon',
+      position: 'RB',
+      first_season: 2023,
+      last_season: 2023,
+    },
+  ],
+}

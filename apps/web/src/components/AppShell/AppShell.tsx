@@ -21,6 +21,9 @@ export function AppShell() {
           <Link to="/nfl/leaders" className={styles.navLink}>
             NFL Leaders
           </Link>
+          <Link to="/nfl/compare" className={styles.navLink}>
+            Compare Players
+          </Link>
           <Link to="/about" className={styles.navLink}>
             How This Works
           </Link>

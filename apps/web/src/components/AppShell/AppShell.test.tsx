@@ -40,6 +40,15 @@ describe('AppShell', () => {
     ).toHaveAttribute('href', '/nfl/leaders')
   })
 
+  it('links to the player compare page from the nav (issue #301)', () => {
+    renderWithRoute('/')
+
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    expect(
+      within(nav).getByRole('link', { name: 'Compare Players' }),
+    ).toHaveAttribute('href', '/nfl/compare')
+  })
+
   it('links home from the site name', () => {
     renderWithRoute('/about')
 

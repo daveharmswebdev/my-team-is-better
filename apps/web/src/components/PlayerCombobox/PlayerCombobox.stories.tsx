@@ -1,0 +1,124 @@
+import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
+import { expect, fn, userEvent, within } from 'storybook/test'
+import { SEARCH_FAILED_COPY } from '../../lib/playerCompare'
+import { SEARCH_MC } from '../../lib/playerFixtures'
+import { PlayerCombobox } from './PlayerCombobox'
+import type { PlayerComboboxProps } from './PlayerCombobox'
+
+/** The page owns the text; this stand-in keeps it so typing shows. */
+function Harness(props: PlayerComboboxProps) {
+  const [value, setValue] = useState(props.value)
+  return (
+    <div style={{ maxWidth: '24rem', minHeight: '22rem' }}>
+      <PlayerCombobox
+        {...props}
+        value={value}
+        onChange={(text) => {
+          setValue(text)
+          props.onChange(text)
+        }}
+        onSelect={(player) => {
+          setValue(player.display_name)
+          props.onSelect(player)
+        }}
+      />
+    </div>
+  )
+}
+
+const meta = {
+  title: 'components/PlayerCombobox',
+  component: PlayerCombobox,
+  tags: ['autodocs'],
+  args: {
+    label: 'Player B',
+    value: '',
+    options: [],
+    status: 'idle',
+    placeholder: 'Type a name',
+    onChange: fn(),
+    onSelect: fn(),
+  },
+  render: (args) => <Harness {...args} />,
+} satisfies Meta<typeof PlayerCombobox>
+
+export default meta
+
+type Story = StoryObj<typeof meta>
+
+export const Empty: Story = {}
+
+/** A picked player: the field shows his name. */
+export const Picked: Story = {
+  args: { label: 'Player A', value: 'Kurt Warner' },
+}
+
+/** `?q=mc` on the committed fixture: name, position and season span on each option. */
+export const Suggestions: Story = {
+  args: { options: SEARCH_MC.rows, status: 'done' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('combobox'), 'mc')
+    await expect(canvas.getAllByRole('option')).toHaveLength(6)
+    await userEvent.keyboard('{ArrowDown}')
+    await expect(canvas.getByRole('combobox')).toHaveAttribute(
+      'aria-activedescendant',
+    )
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSelect).toHaveBeenCalledWith(SEARCH_MC.rows[0])
+  },
+}
+
+/** Two players with one name, told apart by position and seasons. */
+export const SameNames: Story = {
+  args: {
+    status: 'done',
+    options: [
+      {
+        player_id: 1,
+        display_name: 'Mike Smith',
+        position: 'QB',
+        first_season: 1999,
+        last_season: 2004,
+      },
+      {
+        player_id: 2,
+        display_name: 'Mike Smith',
+        position: null,
+        first_season: 2023,
+        last_season: 2023,
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('combobox'), 'smith')
+    await expect(canvas.getAllByRole('option')).toHaveLength(2)
+  },
+}
+
+export const Searching: Story = {
+  args: { status: 'searching' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('combobox'), 'mcn')
+    await expect(canvas.getByRole('status')).toHaveTextContent('Searching')
+  },
+}
+
+export const NoMatches: Story = {
+  args: { status: 'done' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('combobox'), 'zzzz')
+    await expect(canvas.getByRole('status')).toHaveTextContent(
+      'No players match',
+    )
+  },
+}
+
+/** The search couldn't be had: the narrator says so under the field. */
+export const SearchFailed: Story = {
+  args: { status: 'error', hint: SEARCH_FAILED_COPY, value: 'McNair' },
+}

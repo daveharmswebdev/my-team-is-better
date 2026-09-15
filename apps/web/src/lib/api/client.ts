@@ -25,8 +25,10 @@ import type {
   CreditsOut,
   Method,
   PlayerCareerOut,
+  PlayerComparisonOut,
   PlayerLeaderSort,
   PlayerLeadersOut,
+  PlayerSearchOut,
   PlayerSeasonType,
   Sport,
   TeamCaseEnvelope,
@@ -461,6 +463,49 @@ export function fetchPlayerCareer(playerId: number): Promise<PlayerCareerOut> {
       isUnknownPlayerErrorBody(detail)
         ? new PlayerApiError(status, detail)
         : null,
+  )
+}
+
+/**
+ * `GET /api/players/compare?a=&b=&sport=nfl` (issue #301): both careers and
+ * their head-to-heads as opposing starters. A typed 404 `unknown_player` (for
+ * either id) rejects with a `PlayerApiError`; everything else is `getJson`'s.
+ * `a == b` is a 422, which callers rule out before asking.
+ */
+export function fetchPlayerComparison(
+  a: number,
+  b: number,
+): Promise<PlayerComparisonOut> {
+  const params = new URLSearchParams({
+    a: String(a),
+    b: String(b),
+    sport: 'nfl',
+  })
+  return getJson<PlayerComparisonOut>(
+    `${API_BASE_URL}/api/players/compare?${params.toString()}`,
+    (status, detail) =>
+      isUnknownPlayerErrorBody(detail)
+        ? new PlayerApiError(status, detail)
+        : null,
+  )
+}
+
+/**
+ * `GET /api/players/search?q=&limit=&sport=nfl` (issue #301): players whose
+ * name contains `query`. The API wants 2..100 characters once stripped and a
+ * `limit` of 1..20; callers screen the query. No match is a 200 with no rows.
+ */
+export function searchPlayers(
+  query: string,
+  limit = 10,
+): Promise<PlayerSearchOut> {
+  const params = new URLSearchParams({
+    q: query,
+    limit: String(limit),
+    sport: 'nfl',
+  })
+  return getJson<PlayerSearchOut>(
+    `${API_BASE_URL}/api/players/search?${params.toString()}`,
   )
 }
 
