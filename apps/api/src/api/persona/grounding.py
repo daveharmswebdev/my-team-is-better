@@ -134,7 +134,9 @@ through these rules in order:
 
 * **A three-part claim** is grounded only if it is, in order, a subject
   team's `(wins, losses, ties)` (the same subjects as #107). Which subject it
-  is said about is not checked (#166).
+  is said about is checked by the #166 rules below when the sentence names
+  a subject; these #181 rules are the path for a claim no subject is
+  attributed to.
 * **A two-part claim equal to a subject `(wins, losses)`** is skipped (#107).
 * **A two-part claim that is a subject `(wins, losses)` backwards** is
   flagged, whether or not the sentence names a team and before either
@@ -147,8 +149,13 @@ through these rules in order:
   0-14." in the 2013 Florida State (14-0) comparison is that score, not
   Florida State's record backwards. An exempted pair falls through to the
   two rules below, as any other pair does. Accepted trade-off, the same kind
-  as #107's: a record stated backwards goes uncaught when some string value
-  quotes a score equal to that record.
+  as #107's, and since #166's round 4 confined to a claim no subject is
+  attributed to: a record stated backwards in a sentence naming no subject
+  goes uncaught when some string value quotes a score equal to that record.
+  A sentence that attributes the claim to a subject takes the #166 rules
+  below, which grant no string-value exemption, so "Florida State ended that
+  one 0-14." on that comparison is flagged as Florida State's record
+  backwards.
 * **A two-part claim in a sentence that names a team** goes through the
   parenthetical/bare attribution above, unchanged.
 * **A two-part claim in a sentence that names no team** can't be held to an
@@ -166,11 +173,12 @@ record; Texas's record is 13-0-0". The owner is the subject's `team_name`
 (a team case's top level, or a comparison's `team_a` / `team_b`). The
 message deliberately does not say the claim "should be stated" as the
 reverse: in a comparison the sentence may be about the other team, and
-which team a sentence is about is attribution (#166), which this check does
-not settle -- whose record the reverse is, though, is simply true. When no
-subject's record is the reverse, or more than one subject's is, no owner is
-named ("7-1-1 is not a stated record"). An unattributed pair that is none of
-the above is reported as "42-25 is not a score from any game in the facts".
+which team a sentence is about is attribution (the #166 rules below, which
+only apply when the sentence names a subject) -- whose record the reverse
+is, though, is simply true. When no subject's record is the reverse, or more
+than one subject's is, no owner is named ("7-1-1 is not a stated record").
+An unattributed pair that is none of the above is reported as "42-25 is not
+a score from any game in the facts".
 These rules are stricter than the independent smoke-eval checker's
 (`tests/test_persona_smoke_eval.py`), which production must never import.
 That checker accepts any object's W-L or W-L-T in its stated order and any
@@ -179,9 +187,152 @@ record. Production grounds a three-part claim only as a subject's record,
 and flags a subject's `(wins, losses)` stated backwards unless it is a game
 score in that order or a hyphen pair inside some string value.
 
+**A record and a rating belong to the team the sentence says they do (issue
+#166).** Two more fabrications passed everything above because each number
+was *somebody's*: "Texas went 12-1" on the 2005 Texas (13-0) vs USC (12-1)
+comparison, grounded by #107's skip since 12-1 is a subject's record, and
+"Elo has Texas at 1892" on the same blocks, grounded by #162's rounding
+since 1892 is USC's rating as the card shows it. Both are now attributed to
+a team with the same sentence-scoped, parenthetical-vs-bare device the
+score rule uses: a parenthetical claim is bound to its nearest name within
+`_PROXIMITY_WINDOW` and nothing else; a bare claim's first guess is the
+nearest name, at any distance, and it is rescued when another team named
+in the same sentence owns it.
+
+* **A record claim's subject.** For a two- or three-part claim, the
+  attributed subject is: parenthetical -- the nearest name, if it is a
+  subject team (#107's subjects: a team case's top level, a comparison's
+  `team_a` / `team_b`); bare -- the nearest *subject* mention in the
+  sentence, skipping non-subject names for this step only, so "going 13-1
+  with wins over Oklahoma 21-14" still attributes LSU's record to LSU. A
+  claim with no attributed subject (the sentence names no subject, a
+  parenthetical is bound to an opponent, a hand-typed block whose sides
+  carry no `wins`/`losses`) takes the #181 path above, unchanged. With a
+  subject, `_check_claim` applies, in order: grounded if the claim is the
+  subject's record with the same number of parts; grounded (bare only) if
+  it is another named subject's record; grounded (two-part only) if it is a
+  game score -- one of the nearest name's tuples, bare and one of another
+  named team's, in order a game score from any row, or in the order written
+  a hyphen pair inside some string value; otherwise flagged. The string
+  pair counts in its written order only (rounds 4 and 5): the first version
+  of this rule accepted one in either order, which let a swapped score
+  beside the opponent's name ("Texas beat Oklahoma 12-45") pass on every
+  Keener block, whose `explanation` strings quote every game score -- #26's
+  own case, regressed. Round 4 dropped the string branch outright on the
+  premise that every score an explanation quotes is also a `games[]` row.
+  That holds for a team case and not for a comparison, which carries no
+  `games[]` on either side and only its `quality_wins[]` / `worst_loss`
+  rows, so most breakdown scores there are stated only by an explanation
+  and every correct "Texas beat Colorado 42-17" was flagged as Texas's
+  record. The engine quotes a score team-first ("Swept them twice, 42-17
+  and 70-3"), so the in-order match grounds the legitimate quote and never
+  the swap. The message, in
+  this order: a subject record backwards keeps #181's wording ("0-13 is not
+  a stated record; Texas's record is 13-0"); a two-part claim whose nearest
+  name is a non-subject opponent with game data is that opponent's score,
+  in #26's wording ("Oklahoma's score should be stated 21-14, not 14-1");
+  otherwise, when the attribution is unambiguous (parenthetical, or bare
+  with exactly one subject named in the sentence), "12-1 is not Texas's
+  record; Texas's record is 13-0" ("12-1-0 ... 13-0-0" for three parts);
+  when bare and more than one subject is named, "13-1 is not a stated
+  record" -- never a team the sentence may not be about (#181's reasoning).
+* **A rating claim's owner.** Ratings are keyed by name: a subject's
+  `rating` under its `team_name`, and every `opponent_rating` under the
+  `opponent_name` beside it (`games[]`, `quality_wins[]`, `worst_loss`, at
+  the top level and inside `team_a` / `team_b`). A response number is
+  *rating-only* when the membership rules accept it but it is not a number
+  token of the block with the `rating` / `opponent_rating` literals blanked
+  out and, on a comparison, the whole top-level `verdict` string blanked
+  too: "1892", "1933", "4.74", "5.04", the exact literal
+  `1933.1932908945062` and the verdict's own "1933.2" / "1891.8" are; "13",
+  "0", "2005", "41" never are. The verdict is blanked because it restates
+  both subjects' ratings rounded ("Texas rates higher overall (1933.2 vs
+  1891.8, rank 1 vs 2)"), which made each rounding a plain token of every
+  comparison block, never rating-only, so "Elo has Texas at 1891.8" passed
+  there while the same sentence on Texas's team case was caught. Blanking
+  the whole string rather than the rating pair is safe because the verdict
+  is a derived summary of facts the block states elsewhere as rows (the
+  head-to-head scores and weeks in `head_to_head.meetings`, the
+  common-opponent scores in `common_opponents[*]`, the ranks in
+  `team_a.rank` / `team_b.rank`): removing it changes rating-only-ness for
+  nothing but the rounded rating pair, and it keeps grounding independent
+  of the verdict's prose. The record and score rules still read the verdict
+  (a hyphen pair quoted there is still a string-value exemption). Each
+  rating-only token in a sentence naming a team is attributed like a bare
+  or parenthetical claim, and is grounded if it is the attributed name's
+  rating exactly, rounded (#162) or as displayed (#165); a bare token is
+  also grounded if it is another named team's. A name with no rating in
+  the block (nothing to check, like a name with no game data) and a token
+  in a sentence naming no team are grounded as before. Otherwise "1892 is
+  not Texas's rating; Texas's rating is 1933", the token as written (a
+  grouped "1,892" stays grouped) and the owner's rating in the form the
+  token matched under -- the display value when the token is a display
+  value of the block, else rounded half away from zero to the token's
+  decimal places when the token is a rounding, else the exact literal. When
+  the name carries more than one distinct rating, only "1892 is not Texas's
+  rating".
+* **A sentence quoting both compared teams' ratings is a comparison
+  statement (round 3).** On a comparison -- two subjects, `team_a` and
+  `team_b`, each with a `rating` under its `team_name` -- a bare
+  rating-only token that fails the nearest-name check and the bare rescue
+  is also grounded when it is the rating (exact, rounded or as displayed)
+  of the subject that is *not* its nearest name, and another bare
+  rating-only token in the same sentence is the other subject's rating,
+  that other subject being the nearest subject mention to it, and (round
+  4) the token is credited to that named subject rather than to some
+  non-subject: its own nearest name is the named subject, or is also the
+  partner's nearest name among all the sentence's mentions. The engine's
+  own verdict sentence handed to the narrator, "Texas rates higher overall
+  (1933.2 vs 1891.8, rank 1 vs 2)", names only `team_a`, and it and its
+  voiced forms ("Texas rates higher, 1933 to 1892"; "USC rates lower,
+  1933.2 vs 1891.8"; "Texas beat Oklahoma 45-12, and Elo has it 1933 to
+  1892", where Oklahoma stands nearest both figures) are grounded: a
+  sentence quoting both compared teams' ratings is a comparison statement,
+  and the rating that is not the named team's can only be the other
+  team's. A rating beside a non-subject's own name is that non-subject's
+  claim, whatever else the sentence quotes: "Elo has Ohio State at 1892,
+  while Texas sits at 1933" credits USC's rating to Ohio State (whose
+  `opponent_rating` is 1858) and is flagged as such, as round 1 flagged
+  it. A lone bare token gets no such rescue, so "Elo has Texas at 1892" on
+  the comparison is still flagged; a parenthetical token never uses it and
+  never counts as the partner ("Texas (1892) sits above 1933" and "Texas
+  sits at 1892 (1933)" are flagged); a sentence naming neither subject has
+  no named subject to hold the partner to; and a team case has one
+  subject, so the rule never applies there.
+
+* **A name is a mention only when it stands on its own.** The sentence's
+  name mentions (`_name_occurrences`, shared by the score rule, the record
+  rule and the rating pass) are the known names not glued to a word
+  character on either side (a possessive "Texas's" / "Texas'" counts, and so
+  do "Miami (OH)" and "Texas A&M") and not inside another known name's
+  occurrence: in "Florida State" only Florida State is mentioned, never a
+  phantom Florida. Matching raw substrings had registered that phantom, and
+  the bare rescue then accepted its rating: "Keener has Florida State at
+  2.99" passed on the 2013 Florida State case because 2.99 is Florida's
+  `opponent_rating` as displayed. The membership check on the whole response
+  (`name in response_text`) is unchanged and still matches substrings.
+
+Accepted trade-offs, all shared with #26's score rule: a two-team swap in
+one sentence ("Texas went 12-1 and USC went 13-0"; "Elo has USC at 1933 and
+Texas at 1892") is rescued, because the bare phrasing itself cannot say
+which of the two names each number belongs to, and the rescue is what keeps
+"USC lost only to Texas, finishing 12-1" and "beat USC 41-38, and Elo has
+them at 1,933" grounded. The comparison-statement rule has the same
+trade-off in one-name prose: "Texas sits at 1892, up from 1933" quotes both
+compared teams' ratings, and bare prose cannot say which figure is Texas's,
+so it is grounded like the two-team swap; a lone wrong rating beside a name
+("Elo has Texas at 1892") is still caught. A wrong-team
+two-part record that equals, in order, a game score the block states
+("Michigan State went 14-0" in Michigan State's 13-1-0 season, after a 14-0
+win over Purdue) is grounded by the game-score rule, the same kind of
+trade-off as #107's; the three-part form ("14-0-0") is caught. And only
+rating-only tokens are attributed: a rating that also happens to be an id, a
+rank, a year or a week token of the block is grounded by membership and
+never reaches this check (epic #199).
+
 Sentence-scoping (splitting `response_text` naively on `.`/`!`/`?`) keeps
-both checks from reaching across unrelated sentences to grab a team name
-or tuple that has nothing to do with the score pair at hand.
+all of these checks from reaching across unrelated sentences to grab a team
+name or tuple that has nothing to do with the claim at hand.
 
 `find_ungrounded_tokens` extracts all of these signals from the response
 and returns whichever are *not* grounded, so the caller
@@ -219,6 +370,29 @@ _RESPONSE_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?(?!\d)|\d+(?:\.\d
 # arithmetic (see module docstring for why the allowance is scoped by name).
 _ROUNDABLE_KEYS = frozenset({"rating", "opponent_rating"})
 
+# A `rating` / `opponent_rating` key with its JSON number literal (issue
+# #166): blanking these out of the fact-block text leaves the number tokens
+# a response number can be grounded by *without* being a rating, so a token
+# grounded only as a rating can be told apart and attributed to a name.
+_RATING_LITERAL_RE = re.compile(
+    r'("(?:rating|opponent_rating)":\s*)(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)'
+)
+
+# A comparison's `verdict` key with its whole JSON string value (issue #166,
+# round 2): the verdict restates both subjects' ratings rounded ("1933.2 vs
+# 1891.8"), so it is blanked along with the rating literals when deciding
+# whether a token is grounded only as a rating. Applied to the JSON text, so
+# it matches the key wherever it sits; `ComparisonResultOut.verdict` is the
+# only such key any fact block carries, and a JSON string value can't contain
+# an unescaped `"verdict":`. Everything the verdict quotes besides the rating
+# pair is a row of the block, so the blank costs nothing (module docstring).
+_VERDICT_STRING_RE = re.compile(r'("verdict":\s*)"(?:[^"\\]|\\.)*"')
+
+# A known team name standing on its own in a sentence (issue #166, round 2):
+# not glued to a word character on either side. A possessive ("Texas's",
+# "Texas'") still counts, and so do "Miami (OH)" and "Texas A&M".
+_NAME_BOUNDARY = (r"(?<!\w)", r"(?!\w)")
+
 # A hyphen-joined score pair or record, e.g. "34-31", "34 - 31" or "8-8-1".
 # Reuses this module's hyphen-as-separator convention (see `_NUMBER_RE`
 # above) rather than treating the hyphen as a negative sign. A W-L-T record
@@ -251,6 +425,71 @@ _ScoreTuplesByName = dict[str, set[tuple[int, int]]]
 # (response text or a single sentence of it) it was found in.
 _NameOccurrence = tuple[str, tuple[int, int]]
 
+# `name -> {rating}`: a subject's own `rating` and every `opponent_rating`
+# beside an `opponent_name`, as exact `Decimal`s (issue #166).
+_RatingsByName = dict[str, set[Decimal]]
+
+# A response number token grounded only as a rating, with its span in the
+# sentence it was found in and the token as written (issue #166, round 3).
+_RatingToken = tuple[tuple[int, int], str]
+
+
+@dataclass(frozen=True)
+class _SubjectRecord:
+    """A subject team's season record (#107's subjects), with `ties` when the
+    block states them."""
+
+    wins: int
+    losses: int
+    ties: int | None
+
+    def parts(self, count: int) -> tuple[int, ...] | None:
+        """The record with `count` parts (2 or 3), or `None` when the block
+        states no `ties` and three parts are asked for."""
+        if count == 2:
+            return (self.wins, self.losses)
+        if self.ties is None:
+            return None
+        return (self.wins, self.losses, self.ties)
+
+
+@dataclass(frozen=True)
+class _RecordAttribution:
+    """Which team a record-shaped claim is about (issue #166; see the module
+    docstring's #166 rules)."""
+
+    # N: the nearest known-team mention (within `_PROXIMITY_WINDOW` for a
+    # parenthetical claim), or `None`.
+    nearest: str | None
+    # S: the subject the claim is attributed to, or `None`.
+    subject: str | None
+    # Every distinct subject the sentence names, for the bare rescue and
+    # for deciding whether the message may name a team.
+    named_subjects: tuple[str, ...]
+    parenthetical: bool
+
+
+@dataclass(frozen=True)
+class _NumberFacts:
+    """What a response number token is grounded against, and what the
+    rating-attribution pass (issue #166) needs on top of that."""
+
+    # Every number token of the fact block, as written.
+    fact_numbers: set[str]
+    # Every `rating` / `opponent_rating` value, for #162's rounding.
+    rating_values: list[Decimal]
+    # Those values as the card shows them under `method` (#165).
+    display_values: set[str]
+    method: Method | None
+    # `fact_numbers` with the rating literals blanked out: a grounded token
+    # absent from this set is grounded only as a rating.
+    non_rating_numbers: set[str]
+    ratings_by_name: _RatingsByName
+    # A comparison's `team_a` / `team_b` `rating` under each `team_name`,
+    # for the comparison-statement rule (#166, round 3). Empty on a team
+    # case, or when either side lacks a name or a finite rating.
+    compared_ratings: Mapping[str, Decimal]
+
 
 @dataclass(frozen=True)
 class _ClaimFacts:
@@ -268,30 +507,35 @@ class _ClaimFacts:
     object_records: frozenset[tuple[int, int]]
     # Two-part hyphen pairs inside any string value, stored `(low, high)`.
     string_value_pairs: frozenset[tuple[int, int]]
+    # The same pairs in the order written (#166, round 5): the engine quotes
+    # a score team-first, so this is what a legitimate quote of a score that
+    # only an explanation states has to match.
+    ordered_string_pairs: frozenset[tuple[int, int]]
     # A subject record, `(wins, losses)` or `(wins, losses, ties)`, to the
     # `team_name` of every subject whose record it is (`None` for a subject
     # with no string `team_name`), for naming whose record a reverse is.
     record_owners: Mapping[tuple[int, ...], tuple[str | None, ...]]
+    # Each subject's record under its `team_name`, for attributing a record
+    # claim to the team the sentence names (#166). A subject with no string
+    # `team_name` cannot be named, so it is not here.
+    subjects: Mapping[str, _SubjectRecord]
 
 
 def find_ungrounded_tokens(
     response_text: str, fact_block_json: str, known_team_names: Iterable[str]
 ) -> list[str]:
     """Return the sorted, de-duplicated set of number-like tokens,
-    known-team-name mentions, and opponent/score-order mismatches in
-    `response_text` that are not grounded in `fact_block_json`. An empty
-    list means the response is fully grounded.
+    known-team-name mentions, and opponent/score-order, record and rating
+    attribution mismatches in `response_text` that are not grounded in
+    `fact_block_json`. An empty list means the response is fully grounded.
     """
-    fact_numbers = set(_NUMBER_RE.findall(fact_block_json))
-    rating_values = _extract_rating_values(fact_block_json)
-    method = _extract_fact_block_method(fact_block_json)
-    display_values = (
-        set() if method is None else {display_value(rating, method) for rating in rating_values}
-    )
+    numbers = _extract_number_facts(fact_block_json)
     ungrounded_numbers = {
         token
         for token in _RESPONSE_NUMBER_RE.findall(response_text)
-        if not _is_grounded_number(token, fact_numbers, rating_values, display_values)
+        if not _is_grounded_number(
+            token, numbers.fact_numbers, numbers.rating_values, numbers.display_values
+        )
     }
 
     names = [name for name in known_team_names if name]
@@ -302,8 +546,27 @@ def find_ungrounded_tokens(
     relational_mismatches = _find_relational_mismatches(
         response_text, names, _extract_claim_facts(fact_block_json)
     )
+    rating_mismatches = _find_rating_mismatches(response_text, names, numbers)
 
-    return sorted(ungrounded_numbers | ungrounded_teams | relational_mismatches)
+    return sorted(ungrounded_numbers | ungrounded_teams | relational_mismatches | rating_mismatches)
+
+
+def _extract_number_facts(fact_block_json: str) -> _NumberFacts:
+    rating_values = _extract_rating_values(fact_block_json)
+    method = _extract_fact_block_method(fact_block_json)
+    display_values = (
+        set() if method is None else {display_value(rating, method) for rating in rating_values}
+    )
+    blanked = _VERDICT_STRING_RE.sub(r"\1null", _RATING_LITERAL_RE.sub(r"\1null", fact_block_json))
+    return _NumberFacts(
+        fact_numbers=set(_NUMBER_RE.findall(fact_block_json)),
+        rating_values=rating_values,
+        display_values=display_values,
+        method=method,
+        non_rating_numbers=set(_NUMBER_RE.findall(blanked)),
+        ratings_by_name=_extract_ratings_by_name(fact_block_json),
+        compared_ratings=_extract_compared_ratings(fact_block_json),
+    )
 
 
 def _is_grounded_number(
@@ -385,6 +648,67 @@ def _collect_rating_values(node: Any, ratings: list[Decimal]) -> None:
             _collect_rating_values(item, ratings)
 
 
+def _extract_ratings_by_name(fact_block_json: str) -> _RatingsByName:
+    """Every rating the block states *for a named team* (issue #166): a
+    subject's `rating` under its `team_name` (a team case's top level, a
+    comparison's `team_a` / `team_b`), and every finite `opponent_rating` in
+    a dict that also carries a string `opponent_name`, under that name
+    (`OpponentResultOut` rows: `games[]`, `quality_wins[]`, `worst_loss`).
+    Parsed as exact `Decimal`s, like `_extract_rating_values`.
+    """
+    try:
+        data: Any = json.loads(fact_block_json, parse_float=Decimal)
+    except json.JSONDecodeError:
+        return {}
+
+    ratings: _RatingsByName = defaultdict(set)
+    if isinstance(data, dict):
+        for subject in (data, data.get("team_a"), data.get("team_b")):
+            if not isinstance(subject, dict):
+                continue
+            team_name, rating = subject.get("team_name"), subject.get("rating")
+            if isinstance(team_name, str) and isinstance(rating, Decimal) and rating.is_finite():
+                ratings[team_name].add(rating)
+    _collect_opponent_ratings(data, ratings)
+    return ratings
+
+
+def _extract_compared_ratings(fact_block_json: str) -> Mapping[str, Decimal]:
+    """A comparison's two subjects' own ratings under their names (issue
+    #166, round 3): `{team_a.team_name: team_a.rating, team_b.team_name:
+    team_b.rating}` when both sides carry a string `team_name` and a finite
+    `rating` and the names differ, else empty. A team case has one subject,
+    so the comparison-statement rule never applies to it.
+    """
+    try:
+        data: Any = json.loads(fact_block_json, parse_float=Decimal)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    compared: dict[str, Decimal] = {}
+    for side in (data.get("team_a"), data.get("team_b")):
+        if not isinstance(side, dict):
+            return {}
+        team_name, rating = side.get("team_name"), side.get("rating")
+        if not (isinstance(team_name, str) and isinstance(rating, Decimal) and rating.is_finite()):
+            return {}
+        compared[team_name] = rating
+    return compared if len(compared) == 2 else {}
+
+
+def _collect_opponent_ratings(node: Any, ratings: _RatingsByName) -> None:
+    if isinstance(node, dict):
+        opponent_name, rating = node.get("opponent_name"), node.get("opponent_rating")
+        if isinstance(opponent_name, str) and isinstance(rating, Decimal) and rating.is_finite():
+            ratings[opponent_name].add(rating)
+        for value in node.values():
+            _collect_opponent_ratings(value, ratings)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_opponent_ratings(item, ratings)
+
+
 def _extract_valid_score_tuples(fact_block_json: str) -> _ScoreTuplesByName:
     """Recursively walk the parsed fact block, pattern-matching dict shapes
     by field name (never importing the Pydantic response models -- see
@@ -445,6 +769,7 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
 
     subject_w_l_t_records: set[tuple[int, int, int]] = set()
     record_owners: defaultdict[tuple[int, ...], list[str | None]] = defaultdict(list)
+    subjects: dict[str, _SubjectRecord] = {}
     if isinstance(data, dict):
         for subject in (data, data.get("team_a"), data.get("team_b")):
             if not isinstance(subject, dict):
@@ -458,10 +783,17 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
             if isinstance(ties, int):
                 subject_w_l_t_records.add((wins, losses, ties))
                 record_owners[(wins, losses, ties)].append(owner)
+            if owner is not None and owner not in subjects:
+                subjects[owner] = _SubjectRecord(
+                    wins, losses, ties if isinstance(ties, int) else None
+                )
 
     object_records: set[tuple[int, int]] = set()
     string_value_pairs: set[tuple[int, int]] = set()
-    _collect_records_and_string_pairs(data, object_records, string_value_pairs)
+    ordered_string_pairs: set[tuple[int, int]] = set()
+    _collect_records_and_string_pairs(
+        data, object_records, string_value_pairs, ordered_string_pairs
+    )
     return _ClaimFacts(
         valid_tuples=valid_tuples,
         game_scores=game_scores,
@@ -469,28 +801,38 @@ def _extract_claim_facts(fact_block_json: str) -> _ClaimFacts:
         subject_w_l_t_records=frozenset(subject_w_l_t_records),
         object_records=frozenset(object_records),
         string_value_pairs=frozenset(string_value_pairs),
+        ordered_string_pairs=frozenset(ordered_string_pairs),
         record_owners={record: tuple(owners) for record, owners in record_owners.items()},
+        subjects=subjects,
     )
 
 
 def _collect_records_and_string_pairs(
-    node: Any, object_records: set[tuple[int, int]], string_value_pairs: set[tuple[int, int]]
+    node: Any,
+    object_records: set[tuple[int, int]],
+    string_value_pairs: set[tuple[int, int]],
+    ordered_string_pairs: set[tuple[int, int]],
 ) -> None:
     if isinstance(node, dict):
         wins, losses = node.get("wins"), node.get("losses")
         if isinstance(wins, int) and isinstance(losses, int):
             object_records.add((wins, losses))
         for value in node.values():
-            _collect_records_and_string_pairs(value, object_records, string_value_pairs)
+            _collect_records_and_string_pairs(
+                value, object_records, string_value_pairs, ordered_string_pairs
+            )
     elif isinstance(node, list):
         for item in node:
-            _collect_records_and_string_pairs(item, object_records, string_value_pairs)
+            _collect_records_and_string_pairs(
+                item, object_records, string_value_pairs, ordered_string_pairs
+            )
     elif isinstance(node, str):
         for match in _SCORE_OR_RECORD_RE.finditer(node):
             first, second, third = match.groups()
             if third is None:
                 low, high = sorted((int(first), int(second)))
                 string_value_pairs.add((low, high))
+                ordered_string_pairs.add((int(first), int(second)))
 
 
 def _walk_fact_block(node: Any, valid: _ScoreTuplesByName) -> None:
@@ -582,16 +924,38 @@ def _find_relational_mismatches(
     """
     mismatches: set[str] = set()
     for sentence in _split_sentences(response_text):
-        name_occurrences = [
-            (name, match.span())
-            for name in known_team_names
-            for match in re.finditer(re.escape(name), sentence)
-        ]
+        name_occurrences = _name_occurrences(sentence, known_team_names)
         for claim_match in _SCORE_OR_RECORD_RE.finditer(sentence):
             mismatch = _check_claim(sentence, claim_match, name_occurrences, facts)
             if mismatch is not None:
                 mismatches.add(mismatch)
     return mismatches
+
+
+def _name_occurrences(sentence: str, known_team_names: list[str]) -> list[_NameOccurrence]:
+    """Every known name mentioned in `sentence`, with its span, for the score
+    rule (#26), the record rule and the rating pass (#166). A name counts
+    only when it stands on its own (issue #166, round 2): not glued to a word
+    character (`_NAME_BOUNDARY`), and not inside another known name's
+    occurrence -- the longer name wins, so "Florida State" is one mention of
+    Florida State and never also a phantom "Florida", whose rating the bare
+    rescue would otherwise accept for Florida State.
+    """
+    before, after = _NAME_BOUNDARY
+    found = [
+        (name, match.span())
+        for name in known_team_names
+        for match in re.finditer(f"{before}{re.escape(name)}{after}", sentence)
+    ]
+    return [
+        (name, span)
+        for name, span in found
+        if not any(_lies_inside(span, other) for _, other in found if other != span)
+    ]
+
+
+def _lies_inside(span: tuple[int, int], other: tuple[int, int]) -> bool:
+    return other[0] <= span[0] and span[1] <= other[1]
 
 
 def _check_claim(
@@ -600,7 +964,28 @@ def _check_claim(
     name_occurrences: list[_NameOccurrence],
     facts: _ClaimFacts,
 ) -> str | None:
+    """One score or record claim, in this order:
+
+    1. Attribute it to a subject (#166). With one, `_check_attributed_record`
+       decides; the rest of this function never runs.
+    2. Otherwise the #181 order: a three-part claim must be some subject's
+       record; a two-part claim equal to a subject record is skipped (#107);
+       a subject record backwards is flagged; a pair in a sentence naming a
+       team goes through the parenthetical / bare attribution (#26); a pair
+       in a sentence naming none must be some pair the block states.
+    """
     first, second, third = claim_match.groups()
+    span = claim_match.span()
+    parenthetical = _is_parenthesized(sentence, span)
+    attribution = _attribute_record_claim(span, parenthetical, name_occurrences, facts.subjects)
+    if attribution.subject is not None:
+        claimed_parts: tuple[int, ...] = (
+            (int(first), int(second)) if third is None else (int(first), int(second), int(third))
+        )
+        return _check_attributed_record(
+            claimed_parts, attribution.subject, attribution, name_occurrences, facts
+        )
+
     if third is not None:
         return _check_w_l_t_record((int(first), int(second), int(third)), facts)
 
@@ -612,11 +997,130 @@ def _check_claim(
         return reversed_record
     if not name_occurrences:
         return _check_unattributed_pair(claimed, facts)
-    if _is_parenthesized(sentence, claim_match.span()):
-        return _check_parenthetical_pair(
-            claim_match.span(), claimed, name_occurrences, facts.valid_tuples
+    if parenthetical:
+        return _check_parenthetical_pair(span, claimed, name_occurrences, facts.valid_tuples)
+    return _check_bare_pair(span, claimed, name_occurrences, facts.valid_tuples)
+
+
+def _attribute_record_claim(
+    claim_span: tuple[int, int],
+    parenthetical: bool,
+    name_occurrences: list[_NameOccurrence],
+    subjects: Mapping[str, _SubjectRecord],
+) -> _RecordAttribution:
+    """Which team a record-shaped claim is about (issue #166). The nearest
+    name is the parenthetical / bare device the score rule uses (a
+    parenthetical binds only within `_PROXIMITY_WINDOW`). The subject is that
+    name for a parenthetical claim, if it is a subject; for a bare claim it
+    is the nearest *subject* mention at any distance, skipping non-subject
+    names for this step only.
+    """
+    nearest: str | None = None
+    found = _nearest_name(claim_span, name_occurrences)
+    if found is not None and (not parenthetical or found[1] <= _PROXIMITY_WINDOW):
+        nearest = found[0]
+
+    named_subjects = tuple(dict.fromkeys(name for name, _ in name_occurrences if name in subjects))
+    if parenthetical:
+        subject = nearest if nearest is not None and nearest in subjects else None
+    else:
+        nearest_subject = _nearest_name(
+            claim_span, [(name, span) for name, span in name_occurrences if name in subjects]
         )
-    return _check_bare_pair(claim_match.span(), claimed, name_occurrences, facts.valid_tuples)
+        subject = None if nearest_subject is None else nearest_subject[0]
+    return _RecordAttribution(
+        nearest=nearest,
+        subject=subject,
+        named_subjects=named_subjects,
+        parenthetical=parenthetical,
+    )
+
+
+def _check_attributed_record(
+    claimed: tuple[int, ...],
+    subject: str,
+    attribution: _RecordAttribution,
+    name_occurrences: list[_NameOccurrence],
+    facts: _ClaimFacts,
+) -> str | None:
+    """A record-shaped claim attributed to `subject` (issue #166), in this
+    order: grounded as the subject's record; grounded (bare) as another
+    named subject's record; grounded (two-part) as a game score; else
+    flagged -- a subject record backwards keeps #181's message, a two-part
+    claim nearest a non-subject opponent with game data is that opponent's
+    score (#26's message), and anything else is not the subject's record.
+    """
+    parts = len(claimed)
+    own_record = facts.subjects[subject]
+    record = own_record.parts(parts)
+    if claimed == record:
+        return None
+    if not attribution.parenthetical and any(
+        facts.subjects[other].parts(parts) == claimed
+        for other in attribution.named_subjects
+        if other != subject
+    ):
+        return None
+    if parts == 2 and _is_stated_game_score(
+        (claimed[0], claimed[1]), attribution, name_occurrences, facts
+    ):
+        return None
+
+    reverse = (claimed[1], claimed[0], *claimed[2:])
+    stated_records: frozenset[tuple[int, ...]] = (
+        facts.subject_records if parts == 2 else facts.subject_w_l_t_records
+    )
+    if reverse in stated_records:
+        return _record_mismatch_message(claimed, reverse, facts)
+    nearest = attribution.nearest
+    if parts == 2 and nearest is not None and nearest != subject:
+        valid_for_nearest = facts.valid_tuples.get(nearest)
+        if valid_for_nearest:
+            return _mismatch_message(nearest, (claimed[0], claimed[1]), valid_for_nearest)
+    stated = _hyphenated(claimed)
+    if attribution.parenthetical or len(attribution.named_subjects) == 1:
+        # The subject's record with the claim's number of parts; a block
+        # stating no `ties` can only answer a three-part claim with two.
+        own = _hyphenated(record if record is not None else (own_record.wins, own_record.losses))
+        return f"{stated} is not {subject}'s record; {subject}'s record is {own}"
+    return f"{stated} is not a stated record"
+
+
+def _is_stated_game_score(
+    claimed: tuple[int, int],
+    attribution: _RecordAttribution,
+    name_occurrences: list[_NameOccurrence],
+    facts: _ClaimFacts,
+) -> bool:
+    """A two-part claim attributed to a subject may still be a game score:
+    one of the nearest name's tuples; bare, one of another named team's; in
+    order, any row's game score; or, in the order written, a hyphen pair
+    inside some string value. Never a string pair in either order (round
+    4): that branch rescued a swapped score beside the opponent's name
+    ("Texas beat Oklahoma 12-45"), #26's own case, on every Keener block,
+    whose `explanation` strings quote every game score. Round 4 dropped the
+    string branch outright on the premise that every score an explanation
+    quotes is also a `games[]` row; that is true of a team case and false
+    of a comparison, which has no `games[]` and only its `quality_wins[]` /
+    `worst_loss` rows, so on a comparison an in-order string quote is the
+    only statement of most breakdown scores and dropping it flagged every
+    correct "Texas beat Colorado 42-17" as a record (round 5). In order is
+    enough: the engine quotes a score team-first ("Swept them twice, 42-17
+    and 70-3", "Beat them, 38-10"), so a legitimate quote matches and a
+    swapped score never does. The string-value exemptions of
+    `_check_reversed_record` and `_check_unattributed_pair` (#181), still
+    either-order, are unchanged.
+    """
+    nearest = attribution.nearest
+    if nearest is not None and claimed in facts.valid_tuples.get(nearest, set()):
+        return True
+    if not attribution.parenthetical and any(
+        claimed in facts.valid_tuples.get(other, set())
+        for other, _ in name_occurrences
+        if other != nearest
+    ):
+        return True
+    return claimed in facts.game_scores or claimed in facts.ordered_string_pairs
 
 
 def _check_w_l_t_record(claimed: tuple[int, int, int], facts: _ClaimFacts) -> str | None:
@@ -664,7 +1168,9 @@ def _record_mismatch_message(
     """Retry feedback for a record claim (issue #181). Names whose record
     `reverse` is only when exactly one named subject owns it; never says the
     claim "should be stated" as the reverse, since which team the sentence
-    is about is attribution (#166), not settled here."""
+    is about is attribution, which `_check_attributed_record` (#166) settles
+    only when the sentence names a subject, and this message is also used
+    when it does not."""
     stated = _hyphenated(claimed)
     owners = facts.record_owners.get(reverse, ())
     if len(owners) == 1 and owners[0] is not None:
@@ -794,3 +1300,182 @@ def _span_distance(a: tuple[int, int], b: tuple[int, int]) -> int:
     if a_start >= b_end:
         return a_start - b_end
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Rating attribution (issue #166; see the module docstring's #166 rules)
+# ---------------------------------------------------------------------------
+
+
+def _find_rating_mismatches(
+    response_text: str, known_team_names: list[str], numbers: _NumberFacts
+) -> set[str]:
+    """For every response number grounded only as a rating, sentence by
+    sentence, in a sentence that names at least one team: attribute it to
+    its nearest name (parenthetical within `_PROXIMITY_WINDOW`, bare at any
+    distance) and require it to be that name's rating -- exactly, rounded
+    (#162) or as displayed (#165) -- or, bare, another named team's, or,
+    bare on a comparison, the other compared team's beside the named team's
+    (`_is_comparison_statement`, round 3).
+    """
+    mismatches: set[str] = set()
+    for sentence in _split_sentences(response_text):
+        name_occurrences = _name_occurrences(sentence, known_team_names)
+        if not name_occurrences:
+            continue
+        rating_tokens: list[_RatingToken] = [
+            (token_match.span(), token_match.group())
+            for token_match in _RESPONSE_NUMBER_RE.finditer(sentence)
+            if _is_rating_only(token_match.group(), numbers)
+        ]
+        bare_tokens = [
+            (span, token) for span, token in rating_tokens if not _is_parenthesized(sentence, span)
+        ]
+        for span, token in rating_tokens:
+            mismatch = _check_rating_claim(
+                sentence, span, token, name_occurrences, numbers, bare_tokens
+            )
+            if mismatch is not None:
+                mismatches.add(mismatch)
+    return mismatches
+
+
+def _is_rating_only(token: str, numbers: _NumberFacts) -> bool:
+    """Grounded by the membership rules, but not a number token of the block
+    once its rating literals are blanked out: only a rating grounds it, so
+    the sentence's attribution of it can be checked. An id, rank, year or
+    week token that shares a rating's digits is grounded either way and
+    never attributed (epic #199).
+    """
+    plain = token.replace(",", "")
+    return plain not in numbers.non_rating_numbers and _is_grounded_number(
+        token, numbers.fact_numbers, numbers.rating_values, numbers.display_values
+    )
+
+
+def _check_rating_claim(
+    sentence: str,
+    token_span: tuple[int, int],
+    token: str,
+    name_occurrences: list[_NameOccurrence],
+    numbers: _NumberFacts,
+    bare_tokens: list[_RatingToken],
+) -> str | None:
+    plain = token.replace(",", "")
+    parenthetical = _is_parenthesized(sentence, token_span)
+    nearest = _nearest_name(token_span, name_occurrences)
+    if nearest is None:
+        return None
+    name, distance = nearest
+    if parenthetical and distance > _PROXIMITY_WINDOW:
+        return None
+
+    values = numbers.ratings_by_name.get(name)
+    if not values:
+        # No rating stated for this name: nothing to hold the claim to,
+        # like a score beside a name with no game data.
+        return None
+    if any(_rating_matches(plain, value, numbers.method) for value in values):
+        return None
+    if not parenthetical and any(
+        _rating_matches(plain, value, numbers.method)
+        for other, _ in name_occurrences
+        if other != name
+        for value in numbers.ratings_by_name.get(other, set())
+    ):
+        return None
+    if not parenthetical and _is_comparison_statement(
+        plain, token_span, name, name_occurrences, numbers, bare_tokens
+    ):
+        return None
+
+    if len(values) > 1:
+        return f"{token} is not {name}'s rating"
+    (value,) = values
+    own = _rating_as_claimed(plain, value, numbers)
+    return f"{token} is not {name}'s rating; {name}'s rating is {own}"
+
+
+def _is_comparison_statement(
+    plain: str,
+    token_span: tuple[int, int],
+    nearest_name: str,
+    name_occurrences: list[_NameOccurrence],
+    numbers: _NumberFacts,
+    bare_tokens: list[_RatingToken],
+) -> bool:
+    """Whether a bare rating-only token that failed the nearest-name check
+    and the bare rescue is half of a comparison statement (issue #166, round
+    3; see the module docstring): on a block with two rated subjects, it
+    states the rating of the subject S2 that is *not* its nearest name, and
+    another bare rating-only token in the sentence states the other subject
+    S1's rating, where S1 is that token's nearest subject mention -- and
+    (round 4) the token is credited to S1 rather than to some non-subject:
+    its own nearest name (`nearest_name`) is S1, or is also the partner's
+    nearest name among *all* the sentence's mentions. So "Texas beat
+    Oklahoma 45-12, and Elo has it 1933 to 1892" holds (Oklahoma stands
+    nearest both figures) and the verdict sentence holds (Texas is nearest
+    both), while "Elo has Ohio State at 1892, while Texas sits at 1933"
+    credits 1892 to Ohio State and is not a comparison statement. Never for
+    a parenthetical token (the caller's check), never with a parenthetical
+    partner (`bare_tokens` excludes them), and never on a one-subject block
+    (`compared_ratings` is empty there). A lone token has no partner, so
+    "Elo has Texas at 1892" is never grounded this way.
+    """
+    compared = numbers.compared_ratings
+    if len(compared) != 2:
+        return False
+    subject_mentions = [occurrence for occurrence in name_occurrences if occurrence[0] in compared]
+    for other_subject, other_rating in compared.items():
+        if other_subject == nearest_name or not _rating_matches(
+            plain, other_rating, numbers.method
+        ):
+            continue
+        (named_subject,) = (subject for subject in compared if subject != other_subject)
+        for partner_span, partner in bare_tokens:
+            if partner_span == token_span:
+                continue
+            if not _rating_matches(
+                partner.replace(",", ""), compared[named_subject], numbers.method
+            ):
+                continue
+            partner_subject = _nearest_name(partner_span, subject_mentions)
+            if partner_subject is None or partner_subject[0] != named_subject:
+                continue
+            partner_nearest = _nearest_name(partner_span, name_occurrences)
+            if nearest_name == named_subject or (
+                partner_nearest is not None and partner_nearest[0] == nearest_name
+            ):
+                return True
+    return False
+
+
+def _rating_matches(plain_token: str, rating: Decimal, method: Method | None) -> bool:
+    """Whether the (ungrouped) token states `rating`: the exact value, its
+    display value under `method` (#165), or a rounding of it (#162)."""
+    if Decimal(plain_token) == rating:
+        return True
+    if method is not None and display_value(rating, method) == plain_token:
+        return True
+    return _is_rounding_of(plain_token, rating)
+
+
+def _rating_as_claimed(plain_token: str, rating: Decimal, numbers: _NumberFacts) -> str:
+    """`rating` in the form the token matched some rating under, so the
+    retry feedback compares like with like: the display value when the
+    token is a display value of the block, else rounded half away from zero
+    to the token's decimal places when the token is a rounding of some
+    rating, else the exact literal.
+    """
+    if numbers.method is not None and plain_token in numbers.display_values:
+        return display_value(rating, numbers.method)
+    places = _decimal_places(Decimal(plain_token))
+    if places < _decimal_places(rating) and any(
+        _is_rounding_of(plain_token, value) for value in numbers.rating_values
+    ):
+        try:
+            rounded = abs(rating).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            return format(rating, "f")
+        return format(rounded, "f")
+    return format(rating, "f")
