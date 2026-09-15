@@ -421,6 +421,110 @@ class UnknownPlayerError(ValueError):
 
 
 # ---------------------------------------------------------------------------
+# player comparison and search (issue #301, epic #288 step 3): the same
+# module (`cfb_strength.players`) and the same rules as the read layer above.
+#
+# Coordinator-assigned signatures, implemented by players-agent and exported
+# from `cfb_strength.players`:
+#
+#   def get_player_comparison(conn: sqlite3.Connection, *, sport: Sport,
+#                             a: int, b: int) -> PlayerComparison: ...
+#       Raises ValueError when a == b, and UnknownPlayerError for the first of
+#       `a`, `b` (checked in that order) with no `players` row in that sport.
+#
+#   def search_players(conn: sqlite3.Connection, *, sport: Sport, query: str,
+#                      limit: int = 10) -> PlayerSearch: ...
+#       Raises ValueError unless 1 <= limit <= PLAYER_SEARCH_MAX_LIMIT and
+#       `query.strip()` has at least PLAYER_SEARCH_MIN_QUERY_LENGTH characters.
+#
+# Rules:
+#   * `PlayerComparison.a` and `.b` equal `get_player_career` for those ids.
+#     A comparison computes no totals of its own, so it can never disagree
+#     with a career page.
+#   * Head-to-head (founder decision, #301): a completed game with both scores
+#     in which `a` and `b` each have a QB `game_starters` row, for different
+#     teams. Relief appearances don't count; when the source lists a
+#     replacement starter, the game belongs to the replacement. The record is
+#     `a`'s W-L-T in those games (a tie is equal scores), so swapping `a` and
+#     `b` swaps wins and losses. `record.starts == len(games)`, and every such
+#     game is also counted in each player's career record for its season type.
+#   * No rating math (founder decision, #301): nothing here compares `a`'s
+#     numbers with `b`'s. Marking the larger number in a row is presentation
+#     in apps/web, and there is no tally, winner or rate stat.
+#   * Search matches `display_name` case-insensitively as a substring of the
+#     stripped query, among players who qualify for a leaderboard in either
+#     season type (a pass attempt or a QB start). Order: regular-season career
+#     passing yards descending with None last, then `display_name`, then
+#     `player_id`.
+# ---------------------------------------------------------------------------
+
+PLAYER_SEARCH_MAX_LIMIT = 20
+PLAYER_SEARCH_MIN_QUERY_LENGTH = 2
+
+
+@dataclass(frozen=True)
+class PlayerHeadToHeadGame:
+    """One game `a` and `b` started against each other at QB. (Not the
+    evidence layer's team `HeadToHead` above.)"""
+
+    season: int
+    season_type: PlayerSeasonType
+    week: int | None
+    start_date: str | None
+    # `games.source_id`, e.g. "1999_21_STL_TEN"; None when the source has none.
+    source_id: str | None
+    # `teams.school` for the team each player started for.
+    a_team: str
+    b_team: str
+    a_points: int
+    b_points: int
+    # Each player's `player_game_stats` line in this game; None when the
+    # player has no row (e.g. the games with no stat lines at all, #289's
+    # accepted limit). A row's untracked stat stays None inside PlayerStats.
+    a_stats: PlayerStats | None
+    b_stats: PlayerStats | None
+
+
+@dataclass(frozen=True)
+class PlayerHeadToHead:
+    season_type: PlayerSeasonType
+    # `a`'s W-L-T against `b`.
+    record: StarterRecord
+    # Chronological: start_date, then week, then game id.
+    games: list[PlayerHeadToHeadGame]
+
+
+@dataclass(frozen=True)
+class PlayerComparison:
+    sport: Sport
+    a: PlayerCareer
+    b: PlayerCareer
+    # Always present; `record` is 0-0-0 and `games` empty when they never met.
+    regular_season_head_to_head: PlayerHeadToHead
+    postseason_head_to_head: PlayerHeadToHead
+
+
+@dataclass(frozen=True)
+class PlayerSearchRow:
+    player_id: int
+    display_name: str
+    position: str | None
+    # The span of seasons with a season row or a QB start, either season type,
+    # so two players with one name can be told apart.
+    first_season: int
+    last_season: int
+
+
+@dataclass(frozen=True)
+class PlayerSearch:
+    sport: Sport
+    # The query as matched: stripped of surrounding whitespace.
+    query: str
+    limit: int
+    rows: list[PlayerSearchRow]
+
+
+# ---------------------------------------------------------------------------
 # ratings input/output (ratings-agent implements RatingMethod; the CLI reads
 # `games` from the db, the compute-and-store step writes to `ratings`)
 # ---------------------------------------------------------------------------

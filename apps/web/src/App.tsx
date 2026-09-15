@@ -3,6 +3,7 @@ import { AppShell } from './components/AppShell/AppShell'
 import { AboutPage } from './pages/AboutPage/AboutPage'
 import { HomePage } from './pages/HomePage/HomePage'
 import { PlayerCareerPage } from './pages/PlayerCareerPage/PlayerCareerPage'
+import { PlayerComparePage } from './pages/PlayerComparePage/PlayerComparePage'
 import { PlayerLeadersPage } from './pages/PlayerLeadersPage/PlayerLeadersPage'
 
 function App() {
@@ -14,6 +15,7 @@ function App() {
           <Route path="/about" element={<AboutPage />} />
           <Route path="/nfl/leaders" element={<PlayerLeadersPage />} />
           <Route path="/nfl/players/:playerId" element={<PlayerCareerPage />} />
+          <Route path="/nfl/compare" element={<PlayerComparePage />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -75,6 +75,11 @@ REQUIRED_LOCATIONS: dict[str, tuple[str, ...]] = {
         "#/components/schemas/PlayerLeadersOut/properties/sport",
         "#/components/schemas/PlayerCareerOut/properties/sport",
         "#/components/schemas/UnknownPlayerErrorBody/properties/sport",
+        # Issue #301: comparison and search, the same runtime-narrowed `sport`.
+        "GET /api/players/compare query parameter 'sport'",
+        "GET /api/players/search query parameter 'sport'",
+        "#/components/schemas/PlayerComparisonOut/properties/sport",
+        "#/components/schemas/PlayerSearchOut/properties/sport",
     ),
     "method": (
         *(f"#/components/schemas/{model}/properties/method" for model in _VERDICT_REQUESTS),

@@ -1,0 +1,204 @@
+import type { Meta, StoryObj } from '@storybook/react-vite'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { expect, userEvent, within } from 'storybook/test'
+import {
+  PICK_TWO_COPY,
+  SAME_PLAYER_COPY,
+  pickOneMoreCopy,
+} from '../../lib/playerCompare'
+import {
+  DATA_SOURCES,
+  KURT_WARNER_CAREER,
+  NEVER_MET_COMPARISON,
+  SEARCH_MCNAIR,
+  WARNER_VS_MCNAIR,
+} from '../../lib/playerFixtures'
+import { NETWORK_ERROR_COPY } from '../../lib/api/client'
+import { PLAYER_NOT_FOUND_COPY } from '../../lib/playerStats'
+import { PlayerComparePage } from './PlayerComparePage'
+
+type Handler = () => Promise<Response>
+
+interface Handlers {
+  compare?: Handler
+  career?: Handler
+}
+
+/**
+ * Like PlayerCareerPage's stories, these drive the page through a stubbed
+ * `window.fetch`: `/api/players/compare` and `/api/players/{id}` get each
+ * story's handlers, `/api/players/search` the fixture's McNair row, and
+ * `/api/credits` the live data sources. Everything else falls through.
+ */
+function installFetch(handlers: Handlers) {
+  const realFetch = globalThis.fetch
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input.toString())
+    if (url.pathname === '/api/players/compare') {
+      return (handlers.compare ?? never)()
+    }
+    if (url.pathname === '/api/players/search') {
+      return jsonResponse(200, SEARCH_MCNAIR)
+    }
+    if (url.pathname.startsWith('/api/players/')) {
+      return (handlers.career ?? never)()
+    }
+    if (url.pathname === '/api/credits') {
+      return jsonResponse(200, {
+        methodologies: [],
+        data_sources: DATA_SOURCES,
+      })
+    }
+    return realFetch(input, init)
+  }) as typeof fetch
+}
+
+function never(): Promise<Response> {
+  return new Promise(() => {})
+}
+
+function jsonResponse(status: number, body: unknown): Promise<Response> {
+  return Promise.resolve(
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    }),
+  )
+}
+
+function atSearch(search: string, handlers: Handlers = {}) {
+  return function RouterDecorator(Story: () => React.JSX.Element) {
+    installFetch(handlers)
+    return (
+      <MemoryRouter initialEntries={[`/nfl/compare${search}`]}>
+        <Routes>
+          <Route path="/nfl/compare" element={<Story />} />
+        </Routes>
+      </MemoryRouter>
+    )
+  }
+}
+
+const WARNER = KURT_WARNER_CAREER.player_id
+const MCNAIR = WARNER_VS_MCNAIR.b.player_id
+
+const meta = {
+  title: 'pages/PlayerComparePage',
+  component: PlayerComparePage,
+  tags: ['autodocs'],
+} satisfies Meta<typeof PlayerComparePage>
+
+export default meta
+
+type Story = StoryObj<typeof meta>
+
+export const NothingPicked: Story = {
+  decorators: [atSearch('')],
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText(PICK_TWO_COPY)
+  },
+}
+
+/** Opened from Kurt Warner's career page. */
+export const OnePicked: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}`, {
+      career: () => jsonResponse(200, KURT_WARNER_CAREER),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText(pickOneMoreCopy('Kurt Warner'))
+  },
+}
+
+/** Player B's typeahead open on "McNair", from the one-picked state. */
+export const PickingPlayerB: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}`, {
+      career: () => jsonResponse(200, KURT_WARNER_CAREER),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(
+      canvas.getByLabelText('Player B', { exact: true }),
+      'McNair',
+    )
+    await expect(
+      await canvas.findByRole('option', { name: /Steve McNair/ }),
+    ).toBeVisible()
+  },
+}
+
+export const SamePlayer: Story = {
+  decorators: [atSearch(`?a=${WARNER}&b=${WARNER}`)],
+  play: async ({ canvasElement }) => {
+    await expect(
+      await within(canvasElement).findByRole('alert'),
+    ).toHaveTextContent(SAME_PLAYER_COPY)
+  },
+}
+
+export const Loading: Story = {
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`, { compare: never })],
+}
+
+/** Kurt Warner and Steve McNair on the committed fixture. */
+export const Loaded: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, playoffs',
+    })
+    await canvas.findByRole('link', { name: /nflfastR/ })
+  },
+}
+
+/** Never met, and one of them with null stats and no playoff games. */
+export const NeverMet: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=1001`, {
+      compare: () => jsonResponse(200, NEVER_MET_COMPARISON),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByText(
+      'Kurt Warner and Unrecorded Player never started against each other in the playoffs.',
+    )
+  },
+}
+
+/** A 404 `unknown_player`, in the narrator's voice. */
+export const UnknownPlayer: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=1`, {
+      compare: () =>
+        jsonResponse(404, {
+          detail: { error: 'unknown_player', player_id: 1, sport: 'nfl' },
+        }),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    await expect(
+      await within(canvasElement).findByRole('alert'),
+    ).toHaveTextContent(PLAYER_NOT_FOUND_COPY)
+  },
+}
+
+export const NetworkError: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => Promise.reject(new TypeError('Failed to fetch')),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    await expect(
+      await within(canvasElement).findByRole('alert'),
+    ).toHaveTextContent(NETWORK_ERROR_COPY)
+  },
+}

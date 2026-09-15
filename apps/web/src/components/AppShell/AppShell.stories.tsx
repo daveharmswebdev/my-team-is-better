@@ -39,6 +39,9 @@ export const Default: Story = {
       within(nav).getByRole('link', { name: 'NFL Leaders' }),
     ).toHaveAttribute('href', '/nfl/leaders')
     await expect(
+      within(nav).getByRole('link', { name: 'Compare Players' }),
+    ).toHaveAttribute('href', '/nfl/compare')
+    await expect(
       within(nav).getByRole('link', { name: 'How This Works' }),
     ).toHaveAttribute('href', '/about')
   },
