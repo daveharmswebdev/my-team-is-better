@@ -16,11 +16,15 @@ boundary:
   that field before the engine is called. The engine's own `ValueError` for
   the same bounds must never surface as a 500, and neither may sqlite3's
   `OverflowError` for an offset no SQLite INTEGER can hold (#296 review).
-  Two engine rules no `Query` bound can express are checked in the route
+  Three engine rules no `Query` bound can express are checked in the route
   and raised in FastAPI's own validation shape: search's `q` must keep
   `PLAYER_SEARCH_MIN_QUERY_LENGTH` characters *after stripping* (`' a '`
-  passes `min_length`), located at `q`; and compare's `a` and `b` must be
-  different players, located at `b`.
+  passes `min_length`), located at `q`; compare's `a` and `b` must be
+  different players, located at `b`; and a leaderboard's `sort` must be one
+  of its `category`'s sorts (`leader_board`), located at `sort`. That last
+  one matters because every `PlayerLeaderSort` passes the published enum:
+  without the check, `category=rushing&sort=wins` would reach the engine and
+  its `ValueError` would surface as a 500 (#312).
 - **Only leagues with player stats.** CFB has none, so `sport=cfb` would
   answer an empty 200 that looks exactly like an unloaded db (the failure
   #104 fixed for `method`). `player_sport` turns it into a 422 at `sport`
@@ -45,9 +49,11 @@ import sqlite3
 from typing import Annotated, Final
 
 from cfb_strength.contracts import (
+    PLAYER_LEADER_SORTS_BY_CATEGORY,
     PLAYER_LEADERS_MAX_LIMIT,
     PLAYER_SEARCH_MAX_LIMIT,
     PLAYER_SEARCH_MIN_QUERY_LENGTH,
+    PlayerLeaderCategory,
     PlayerLeaderSort,
     PlayerSeasonType,
     UnknownPlayerError,
@@ -115,22 +121,68 @@ def _require_storable_player_id(player_id: int, sport: Sport) -> None:
         raise UnknownPlayerError(player_id, sport)
 
 
+def leader_board(
+    category: PlayerLeaderCategory = "passing",
+    sort: PlayerLeaderSort | None = None,
+) -> tuple[PlayerLeaderCategory, PlayerLeaderSort | None]:
+    """A leaderboard request's `category` and `sort`, checked as a pair.
+
+    This is the only place in apps/api that knows which sorts a category
+    takes, and it reads them from the engine's
+    `PLAYER_LEADER_SORTS_BY_CATEGORY` rather than keeping a copy that could
+    drift as categories are added. A sort from another category is a
+    request-validation 422 located at `sort`, in pydantic's `literal_error`
+    shape naming this category's sorts -- the same treatment `player_sport`
+    gives a league without player stats.
+
+    `sort=None` is passed through untouched: resolving it to the category's
+    default is the engine's job, and the response echoes what it resolved.
+    """
+    sorts = PLAYER_LEADER_SORTS_BY_CATEGORY[category]
+    if sort is not None and sort not in sorts:
+        expected = (
+            repr(sorts[0])
+            if len(sorts) == 1
+            else ", ".join(repr(s) for s in sorts[:-1]) + f" or {sorts[-1]!r}"
+        )
+        raise RequestValidationError(
+            [
+                {
+                    "type": "literal_error",
+                    "loc": ("query", "sort"),
+                    "msg": f"Input should be {expected}",
+                    "input": sort,
+                    "ctx": {"expected": expected},
+                }
+            ]
+        )
+    return category, sort
+
+
 @router.get("/players/leaders", response_model=PlayerLeadersOut)
 def leaders(
     sport: Annotated[Sport, Depends(player_sport)],
+    board: Annotated[tuple[PlayerLeaderCategory, PlayerLeaderSort | None], Depends(leader_board)],
     season_type: PlayerSeasonType = "regular",
-    sort: PlayerLeaderSort = "passing_yards",
     limit: Annotated[int, Query(ge=1, le=PLAYER_LEADERS_MAX_LIMIT)] = 50,
     offset: Annotated[int, Query(ge=0, le=SQLITE_INTEGER_MAX)] = 0,
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> PlayerLeadersOut:
-    """One page of a career leaderboard, always descending on `sort`, with
-    `total` the size of the whole qualifying population so a client can
-    page. `rank` is the engine's competition rank over that population
-    (ties share it), null when the sort value is null."""
+    """One page of `category`'s career leaderboard, always descending on
+    `sort`, with `total` the size of that category's whole qualifying
+    population so a client can page. `rank` is the engine's competition rank
+    over that population (ties share it), null when the sort value is null.
+    Omitting `sort` gives the category's default, echoed in the response."""
+    category, sort = board
     return PlayerLeadersOut.from_dataclass(
         get_player_leaders(
-            conn, sport=sport, season_type=season_type, sort=sort, limit=limit, offset=offset
+            conn,
+            sport=sport,
+            category=category,
+            season_type=season_type,
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
     )
 
