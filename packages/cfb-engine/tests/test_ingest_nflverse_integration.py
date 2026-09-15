@@ -14,8 +14,6 @@ import csv
 import sqlite3
 from pathlib import Path
 
-import pytest
-
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest.nflverse.ingest_season import ingest_one
 from cfb_strength.ingest.nflverse.normalize import TeamLookup, build_team_lookup, mint_surrogate_id
@@ -60,7 +58,8 @@ def test_ingest_one_writes_nfl_rows_with_sport_and_source_id(empty_schema_db: Pa
         assert r["id"] == mint_surrogate_id("nfl_team", r["source_id"])
 
     log_row = conn.execute(
-        "SELECT * FROM ingestion_log WHERE year = 2023 AND season_type = 'regular' AND sport = 'nfl'"
+        "SELECT * FROM ingestion_log "
+        "WHERE year = 2023 AND season_type = 'regular' AND sport = 'nfl'"
     ).fetchone()
     assert log_row is not None
     assert log_row["game_count"] == 1

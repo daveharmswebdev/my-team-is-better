@@ -31,7 +31,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import get_args
 
 from cfb_strength.contracts import (
@@ -278,7 +278,7 @@ def _store(
     inserted row would silently take the `sport` column's schema default
     ('cfb') regardless of which sport was actually computed.
     """
-    computed_at = datetime.now(timezone.utc).isoformat()
+    computed_at = datetime.now(UTC).isoformat()
     with conn:
         conn.execute(
             "DELETE FROM ratings WHERE year = ? AND method = ? AND sport = ?",
@@ -320,11 +320,20 @@ def _store_breakdowns(
     `opponent_team_id IS NULL` residual row, per displayed team -- same
     pattern as `_store()`, scoped by year+method+sport (see `_store()`'s
     docstring for why `sport` must be in both the DELETE and the INSERT)."""
-    computed_at = datetime.now(timezone.utc).isoformat()
+    computed_at = datetime.now(UTC).isoformat()
     rows: list[
         tuple[
-            int, str, int, int | None, int | None, int | None, int | None,
-            float | None, float, str, str,
+            int,
+            str,
+            int,
+            int | None,
+            int | None,
+            int | None,
+            int | None,
+            float | None,
+            float,
+            str,
+            str,
         ]
     ] = []
     for tr in ratings:
@@ -418,7 +427,7 @@ def _store_elo_ledgers(
     printing the wrong tuning beside some team's path. A single walk never
     produces that; the check is a guard, not a code path.
     """
-    computed_at = datetime.now(timezone.utc).isoformat()
+    computed_at = datetime.now(UTC).isoformat()
     ledgers = [(tr.team_id, tr.elo_ledger) for tr in ratings if tr.elo_ledger is not None]
 
     config_row: tuple[int, str, str, float, float, float, float, float, float, str] | None
@@ -442,14 +451,42 @@ def _store_elo_ledgers(
             )
         ((starting_rating, k, hfa, scale, mov_scale, mov_autocorr),) = constants
         config_row = (
-            year, method, sport, starting_rating, k, hfa, scale, mov_scale,
-            mov_autocorr, computed_at,
+            year,
+            method,
+            sport,
+            starting_rating,
+            k,
+            hfa,
+            scale,
+            mov_scale,
+            mov_autocorr,
+            computed_at,
         )
 
     step_rows: list[
         tuple[
-            int, str, str, int, int, int | None, str, str | None, int, str, int, int,
-            str, float, float, float, float, float, float, float, float, str,
+            int,
+            str,
+            str,
+            int,
+            int,
+            int | None,
+            str,
+            str | None,
+            int,
+            str,
+            int,
+            int,
+            str,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            float,
+            str,
         ]
     ] = [
         (
@@ -515,9 +552,7 @@ def _store_elo_ledgers(
             )
 
 
-def compute_and_store(
-    conn: sqlite3.Connection, year: int, method: str, sport: str = "cfb"
-) -> int:
+def compute_and_store(conn: sqlite3.Connection, year: int, method: str, sport: str = "cfb") -> int:
     """Compute ratings for one year/method/sport and store them. Returns the
     number of displayed rows written.
 

@@ -79,9 +79,7 @@ VERDICT_RATING_FORMATS: dict[Method, str] = {
 # ---------------------------------------------------------------------------
 
 
-def _rated_teams(
-    conn: sqlite3.Connection, year: int, method: str, sport: str
-) -> list[sqlite3.Row]:
+def _rated_teams(conn: sqlite3.Connection, year: int, method: str, sport: str) -> list[sqlite3.Row]:
     """All (team_id, school) pairs that have a rating row for year/method/sport.
 
     `sport` must be filtered here (issue #58, same bug class as #57 in
@@ -403,9 +401,7 @@ def resolve_team(
     raise UnknownTeamError(query, year, sport)
 
 
-def _team_games(
-    conn: sqlite3.Connection, year: int, team_id: int, sport: str
-) -> list[sqlite3.Row]:
+def _team_games(conn: sqlite3.Connection, year: int, team_id: int, sport: str) -> list[sqlite3.Row]:
     return conn.execute(
         """
         SELECT id, week, season_type, neutral_site,

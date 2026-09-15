@@ -67,7 +67,8 @@ USAGE = f"""\
 usage: cfb <command> [args]
 
 commands:
-  ingest --years YEARS [--sport {{{_SPORT_CHOICES}}}] [--force] [--season-types TYPES] [--db-path PATH]
+  ingest --years YEARS [--sport {{{_SPORT_CHOICES}}}] [--force] [--season-types TYPES]
+         [--db-path PATH]
       Fetch and store game/team data for one or more seasons. --sport
       defaults to "cfb" (CFBD); "nfl" ingests nflverse data instead.
 

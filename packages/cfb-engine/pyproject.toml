@@ -35,4 +35,15 @@ dev = [
     "mypy>=1.14.0",
     "import-linter>=2.1",
     "pre-commit>=4.6.2",
+    "ruff>=0.8.0",
 ]
+
+# Issue #141: the same ruff configuration as apps/api, so the two Python
+# sides are held to one standard. Enforced by the `cfb-engine` CI job and
+# the `cfb-engine-ruff` pre-commit hook.
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

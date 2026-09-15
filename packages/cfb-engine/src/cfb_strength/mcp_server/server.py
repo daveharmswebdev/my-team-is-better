@@ -36,6 +36,8 @@ import dataclasses
 import sqlite3
 from typing import Any
 
+from mcp.server.mcpserver import MCPServer
+
 from cfb_strength.config import DB_PATH
 from cfb_strength.contracts import (
     AmbiguousTeamError,
@@ -50,8 +52,6 @@ from cfb_strength.contracts import (
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.credits import get_credits
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
-
-from mcp.server.mcpserver import MCPServer
 
 mcp: MCPServer = MCPServer(
     "cfb-strength",

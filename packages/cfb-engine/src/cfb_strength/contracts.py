@@ -17,7 +17,6 @@ the `ratings` table via SQL rather than importing `cfb_strength.ratings`.
 from dataclasses import dataclass, field
 from typing import Literal, Protocol, get_args, runtime_checkable
 
-
 # ---------------------------------------------------------------------------
 # closed vocabularies (issue #112)
 # ---------------------------------------------------------------------------
@@ -450,9 +449,7 @@ class CareerRatingMethod(Protocol):
     `rate_through`) correctly fails it.
     """
 
-    def rate_through(
-        self, games: list[Game], target_season: int
-    ) -> dict[int, TeamRating]: ...
+    def rate_through(self, games: list[Game], target_season: int) -> dict[int, TeamRating]: ...
 
 
 # ---------------------------------------------------------------------------

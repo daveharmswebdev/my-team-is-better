@@ -45,12 +45,14 @@ def test_tie_is_tallied_as_a_tie_not_dropped() -> None:
 
     Before #83 it incremented neither `wins` nor `losses`, so a 1-0-1 team
     was reported as 1-0. `wins + losses + ties` must equal games played."""
-    result = _rate([
-        Game(home_team_id=A, away_team_id=B, home_points=28, away_points=21),
-        Game(home_team_id=A, away_team_id=C, home_points=17, away_points=17),
-        Game(home_team_id=C, away_team_id=B, home_points=10, away_points=3),
-        Game(home_team_id=B, away_team_id=C, home_points=0, away_points=0),
-    ])
+    result = _rate(
+        [
+            Game(home_team_id=A, away_team_id=B, home_points=28, away_points=21),
+            Game(home_team_id=A, away_team_id=C, home_points=17, away_points=17),
+            Game(home_team_id=C, away_team_id=B, home_points=10, away_points=3),
+            Game(home_team_id=B, away_team_id=C, home_points=0, away_points=0),
+        ]
+    )
     assert (result[A].wins, result[A].losses, result[A].ties) == (1, 0, 1)
     assert (result[B].wins, result[B].losses, result[B].ties) == (0, 2, 1)
     assert (result[C].wins, result[C].losses, result[C].ties) == (1, 0, 2)
@@ -121,7 +123,7 @@ def test_win_always_beats_loss_regardless_of_margin() -> None:
         Game(home_team_id=W, away_team_id=K, home_points=15, away_points=14),
         Game(home_team_id=K, away_team_id=L, home_points=70, away_points=10),
     ]
-    result = _rate(games)
+    _rate(games)
     # W's credit against K and L's credit against K are not directly
     # comparable via .rating (different opponents), but we can check the
     # underlying invariant directly via the credit formula.
@@ -392,12 +394,8 @@ def test_keener_is_bit_identical_under_game_reordering() -> None:
             assert actual.wins == expected.wins
             assert actual.losses == expected.losses
 
-            expected_entries = {
-                e.opponent_team_id: e for e in expected.rating_breakdown.entries
-            }
-            actual_entries = {
-                e.opponent_team_id: e for e in actual.rating_breakdown.entries
-            }
+            expected_entries = {e.opponent_team_id: e for e in expected.rating_breakdown.entries}
+            actual_entries = {e.opponent_team_id: e for e in actual.rating_breakdown.entries}
             assert actual_entries.keys() == expected_entries.keys()
             for opponent_id, expected_entry in expected_entries.items():
                 actual_entry = actual_entries[opponent_id]
@@ -481,21 +479,15 @@ def test_keener_reordering_drift_is_bounded_for_a_three_meeting_pair() -> None:
             assert actual.rating == pytest.approx(expected.rating, abs=1e-12)
             worst_drift = max(worst_drift, abs(actual.rating - expected.rating))
 
-            expected_entries = {
-                e.opponent_team_id: e for e in expected.rating_breakdown.entries
-            }
-            actual_entries = {
-                e.opponent_team_id: e for e in actual.rating_breakdown.entries
-            }
+            expected_entries = {e.opponent_team_id: e for e in expected.rating_breakdown.entries}
+            actual_entries = {e.opponent_team_id: e for e in actual.rating_breakdown.entries}
             assert actual_entries.keys() == expected_entries.keys()
             for opponent_id, expected_entry in expected_entries.items():
                 actual_entry = actual_entries[opponent_id]
                 assert actual_entry.games_played == expected_entry.games_played
                 assert actual_entry.wins == expected_entry.wins
                 assert actual_entry.losses == expected_entry.losses
-                assert actual_entry.credit == pytest.approx(
-                    expected_entry.credit, abs=1e-12
-                )
+                assert actual_entry.credit == pytest.approx(expected_entry.credit, abs=1e-12)
                 assert actual_entry.contribution == pytest.approx(
                     expected_entry.contribution, abs=1e-12
                 )

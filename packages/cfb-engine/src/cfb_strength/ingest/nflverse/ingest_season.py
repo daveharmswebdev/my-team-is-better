@@ -102,9 +102,7 @@ def _filter_raw_games(
     all_games_raw: list[dict[str, str]], year: int, season_type: str
 ) -> list[dict[str, str]]:
     wanted_types = REGULAR_GAME_TYPES if season_type == "regular" else POSTSEASON_GAME_TYPES
-    return [
-        g for g in all_games_raw if g["season"] == str(year) and g["game_type"] in wanted_types
-    ]
+    return [g for g in all_games_raw if g["season"] == str(year) and g["game_type"] in wanted_types]
 
 
 def _assert_no_surrogate_collisions(rows: list[TeamRow] | list[GameRow]) -> None:
@@ -329,13 +327,19 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     if not years:
-        print(f"error: no valid years to ingest after filtering to {MIN_YEAR}-{MAX_YEAR}", file=sys.stderr)
+        print(
+            f"error: no valid years to ingest after filtering to {MIN_YEAR}-{MAX_YEAR}",
+            file=sys.stderr,
+        )
         return 1
 
     season_types = [s.strip() for s in args.season_types.split(",") if s.strip()]
     unknown_types = [s for s in season_types if s not in SEASON_TYPES]
     if unknown_types:
-        print(f"error: unknown season type(s) {unknown_types}, expected {SEASON_TYPES}", file=sys.stderr)
+        print(
+            f"error: unknown season type(s) {unknown_types}, expected {SEASON_TYPES}",
+            file=sys.stderr,
+        )
         return 1
 
     db_path = Path(args.db_path) if args.db_path else DB_PATH

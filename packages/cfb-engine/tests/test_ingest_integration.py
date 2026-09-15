@@ -255,8 +255,12 @@ def test_duplicate_fixture_pairs_really_share_the_matching_key() -> None:
             r["awayPoints"],
         )
 
-    for low, high in ((63840, 243322226), (63829, 242830326), (282430099, 400361387),
-                      (401806686, 401833370)):
+    for low, high in (
+        (63840, 243322226),
+        (63829, 242830326),
+        (282430099, 400361387),
+        (401806686, 401833370),
+    ):
         assert key(by_id[low]) == key(by_id[high])
     assert by_id[63840]["startDate"] != by_id[243322226]["startDate"]
     assert (by_id[63840]["awayId"], by_id[243322226]["awayId"]) == (1000899, 2206)
@@ -533,9 +537,9 @@ def test_ingest_writes_unreported_results_with_null_points_and_still_mints_teams
         assert _points(conn, SCORED_WITHOUT_LINE_SCORES_ID) == (11, 28, 1)
 
         # The row is kept, raw_json still holds CFBD's 0-0 ...
-        raw_json = conn.execute(
-            "SELECT raw_json FROM games WHERE id = 401655664"
-        ).fetchone()["raw_json"]
+        raw_json = conn.execute("SELECT raw_json FROM games WHERE id = 401655664").fetchone()[
+            "raw_json"
+        ]
         assert (json.loads(raw_json)["homePoints"], json.loads(raw_json)["awayPoints"]) == (0, 0)
 
         # ... and both sides still get `teams` / `team_season` rows.
@@ -605,8 +609,9 @@ def test_reingest_nulls_a_previously_stored_0_0_row(
     conn, _ = _ingest_batch(empty_schema_db, monkeypatch, 2024, records)
     try:
         assert _points(conn, 401655664) == (None, None, 1)
-        assert conn.execute(
-            "SELECT COUNT(*) AS c FROM games WHERE id = 401655664"
-        ).fetchone()["c"] == 1
+        assert (
+            conn.execute("SELECT COUNT(*) AS c FROM games WHERE id = 401655664").fetchone()["c"]
+            == 1
+        )
     finally:
         conn.close()

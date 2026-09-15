@@ -304,9 +304,7 @@ def _write_ingestion_log(
     )
 
 
-def ingest_one(
-    conn: Any, year: int, season_type: str, *, force: bool = False
-) -> IngestResult:
+def ingest_one(conn: Any, year: int, season_type: str, *, force: bool = False) -> IngestResult:
     """Fetch (cache-first), normalize, and write one year/season-type batch."""
     games_raw, fetched_live = get_games(year, season_type, force=force)
 
@@ -400,7 +398,10 @@ def main(argv: list[str] | None = None) -> int:
     season_types = [s.strip() for s in args.season_types.split(",") if s.strip()]
     unknown_types = [s for s in season_types if s not in SEASON_TYPES]
     if unknown_types:
-        print(f"error: unknown season type(s) {unknown_types}, expected {SEASON_TYPES}", file=sys.stderr)
+        print(
+            f"error: unknown season type(s) {unknown_types}, expected {SEASON_TYPES}",
+            file=sys.stderr,
+        )
         return 1
 
     db_path = Path(args.db_path) if args.db_path else DB_PATH

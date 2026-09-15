@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from typing import Any
 
 import requests
@@ -47,7 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--games", action="store_true", help="Inspect a /games response")
-    group.add_argument("--teams", action="store_true", help="Inspect a /teams response (always live)")
+    group.add_argument(
+        "--teams", action="store_true", help="Inspect a /teams response (always live)"
+    )
     parser.add_argument("--year", type=int, required=True)
     parser.add_argument(
         "--season-type",

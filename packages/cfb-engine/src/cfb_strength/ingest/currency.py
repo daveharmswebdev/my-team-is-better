@@ -322,7 +322,9 @@ def _nflverse_cache_scan(raw_dir: Path) -> CacheScan:
                 pairs.add((season, season_type))
 
     if not pairs:
-        return unrecognized(f"{name} has no games nflverse ingest would keep for {min_year}-{max_year}")
+        return unrecognized(
+            f"{name} has no games nflverse ingest would keep for {min_year}-{max_year}"
+        )
     return CacheScan(
         pairs=frozenset(pairs),
         beyond_max_year=tuple(sorted(beyond)),
@@ -395,7 +397,9 @@ def _missing_schema(actual: _Schema, reference: _Schema) -> tuple[str, ...]:
         if table not in actual.columns:
             missing.append(table)
             continue
-        missing.extend(f"{table}.{column}" for column in columns if column not in actual.columns[table])
+        missing.extend(
+            f"{table}.{column}" for column in columns if column not in actual.columns[table]
+        )
     missing.extend(sorted(reference.indexes - actual.indexes))
     return tuple(missing)
 
@@ -654,7 +658,11 @@ def _is_wal_mode(db_path: Path) -> bool:
             header = f.read(20)
     except OSError:
         return False
-    return len(header) == 20 and header.startswith(b"SQLite format 3\x00") and header[18:20] == b"\x02\x02"
+    return (
+        len(header) == 20
+        and header.startswith(b"SQLite format 3\x00")
+        and header[18:20] == b"\x02\x02"
+    )
 
 
 def _wal_file(db_path: Path) -> Path:

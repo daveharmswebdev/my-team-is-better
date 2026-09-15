@@ -82,7 +82,6 @@ def test_two_losses_bonuses_differ_names_bigger_game() -> None:
     pct2 = round(c2.raw_share * 100)
 
     bigger_word = "first" if c1.bonus > c2.bonus else "second"
-    smaller_word = "second" if c1.bonus > c2.bonus else "first"
     pct_bigger, pct_smaller = (pct1, pct2) if c1.bonus > c2.bonus else (pct2, pct1)
     bonus_bigger, bonus_smaller = (
         (c1.bonus, c2.bonus) if c1.bonus > c2.bonus else (c2.bonus, c1.bonus)

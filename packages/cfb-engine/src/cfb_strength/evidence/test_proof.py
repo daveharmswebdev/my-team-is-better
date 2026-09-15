@@ -154,7 +154,18 @@ def _insert_breakdown(
             credit, contribution, computed_at, sport
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'test', ?)
         """,
-        (year, method, team_id, opponent_team_id, games_played, wins, losses, credit, contribution, sport),
+        (
+            year,
+            method,
+            team_id,
+            opponent_team_id,
+            games_played,
+            wins,
+            losses,
+            credit,
+            contribution,
+            sport,
+        ),
     )
 
 
@@ -259,7 +270,9 @@ def test_build_team_case_nfl(conn: sqlite3.Connection) -> None:
 
 
 def test_build_comparison_nfl(conn: sqlite3.Connection) -> None:
-    comparison = build_comparison(conn, YEAR, "Delta Squad", "Echo Corp", method=METHOD, sport="nfl")
+    comparison = build_comparison(
+        conn, YEAR, "Delta Squad", "Echo Corp", method=METHOD, sport="nfl"
+    )
     assert comparison.team_a.team_id == 101
     assert comparison.team_b.team_id == 102
     assert comparison.head_to_head.played is True
@@ -305,7 +318,9 @@ def test_build_team_case_default_sport_is_cfb(conn: sqlite3.Connection) -> None:
 
 
 def test_build_comparison_cfb(conn: sqlite3.Connection) -> None:
-    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb")
+    comparison = build_comparison(
+        conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb"
+    )
     assert comparison.team_a.team_id == 1
     assert comparison.team_b.team_id == 2
     assert comparison.head_to_head.played is True
@@ -360,7 +375,9 @@ def test_build_comparison_cross_sport_common_opponent_pool_stays_scoped(
     ever appear, proving `build_comparison`'s CFB-scoped call doesn't pull
     NFL rows into `_ratings_map`/`_team_games` and quietly attribute an NFL
     opponent's rank/rating to a CFB matchup."""
-    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb")
+    comparison = build_comparison(
+        conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb"
+    )
     assert [c.opponent_team_id for c in comparison.common_opponents] == [3]
     nfl_ids = {101, 102, 103, 104, 105}
     assert all(c.opponent_team_id not in nfl_ids for c in comparison.common_opponents)
@@ -396,7 +413,7 @@ def test_ambiguous_team_error_within_a_single_sport_still_raised(
 
 
 def test_zero_match_query_raises_unknown_team_error(conn: sqlite3.Connection) -> None:
-    """"Texas" names a CFB school; under sport="nfl" nothing matches at any
+    """ "Texas" names a CFB school; under sport="nfl" nothing matches at any
     stage. Before #100 this raised AmbiguousTeamError(query, []) -- "which of
     these did you mean?" with nothing under it."""
     with pytest.raises(UnknownTeamError) as exc_info:
@@ -440,7 +457,7 @@ def test_unknown_team_error_carries_no_suggestion_list(
 def test_zero_match_query_with_no_lookalike_at_all_is_unknown_team_error(
     conn: sqlite3.Connection,
 ) -> None:
-    """"Zebra" has no counterpart of any kind in the CFB rated set -- still
+    """ "Zebra" has no counterpart of any kind in the CFB rated set -- still
     UnknownTeamError, emphatically not a crash or an AmbiguousTeamError."""
     with pytest.raises(UnknownTeamError) as exc_info:
         resolve_team(conn, YEAR, "Zebra", method=METHOD, sport="cfb")
@@ -516,9 +533,45 @@ def _build_tie_fixture(conn: sqlite3.Connection, sport: str) -> None:
     india, juliet, kilo = base + 1, base + 2, base + 3
     for tid, name in ((india, "India Ties"), (juliet, "Juliet Draws"), (kilo, "Kilo Beats")):
         _insert_team(conn, tid, name, sport=sport)
-    _insert_game(conn, base + 1, TIE_YEAR, juliet, india, "Juliet Draws", "India Ties", 17, 17, week=1, sport=sport)
-    _insert_game(conn, base + 2, TIE_YEAR, india, kilo, "India Ties", "Kilo Beats", 10, 20, week=2, sport=sport)
-    _insert_game(conn, base + 3, TIE_YEAR, juliet, kilo, "Juliet Draws", "Kilo Beats", 21, 7, week=3, sport=sport)
+    _insert_game(
+        conn,
+        base + 1,
+        TIE_YEAR,
+        juliet,
+        india,
+        "Juliet Draws",
+        "India Ties",
+        17,
+        17,
+        week=1,
+        sport=sport,
+    )
+    _insert_game(
+        conn,
+        base + 2,
+        TIE_YEAR,
+        india,
+        kilo,
+        "India Ties",
+        "Kilo Beats",
+        10,
+        20,
+        week=2,
+        sport=sport,
+    )
+    _insert_game(
+        conn,
+        base + 3,
+        TIE_YEAR,
+        juliet,
+        kilo,
+        "Juliet Draws",
+        "Kilo Beats",
+        21,
+        7,
+        week=3,
+        sport=sport,
+    )
     _insert_rating(conn, TIE_YEAR, METHOD, juliet, 1.2, 1, 1, 0, sport=sport, ties=1)
     _insert_rating(conn, TIE_YEAR, METHOD, kilo, 0.9, 2, 1, 1, sport=sport)
     _insert_rating(conn, TIE_YEAR, METHOD, india, 0.4, 3, 0, 1, sport=sport, ties=1)
@@ -541,9 +594,7 @@ def test_build_team_case_lists_an_equal_score_game_as_a_tie(
 
 
 @pytest.mark.parametrize("sport", ["cfb", "nfl"])
-def test_tie_is_never_a_quality_win_or_worst_loss(
-    conn: sqlite3.Connection, sport: Sport
-) -> None:
+def test_tie_is_never_a_quality_win_or_worst_loss(conn: sqlite3.Connection, sport: Sport) -> None:
     _build_tie_fixture(conn, sport)
 
     # India tied the #1 team and lost to #2: the tie against #1 is neither a
@@ -610,8 +661,7 @@ def test_build_comparison_common_opponent_reports_a_tie(
     assert comparison.team_b.ties == 0
     assert (
         "vs common opponent India Ties (rank 3): Juliet Draws went T 17-17 (week 1); "
-        "Kilo Beats went W 20-10 (week 2)."
-        in comparison.verdict
+        "Kilo Beats went W 20-10 (week 2)." in comparison.verdict
     )
 
 
@@ -641,12 +691,58 @@ def _build_rematch_fixture(conn: sqlite3.Connection, sport: str) -> None:
     oscar, papa, quebec = base + 1, base + 2, base + 3
     for tid, name in ((oscar, "Oscar Twice"), (papa, "Papa Shared"), (quebec, "Quebec Once")):
         _insert_team(conn, tid, name, sport=sport)
-    _insert_game(conn, base + 1, REMATCH_YEAR, oscar, papa, "Oscar Twice", "Papa Shared", 24, 27, week=9, sport=sport)
-    _insert_game(conn, base + 2, REMATCH_YEAR, papa, quebec, "Papa Shared", "Quebec Once", 10, 13, week=3, sport=sport)
-    _insert_game(conn, base + 3, REMATCH_YEAR, papa, oscar, "Papa Shared", "Oscar Twice", 20, 21, week=2, sport=sport)
     _insert_game(
-        conn, base + 4, REMATCH_YEAR, papa, oscar, "Papa Shared", "Oscar Twice", 14, 14,
-        week=1, season_type="postseason", sport=sport,
+        conn,
+        base + 1,
+        REMATCH_YEAR,
+        oscar,
+        papa,
+        "Oscar Twice",
+        "Papa Shared",
+        24,
+        27,
+        week=9,
+        sport=sport,
+    )
+    _insert_game(
+        conn,
+        base + 2,
+        REMATCH_YEAR,
+        papa,
+        quebec,
+        "Papa Shared",
+        "Quebec Once",
+        10,
+        13,
+        week=3,
+        sport=sport,
+    )
+    _insert_game(
+        conn,
+        base + 3,
+        REMATCH_YEAR,
+        papa,
+        oscar,
+        "Papa Shared",
+        "Oscar Twice",
+        20,
+        21,
+        week=2,
+        sport=sport,
+    )
+    _insert_game(
+        conn,
+        base + 4,
+        REMATCH_YEAR,
+        papa,
+        oscar,
+        "Papa Shared",
+        "Oscar Twice",
+        14,
+        14,
+        week=1,
+        season_type="postseason",
+        sport=sport,
     )
     _insert_rating(conn, REMATCH_YEAR, METHOD, quebec, 1.3, 1, 1, 0, sport=sport)
     _insert_rating(conn, REMATCH_YEAR, METHOD, papa, 1.0, 2, 1, 2, sport=sport, ties=1)
@@ -728,8 +824,7 @@ def test_verdict_describes_a_tied_head_to_head_meeting(
     )
     assert [m.winner for m in comparison.head_to_head.meetings] == [None]
     assert comparison.verdict.startswith(
-        "India Ties and Juliet Draws tied head-to-head 17-17 "
-        "(Juliet Draws vs India Ties, week 1)."
+        "India Ties and Juliet Draws tied head-to-head 17-17 (Juliet Draws vs India Ties, week 1)."
     )
     assert "did not play each other" not in comparison.verdict
 
@@ -737,7 +832,9 @@ def test_verdict_describes_a_tied_head_to_head_meeting(
 def test_verdict_for_a_decided_head_to_head_is_unchanged(conn: sqlite3.Connection) -> None:
     """Regression guard for existing CFB prose: no tie, same wording as
     before #83."""
-    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb")
+    comparison = build_comparison(
+        conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb"
+    )
     assert comparison.verdict.startswith(
         "Alpha State beat Bravo Tech head-to-head 30-10 (Alpha State vs Bravo Tech, week 1). "
         "vs common opponent Charlie U (rank 3): Alpha State went W 40-3 (week 1); "
@@ -776,13 +873,45 @@ def _build_winner_first_fixture(conn: sqlite3.Connection, sport: str) -> None:
     for rank, (tid, name) in enumerate(teams, start=1):
         _insert_team(conn, tid, name, sport=sport)
         _insert_rating(conn, H2H_YEAR, METHOD, tid, 1.0 - rank / 10, rank, 1, 1, sport=sport)
-    _insert_game(conn, base + 1, H2H_YEAR, base, base + 1, "Home Losers", "Road Winners", 17, 24, week=5, sport=sport)
     _insert_game(
-        conn, base + 2, H2H_YEAR, base + 2, base + 3, "Home Winners", "Visiting Losers", 35, 14, week=6, sport=sport
+        conn,
+        base + 1,
+        H2H_YEAR,
+        base,
+        base + 1,
+        "Home Losers",
+        "Road Winners",
+        17,
+        24,
+        week=5,
+        sport=sport,
     )
     _insert_game(
-        conn, base + 3, H2H_YEAR, base + 4, base + 5, "Nominal Host", "Nominal Visitor", 8, 43,
-        week=7, sport=sport, neutral_site=True,
+        conn,
+        base + 2,
+        H2H_YEAR,
+        base + 2,
+        base + 3,
+        "Home Winners",
+        "Visiting Losers",
+        35,
+        14,
+        week=6,
+        sport=sport,
+    )
+    _insert_game(
+        conn,
+        base + 3,
+        H2H_YEAR,
+        base + 4,
+        base + 5,
+        "Nominal Host",
+        "Nominal Visitor",
+        8,
+        43,
+        week=7,
+        sport=sport,
+        neutral_site=True,
     )
     conn.commit()
 
@@ -798,14 +927,16 @@ _WINNER_FIRST_CASES = [
     pytest.param(
         "Home Winners",
         "Visiting Losers",
-        "Home Winners beat Visiting Losers head-to-head 35-14 (Home Winners vs Visiting Losers, week 6).",
+        "Home Winners beat Visiting Losers head-to-head 35-14 "
+        "(Home Winners vs Visiting Losers, week 6).",
         False,
         id="home-winner",
     ),
     pytest.param(
         "Nominal Visitor",
         "Nominal Host",
-        "Nominal Visitor beat Nominal Host head-to-head 43-8 (Nominal Host vs Nominal Visitor, week 7).",
+        "Nominal Visitor beat Nominal Host head-to-head 43-8 "
+        "(Nominal Host vs Nominal Visitor, week 7).",
         True,
         id="neutral-site-nominal-away-winner",
     ),
@@ -874,7 +1005,8 @@ def test_keener_verdict_text_is_byte_identical(conn: sqlite3.Connection) -> None
     places suit its sum-to-1 eigenvector and must not move."""
     comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener")
     assert comparison.verdict == (
-        _ALPHA_BRAVO_PREFIX + "Alpha State rates higher overall (1.500000 vs 1.000000, rank 1 vs 2)."
+        _ALPHA_BRAVO_PREFIX
+        + "Alpha State rates higher overall (1.500000 vs 1.000000, rank 1 vs 2)."
     )
 
 
@@ -1167,7 +1299,9 @@ def test_build_comparison_carries_each_teams_own_ledger(conn: sqlite3.Connection
     TeamCase.elo_ledger, for both sides, and neither side gets the other's."""
     _insert_elo_ledger_fixture(conn)
 
-    comparison = build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="elo", sport="cfb")
+    comparison = build_comparison(
+        conn, YEAR, "Alpha State", "Bravo Tech", method="elo", sport="cfb"
+    )
 
     assert comparison.team_a.elo_ledger == _expected_ledger(_ALPHA_STEP_1, _ALPHA_STEP_2)
     assert comparison.team_b.elo_ledger == _expected_ledger(_BRAVO_STEP_1, _BRAVO_STEP_2)
@@ -1245,7 +1379,11 @@ def test_ledger_rows_outside_the_cases_scope_never_appear(
     _insert_ledger_step(conn, decoy_year, decoy_method, decoy_sport, decoy_team_id, decoy_step)
     if (decoy_year, decoy_method, decoy_sport) != (YEAR, "elo", "cfb"):
         _insert_ledger_config(
-            conn, decoy_year, decoy_method, decoy_sport, **{k: v + 1 for k, v in _ELO_CONFIG.items()}
+            conn,
+            decoy_year,
+            decoy_method,
+            decoy_sport,
+            **{k: v + 1 for k, v in _ELO_CONFIG.items()},
         )
     conn.commit()
 
