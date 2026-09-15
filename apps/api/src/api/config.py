@@ -105,7 +105,14 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # "Florida got them 7-19"); a score is said winner-first, and a loss in a
 # sentence that says it was lost ("lost 19-7 to Florida"). v9 narrations were
 # written under the old order.
-PROMPT_VERSION = "persona-v10"
+# persona-v11 (issue #291): the prompt changed -- numbers go through typed
+# claims the server renders. The narrator answers with one `submit_narration`
+# tool call whose placeholders `api.persona.claims` resolves against the fact
+# block, so rule 1, rule 5 and the worked examples were rewritten. The tool
+# schema's description strings are prompt-facing too, so changing them moves
+# this version as well. The cache key's grounding version moved with it, to
+# `api.persona.claims.GROUNDING_VERSION` ("claims-v1").
+PROMPT_VERSION = "persona-v11"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

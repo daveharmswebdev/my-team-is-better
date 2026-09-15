@@ -44,6 +44,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 # `httpx2`, not `httpx`: both are installed, and starlette's `TestClient`
 # prefers `httpx2` when present, so that is the `Response` type these
@@ -51,6 +52,11 @@ from types import ModuleType
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
+
+    from api.persona.claude_client import NarratorReply
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -63,13 +69,15 @@ FIXTURE_YEAR = 2005
 class _StubNarrator:
     """Minimal `Narrator` double -- same contract as `tests/conftest.py`'s,
     kept local because this file's client fixture deliberately does not build
-    on the shared `client` fixture (see module docstring). Its response has no
-    numbers and no team names, so it passes the grounding check against any
-    fact block and never triggers a retry.
+    on the shared `client` fixture (see module docstring). Its submission has
+    no numbers, no team names and no claims, so the claim validator accepts it
+    against any fact block and it never triggers a retry.
     """
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        return "Solid case, no notes."
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        from api.persona.claude_client import tool_reply
+
+        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 def _api_deps() -> ModuleType:

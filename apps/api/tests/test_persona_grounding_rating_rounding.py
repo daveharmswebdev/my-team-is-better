@@ -49,6 +49,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
@@ -57,6 +58,7 @@ from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.grounding import find_ungrounded_tokens
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 from api.repositories.teams import list_all_team_names
@@ -260,34 +262,59 @@ def test_winning_percentage_from_an_even_record_is_still_flagged(
 
 
 class _ScriptedNarrator:
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
         self.responses = list(responses)
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append(messages)
-        return self.responses.pop(0)
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
+        return tool_reply(self.responses.pop(0))
 
 
+# Since #291 production narration goes through typed claims: the server
+# prints a `rating` claim rounded the way the site displays an Elo rating, so
+# the rounded rating still reaches the user on the first call.
 @pytest.mark.parametrize(
-    ("route", "payload", "response"),
+    ("route", "payload", "submission", "response"),
     [
         (
             "/api/verdict/compare",
             {"year": 2005, "team_a": "Texas", "team_b": "USC", "method": "elo"},
-            "Elo has Texas at 1,933 and USC at 1892, and Texas beat USC 41-38 to prove it.",
+            {
+                "text": "Elo has {a} and {b}, and Texas beat USC {g} to prove it.",
+                "claims": [
+                    {"id": "a", "kind": "rating", "team": "Texas"},
+                    {"id": "b", "kind": "rating", "team": "USC"},
+                    {
+                        "id": "g",
+                        "kind": "game_score",
+                        "team": "Texas",
+                        "opponent": "USC",
+                        "result": "W",
+                    },
+                ],
+            },
+            "Elo has Texas 1933 and USC 1892, and Texas beat USC 41-38 to prove it.",
         ),
         (
             "/api/verdict/champion",
             {"year": 2005, "method": "elo"},
-            "Elo rates Texas at 1933 after a 13-0 run, and nobody's arguing.",
+            {
+                "text": "Elo rates {r}, and nobody's arguing.",
+                "claims": [{"id": "r", "kind": "rating", "team": "Texas"}],
+            },
+            "Elo rates Texas 1933, and nobody's arguing.",
         ),
     ],
 )
 def test_rounded_elo_rating_narration_is_served_on_the_first_call(
-    client: TestClient, route: str, payload: dict[str, object], response: str
+    client: TestClient,
+    route: str,
+    payload: dict[str, object],
+    submission: dict[str, object],
+    response: str,
 ) -> None:
-    narrator = _ScriptedNarrator([response])
+    narrator = _ScriptedNarrator([submission])
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
     app.dependency_overrides[get_narrator] = lambda: narrator
     try:

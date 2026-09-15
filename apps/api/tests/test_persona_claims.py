@@ -45,7 +45,15 @@ from fixtures.method_fixture import METHODS, make_method_fixture_db
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.models import Method
-from api.persona.claims import TOOL_NAME, ClaimOutcome, check_and_render, tool_schema
+from api.persona.claims import (
+    GROUNDING_VERSION,
+    MAX_CLAIMS,
+    MAX_GAME_SCORE_CLAIMS,
+    TOOL_NAME,
+    ClaimOutcome,
+    check_and_render,
+    tool_schema,
+)
 from api.repositories.teams import TeamRecord
 
 # ---------------------------------------------------------------------------
@@ -640,7 +648,9 @@ def test_win_pct_for_a_non_subject_is_rejected(
     ("opponent", "result", "expected"),
     [
         ("Florida State", "W", "to open the season"),
-        ("Auburn", "L", "in the regular-season finale"),
+        # The last regular-season game is only its week until #300 tells a
+        # conference title game from a true finale (founder decision 2, #291).
+        ("Auburn", "L", "in week 13"),
         # 2017 Alabama's postseason games are both week 1: never "week 1"
         ("Georgia", "W", "in the postseason"),
         ("Clemson", "W", "in the postseason"),
@@ -947,6 +957,7 @@ def test_tool_schema_accepts_a_real_submission_and_names_every_kind() -> None:
         "rank",
         "game_score",
         "margin",
+        "rating_gap",
         "year",
         "count",
         "win_pct",
@@ -983,5 +994,194 @@ def test_check_and_render_is_pure_on_the_block(
     claim = _game("w", "when", "Alabama", "Auburn", "L")
     first = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
     second = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
-    assert first == second == ClaimOutcome(errors=(), text="in the regular-season finale")
+    assert first == second == ClaimOutcome(errors=(), text="in week 13")
     assert _row(alabama_2017, "games") == before
+
+
+# ---------------------------------------------------------------------------
+# `when` renders no "regular-season finale" until #300 (founder decision 2 on
+# #291, 2026-09-15)
+# ---------------------------------------------------------------------------
+
+# Every team case the #291 brief measured, with its last season_type='regular'
+# game: a conference title game in five of the nine, a true finale in four.
+# The engine cannot tell the two apart yet (#300), so both print their week.
+LAST_REGULAR_GAMES: list[tuple[int, str, str, int]] = [
+    (2003, "LSU", "Georgia", 16),
+    (2005, "Texas", "Colorado", 14),
+    (2013, "Florida State", "Duke", 15),
+    (2019, "LSU", "Georgia", 15),
+    (2017, "Auburn", "Georgia", 14),
+    (2001, "Miami", "Virginia Tech", 15),
+    (2004, "USC", "UCLA", 15),
+    (2005, "USC", "UCLA", 14),
+    (2017, "Alabama", "Auburn", 13),
+]
+
+
+@pytest.mark.parametrize(("year", "team", "opponent", "week"), LAST_REGULAR_GAMES)
+def test_the_last_regular_season_game_renders_its_week_not_a_finale(
+    catalog: tuple[TeamRecord, ...], year: int, team: str, opponent: str, week: int
+) -> None:
+    block = cfb_team_case_block(year, team)
+    regular = [g for g in _row(block, "games") if g["season_type"] == "regular"]
+    last = regular[-1]
+    assert (last["opponent_name"], last["week"]) == (opponent, week)
+    claim = _game("w", "when", team, opponent, last["result"], week=week, season_type="regular")
+    assert rendered("It happened {w}.", [claim], block, catalog) == f"It happened in week {week}."
+
+
+@pytest.mark.parametrize(
+    ("year", "team", "opponent", "result", "extra", "expected"),
+    [
+        # Texas met Colorado twice in 2005 (week 7 and week 14)
+        (2005, "Texas", "Colorado", "W", {"week": 14, "season_type": "regular"}, "in week 14"),
+        # Auburn met Georgia twice in 2017 (a week-11 win, the week-14 title-game loss)
+        (2017, "Auburn", "Georgia", "L", {"week": 14, "season_type": "regular"}, "in week 14"),
+        (2005, "Texas", "Louisiana", "W", {}, "to open the season"),
+        (2005, "Texas", "USC", "W", {}, "in the postseason"),
+    ],
+)
+def test_when_keeps_the_opener_and_the_postseason(
+    catalog: tuple[TeamRecord, ...],
+    year: int,
+    team: str,
+    opponent: str,
+    result: str,
+    extra: dict[str, object],
+    expected: str,
+) -> None:
+    block = cfb_team_case_block(year, team)
+    claim = _game("w", "when", team, opponent, result, **extra)
+    assert rendered("{w}", [claim], block, catalog) == expected
+
+
+def test_no_when_on_any_measured_block_says_finale(catalog: tuple[TeamRecord, ...]) -> None:
+    for year, team, _, _ in LAST_REGULAR_GAMES:
+        block = cfb_team_case_block(year, team)
+        for game in _row(block, "games"):
+            claim = _game(
+                "w",
+                "when",
+                team,
+                game["opponent_name"],
+                game["result"],
+                week=game["week"],
+                season_type=game["season_type"],
+            )
+            outcome = check_and_render({"text": "{w}", "claims": [claim]}, block, catalog)
+            assert outcome.text is not None, outcome.errors
+            assert "finale" not in outcome.text
+
+
+# ---------------------------------------------------------------------------
+# the claim cap (founder decision 1 on #291, 2026-09-15)
+# ---------------------------------------------------------------------------
+
+
+def _texas_claims() -> list[dict[str, object]]:
+    """Eight valid claims on the 2005 Texas team case, three of them game scores."""
+    return [
+        {"id": "rec", "kind": "record", "team": "Texas"},
+        {"id": "yr", "kind": "year"},
+        _game("g1", "game_score", "Texas", "USC", "W"),
+        _game("w1", "when", "Texas", "USC", "W"),
+        _game("g2", "game_score", "Texas", "Ohio State", "W"),
+        _game("g3", "game_score", "Texas", "Oklahoma", "W"),
+        {"id": "rk", "kind": "rank", "team": "Texas"},
+        {"id": "n", "kind": "count", "of": "wins", "team": "Texas"},
+    ]
+
+
+_TEXAS_EIGHT = (
+    "Look at {rec} in {yr}: {g1} over USC {w1}, {g2} over Ohio State and {g3} over Oklahoma. "
+    "The math has {rk} with {n} wins."
+)
+
+
+def test_the_cap_is_eight_claims_and_three_game_scores() -> None:
+    assert (MAX_CLAIMS, MAX_GAME_SCORE_CLAIMS) == (8, 3)
+
+
+def test_eight_claims_with_three_game_scores_are_accepted(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    assert rendered(_TEXAS_EIGHT, _texas_claims(), texas_2005, catalog) == (
+        "Look at Texas 13-0 in 2005: 41-38 over USC in the postseason, 25-22 over Ohio State "
+        "and 45-12 over Oklahoma. The math has No. 1 Texas with 13 wins."
+    )
+
+
+def test_a_ninth_claim_is_rejected_with_the_count_and_the_limit(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims: list[dict[str, object]] = [
+        *_texas_claims(),
+        {"id": "pct", "kind": "win_pct", "team": "Texas"},
+    ]
+    errors = rejected(_TEXAS_EIGHT + " That's {pct}.", claims, texas_2005, catalog)
+    assert len(errors) == 1, errors
+    assert_an_error_says(
+        errors, "9 claims", "limit of 8", "keep only the figures that make the case"
+    )
+
+
+def test_a_fourth_game_score_is_rejected_with_the_count_and_the_limit(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims = [claim for claim in _texas_claims() if claim["id"] != "w1"] + [
+        _game("g4", "game_score", "Texas", "Colorado", "W", week=14, season_type="regular")
+    ]
+    assert len(claims) == 8
+    text = (
+        "Look at {rec} in {yr}: {g1} over USC, {g2}, {g3} and {g4} over Colorado. "
+        "The math has {rk} with {n} wins."
+    )
+    errors = rejected(text, claims, texas_2005, catalog)
+    assert len(errors) == 1, errors
+    assert_an_error_says(
+        errors, "4 game_score claims", "limit of 3", "keep only the games that make the case"
+    )
+
+
+def test_both_caps_are_reported_first_so_capped_feedback_always_holds_them(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    claims: list[dict[str, object]] = [
+        {
+            "id": f"g{week}",
+            "kind": "game_score",
+            "team": "Texas",
+            "opponent": opponent,
+            "result": "W",
+        }
+        for week, opponent in enumerate(
+            [
+                "Louisiana",
+                "Ohio State",
+                "Rice",
+                "Missouri",
+                "Oklahoma",
+                "Texas Tech",
+                "Oklahoma State",
+                "Baylor",
+                "Kansas",
+            ]
+        )
+    ]
+    # An error from the text as well, so the caps must come before it.
+    text = "The Longhorns: " + ", ".join(f"{{{claim['id']}}}" for claim in claims) + "."
+    errors = rejected(text, claims, texas_2005, catalog)
+    assert "9 claims" in errors[0] and "limit of 8" in errors[0], errors
+    assert "9 game_score claims" in errors[1] and "limit of 3" in errors[1], errors
+    assert any("Longhorns" in error for error in errors[2:]), errors
+
+
+def test_the_tool_description_states_both_limits() -> None:
+    description = tool_schema()["description"]
+    assert "at most 8 claims" in description
+    assert "at most 3 of them game_score" in description
+
+
+def test_the_claims_grounding_version() -> None:
+    assert GROUNDING_VERSION == "claims-v1"

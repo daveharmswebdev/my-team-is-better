@@ -6,8 +6,8 @@ With every figure printed from a claim, the prose itself must carry none: no
 digits, no spelled-out numbers or number-word records, no ordinal ranks, and
 every team reference spelled exactly as the fact block spells it (never an
 alias like "FSU", a mascot like "the Tide", a different case like "texas", a
-team the block doesn't hold, or the name typed again beside a placeholder that
-already prints it). Each rejection must say what the block does hold, because
+team the block doesn't hold, or the name typed again right after a placeholder
+that already prints it). Each rejection must say what the block does hold, because
 the errors go back to the narrator verbatim as retry feedback.
 
 The other direction matters as much: ordinary bar-stool prose ("the tide
@@ -433,11 +433,10 @@ def test_an_ordinal_outside_a_game_phase_keeps_the_rank_wording(
     ("text", "claim"),
     [
         ("Alabama beat {k1} Georgia.", {"id": "k1", "kind": "rank", "team": "Georgia"}),
-        ("Georgia {k1} was no match.", {"id": "k1", "kind": "rating", "team": "Georgia"}),
         ("{r} Alabama rolled.", {"id": "r", "kind": "record", "team": "Alabama"}),
     ],
 )
-def test_the_name_typed_beside_a_placeholder_that_prints_it_is_rejected(
+def test_the_name_typed_after_a_placeholder_that_prints_it_is_rejected(
     alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str, claim: dict[str, object]
 ) -> None:
     errors = rejected(text, [claim], alabama_2017, catalog)
@@ -460,45 +459,80 @@ _ALABAMA_RECORD: dict[str, object] = {"id": "r", "kind": "record", "team": "Alab
 @pytest.mark.parametrize(
     ("text", "claim"),
     [
-        # parenthetical: would render "Alabama (Alabama 13-1) rolled."
-        ("Alabama ({r}) rolled.", _ALABAMA_RECORD),
-        ("They beat Georgia ({k}).", {"id": "k", "kind": "rank", "team": "Georgia"}),
-        ("Alabama ({t}) is the pick.", {"id": "t", "kind": "rating", "team": "Alabama"}),
         ("[{r}] Alabama rolled.", _ALABAMA_RECORD),
-        # possessive: would render "Alabama's Alabama 13-1 says it all."
-        ("Alabama's {r} says it all.", _ALABAMA_RECORD),
-        ("Alabama’s {r} says it all.", _ALABAMA_RECORD),
-        # commas, colons, semicolons, dashes and quotes, in either order
-        ("Alabama, {r}, rolled.", _ALABAMA_RECORD),
+        # commas, colons, semicolons, dashes and quotes after the placeholder
         ("{r}, Alabama rolled.", _ALABAMA_RECORD),
-        ("Alabama: {r}.", _ALABAMA_RECORD),
         ("{r}; Alabama rolled.", _ALABAMA_RECORD),
-        ("Alabama - {r}.", _ALABAMA_RECORD),
-        ("Alabama – {r}.", _ALABAMA_RECORD),
-        ("Alabama—{r}.", _ALABAMA_RECORD),
-        ('"Alabama" {r}.', _ALABAMA_RECORD),
-        ("'Alabama' {r}.", _ALABAMA_RECORD),
-        ("“Alabama” {r}.", _ALABAMA_RECORD),
-        ("‘Alabama’ {r}.", _ALABAMA_RECORD),
+        ("{r}: Alabama rolled.", _ALABAMA_RECORD),
+        ("{r} — Alabama rolled.", _ALABAMA_RECORD),
+        ('{r} "Alabama" rolled.', _ALABAMA_RECORD),
+        ("{k} (Georgia) was next.", {"id": "k", "kind": "rank", "team": "Georgia"}),
+        ("{t}, Georgia, was next.", {"id": "t", "kind": "rating", "team": "Georgia"}),
     ],
 )
-def test_the_name_typed_beside_its_own_placeholder_across_punctuation_is_rejected(
+def test_the_name_typed_after_its_own_placeholder_across_punctuation_is_rejected(
     alabama_2017: str, catalog: tuple[TeamRecord, ...], text: str, claim: dict[str, object]
 ) -> None:
     errors = rejected(text, [claim], alabama_2017, catalog)
     assert_an_error_says(errors, "{" + str(claim["id"]) + "}", "already prints", str(claim["team"]))
 
 
-def test_both_names_typed_beside_their_own_placeholders_on_a_comparison_are_rejected(
+@pytest.mark.parametrize(
+    ("text", "claim", "expected"),
+    [
+        # #291 round 2, founder decision 2: a name typed immediately BEFORE its
+        # own placeholder is no longer an error; the placeholder leaves the
+        # name off. Round 1 rejected each of these.
+        ("Alabama ({r}) rolled.", _ALABAMA_RECORD, "Alabama (13-1) rolled."),
+        (
+            "They beat Georgia ({k}).",
+            {"id": "k", "kind": "rank", "team": "Georgia"},
+            "They beat Georgia (No. 3).",
+        ),
+        (
+            "Georgia ({t}) is no joke.",
+            {"id": "t", "kind": "rating", "team": "Georgia"},
+            "Georgia (4.75) is no joke.",
+        ),
+        (
+            "Georgia {k1} was no match.",
+            {"id": "k1", "kind": "rating", "team": "Georgia"},
+            "Georgia 4.75 was no match.",
+        ),
+        ("Alabama's {r} says it all.", _ALABAMA_RECORD, "Alabama's 13-1 says it all."),
+        ("Alabama’s {r} says it all.", _ALABAMA_RECORD, "Alabama’s 13-1 says it all."),
+        ("Alabama, {r}, rolled.", _ALABAMA_RECORD, "Alabama, 13-1, rolled."),
+        ("Alabama: {r}.", _ALABAMA_RECORD, "Alabama: 13-1."),
+        ("Alabama - {r}.", _ALABAMA_RECORD, "Alabama - 13-1."),
+        ("Alabama – {r}.", _ALABAMA_RECORD, "Alabama – 13-1."),
+        ("Alabama—{r}.", _ALABAMA_RECORD, "Alabama—13-1."),
+        ('"Alabama" {r}.', _ALABAMA_RECORD, '"Alabama" 13-1.'),
+        ("'Alabama' {r}.", _ALABAMA_RECORD, "'Alabama' 13-1."),
+        ("“Alabama” {r}.", _ALABAMA_RECORD, "“Alabama” 13-1."),
+        ("‘Alabama’ {r}.", _ALABAMA_RECORD, "‘Alabama’ 13-1."),
+    ],
+)
+def test_the_name_typed_before_its_own_placeholder_renders_the_figure_without_it(
+    alabama_2017: str,
+    catalog: tuple[TeamRecord, ...],
+    text: str,
+    claim: dict[str, object],
+    expected: str,
+) -> None:
+    assert rendered(text, [claim], alabama_2017, catalog) == expected
+
+
+def test_both_names_typed_before_their_own_placeholders_on_a_comparison_render_once(
     texas_usc_2005: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
     claims: list[dict[str, object]] = [
         {"id": "a", "kind": "record", "team": "Texas"},
         {"id": "b", "kind": "record", "team": "USC"},
     ]
-    errors = rejected("Texas ({a}) beat USC ({b}).", claims, texas_usc_2005, catalog)
-    assert_an_error_says(errors, "{a}", "already prints", '"Texas"')
-    assert_an_error_says(errors, "{b}", "already prints", '"USC"')
+    assert (
+        rendered("Texas ({a}) beat USC ({b}).", claims, texas_usc_2005, catalog)
+        == "Texas (13-0) beat USC (12-1)."
+    )
 
 
 @pytest.mark.parametrize(
@@ -571,9 +605,9 @@ def test_bar_stool_prose_passes(
 
 
 def test_a_full_narration_renders(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    # Six claims, two of them scores: within the claim cap (#291).
     claims: list[dict[str, object]] = [
         {"id": "rec", "kind": "record", "team": "Alabama"},
-        {"id": "qw", "kind": "count", "of": "quality_wins", "team": "Alabama"},
         {"id": "uga", "kind": "rank", "team": "Georgia"},
         {"id": "s1", "kind": "game_score", "team": "Alabama", "opponent": "Georgia", "result": "W"},
         {"id": "w1", "kind": "when", "team": "Alabama", "opponent": "Georgia", "result": "W"},
@@ -587,11 +621,11 @@ def test_a_full_narration_renders(alabama_2017: str, catalog: tuple[TeamRecord, 
         {"id": "fin", "kind": "when", "team": "Alabama", "opponent": "Auburn", "result": "L"},
     ]
     text = (
-        "Look, {rec} with {qw} quality wins. They beat {uga} {s1} {w1}. "
+        "Look, {rec}. They beat {uga} {s1} {w1}. "
         "The one loss was {iron} to Auburn {fin}, and the numbers are the numbers."
     )
     assert rendered(text, claims, alabama_2017, catalog) == (
-        "Look, Alabama 13-1 with two quality wins. They beat No. 3 Georgia 26-23 in the "
-        "postseason. The one loss was 26-14 to Auburn in the regular-season finale, and the "
+        "Look, Alabama 13-1. They beat No. 3 Georgia 26-23 in the "
+        "postseason. The one loss was 26-14 to Auburn in week 13, and the "
         "numbers are the numbers."
     )

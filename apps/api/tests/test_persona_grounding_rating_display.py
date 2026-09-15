@@ -51,6 +51,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
@@ -59,6 +60,7 @@ from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.grounding import find_ungrounded_tokens
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 from api.repositories.teams import list_all_team_names
@@ -253,18 +255,25 @@ def test_block_with_unknown_method_gets_no_display_allowance(conn: sqlite3.Conne
 
 
 class _ScriptedNarrator:
-    def __init__(self, responses: list[str]) -> None:
+    def __init__(self, responses: list[dict[str, object]]) -> None:
         self.responses = list(responses)
-        self.calls: list[list[dict[str, str]]] = []
+        self.calls: list[list[MessageParam]] = []
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        self.calls.append(messages)
-        return self.responses.pop(0)
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls.append(list(messages))
+        return tool_reply(self.responses.pop(0))
 
 
 def test_keener_display_value_narration_is_served_on_the_first_call(client: TestClient) -> None:
-    response = "Keener rates Texas at 5.04 after a 13-0 run, and nobody's arguing."
-    narrator = _ScriptedNarrator([response])
+    # Since #291 production narration goes through typed claims: the server
+    # prints a `rating` claim the way the site displays it, so the Keener
+    # display value still reaches the user on the first call.
+    submission: dict[str, object] = {
+        "text": "Keener rates {r}, and nobody's arguing.",
+        "claims": [{"id": "r", "kind": "rating", "team": "Texas"}],
+    }
+    response = "Keener rates Texas 5.04, and nobody's arguing."
+    narrator = _ScriptedNarrator([submission])
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
     app.dependency_overrides[get_narrator] = lambda: narrator
     try:

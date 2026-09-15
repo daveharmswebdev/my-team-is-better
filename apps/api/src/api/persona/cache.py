@@ -92,7 +92,8 @@ def cache_key(
     `comparison_fact_block_json`, never a bare `model_dump_json()`); it is
     folded in as its own sha256 rather than as text, so the key stays one
     fixed-length digest whatever the block's size. `grounding_version` is
-    `api.persona.grounding.GROUNDING_VERSION`. A changed block, or tightened
+    `api.persona.claims.GROUNDING_VERSION`, the typed-claim validator's
+    (issue #291; `api.persona.grounding`'s before). A changed block, or tightened
     rules, now miss exactly the affected entries, and `PROMPT_VERSION` is
     back to meaning the prompt wording changed. Adding these two fields
     changed every key, which invalidated all older entries on purpose (the

@@ -30,6 +30,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from anthropic.types import MessageParam
 from fastapi.testclient import TestClient
 
 import api.main as main_module
@@ -37,6 +38,7 @@ import api.persona.cache as cache_module
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.persona.cache import CachedNarration, PostgresNarrationCache
+from api.persona.claude_client import NarratorReply, tool_reply
 
 REAL_NARRATION = "Solid case, no notes."
 READ_ERROR = "read side: server closed the connection unexpectedly"
@@ -49,9 +51,9 @@ class _ScriptedNarrator:
         self.responses = list(responses)
         self.calls = 0
 
-    def complete(self, *, system: str, messages: list[dict[str, str]]) -> str:
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
         self.calls += 1
-        return self.responses.pop(0)
+        return tool_reply({"text": self.responses.pop(0), "claims": []})
 
 
 class _FailingStore:
