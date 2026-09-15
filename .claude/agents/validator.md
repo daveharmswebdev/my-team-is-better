@@ -39,7 +39,9 @@ the doctor, and waive only these findings:
   committed cache on purpose.
 
 Any other finding blocks verification of **every** league in that fixture, including
-`schema_not_current`, which has no league attached, and `no_cfb_mascots`.
+`schema_not_current`, which has no league attached, `no_cfb_mascots`, and
+`season_missing_elo_ledger` (#193: a slice that stores elo ratings must store their
+ledger too; the committed fixtures do).
 `packages/cfb-engine/tests/test_regression_fixtures_currency.py` and
 `apps/api/tests/fixtures/build_fixture.py` enforce these same waivers on the committed
 fixtures (#110). One blocking finding isn't about the db at all: `cache_past_max_year`
