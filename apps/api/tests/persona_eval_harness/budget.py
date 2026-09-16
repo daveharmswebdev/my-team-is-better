@@ -1,5 +1,14 @@
 """The `--max-calls` budget: a worst-case estimate checked before a run, and
-a hard cap enforced on every call during it."""
+a hard cap enforced on every call during it.
+
+**What a call is.** One logical call: one `Narrator.submit` or one grader
+`messages.create`. The `anthropic` SDK retries a connection error, a 408,
+409 or 429, or a 5xx on its own, up to `max_retries` (default 2) more HTTP
+requests inside that one call, and the harness can't see them. So the cap
+bounds logical calls, not HTTP requests: in the worst case the billed
+requests reach three times the cap. The retry setting is left alone on
+purpose, because the narrator is production's `ClaudeNarrator`. A call the
+SDK gives up on still counts (it was spent before the call was made)."""
 
 from __future__ import annotations
 
@@ -19,7 +28,8 @@ CallKind = Literal["narrator", "grader"]
 
 
 def worst_case_calls(*, cases: int, samples: int, variants: int) -> int:
-    """The most Claude calls a run can make: cases x N x variants x 3."""
+    """The most logical Claude calls a run can make: cases x N x variants x 3
+    (SDK-internal HTTP retries not included)."""
     return cases * samples * variants * WORST_CASE_CALLS_PER_NARRATION
 
 
@@ -30,7 +40,8 @@ class BudgetExhausted(Exception):
 
 
 class CallBudget:
-    """Counts Claude calls and refuses the one that would pass `max_calls`."""
+    """Counts logical Claude calls and refuses the one that would pass
+    `max_calls`."""
 
     def __init__(self, max_calls: int) -> None:
         if max_calls < 0:

@@ -3,7 +3,8 @@
 One narration is production's path with only the system prompt swapped:
 
     narrate()  ->  SystemSwappingNarrator  ->  RecordingNarrator
-               ->  BudgetedNarrator        ->  the real (or fake) narrator
+               ->  BudgetedNarrator        ->  ErrorRecordingNarrator
+               ->  the real (or fake) narrator
 
 `narrate()` is `api.persona.narrate.narrate` itself, called with the fact
 block, contested flag, catalog and fallback text production's service would
@@ -12,6 +13,16 @@ is exactly what a user would see under that prompt. The code graders then
 re-judge the recorded calls (`fixtures.persona_eval.judge_narration`,
 `build_record`) and the model grader grades the served text, fallbacks
 included.
+
+**A narrator transport error is not the variant's fallback.** Production
+`narrate()` answers an `anthropic.APIStatusError` or `APIConnectionError`
+(once the SDK's own retries are spent) with the fallback, which would read
+as the variant's own fallback and move every rate. `ErrorRecordingNarrator`
+sits next to the real narrator, records any exception the call raises and
+re-raises it, so production still sees the error. When `narrate()` then
+returns, the swallowed error makes the narration the `error` outcome
+(`HarnessRecord.served_by`): no grader call, no grade, and `report.py`
+leaves it out of every rate and mean and counts it instead.
 
 The loops go sample, then variant, then case, so a run stopped at the
 `--max-calls` cap has covered the variants evenly.
@@ -23,8 +34,9 @@ import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
+from anthropic.types import MessageParam
 from fixtures.persona_eval import (
     Judgement,
     NarrationRecord,
@@ -37,7 +49,7 @@ from fixtures.persona_eval import (
     named_team_violations,
 )
 
-from api.persona.claude_client import Narrator
+from api.persona.claude_client import Narrator, NarratorReply
 from api.persona.narrate import narrate
 from persona_eval_harness.budget import BudgetedNarrator, BudgetExhausted, CallBudget
 from persona_eval_harness.dataset import EvalCase
@@ -48,17 +60,46 @@ from persona_eval_harness.report import (
     record_to_json,
     render_markdown,
     report_to_json,
+    transport_error_warning,
 )
 from persona_eval_harness.variants import SystemSwappingNarrator, Variant
+
+# `fixtures.persona_eval.ServedBy`, plus the harness's own `error`: the
+# narrator call raised and production served the fallback because of it.
+Outcome = ServedBy | Literal["error"]
+
+
+class ErrorRecordingNarrator:
+    """A pass-through that records every exception the inner narrator raises,
+    then re-raises it unchanged, so production `narrate()` handles it exactly
+    as it would without the harness. An exception `narrate()` doesn't swallow
+    ends the run, so on a narration that returned, every recorded error is
+    one production answered with the fallback: a transport error."""
+
+    def __init__(self, inner: Narrator) -> None:
+        self._inner = inner
+        self.errors: list[Exception] = []
+
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        try:
+            return self._inner.submit(system=system, messages=messages)
+        except Exception as exc:
+            self.errors.append(exc)
+            raise
 
 
 @dataclass(frozen=True)
 class HarnessRecord:
-    """One graded narration. `claims` is the served call's claim count (None
-    when the narrator didn't serve it); `property_violations` are §8
-    properties 1 (champion and team-case cases only), 3 and 4 on a
-    narrator-served text; `banned` is every banned-word hit in the served
-    text."""
+    """One narration. `claims` is the served call's claim count (None when
+    the narrator didn't serve it); `property_violations` are §8 properties 1
+    (champion and team-case cases only), 3 and 4 on a narrator-served text;
+    `banned` is every banned-word hit in the served text.
+
+    `narrator_error` ("ExceptionType: message") is set when a narrator call
+    raised a transport error; such a narration is `served_by == "error"` and
+    `grade` is None, because it was never graded. Otherwise `grade` is set,
+    and may itself be an ungraded result, a grader transport error included
+    (`grader_error`)."""
 
     variant: str
     case_id: str
@@ -67,11 +108,20 @@ class HarnessRecord:
     claims: int | None
     property_violations: tuple[str, ...]
     banned: tuple[str, ...]
-    grade: Grade
+    grade: Grade | None
+    narrator_error: str | None = None
 
     @property
-    def served_by(self) -> ServedBy:
-        return self.narration.served_by
+    def errored(self) -> bool:
+        return self.narrator_error is not None
+
+    @property
+    def grader_error(self) -> bool:
+        return self.grade is not None and self.grade.transport_error is not None
+
+    @property
+    def served_by(self) -> Outcome:
+        return "error" if self.errored else self.narration.served_by
 
     @property
     def served_text(self) -> str:
@@ -126,8 +176,10 @@ def narrate_case(
     budget: CallBudget,
 ) -> HarnessRecord:
     """Narrate, judge and grade one case under one variant. Raises
-    `BudgetExhausted` when the cap is reached part-way."""
-    recorder = RecordingNarrator(BudgetedNarrator(narrator, budget))
+    `BudgetExhausted` when the cap is reached part-way. A narration whose
+    narrator call raised is returned ungraded, as the `error` outcome."""
+    errors = ErrorRecordingNarrator(narrator)
+    recorder = RecordingNarrator(BudgetedNarrator(errors, budget))
     swapped = SystemSwappingNarrator(recorder, system=variant.build_system_prompt(case.user_team))
     result = narrate(
         fact_block_json=case.fact_block_json,
@@ -143,10 +195,17 @@ def narrate_case(
         catalog=case.catalog,
         fallback_text=case.fallback_text,
     )
-    budget.spend("grader")
-    grade = grader.grade(
-        fact_block_json=case.fact_block_json, contested=case.contested, narration=result.text
+    narrator_error = (
+        "; ".join(f"{type(exc).__name__}: {exc}" for exc in errors.errors)
+        if errors.errors
+        else None
     )
+    grade: Grade | None = None
+    if narrator_error is None:
+        budget.spend("grader")
+        grade = grader.grade(
+            fact_block_json=case.fact_block_json, contested=case.contested, narration=result.text
+        )
     return HarnessRecord(
         variant=variant.name,
         case_id=case.id,
@@ -156,6 +215,7 @@ def narrate_case(
         property_violations=property_violations(case, judgement),
         banned=tuple(banned_hits(result.text)),
         grade=grade,
+        narrator_error=narrator_error,
     )
 
 
@@ -208,13 +268,15 @@ def run_eval(
 
 
 def _progress_line(record: HarnessRecord) -> str:
-    grade = record.grade
-    score = grade.score if grade.graded else f"ungraded ({grade.ungraded_reason})"
-    return (
+    head = (
         f"[harness] {record.variant} {record.case_id} sample {record.sample + 1}: "
         f"served={record.served_by} calls={record.narration.claude_calls} "
-        f"claims={record.claims} score={score} contradictions={len(grade.contradictions)}"
     )
+    grade = record.grade
+    if grade is None:
+        return f"{head}narrator error ({record.narrator_error}), not graded"
+    score = grade.score if grade.graded else f"ungraded ({grade.ungraded_reason})"
+    return f"{head}claims={record.claims} score={score} contradictions={len(grade.contradictions)}"
 
 
 def run_to_directory(
@@ -270,4 +332,7 @@ def run_to_directory(
     (out_dir / "report.md").write_text(render_markdown(report), encoding="utf-8")
     if progress is not None and result.stop_note is not None:
         print(f"[harness] {result.stop_note}", file=progress, flush=True)
+    warning = transport_error_warning(report)
+    if progress is not None and warning is not None:
+        print(f"[harness] WARNING: {warning}", file=progress, flush=True)
     return report

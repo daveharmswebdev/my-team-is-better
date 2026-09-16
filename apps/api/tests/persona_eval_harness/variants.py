@@ -20,6 +20,7 @@ from api.persona.prompt import build_system_prompt as build_production_prompt
 
 BASELINE_VARIANT_NAME = "baseline"
 DEGRADED_VARIANT_NAME = "degraded"
+RESERVED_VARIANT_NAMES = (BASELINE_VARIANT_NAME, DEGRADED_VARIANT_NAME)
 DEGRADED_VARIANT_PATH = Path(__file__).resolve().parent / "degraded_variant.py"
 
 PromptBuilder = Callable[[str | None], str]
@@ -64,7 +65,9 @@ def load_variant_file(name: str, path: Path) -> Variant:
 
 
 def parse_variant(argument: str) -> Variant:
-    """One `--variant` value: `baseline`, `degraded` or `name=path`."""
+    """One `--variant` value: `baseline`, `degraded` or `name=path`. The two
+    shipped names are reserved: `baseline=x.py` or `degraded=x.py` would put
+    a candidate's numbers under production's (or the control's) name."""
     if argument == BASELINE_VARIANT_NAME:
         return baseline_variant()
     if argument == DEGRADED_VARIANT_NAME:
@@ -75,6 +78,11 @@ def parse_variant(argument: str) -> Variant:
         raise ValueError(
             f"--variant {argument!r}: expected {BASELINE_VARIANT_NAME}, "
             f"{DEGRADED_VARIANT_NAME} or name=path/to/variant.py"
+        )
+    if name in RESERVED_VARIANT_NAMES:
+        raise ValueError(
+            f"--variant {argument!r}: {name!r} is a reserved variant name (it means the shipped "
+            f"{name} prompt); give the file another name, e.g. candidate={path}"
         )
     return load_variant_file(name, Path(path))
 

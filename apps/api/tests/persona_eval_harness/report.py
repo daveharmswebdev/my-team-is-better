@@ -13,8 +13,21 @@ Denominators, so a rate is never read against the wrong base:
   1/3/4 violations: narrations the narrator served (first or retry);
 - lowercase block-team rejections: all narrator attempts;
 - banned words: all narrations;
-- mean voice score and contradictions: graded narrations; `ungraded` is a
-  count.
+- mean voice score and contradictions: graded narrations, fallbacks
+  included; `ungraded` is a count;
+- mean voice score, narrator-served only: graded narrations the narrator
+  served, so a voice gap can be read apart from a fallback-count gap.
+
+**Transport errors never enter a metric.** "All narrations" above means
+every narration except the `error` outcome (a narrator call raised a
+transport error and production served the fallback because of it,
+`runner.py`). Those are left out of every numerator, denominator and sample
+round, never graded, and counted instead: per variant and per case as
+`narrator_errors`, with the failed grader calls (`grader_errors`, which stay
+in `ungraded`) beside them. Either count makes `transport_error_warning`
+return a line that report.md prints at the top and the runner prints on
+stderr, and the command exits 4. Error counts are not metrics, so the
+spread check never reads a variant as "separated" on errors alone.
 
 A metric with an empty denominator is `None` (`n/a`), never 0.
 """
@@ -48,12 +61,21 @@ def _count_served(records: Sequence[HarnessRecord], served_by: str) -> float | N
     return rate(sum(1 for record in records if record.served_by == served_by), len(records))
 
 
+def _without_errors(records: Sequence[HarnessRecord]) -> list[HarnessRecord]:
+    """Every narration but the `error` outcome: the base of every metric."""
+    return [record for record in records if not record.errored]
+
+
 def _narrator_served(records: Sequence[HarnessRecord]) -> list[HarnessRecord]:
-    return [record for record in records if record.narration.narrator_served]
+    return [record for record in records if not record.errored and record.narration.narrator_served]
 
 
 def _graded(records: Sequence[HarnessRecord]) -> list[HarnessRecord]:
-    return [record for record in records if record.grade.graded]
+    return [record for record in records if record.grade is not None and record.grade.graded]
+
+
+def _ungraded_count(records: Sequence[HarnessRecord]) -> int:
+    return sum(1 for record in records if record.grade is not None and not record.grade.graded)
 
 
 def _claims(records: Sequence[HarnessRecord]) -> float | None:
@@ -67,15 +89,30 @@ def _property_violation_rate(records: Sequence[HarnessRecord]) -> float | None:
     return rate(sum(1 for record in served if record.property_violations), len(served))
 
 
+def _scores(records: Sequence[HarnessRecord]) -> list[int]:
+    return [
+        record.grade.score
+        for record in records
+        if record.grade is not None and record.grade.score is not None
+    ]
+
+
 def _mean_score(records: Sequence[HarnessRecord]) -> float | None:
-    return _mean(
-        [record.grade.score for record in _graded(records) if record.grade.score is not None]
-    )
+    """Over every graded narration, graded fallbacks included."""
+    return _mean(_scores(records))
+
+
+def _mean_score_served(records: Sequence[HarnessRecord]) -> float | None:
+    """Over graded narrations the narrator served (first or retry) only."""
+    return _mean(_scores(_narrator_served(records)))
 
 
 def _contradiction_rate(records: Sequence[HarnessRecord]) -> float | None:
     graded = _graded(records)
-    return rate(sum(1 for record in graded if record.grade.contradictions), len(graded))
+    return rate(
+        sum(1 for record in graded if record.grade is not None and record.grade.contradictions),
+        len(graded),
+    )
 
 
 @dataclass(frozen=True)
@@ -136,12 +173,18 @@ METRICS: tuple[MetricDef, ...] = (
         lambda rs: rate(sum(1 for r in rs if r.banned), len(rs)),
     ),
     MetricDef("mean_voice_score", "mean voice score (1-10)", "score", _mean_score),
+    MetricDef(
+        "mean_voice_score_served",
+        "mean voice score, narrator-served only (1-10)",
+        "score",
+        _mean_score_served,
+    ),
     MetricDef("contradiction_rate", "contradiction rate (of graded)", "rate", _contradiction_rate),
     MetricDef(
         "ungraded",
         "ungraded (count)",
         "count",
-        lambda rs: sum(1 for r in rs if not r.grade.graded) if rs else None,
+        lambda rs: _ungraded_count(rs) if rs else None,
     ),
 )
 
@@ -163,19 +206,28 @@ class CaseBreakdown:
     untraceable: int
     claims_per_narration: float | None
     mean_voice_score: float | None
+    mean_voice_score_served: float | None
     contradiction_narrations: int
     graded: int
     ungraded: int
+    narrator_errors: int
+    grader_errors: int
 
 
 @dataclass(frozen=True)
 class VariantReport:
+    """`narrations` counts every narration attempted, errors included; every
+    metric leaves the `narrator_errors` out. `sample_rounds` counts the
+    rounds with at least one narration that didn't error."""
+
     name: str
     source: str
     narrations: int
     narrator_served: int
     graded: int
     ungraded: int
+    narrator_errors: int
+    grader_errors: int
     sample_rounds: int
     metrics: dict[str, MetricValue]
     per_case: tuple[CaseBreakdown, ...]
@@ -198,10 +250,19 @@ class Report:
     worst_case_estimate: int
     variants: tuple[VariantReport, ...]
 
+    @property
+    def narrator_errors(self) -> int:
+        return sum(variant.narrator_errors for variant in self.variants)
+
+    @property
+    def grader_errors(self) -> int:
+        return sum(variant.grader_errors for variant in self.variants)
+
 
 def metric_value(metric: MetricDef, records: Sequence[HarnessRecord]) -> MetricValue:
-    """`metric` over all `records`, with its min-max over the sample rounds
-    present in them."""
+    """`metric` over all `records` but the `error` outcome, with its min-max
+    over the sample rounds present in those."""
+    records = _without_errors(records)
     rounds = sorted({record.sample for record in records})
     per_round = [
         value
@@ -215,6 +276,14 @@ def metric_value(metric: MetricDef, records: Sequence[HarnessRecord]) -> MetricV
     )
 
 
+def _narrator_error_count(records: Sequence[HarnessRecord]) -> int:
+    return sum(1 for record in records if record.errored)
+
+
+def _grader_error_count(records: Sequence[HarnessRecord]) -> int:
+    return sum(1 for record in records if record.grader_error)
+
+
 def _case_breakdown(case_id: str, records: Sequence[HarnessRecord]) -> CaseBreakdown:
     graded = _graded(records)
     return CaseBreakdown(
@@ -226,9 +295,14 @@ def _case_breakdown(case_id: str, records: Sequence[HarnessRecord]) -> CaseBreak
         untraceable=sum(1 for r in records if r.served_by == "untraceable"),
         claims_per_narration=_claims(records),
         mean_voice_score=_mean_score(records),
-        contradiction_narrations=sum(1 for r in graded if r.grade.contradictions),
+        mean_voice_score_served=_mean_score_served(records),
+        contradiction_narrations=sum(
+            1 for r in graded if r.grade is not None and r.grade.contradictions
+        ),
         graded=len(graded),
-        ungraded=len(records) - len(graded),
+        ungraded=_ungraded_count(records),
+        narrator_errors=_narrator_error_count(records),
+        grader_errors=_grader_error_count(records),
     )
 
 
@@ -236,15 +310,16 @@ def variant_report(
     variant: Variant, records: Sequence[HarnessRecord], case_ids: Sequence[str]
 ) -> VariantReport:
     mine = [record for record in records if record.variant == variant.name]
-    graded = _graded(mine)
     return VariantReport(
         name=variant.name,
         source=variant.source,
         narrations=len(mine),
         narrator_served=len(_narrator_served(mine)),
-        graded=len(graded),
-        ungraded=len(mine) - len(graded),
-        sample_rounds=len({record.sample for record in mine}),
+        graded=len(_graded(mine)),
+        ungraded=_ungraded_count(mine),
+        narrator_errors=_narrator_error_count(mine),
+        grader_errors=_grader_error_count(mine),
+        sample_rounds=len({record.sample for record in _without_errors(mine)}),
         metrics={metric.key: metric_value(metric, mine) for metric in METRICS},
         per_case=tuple(
             _case_breakdown(case_id, [r for r in mine if r.case_id == case_id])
@@ -295,6 +370,7 @@ def report_to_json(report: Report) -> dict[str, object]:
         "cases": list(report.cases),
         "complete": report.complete,
         "stop_note": report.stop_note,
+        "errors": {"narrator": report.narrator_errors, "grader": report.grader_errors},
         "calls": {
             "narrator": report.narrator_calls,
             "grader": report.grader_calls,
@@ -310,6 +386,8 @@ def report_to_json(report: Report) -> dict[str, object]:
                 "narrator_served": variant.narrator_served,
                 "graded": variant.graded,
                 "ungraded": variant.ungraded,
+                "narrator_errors": variant.narrator_errors,
+                "grader_errors": variant.grader_errors,
                 "sample_rounds": variant.sample_rounds,
                 "metrics": {key: asdict(value) for key, value in variant.metrics.items()},
                 "per_case": [asdict(case) for case in variant.per_case],
@@ -322,7 +400,8 @@ def report_to_json(report: Report) -> dict[str, object]:
 def record_to_json(record: HarnessRecord, *, samples: int) -> dict[str, object]:
     """One `records.jsonl` line: the run's keys, every attempt's raw tool
     input and validator errors, the served text, the measurements and the
-    grader's whole output."""
+    grader's whole output. An `error` narration has its `narrator_error` and
+    `grade: null`; its `claude_calls` counts only the calls that returned."""
     judgement = record.narration.judgement
     grade = record.grade
     return {
@@ -336,6 +415,7 @@ def record_to_json(record: HarnessRecord, *, samples: int) -> dict[str, object]:
         "case": record.case_id,
         "sample": record.sample + 1,
         "served_by": record.served_by,
+        "narrator_error": record.narrator_error,
         "served_text": record.served_text,
         "claude_calls": record.narration.claude_calls,
         "claims": record.claims,
@@ -355,17 +435,45 @@ def record_to_json(record: HarnessRecord, *, samples: int) -> dict[str, object]:
         "lowercase_rejections": record.narration.lowercase_rejections,
         "property_violations": list(record.property_violations),
         "banned": list(record.banned),
-        "grade": {
+        "grade": None
+        if grade is None
+        else {
             "score": grade.score,
             "strengths": list(grade.strengths),
             "weaknesses": list(grade.weaknesses),
             "contradictions": list(grade.contradictions),
             "reasoning": grade.reasoning,
             "ungraded_reason": grade.ungraded_reason,
+            "transport_error": grade.transport_error,
             "stop_reason": grade.stop_reason,
             "raw_text": grade.raw_text,
         },
     }
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def _by_variant(report: Report, count: Callable[[VariantReport], int]) -> str:
+    parts = [f"{variant.name} {count(variant)}" for variant in report.variants if count(variant)]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def transport_error_warning(report: Report) -> str | None:
+    """One line when any narrator or grader call failed with a transport
+    error, else None. report.md prints it at the top, the runner on stderr."""
+    if not report.narrator_errors and not report.grader_errors:
+        return None
+    return (
+        f"{_plural(report.narrator_errors, 'narration')} hit a narrator transport error"
+        f"{_by_variant(report, lambda v: v.narrator_errors)} and "
+        f"{_plural(report.grader_errors, 'grader call')} failed"
+        f"{_by_variant(report, lambda v: v.grader_errors)}. Errored narrations are left out "
+        "of every rate and mean, and failed grader calls are ungraded, so these figures cover "
+        "fewer narrations than the run asked for and may reflect an outage, not the prompt. "
+        "Re-run before reading a difference as a finding."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +547,9 @@ def render_markdown(report: Report) -> str:
         f"(worst case {report.worst_case_estimate})",
         "",
     ]
+    warning = transport_error_warning(report)
+    if warning is not None:
+        lines += [f"**TRANSPORT ERRORS.** {warning}", ""]
     if not report.complete:
         lines += [
             f"**PARTIAL RUN.** {report.stop_note} Every figure below covers only the "
@@ -456,6 +567,11 @@ def render_markdown(report: Report) -> str:
         ["narrations", *(str(v.narrations) for v in variants)],
         ["served by the narrator", *(str(v.narrator_served) for v in variants)],
         ["graded", *(str(v.graded) for v in variants)],
+        [
+            "narrator errors (excluded from every rate)",
+            *(str(v.narrator_errors) for v in variants),
+        ],
+        ["grader errors (ungraded)", *(str(v.grader_errors) for v in variants)],
         ["sample rounds", *(str(v.sample_rounds) for v in variants)],
     ]
     rows += [
@@ -494,8 +610,11 @@ def render_markdown(report: Report) -> str:
                 "untraceable",
                 "claims/served",
                 "mean score",
+                "mean score, served",
                 "with contradictions",
                 "ungraded",
+                "narrator errors",
+                "grader errors",
             ],
             [
                 [
@@ -507,8 +626,11 @@ def render_markdown(report: Report) -> str:
                     str(case.untraceable),
                     _format(case.claims_per_narration, "mean"),
                     _format(case.mean_voice_score, "score"),
+                    _format(case.mean_voice_score_served, "score"),
                     str(case.contradiction_narrations),
                     str(case.ungraded),
+                    str(case.narrator_errors),
+                    str(case.grader_errors),
                 ]
                 for case in variant.per_case
             ],

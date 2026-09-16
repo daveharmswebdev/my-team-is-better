@@ -6,9 +6,14 @@ refusals on the raw environment before importing anything from `api` (whose
 `api.config` loads `apps/api/.env` at import) or the rest of the harness.
 `tests/test_persona_eval_harness.py` checks that in a fresh interpreter.
 
-Exit codes: 0 a complete run or a dry run; 2 refused (safety, budget, bad
-arguments or an output directory that already holds a report); 3 a run the
-`--max-calls` cap stopped part-way (its partial report is written).
+Exit codes: 0 a complete run with no transport error, or a dry run; 2
+refused (safety, budget, bad arguments, a reserved variant name or an output
+directory that already holds a report); 3 a run the `--max-calls` cap
+stopped part-way (its partial report is written); 4 a run in which any
+narrator or grader call failed with a transport error, whether or not the
+cap also stopped it (the report is written, with the error counts and a
+warning), so a report with outage-tainted numbers never exits like a clean
+one.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ if TYPE_CHECKING:
 EXIT_OK = 0
 EXIT_REFUSED = 2
 EXIT_PARTIAL = 3
+EXIT_TRANSPORT_ERRORS = 4
 
 REPORT_FILES = ("report.json", "report.md", "records.jsonl")
 
@@ -73,7 +79,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-calls",
         type=_non_negative_int,
-        help="hard cap on Claude calls, narrator and grader together (required for a live run)",
+        help="hard cap on logical Claude calls, narrator and grader together (required for a "
+        "live run). Each narrator submit and each grader request counts once; the SDK's "
+        "automatic retries (up to 2 more HTTP requests per call) are not counted, so billed "
+        "requests can reach 3x the cap",
     )
     parser.add_argument("--out", type=Path, help="report directory (required for a live run)")
     parser.add_argument(
@@ -157,8 +166,8 @@ def main(
                 file=out,
             )
         print(
-            f"worst-case Claude calls: {len(cases)} cases x {args.samples} samples x "
-            f"{len(variants)} variants x 3 = {estimate}",
+            f"worst-case logical Claude calls (SDK retries not counted): {len(cases)} cases x "
+            f"{args.samples} samples x {len(variants)} variants x 3 = {estimate}",
             file=out,
         )
         if args.max_calls is not None:
@@ -204,4 +213,6 @@ def main(
     )
     for name in REPORT_FILES:
         print(out_dir / name, file=out)
+    if report.narrator_errors or report.grader_errors:
+        return EXIT_TRANSPORT_ERRORS
     return EXIT_OK if report.complete else EXIT_PARTIAL

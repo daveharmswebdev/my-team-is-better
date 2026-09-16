@@ -9,20 +9,24 @@ thinking plus the JSON. No server-side model fallback: a different grader
 model would make scores incomparable across runs.
 
 **The rubric** is the product's, verbatim: the PRD's §3 "The persona"
-paragraph and tone bullet, §4's may / may-not bullets, the founder's
-"The numbers are the numbers. This is math." (#231) and the prompt's length
-ask. `tests/test_persona_eval_harness.py` checks the PRD excerpts are still
-in docs/PRD.md, so a PRD edit makes that test fail rather than silently
-moving what "voice" means. The grader never sees the variant's prompt: a
-variant is graded against the product's rubric, not against itself.
+paragraph and tone bullet, all three of §4's bullets (may, may not, and the
+contested-year disclosure), the founder's "The numbers are the numbers.
+This is math." (#231) and the prompt's length ask.
+`tests/test_persona_eval_harness.py` checks the PRD excerpts are still in
+docs/PRD.md, so a PRD edit makes that test fail rather than silently moving
+what "voice" means. The grader never sees the variant's prompt: a variant is
+graded against the product's rubric, not against itself.
 
 **Ungraded is not a score.** A `stop_reason` of `refusal`, a transport
 error, or output that doesn't parse into exactly the schema's shape with an
 integer score from 1 to 10 is recorded as ungraded, with the reason and the
-raw text, and is counted separately in the report.
+raw text, and is counted separately in the report. A transport error also
+sets `Grade.transport_error`: the report counts it as a grader error, warns,
+and the command exits 4 (`cli.py`).
 
 Bump `GRADER_PROMPT_VERSION` whenever the rubric, the instructions or the
 schema change: reports with different grader versions don't compare.
+`grader-v2` added §4's contested-year bullet to the rubric.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ from anthropic.types import Message, TextBlock
 
 GRADER_MODEL = "claude-opus-5"
 GRADER_MAX_TOKENS = 16000
-GRADER_PROMPT_VERSION = "grader-v1"
+GRADER_PROMPT_VERSION = "grader-v2"
 
 MIN_SCORE = 1
 MAX_SCORE = 10
@@ -90,7 +94,7 @@ session (see §5.1) rather than having a fixed rival.
   fanbases and heartbreak losses. No slurs, no profanity, no punching at real
   people — safe to show your mother, sharp enough to sting a rival fan."""
 
-# docs/PRD.md §4: the may and may-not bullets, verbatim.
+# docs/PRD.md §4: the may, may-not and contested-year bullets, verbatim.
 PRD_MAY = """- The persona **may** be as opinionated as it wants about eye-test stuff,
   rivalries, "how it felt to watch," and — for genuinely split-decision years
   like 2003 (BCS gave it to LSU, AP voters to USC) or 2017 (Alabama won the
@@ -100,6 +104,9 @@ PRD_MAY = """- The persona **may** be as opinionated as it wants about eye-test 
 PRD_MAY_NOT = """- The persona **may not** override, hedge, or "well actually" its way around
   what the algorithm says is #1, or invent a stat, score, or record that isn't
   in the computed evidence."""
+
+PRD_CONTESTED = """- When the underlying case is one of those contested years, the UI/persona
+  discloses that it's contested rather than presenting it as clean-cut."""
 
 # The founder's rule on #231.
 FOUNDER_RULE = (
@@ -133,6 +140,10 @@ hypes whoever the fact block puts on top.
 <may_not>
 {PRD_MAY_NOT}
 </may_not>
+
+<contested_years>
+{PRD_CONTESTED}
+</contested_years>
 
 <founder_rule>
 {FOUNDER_RULE}
@@ -179,7 +190,9 @@ def grader_user_message(*, fact_block_json: str, contested: bool, narration: str
 @dataclass(frozen=True)
 class Grade:
     """One grader result. `score` is set exactly when the output parsed;
-    otherwise `ungraded_reason` says why."""
+    otherwise `ungraded_reason` says why. `transport_error` is set, as
+    "ExceptionType: message", exactly when the grader call itself failed
+    (after the SDK's own retries), as opposed to a refusal or bad output."""
 
     score: int | None
     strengths: tuple[str, ...]
@@ -189,13 +202,20 @@ class Grade:
     ungraded_reason: str | None
     stop_reason: str | None
     raw_text: str
+    transport_error: str | None = None
 
     @property
     def graded(self) -> bool:
         return self.score is not None
 
 
-def ungraded(reason: str, *, stop_reason: str | None = None, raw_text: str = "") -> Grade:
+def ungraded(
+    reason: str,
+    *,
+    stop_reason: str | None = None,
+    raw_text: str = "",
+    transport_error: str | None = None,
+) -> Grade:
     return Grade(
         score=None,
         strengths=(),
@@ -205,6 +225,7 @@ def ungraded(reason: str, *, stop_reason: str | None = None, raw_text: str = "")
         ungraded_reason=reason,
         stop_reason=stop_reason,
         raw_text=raw_text,
+        transport_error=transport_error,
     )
 
 
@@ -299,5 +320,6 @@ class ModelGrader:
                 output_config={"format": {"type": "json_schema", "schema": GRADE_SCHEMA}},
             )
         except (anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
-            return ungraded(f"grader call failed: {type(exc).__name__}: {exc}")
+            error = f"{type(exc).__name__}: {exc}"
+            return ungraded(f"grader call failed: {error}", transport_error=error)
         return parse_grade(message)

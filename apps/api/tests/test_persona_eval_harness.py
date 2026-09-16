@@ -23,7 +23,12 @@ What they pin:
   order, no sampling parameters, XML-tagged inputs) and its parsing (a
   refusal or unparseable output is ungraded, never a score);
 - aggregation, spread and the report files, including zero served and all
-  ungraded, and a worse variant reading as worse;
+  ungraded, a worse variant reading as worse, and the narrator-served-only
+  voice mean beside the all-narrations one;
+- transport errors: a narration whose narrator call raised is the `error`
+  outcome, never graded and outside every rate, and a grader transport error
+  is ungraded and counted; either one puts a warning in report.md and on
+  stderr and makes the exit code 4;
 - `--max-calls` (refused up front, and a hard stop mid-run), the safety
   refusals, and `--dry-run`.
 """
@@ -58,25 +63,35 @@ from persona_eval_harness.budget import (
     CallBudget,
     worst_case_calls,
 )
-from persona_eval_harness.cli import main
+from persona_eval_harness.cli import EXIT_TRANSPORT_ERRORS, main
 from persona_eval_harness.dataset import CASE_SPECS, EvalCase, build_dataset
 from persona_eval_harness.grader import (
     FOUNDER_RULE,
     GRADE_FIELDS,
     GRADER_MAX_TOKENS,
     GRADER_MODEL,
+    GRADER_PROMPT_VERSION,
     LENGTH_ASK,
+    PRD_CONTESTED,
     PRD_MAY,
     PRD_MAY_NOT,
     PRD_PERSONA,
     Grade,
     ModelGrader,
     parse_grade,
+    ungraded,
 )
 from persona_eval_harness.report import build_report, render_markdown, report_to_json
-from persona_eval_harness.runner import HarnessRecord, run_eval, run_to_directory
+from persona_eval_harness.runner import (
+    ErrorRecordingNarrator,
+    HarnessRecord,
+    Outcome,
+    run_eval,
+    run_to_directory,
+)
 from persona_eval_harness.safety import DEFAULT_ENV_FILE, preflight_refusals
 from persona_eval_harness.variants import (
+    BASELINE_VARIANT_NAME,
     DEGRADED_VARIANT_NAME,
     SystemSwappingNarrator,
     Variant,
@@ -180,6 +195,53 @@ class _FakeGrader:
     def grade(self, *, fact_block_json: str, contested: bool, narration: str) -> Grade:
         self.calls.append((fact_block_json, contested, narration))
         return _grade(self.score, contradictions=self.contradictions)
+
+
+def _transport_error(kind: str) -> anthropic.APIError:
+    """An error production `narrate()` answers with the fallback, as the SDK
+    raises it once its own retries are spent."""
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+    if kind == "connection":
+        return anthropic.APIConnectionError(request=request)
+    response = httpx2.Response(status_code=529, request=request)
+    return anthropic.APIStatusError("overloaded", response=response, body=None)
+
+
+TRANSPORT_ERROR_KINDS = ("connection", "status")
+TRANSPORT_ERROR_TYPES = {"connection": "APIConnectionError", "status": "APIStatusError"}
+
+
+class _OutageNarrator:
+    """The stub reply for every call, except that a call whose system prompt
+    isn't production's (so any variant but `baseline`) on one of
+    `outage_blocks` raises `error`: an outage that hits one variant only."""
+
+    def __init__(self, error: Exception, outage_blocks: Sequence[str]) -> None:
+        self.error = error
+        self.outage_blocks = set(outage_blocks)
+        self.calls = 0
+        self.raised = 0
+
+    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
+        self.calls += 1
+        first = messages[0]["content"]
+        assert isinstance(first, str)
+        if (
+            system != build_system_prompt(None)
+            and fact_block_from_user_turn(first) in self.outage_blocks
+        ):
+            self.raised += 1
+            raise self.error
+        return StubNarrator().submit(system=system, messages=messages)
+
+
+class _FailingMessages:
+    def create(self, **kwargs: Any) -> Message:
+        raise anthropic.APIConnectionError(request=httpx2.Request("POST", "https://test"))
+
+
+class _FailingAnthropic:
+    messages = _FailingMessages()
 
 
 class _FakeMessages:
@@ -332,6 +394,25 @@ def test_bad_variant_arguments_are_refused(tmp_path: Path) -> None:
         parse_variants(["baseline", "baseline"])
     with pytest.raises(ValueError):
         parse_variants([])
+
+
+@pytest.mark.parametrize("reserved", [BASELINE_VARIANT_NAME, DEGRADED_VARIANT_NAME])
+def test_a_reserved_name_in_name_equals_path_form_is_refused(reserved: str, tmp_path: Path) -> None:
+    path = tmp_path / "x.py"
+    path.write_text("def build_system_prompt(user_team: str | None) -> str:\n    return 'X'\n")
+    for argument in (f"{reserved}={path}", f" {reserved} ={path}"):
+        with pytest.raises(ValueError, match="reserved"):
+            parse_variant(argument)
+    err = io.StringIO()
+    code = main(
+        ["--dry-run", "--variant", f"{reserved}={path}"],
+        environ={},
+        env_file=NO_ENV_FILE,
+        out=io.StringIO(),
+        err=err,
+    )
+    assert code == 2
+    assert "reserved" in err.getvalue()
 
 
 def test_the_degraded_variant_is_a_narrator_without_rules_or_examples() -> None:
@@ -499,7 +580,7 @@ def test_the_grader_request(dataset_by_id: dict[str, EvalCase]) -> None:
     assert "<narration>\nLSU. Loud.\n</narration>" in content
     assert "<contested>true</contested>" in content
     system = kwargs["system"]
-    for rubric in (PRD_PERSONA, PRD_MAY, PRD_MAY_NOT, FOUNDER_RULE, LENGTH_ASK):
+    for rubric in (PRD_PERSONA, PRD_MAY, PRD_MAY_NOT, PRD_CONTESTED, FOUNDER_RULE, LENGTH_ASK):
         assert rubric in system
     assert "The numbers are the numbers. This is math." in system
     assert "Two or three sentences" in system
@@ -508,25 +589,25 @@ def test_the_grader_request(dataset_by_id: dict[str, EvalCase]) -> None:
 
 def test_the_grader_rubric_is_verbatim_from_the_prd() -> None:
     prd = (REPO_ROOT / "docs" / "PRD.md").read_text()
-    for excerpt in (PRD_PERSONA, PRD_MAY, PRD_MAY_NOT):
+    for excerpt in (PRD_PERSONA, PRD_MAY, PRD_MAY_NOT, PRD_CONTESTED):
         assert excerpt in prd
+    # §4's third bullet, as the brief quotes it, with the PRD's line wrap
+    assert " ".join(PRD_CONTESTED.split()) == (
+        "- When the underlying case is one of those contested years, the UI/persona discloses "
+        "that it's contested rather than presenting it as clean-cut."
+    )
+    assert GRADER_PROMPT_VERSION == "grader-v2"
     assert "**may**" in PRD_MAY
     assert "**may not**" in PRD_MAY_NOT
     assert PRD_PERSONA.startswith("Think: the regular at the end of the bar")
 
 
 def test_a_grader_transport_error_is_ungraded() -> None:
-    class _FailingMessages:
-        def create(self, **kwargs: Any) -> Message:
-            raise anthropic.APIConnectionError(request=httpx2.Request("POST", "https://test"))
-
-    class _FailingAnthropic:
-        messages = _FailingMessages()
-
     grader = ModelGrader(cast(anthropic.Anthropic, _FailingAnthropic()))
     grade = grader.grade(fact_block_json="{}", contested=False, narration="Texas.")
     assert not grade.graded
     assert grade.ungraded_reason is not None and "APIConnectionError" in grade.ungraded_reason
+    assert grade.transport_error is not None and "APIConnectionError" in grade.transport_error
 
 
 def test_a_good_grade_parses() -> None:
@@ -550,6 +631,7 @@ def test_a_refusal_is_ungraded_never_a_score() -> None:
         assert not grade.graded
         assert grade.score is None
         assert grade.ungraded_reason is not None and "refusal" in grade.ungraded_reason
+        assert grade.transport_error is None
 
 
 @pytest.mark.parametrize(
@@ -571,6 +653,7 @@ def test_unparseable_grader_output_is_ungraded(text: str) -> None:
     assert grade.score is None
     assert grade.ungraded_reason
     assert grade.raw_text == text
+    assert grade.transport_error is None
 
 
 # ---------------------------------------------------------------------------
@@ -608,23 +691,38 @@ def _hrecord(
     *,
     variant: str,
     sample: int,
-    served_by: ServedBy,
+    served_by: Outcome,
     score: int | None,
     case_id: str = "case-a",
     claims: int | None = 3,
     contradictions: tuple[str, ...] = (),
     text: str = "Texas rolled.",
+    grader_error: bool = False,
 ) -> HarnessRecord:
-    narration = _narration(served_by, text=text)
+    """A hand-built record. `error` is a narration whose narrator call raised:
+    production served the fallback, and nothing graded it."""
+    errored = served_by == "error"
+    narration = _narration("fallback" if served_by == "error" else served_by, text=text)
+    grade: Grade | None
+    if errored:
+        grade = None
+    elif grader_error:
+        grade = ungraded(
+            "grader call failed: APIConnectionError: Connection error.",
+            transport_error="APIConnectionError: Connection error.",
+        )
+    else:
+        grade = _grade(score, contradictions=contradictions, ungraded="refusal")
     return HarnessRecord(
         variant=variant,
         case_id=case_id,
         sample=sample,
         narration=narration,
-        claims=None if served_by == "fallback" else claims,
+        claims=None if served_by in ("fallback", "error") else claims,
         property_violations=(),
         banned=(),
-        grade=_grade(score, contradictions=contradictions, ungraded="refusal"),
+        grade=grade,
+        narrator_error="APIConnectionError: Connection error." if errored else None,
     )
 
 
@@ -659,6 +757,8 @@ def test_report_json_is_keyed_by_versions_models_and_n() -> None:
     assert report["grounding_version"] == GROUNDING_VERSION
     assert report["narrator_model"] == MODEL
     assert report["grader_model"] == GRADER_MODEL
+    assert report["grader_prompt_version"] == "grader-v2"
+    assert report["errors"] == {"narrator": 0, "grader": 0}
     assert report["samples"] == 1
     assert report["complete"] is True
     assert report["calls"] == {
@@ -681,10 +781,12 @@ def test_report_json_is_keyed_by_versions_models_and_n() -> None:
         "lowercase_rejection_rate",
         "property_violation_rate",
         "mean_voice_score",
+        "mean_voice_score_served",
         "contradiction_rate",
         "ungraded",
     }
     assert variant["metrics"]["mean_voice_score"] == {"value": 7.0, "min": 7.0, "max": 7.0}
+    assert variant["narrator_errors"] == 0 and variant["grader_errors"] == 0
 
 
 def test_aggregation_and_spread_across_sample_rounds() -> None:
@@ -823,6 +925,256 @@ def test_a_difference_inside_the_spread_is_marked_as_such() -> None:
     ]
     markdown = render_markdown(_report_object(records, ["baseline", "candidate"], samples=2))
     assert "| mean voice score (1-10) | within run-to-run spread |" in markdown.splitlines()
+
+
+def test_the_served_only_voice_mean_leaves_graded_fallbacks_out() -> None:
+    records = [
+        _hrecord(variant="v", sample=0, served_by="first", score=8, case_id="case-a"),
+        _hrecord(variant="v", sample=0, served_by="fallback", score=2, case_id="case-b"),
+        _hrecord(variant="v", sample=1, served_by="retry", score=6, case_id="case-a"),
+        _hrecord(variant="v", sample=1, served_by="fallback", score=4, case_id="case-b"),
+        _hrecord(variant="v", sample=1, served_by="first", score=None, case_id="case-c"),
+    ]
+    (variant,) = _report_json(records, ["v"], samples=2)["variants"]
+    metrics = variant["metrics"]
+    assert metrics["mean_voice_score"] == {"value": 5.0, "min": 5.0, "max": 5.0}
+    assert metrics["mean_voice_score_served"] == {"value": 7.0, "min": 6.0, "max": 8.0}
+    per_case = {case["case"]: case for case in variant["per_case"]}
+    assert per_case["case-a"]["mean_voice_score_served"] == 7.0
+    assert per_case["case-b"]["mean_voice_score"] == 3.0
+    assert per_case["case-b"]["mean_voice_score_served"] is None
+    lines = render_markdown(_report_object(records, ["v"], samples=2)).splitlines()
+    assert "| mean voice score, narrator-served only (1-10) | 7.00 [6.00–8.00] |" in lines
+
+
+def test_the_spread_check_reads_the_served_only_voice_mean_apart_from_fallbacks() -> None:
+    """Graded fallbacks pull baseline's all-narrations mean down to the
+    candidate's, so only the served-only mean shows the voice gap."""
+    baseline_rows: tuple[tuple[Outcome, int, str], ...] = (
+        ("first", 8, "case-a"),
+        ("fallback", 2, "case-b"),
+    )
+    records = [
+        _hrecord(variant="baseline", sample=s, served_by=served_by, score=score, case_id=case)
+        for s in (0, 1)
+        for served_by, score, case in baseline_rows
+    ] + [
+        _hrecord(variant="candidate", sample=s, served_by="first", score=5, case_id=case)
+        for s in (0, 1)
+        for case in ("case-a", "case-b")
+    ]
+    report = _report_object(records, ["baseline", "candidate"], samples=2)
+    lines = render_markdown(report).splitlines()
+    assert "| mean voice score (1-10) | within run-to-run spread |" in lines
+    assert (
+        "| mean voice score, narrator-served only (1-10) | separated: lower (5.00 vs 8.00) |"
+        in lines
+    )
+
+
+# ---------------------------------------------------------------------------
+# transport errors
+# ---------------------------------------------------------------------------
+
+
+def test_the_error_recorder_records_and_re_raises() -> None:
+    error = _transport_error("connection")
+    recorder = ErrorRecordingNarrator(_OutageNarrator(error, outage_blocks=["{}"]))
+    messages: list[MessageParam] = [
+        {"role": "user", "content": build_user_message("{}", contested=False)}
+    ]
+    with pytest.raises(anthropic.APIConnectionError):
+        recorder.submit(system="NOT PRODUCTION", messages=messages)
+    assert recorder.errors == [error]
+    reply = recorder.submit(system=build_system_prompt(None), messages=messages)
+    assert reply.tool_call is not None
+    assert recorder.errors == [error]
+
+
+@pytest.mark.parametrize("kind", TRANSPORT_ERROR_KINDS)
+def test_a_narrator_transport_error_is_an_error_outcome_not_a_fallback(
+    kind: str, dataset_by_id: dict[str, EvalCase]
+) -> None:
+    """The reviewer's scenario: an outage on one variant only. Without the
+    error outcome it reads as that variant's fallbacks, 'separated'."""
+    texas = dataset_by_id[TEXAS_CHAMPION]
+    usc = dataset_by_id[USC_TEAM_CASE]
+    narrator = _OutageNarrator(_transport_error(kind), outage_blocks=[usc.fact_block_json])
+    grader = _FakeGrader(score=7)
+    budget = CallBudget(max_calls=100)
+    degraded = Variant(name="degraded", source="test", build_system_prompt=lambda team: "DEGRADED")
+
+    result = run_eval(
+        cases=[texas, usc],
+        variants=[baseline_variant(), degraded],
+        samples=2,
+        narrator=narrator,
+        grader=grader,
+        budget=budget,
+    )
+
+    assert result.complete
+    errored = [record for record in result.records if record.served_by == "error"]
+    assert [(r.variant, r.case_id) for r in errored] == [("degraded", USC_TEAM_CASE)] * 2
+    for record in errored:
+        assert record.grade is None
+        assert record.narrator_error is not None
+        assert TRANSPORT_ERROR_TYPES[kind] in record.narrator_error
+        # production served its fallback, but the harness doesn't call it one
+        assert record.served_text == usc.fallback_text
+    assert all(r.served_by == "first" for r in result.records if r.served_by != "error")
+    # only the six narrations that didn't error were graded
+    assert len(grader.calls) == 6 == result.grader_calls
+    assert narrator.raised == 2
+
+    report = build_report(
+        records=result.records,
+        variants=[baseline_variant(), degraded],
+        case_ids=[texas.id, usc.id],
+        samples=2,
+        complete=result.complete,
+        stop_note=None,
+        narrator_calls=result.narrator_calls,
+        grader_calls=result.grader_calls,
+        max_calls=100,
+        worst_case_estimate=24,
+    )
+    as_json = cast(dict[str, Any], json.loads(json.dumps(report_to_json(report))))
+    assert as_json["errors"] == {"narrator": 2, "grader": 0}
+    baseline_json, degraded_json = as_json["variants"]
+    assert baseline_json["narrator_errors"] == 0
+    assert degraded_json["narrator_errors"] == 2
+    assert degraded_json["narrations"] == 4
+    assert degraded_json["narrator_served"] == 2
+    assert degraded_json["graded"] == 2 and degraded_json["ungraded"] == 0
+    metrics = degraded_json["metrics"]
+    for key in ("first_try_rate",):
+        assert metrics[key] == {"value": 1.0, "min": 1.0, "max": 1.0}, key
+    for key in ("fallback_rate", "retry_rate", "untraceable_rate", "ungraded"):
+        assert metrics[key]["value"] == 0, key
+    assert metrics["mean_voice_score"] == {"value": 7.0, "min": 7.0, "max": 7.0}
+    assert metrics["mean_voice_score_served"] == {"value": 7.0, "min": 7.0, "max": 7.0}
+    per_case = {case["case"]: case for case in degraded_json["per_case"]}
+    assert per_case[USC_TEAM_CASE]["narrator_errors"] == 2
+    assert per_case[USC_TEAM_CASE]["fallback"] == 0
+    assert per_case[USC_TEAM_CASE]["mean_voice_score"] is None
+    assert per_case[TEXAS_CHAMPION]["narrator_errors"] == 0
+
+    markdown = render_markdown(report)
+    assert "separated" not in markdown
+    assert "TRANSPORT ERRORS" in markdown
+    warning = next(line for line in markdown.splitlines() if "TRANSPORT ERRORS" in line)
+    assert "2 narration" in warning
+    assert "| narrator errors (excluded from every rate) | 0 | 2 |" in markdown.splitlines()
+
+
+@pytest.mark.parametrize("kind", TRANSPORT_ERROR_KINDS)
+def test_a_narrator_transport_error_warns_and_exits_non_zero(
+    kind: str, tmp_path: Path, dataset_by_id: dict[str, EvalCase]
+) -> None:
+    usc = dataset_by_id[USC_TEAM_CASE]
+    narrator = _OutageNarrator(_transport_error(kind), outage_blocks=[usc.fact_block_json])
+    grader = _FakeGrader()
+    out_dir = tmp_path / "out"
+    err = io.StringIO()
+    code = main(
+        [
+            *("--variant", "baseline", "--variant", "degraded"),
+            *("--case", TEXAS_CHAMPION, "--case", USC_TEAM_CASE),
+            *("--samples", "2", "--max-calls", "24", "--out", str(out_dir)),
+        ],
+        environ={"ANTHROPIC_API_KEY": NOT_A_KEY},
+        env_file=NO_ENV_FILE,
+        narrator=narrator,
+        grader=grader,
+        out=io.StringIO(),
+        err=err,
+    )
+    assert EXIT_TRANSPORT_ERRORS == 4
+    assert code == EXIT_TRANSPORT_ERRORS
+    assert len(grader.calls) == 6
+    warnings = [line for line in err.getvalue().splitlines() if "WARNING" in line]
+    assert len(warnings) == 1 and "2 narration" in warnings[0]
+    report = json.loads((out_dir / "report.json").read_text())
+    assert report["complete"] is True
+    assert report["errors"] == {"narrator": 2, "grader": 0}
+    assert report["variants"][1]["narrator_errors"] == 2
+    markdown = (out_dir / "report.md").read_text()
+    assert "TRANSPORT ERRORS" in markdown
+    assert "separated" not in markdown
+    lines = [json.loads(line) for line in (out_dir / "records.jsonl").read_text().splitlines()]
+    errored = [line for line in lines if line["served_by"] == "error"]
+    assert len(errored) == 2
+    for line in errored:
+        assert line["variant"] == "degraded" and line["case"] == USC_TEAM_CASE
+        assert line["grade"] is None
+        assert TRANSPORT_ERROR_TYPES[kind] in line["narrator_error"]
+    assert all(line["narrator_error"] is None for line in lines if line["served_by"] != "error")
+
+
+def test_a_grader_transport_error_is_counted_warned_and_exits_non_zero(tmp_path: Path) -> None:
+    narrator = _CountingNarrator()
+    grader = ModelGrader(cast(anthropic.Anthropic, _FailingAnthropic()))
+    out_dir = tmp_path / "out"
+    err = io.StringIO()
+    code = main(
+        [
+            *("--variant", "baseline", "--case", TEXAS_CHAMPION, "--samples", "2"),
+            *("--max-calls", "6", "--out", str(out_dir)),
+        ],
+        environ={"ANTHROPIC_API_KEY": NOT_A_KEY},
+        env_file=NO_ENV_FILE,
+        narrator=narrator,
+        grader=grader,
+        out=io.StringIO(),
+        err=err,
+    )
+    assert code == EXIT_TRANSPORT_ERRORS
+    warnings = [line for line in err.getvalue().splitlines() if "WARNING" in line]
+    assert len(warnings) == 1 and "2 grader" in warnings[0]
+    report = json.loads((out_dir / "report.json").read_text())
+    assert report["errors"] == {"narrator": 0, "grader": 2}
+    (variant,) = report["variants"]
+    assert variant["narrator_errors"] == 0
+    assert variant["grader_errors"] == 2
+    assert variant["ungraded"] == 2 and variant["graded"] == 0
+    assert variant["narrator_served"] == 2
+    assert variant["metrics"]["first_try_rate"]["value"] == 1.0
+    assert variant["metrics"]["mean_voice_score"]["value"] is None
+    assert variant["per_case"][0]["grader_errors"] == 2
+    markdown = (out_dir / "report.md").read_text()
+    assert "TRANSPORT ERRORS" in markdown
+    assert "| grader errors (ungraded) | 2 |" in markdown.splitlines()
+    (first, _) = [json.loads(line) for line in (out_dir / "records.jsonl").read_text().splitlines()]
+    assert first["served_by"] == "first"
+    assert "APIConnectionError" in first["grade"]["transport_error"]
+
+
+def test_hand_built_errors_stay_out_of_every_denominator() -> None:
+    records = [
+        _hrecord(variant="v", sample=0, served_by="first", score=8, case_id="case-a"),
+        _hrecord(variant="v", sample=0, served_by="error", score=None, case_id="case-b"),
+        _hrecord(variant="v", sample=1, served_by="first", score=6, case_id="case-a"),
+        _hrecord(
+            variant="v",
+            sample=1,
+            served_by="retry",
+            score=None,
+            case_id="case-b",
+            grader_error=True,
+        ),
+    ]
+    report = _report_json(records, ["v"], samples=2)
+    assert report["errors"] == {"narrator": 1, "grader": 1}
+    (variant,) = report["variants"]
+    metrics = variant["metrics"]
+    assert variant["narrations"] == 4
+    assert variant["narrator_errors"] == 1 and variant["grader_errors"] == 1
+    assert metrics["first_try_rate"] == {"value": 2 / 3, "min": 0.5, "max": 1.0}
+    assert metrics["fallback_rate"] == {"value": 0.0, "min": 0.0, "max": 0.0}
+    assert metrics["banned_word_rate"]["value"] == 0.0
+    assert metrics["mean_voice_score"] == {"value": 7.0, "min": 6.0, "max": 8.0}
+    assert metrics["ungraded"] == {"value": 1, "min": 0, "max": 1}
 
 
 # ---------------------------------------------------------------------------

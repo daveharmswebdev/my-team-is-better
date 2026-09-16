@@ -20,19 +20,46 @@ else:
   `--variant degraded` is the shipped anti-vacuity control
   (`degraded_variant.py`: the prompt without its rules and worked examples);
   any other value is `name=path/to/variant.py`, a file exposing
-  `build_system_prompt(user_team: str | None) -> str`. Repeat the flag; the
-  first variant is the reference the report's spread check compares against.
+  `build_system_prompt(user_team: str | None) -> str`, under any name but
+  the reserved `baseline` and `degraded`. Repeat the flag; the first variant
+  is the reference the report's spread check compares against.
 - `--samples N` narrates every case N times per variant (default 1).
 - `--case ID` (repeatable) restricts the dataset; `--dry-run` lists the ids.
-- `--max-calls` is a hard cap on every Claude call, narrator and grader
-  together. The run is refused up front when the worst case (cases x N x
-  variants x 3: two narrator calls and one grader call per narration) exceeds
-  it, and it stops at the cap mid-run with a report marked partial.
+- `--max-calls` is a hard cap on logical Claude calls, narrator and grader
+  together: each narrator submit and each grader request counts once. The
+  SDK's own automatic retries (up to 2 more HTTP requests per call, on a
+  connection error, 408, 409, 429 or 5xx) happen inside a call and aren't
+  counted, so the billed requests can reach three times the cap. The run is
+  refused up front when the worst case (cases x N x variants x 3: two
+  narrator calls and one grader call per narration) exceeds it, and it stops
+  at the cap mid-run with a report marked partial.
 - `--out DIR` receives `report.json`, `report.md` and `records.jsonl` (one
   line per narration: tool inputs, validator errors, served text, grader
   output). It is refused when it already holds a report.
 - `--dry-run` builds and prints the dataset, the variants and the call
   estimate. It needs no key and makes no call.
+
+**Exit codes.** 0 a complete, error-free run or a dry run; 2 refused; 3 a
+run the cap stopped part-way; 4 any narrator or grader transport error
+(it takes precedence over 3). The report is written in cases 3 and 4.
+
+**Outcomes and transport errors.** Each narration is served `first`,
+`retry`, `fallback` or `untraceable` (as `fixtures.persona_eval` judges it),
+or `error`: a narrator call raised a transport error
+(`anthropic.APIStatusError` or `APIConnectionError`, after the SDK's own
+retries) and production served the fallback because of it. An `error`
+narration is never graded, is left out of every rate, mean and sample round,
+and is counted per variant and per case (`narrator_errors`). A grader
+transport error leaves that narration ungraded and is counted too
+(`grader_errors`). Either one puts a TRANSPORT ERRORS line at the top of
+report.md, prints a WARNING on stderr and exits 4: the numbers may reflect an
+outage rather than the prompt, so re-run before reading them.
+
+**Voice score.** The model grader (`grader.py`, `GRADER_PROMPT_VERSION`
+`grader-v2`) grades every served text, fallbacks included, so the report
+gives two means: over all graded narrations, and over the narrator-served
+ones only. A gap in the second is a voice gap; a gap only in the first may be
+a fallback-count gap.
 
 **Secrets rule** (spoke-protocol). A live run makes real `claude-haiku-4-5`
 and `claude-opus-5` calls, so it costs money; run it only from a worktree
@@ -46,11 +73,12 @@ db built in a temporary directory.
 
 **Known limits.**
 
-- A variant swaps the system prompt only. The tool schema and its description
-  strings (`api.persona.claims.tool_schema`), the validator, the retry
-  feedback and the user turn are production's in every variant, so a prompt
-  change that only works with a schema or validator change can't be scored
-  here as a prompt-only variant.
+- A variant swaps the system prompt only. There are no tool-schema or
+  validator variants: the tool schema and its description strings
+  (`api.persona.claims.tool_schema`), the validator, the retry feedback and
+  the user turn are production's in every variant, so a prompt change that
+  only works with a schema or validator change can't be scored here as a
+  prompt-only variant.
 - `user_team` is `None` for every case, as the routes default it; the
   allegiance clauses are not exercised.
 - The model grader is one fixed model (`claude-opus-5`) with a fixed rubric
