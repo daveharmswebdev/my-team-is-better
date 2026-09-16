@@ -68,7 +68,14 @@ spread check compares every variant against the first one. A variant swaps the s
 prompt only, so a change to the tool schema, the validator or the retry feedback can't be
 scored as a variant. Say so in the finding rather than presenting a prompt-only score.
 `--dry-run` needs no key and prints the dataset, the variants and the worst-case call count
-(cases x samples x variants x 3), which is the number a brief's budget must cover.
+(cases x samples x variants x 3), which is the number a brief's budget must cover. The cap
+counts logical calls; the SDK's own retries aren't counted.
+
+A run that hit a Claude transport error exits 4, prints a TRANSPORT ERRORS warning and
+counts `narrator_errors` / `grader_errors`. Errored narrations are left out of every rate,
+but the outage still shrank the sample. Report an exit-4 run as outage-tainted, and re-run
+it before citing a difference. Exit 3 means the call cap stopped the run and the report is
+partial.
 
 Whenever your brief doesn't grant a live run, you work **offline**: the checklist, the
 committed fixtures, the claim validator run over hand-written submissions, `--dry-run`, and
