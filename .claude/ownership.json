@@ -65,6 +65,10 @@
     "validator": {
       "kind": "read-only",
       "owns": []
+    },
+    "prompt-engineer": {
+      "kind": "read-only",
+      "owns": []
     }
   }
 }

@@ -1,6 +1,6 @@
 ---
 name: delegate
-description: Hand a scoped task to one of this repo's spokes (api-agent, web-agent, ingest/ratings/evidence/mcp-agent, reviewer, validator) — route it, claim the issue, write a schema-checked brief and render it, launch, then act on the hook-validated return. Use for every delegation in this repo.
+description: Hand a scoped task to one of this repo's spokes (api-agent, web-agent, ingest/ratings/evidence/mcp-agent, reviewer, validator, prompt-engineer) — route it, claim the issue, write a schema-checked brief and render it, launch, then act on the hook-validated return. Use for every delegation in this repo.
 argument-hint: "[issue-number] [agent]"
 ---
 

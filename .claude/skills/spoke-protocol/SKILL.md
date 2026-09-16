@@ -71,7 +71,7 @@ credential, base commit missing), `tool-or-environment-failure` (a tool or env b
 `scope-collision` (needs another owner's files), `brief-mis-scoped` (the brief can't be
 carried out as written). `retryable: true` only if re-running the same brief could succeed.
 
-Read-only agents (`reviewer`, `validator`): `success` means the checks ran, whatever they
+Read-only agents (`reviewer`, `validator`, `prompt-engineer`): `success` means the checks ran, whatever they
 found — the verdict lives in `findings`, and `tests_run` must list the checks. A check
 that fails is recorded as `fail` (phase `gate`) with a matching finding.
 `failure` means you could not check.
