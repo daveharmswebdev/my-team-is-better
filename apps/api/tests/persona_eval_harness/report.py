@@ -14,7 +14,9 @@ Denominators, so a rate is never read against the wrong base:
 - lowercase block-team rejections: all narrator attempts;
 - banned words: all narrations;
 - mean voice score and contradictions: graded narrations, fallbacks
-  included; `ungraded` is a count;
+  included;
+- `ungraded` is a count of refusals and output that didn't parse into a
+  1-10 score; a grader transport error is not in it (below);
 - mean voice score, narrator-served only: graded narrations the narrator
   served, so a voice gap can be read apart from a fallback-count gap.
 
@@ -23,11 +25,14 @@ every narration except the `error` outcome (a narrator call raised a
 transport error and production served the fallback because of it,
 `runner.py`). Those are left out of every numerator, denominator and sample
 round, never graded, and counted instead: per variant and per case as
-`narrator_errors`, with the failed grader calls (`grader_errors`, which stay
-in `ungraded`) beside them. Either count makes `transport_error_warning`
-return a line that report.md prints at the top and the runner prints on
-stderr, and the command exits 4. Error counts are not metrics, so the
-spread check never reads a variant as "separated" on errors alone.
+`narrator_errors`, with the failed grader calls (`grader_errors`) beside
+them. A failed grader call leaves its narration ungraded, so the variant's
+and each case's plain `ungraded` counts include it, but the `ungraded`
+metric does not: it counts only the grader's own failures to grade. Either
+error count makes `transport_error_warning` return a line that report.md
+prints at the top and the runner prints on stderr, and the command exits 4.
+Error counts are not metrics, so the spread check never reads a variant as
+"separated" on errors alone.
 
 A metric with an empty denominator is `None` (`n/a`), never 0.
 """
@@ -75,7 +80,19 @@ def _graded(records: Sequence[HarnessRecord]) -> list[HarnessRecord]:
 
 
 def _ungraded_count(records: Sequence[HarnessRecord]) -> int:
+    """Every ungraded narration, grader transport errors included."""
     return sum(1 for record in records if record.grade is not None and not record.grade.graded)
+
+
+def _ungraded_metric_count(records: Sequence[HarnessRecord]) -> int:
+    """Ungraded narrations the grader answered (a refusal, or output that
+    isn't a 1-10 score); a grader transport error is a `grader_errors`
+    count, never this metric."""
+    return sum(
+        1
+        for record in records
+        if record.grade is not None and not record.grade.graded and not record.grader_error
+    )
 
 
 def _claims(records: Sequence[HarnessRecord]) -> float | None:
@@ -182,9 +199,9 @@ METRICS: tuple[MetricDef, ...] = (
     MetricDef("contradiction_rate", "contradiction rate (of graded)", "rate", _contradiction_rate),
     MetricDef(
         "ungraded",
-        "ungraded (count)",
+        "ungraded, grader errors aside (count)",
         "count",
-        lambda rs: _ungraded_count(rs) if rs else None,
+        lambda rs: _ungraded_metric_count(rs) if rs else None,
     ),
 )
 
@@ -217,8 +234,10 @@ class CaseBreakdown:
 @dataclass(frozen=True)
 class VariantReport:
     """`narrations` counts every narration attempted, errors included; every
-    metric leaves the `narrator_errors` out. `sample_rounds` counts the
-    rounds with at least one narration that didn't error."""
+    metric leaves the `narrator_errors` out. `ungraded` counts every
+    ungraded narration, `grader_errors` included; the `ungraded` metric
+    leaves those out. `sample_rounds` counts the rounds with at least one
+    narration that didn't error."""
 
     name: str
     source: str

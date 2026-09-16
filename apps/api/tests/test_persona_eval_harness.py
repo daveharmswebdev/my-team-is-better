@@ -1174,7 +1174,88 @@ def test_hand_built_errors_stay_out_of_every_denominator() -> None:
     assert metrics["fallback_rate"] == {"value": 0.0, "min": 0.0, "max": 0.0}
     assert metrics["banned_word_rate"]["value"] == 0.0
     assert metrics["mean_voice_score"] == {"value": 7.0, "min": 6.0, "max": 8.0}
-    assert metrics["ungraded"] == {"value": 1, "min": 0, "max": 1}
+    # the grader error is counted in grader_errors, never in the ungraded metric
+    assert variant["ungraded"] == 1
+    assert metrics["ungraded"] == {"value": 0, "min": 0, "max": 0}
+
+
+def test_a_round_lost_to_narrator_errors_is_not_a_sample_round() -> None:
+    """The reviewer's scenario: 2 cases x 2 samples. Baseline is rejected
+    and falls back every time; the candidate is served first in round 1 and
+    every narrator call raises in round 2. That is one real round for the
+    candidate, which can't show a spread, so nothing may read as separated."""
+    cases = ("case-a", "case-b")
+    records = (
+        [
+            _hrecord(variant="baseline", sample=s, served_by="fallback", score=3, case_id=c)
+            for s in (0, 1)
+            for c in cases
+        ]
+        + [
+            _hrecord(variant="candidate", sample=0, served_by="first", score=7, case_id=c)
+            for c in cases
+        ]
+        + [
+            _hrecord(variant="candidate", sample=1, served_by="error", score=None, case_id=c)
+            for c in cases
+        ]
+    )
+    baseline, candidate = _report_json(records, ["baseline", "candidate"], samples=2)["variants"]
+    assert baseline["sample_rounds"] == 2
+    assert candidate["narrations"] == 4 and candidate["narrator_errors"] == 2
+    assert candidate["sample_rounds"] == 1
+
+    markdown = render_markdown(_report_object(records, ["baseline", "candidate"], samples=2))
+    lines = markdown.splitlines()
+    assert "| sample rounds | 2 | 1 |" in lines
+    assert "| first-try valid rate | n/a (needs 2+ sample rounds) |" in lines
+    assert "| mean voice score (1-10) | n/a (needs 2+ sample rounds) |" in lines
+    assert "separated" not in markdown
+    assert "TRANSPORT ERRORS" in markdown
+
+
+def test_grader_transport_errors_alone_never_separate_the_ungraded_count() -> None:
+    """The reviewer's scenario: 3 cases x 3 samples, and the grader call
+    fails with a transport error on one case, for the candidate only. The
+    failures are grader errors and warned about; they are not the
+    candidate's ungraded results, so the ungraded row can't separate on them."""
+    cases = ("case-a", "case-b", "case-c")
+    records = [
+        _hrecord(variant="baseline", sample=s, served_by="first", score=7, case_id=c)
+        for s in (0, 1, 2)
+        for c in cases
+    ] + [
+        _hrecord(
+            variant="candidate",
+            sample=s,
+            served_by="first",
+            score=7,
+            case_id=c,
+            grader_error=c == "case-a",
+        )
+        for s in (0, 1, 2)
+        for c in cases
+    ]
+    report = _report_json(records, ["baseline", "candidate"], samples=3)
+    assert report["errors"] == {"narrator": 0, "grader": 3}
+    baseline, candidate = report["variants"]
+    assert baseline["grader_errors"] == 0
+    assert candidate["grader_errors"] == 3
+    assert candidate["graded"] == 6
+    assert candidate["metrics"]["ungraded"] == {"value": 0, "min": 0, "max": 0}
+    assert baseline["metrics"]["ungraded"] == {"value": 0, "min": 0, "max": 0}
+
+    markdown = render_markdown(_report_object(records, ["baseline", "candidate"], samples=3))
+    spread_section = markdown.split("## Spread check")[1].split("## Per case")[0]
+    (ungraded_row,) = [
+        line for line in spread_section.splitlines() if line.startswith("| ungraded")
+    ]
+    assert "separated" not in ungraded_row
+    assert ungraded_row.endswith("| within run-to-run spread |")
+    assert "separated" not in markdown
+    warning = next(line for line in markdown.splitlines() if "TRANSPORT ERRORS" in line)
+    assert "3 grader calls failed (candidate 3)" in warning
+    assert "| grader errors (ungraded) | 0 | 3 |" in markdown.splitlines()
 
 
 # ---------------------------------------------------------------------------
