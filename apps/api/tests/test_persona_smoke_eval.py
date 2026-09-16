@@ -1,69 +1,68 @@
-"""Architecture Brief §8's persona smoke eval, as a test (issue #109).
+"""Architecture Brief §8's persona smoke eval, as a test (issues #109, #293).
 
 For each of the seven CFB golden years this posts `POST /api/verdict/champion
-{"year": Y}` through the real app, with:
+{"year": Y}`, and for 2005 USC (12-1, its one loss to Texas) `POST
+/api/verdict/team-case`, through the real app, with:
 
 - the **production narrator**, resolved by calling `api.deps.get_narrator()`
   itself (so a `ClaudeNarrator` calling the real `claude-haiku-4-5`), wrapped
-  only in a pass-through recorder that records every call and output;
+  only in a pass-through `RecordingNarrator` that records every call;
 - the committed seven-year fixture db and an `InMemoryNarrationCache`, both
   from the shared `client` fixture (tests/conftest.py).
 
-It then asserts §8's four properties plus one anti-vacuity check, per year:
+**The canary comes first.** Before any Claude call, each test runs the judge
+on a planted invalid submission for its own fact block (the team and a typed
+record, no claims) and asserts it is rejected. The judge below is the
+production validator, so without the canary a validator or judge that stopped
+rejecting anything would make every property-2 check pass silently.
+`test_persona_smoke_eval_checks.py` pins that the canary's fact block is the
+one the route narrates.
 
-1. **Correct #1 named.** The response evidence's `team_name` is the known
-   Keener #1 for the year, and it is one of the team mentions the catalog
-   scanner finds in the narration (leftmost-longest, so "Texas Tech" never
+Then it asserts §8's properties on the served narration, all reported
+together:
+
+1. **Correct #1 named.** The evidence's `team_name` is the expected team, and
+   the narration names it as itself (leftmost-longest, so "Texas Tech" never
    counts as naming "Texas").
-2. **Grounded, checked independently of `api.persona.grounding`.** Three
-   checks, all this module's own code:
-   - every number token is in the fact block verbatim, or is a
-     `rating`/`opponent_rating` from it rounded (#162) or rendered the way the
-     site displays it (#165), with the display scale read as data from
-     `api.rating_display.RATING_DISPLAY`;
-   - every catalog team mentioned is one the fact block mentions;
-   - every hyphen-joined pair is a game score the fact block states (in either
-     order) or, in its stated order, a W-L or W-L-T record the fact block
-     states, so "went 99-0" and a reversed "went 0-13" are both caught.
-   These checks do not tie a score or record to the team or game it is said
-   about. That relational rule (#26, and #166 for records) is production's,
-   and a real score credited to the wrong opponent passes here. Reusing
-   `find_ungrounded_tokens` instead would make the eval vacuous against the
-   regression it exists to catch: a grounding layer that stops rejecting
-   anything also stops the eval from seeing anything.
+2. **Grounded, by the production validator.** Every recorded
+   `submit_narration` call is re-checked with
+   `api.persona.claims.check_and_render` against the fact block that call
+   carried and the fixture's CFB catalog, and a valid call's rendering must be
+   exactly the served text. The eval has no number matcher of its own any
+   more: the old one disagreed with production in both directions (#293), and
+   loss order needs no check now that the renderer prints every score
+   winner-first.
 3. **Length bounded.** 1-4 sentences, at most 700 characters.
 4. **No banned-word hits.** Profanity and slurs as exact word forms, plus real
    AI disclaimers.
-5. **Served by the narrator, not the fallback.** The served text must be one
-   of the narrator's recorded outputs. That is structural, so a fallback that
-   drifts from `team_case_fallback_text` cannot slip past it. The fallback
-   always names the right team and is always grounded, so without this check
-   a persona that never gets a line past grounding would pass 1-4.
+5. **Served by the narrator, not the fallback.** The served text is never the
+   templated fallback, and never text the eval can't trace to a recorded valid
+   call.
 
-The check functions are unit-tested offline, in CI, by
+**Measurements that never fail a test** (founder decision C on #199), printed
+per narration and as rates in one summary line at the end of the module's run:
+timing/venue wording the narrator typed itself (over the raw tool-call text
+with its placeholders removed), a when/where that reads as covering two games,
+served narrations over the prompt's three sentences, rejections for a
+lowercase block team ("rice" for Rice), and first / retry / fallback counts
+with total Claude calls. The summary names `PROMPT_VERSION` and
+`GROUNDING_VERSION`. The judge, the properties and the measurements live in
+`tests/fixtures/persona_eval.py`, unit-tested offline, in CI, by
 `tests/test_persona_smoke_eval_checks.py`.
-
-**A team case with a loss (issue #228).** One more real-key case posts
-`POST /api/verdict/team-case` for 2005 USC (12-1, its one loss 38-41 to
-Texas) and asserts that if the narration cites that loss's score, the
-sentence says the winner's points first and says the game was lost (rule 5
-since persona-v10; `_loss_order_violations`, this module's own check), that
-the narration passes property 2, and that it was served by the narrator
-(property 5). The champion eval above is unchanged: it does not judge loss
-order. Skipped without the key like the rest of this module.
 
 **Key.** Gated on `ANTHROPIC_API_KEY` alone, as `api.config` resolves it: from
 the environment, or through `load_dotenv` from `apps/api/.env` (or the file
 named by `MY_TEAM_IS_BETTER_API_ENV_FILE`), which never overrides a variable
-already set. CI has no such secret by decision, so the CI step reports this
-test skipped.
+already set. CI has no such secret by decision (#203), so the CI step reports
+these tests skipped.
 
 **Postgres.** `api.main` imports `DATABASE_URL`, and its lifespan connects to
 Postgres when it is set. This eval does not reach Postgres, for two reasons:
 the `client` fixture overrides the narration cache with an
 `InMemoryNarrationCache`, and the `TestClient` is not used as a context
 manager, so the lifespan never runs. Keep `DATABASE_URL` unset anyway. Run it
-from `apps/api` with the key exported and `-s` to see the per-year summary:
+from `apps/api` with the key exported and `-s` to see the per-narration lines
+and the summary:
 
     env -u DATABASE_URL -u MY_TEAM_IS_BETTER_API_ENV_FILE \\
         uv run pytest -q -rs -s tests/test_persona_smoke_eval.py
@@ -71,28 +70,34 @@ from `apps/api` with the key exported and `-s` to see the per-year summary:
 
 from __future__ import annotations
 
-import json
-import re
-from decimal import ROUND_HALF_UP, Decimal
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from anthropic.types import MessageParam
-from cfb_strength.db.connection import get_conn
-from conftest import FIXTURE_DB
 from fastapi.testclient import TestClient
+from fixtures.claim_blocks import cfb_catalog, cfb_team_case_block
+from fixtures.persona_eval import (
+    NarrationRecord,
+    RecordingNarrator,
+    build_record,
+    contested_disclosure_words,
+    format_record,
+    format_summary,
+    judge_narration,
+    judge_planted_invalid,
+    section_8_violations,
+    summarize,
+)
 
-from api.config import ANTHROPIC_API_KEY
+from api.config import ANTHROPIC_API_KEY, PROMPT_VERSION
 from api.deps import get_narrator
 from api.main import app
 from api.models import TeamCaseOut
-from api.persona.claims import check_and_render
-from api.persona.claude_client import MODEL, ClaudeNarrator, Narrator, NarratorReply
+from api.persona.claims import GROUNDING_VERSION
+from api.persona.claude_client import MODEL, ClaudeNarrator
 from api.persona.fallback import team_case_fallback_text
 from api.persona.prompt import build_user_message
 from api.persona.service import team_case_fact_block_json
-from api.rating_display import RATING_DISPLAY
-from api.repositories.teams import list_team_records
 
 # The Keener #1 per golden year, as the PRD's golden dataset and the fixture
 # db both have it (2003 and 2017 are the contested seasons).
@@ -112,495 +117,13 @@ EXPECTED_KEENER_NUMBER_ONE: dict[int, str] = {
 # (#151), and the NFL entry is covered by test_verdict_contested_by_sport.py.
 EXPECTED_CONTESTED_YEARS = {2003, 2017}
 
-# The prompt asks for "Two or three sentences". 1-4 allows one either side
-# of that for a model that folds two thoughts into one sentence or adds a
-# short kicker, without letting a paragraph-length answer through. 700
-# characters: the validator's hand run on #109 measured 245-523 characters
-# across the same seven years, so 700 is that ceiling plus about a third of
-# headroom, and is still well under what four long sentences would take.
-MIN_SENTENCES = 1
-MAX_SENTENCES = 4
-MAX_CHARACTERS = 700
-
-# ---------------------------------------------------------------------------
-# independent grounding check
-# ---------------------------------------------------------------------------
-
-# Number-like tokens. A hyphen is a separator here ("13-0" is 13 and 0), not a
-# sign, because records and scores are the numbers a narration quotes. Word
-# numbers ("thirteen") are not tokens; that is a known blind spot of this
-# check, shared with production. A comma-grouped "1,933" reads as two tokens:
-# only an Elo rating is displayed grouped, and this eval asks Keener questions.
-_NUMBER_TOKEN_RE = re.compile(r"\d+(?:\.\d+)?")
-
-# The only fact-block keys whose values may be said other than verbatim: a
-# team's own rating and an opponent's rating (#162, #165). Derived floats
-# (`credit`, `contribution`, `residual_contribution`, `rating_diff`) get no
-# allowance, so a rounded one is still an invented number.
-_RATING_KEYS = frozenset({"rating", "opponent_rating"})
-
-
-def _number_tokens(text: str) -> set[str]:
-    return set(_NUMBER_TOKEN_RE.findall(text))
-
-
-def _rating_values(node: Any) -> list[Decimal]:
-    """Every `rating`/`opponent_rating` value in JSON parsed with
-    `parse_float=Decimal`, so rounding works on the exact literal rather than
-    on a float repr."""
-    if isinstance(node, dict):
-        found = [
-            value
-            for key, value in node.items()
-            if key in _RATING_KEYS and isinstance(value, Decimal) and value.is_finite()
-        ]
-        return found + [rating for value in node.values() for rating in _rating_values(value)]
-    if isinstance(node, list):
-        return [rating for item in node for rating in _rating_values(item)]
-    return []
-
-
-def _decimal_places(value: Decimal) -> int:
-    exponent = value.as_tuple().exponent
-    return -exponent if isinstance(exponent, int) and exponent < 0 else 0
-
-
-def _rendered(value: Decimal, places: int) -> str:
-    """`value` rounded half away from zero to `places` decimals and printed at
-    exactly that precision, unsigned when it rounds to zero."""
-    rounded = value.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
-    if rounded.is_zero():
-        rounded = abs(rounded)
-    return f"{rounded:.{places}f}"
-
-
-def _grounded_number_forms(fact_block_json: str) -> set[str]:
-    """Every number string check 2a accepts for this fact block, and nothing
-    broader:
-
-    (i) a number token of the fact block, verbatim;
-    (ii) for each `rating`/`opponent_rating` value `v`:
-      - rounded (#162): `|v|` rounded half up to any number of decimal places
-        fewer than its JSON literal has ("0.0048" for 0.004784...);
-      - displayed (#165): `v * scale` rounded half up to `decimals` places and
-        printed at exactly that precision ("4.78"), where `scale`/`decimals`
-        are `RATING_DISPLAY`'s entry for the fact block's own top-level
-        `method`. No entry for that method (or no `method`) means no display
-        allowance.
-
-    Only the scale and precision are read from `api.rating_display`, as data;
-    the rendering is this module's own, so a regression in
-    `display_value` is not inherited. Rounding half away from zero is the
-    display rule `api.rating_display` documents.
-    """
-    data: Any = json.loads(fact_block_json, parse_float=Decimal)
-    forms = _number_tokens(fact_block_json)
-    ratings = _rating_values(data)
-    for value in ratings:
-        for places in range(_decimal_places(value)):
-            forms.add(_rendered(abs(value), places))
-    method = data.get("method") if isinstance(data, dict) else None
-    display = next((d for m, d in RATING_DISPLAY.items() if m == method), None)
-    if display is not None:
-        for value in ratings:
-            forms.add(_rendered(value * display.scale, display.decimals))
-    return forms
-
-
-def _team_mention_pattern(catalog: list[str]) -> re.Pattern[str]:
-    """One alternation over every catalog name, longest names first, bounded
-    by non-word characters on both sides, matched case-sensitively.
-
-    - **Longest first** makes each match leftmost-longest: at a given start
-      position Python's regex takes the first alternative that matches, so
-      "Texas Tech" is consumed whole and never also reported as "Texas", and
-      "Miami (OH)" is never reported as "Miami". `finditer` does not overlap,
-      so a longer name hides any shorter name inside it.
-    - **Word bounds** (`(?<!\\w)`, `(?!\\w)`) stop "Concord" matching inside
-      "Concordia" or "Troy" inside "Troyer", while still allowing a
-      possessive ("LSU's") or trailing punctuation ("USC!").
-    - **Case-sensitive**, because a team mention in narration is a proper
-      noun, and several catalog names are ordinary words ("Liberty",
-      "Temple", "Southern", "Miles", "Shorter").
-    """
-    ordered = sorted({name for name in catalog if name}, key=len, reverse=True)
-    alternation = "|".join(re.escape(name) for name in ordered)
-    return re.compile(rf"(?<!\w)(?:{alternation})(?!\w)")
-
-
-def _team_mentions(pattern: re.Pattern[str], text: str) -> set[str]:
-    return {match.group(0) for match in pattern.finditer(text)}
-
-
-def _string_leaves(node: Any) -> list[str]:
-    """Every string value anywhere in parsed JSON."""
-    if isinstance(node, str):
-        return [node]
-    if isinstance(node, dict):
-        return [leaf for value in node.values() for leaf in _string_leaves(value)]
-    if isinstance(node, list):
-        return [leaf for item in node for leaf in _string_leaves(item)]
-    return []
-
-
-def _fact_block_team_mentions(pattern: re.Pattern[str], fact_block_json: str) -> set[str]:
-    """Team names the fact block mentions, found with the same scanner as the
-    narration but run over each string value separately, so a match can never
-    straddle two JSON fields and "Texas Tech" in the fact block grounds
-    "Texas Tech", not "Texas".
-    """
-    leaves = _string_leaves(json.loads(fact_block_json))
-    return {name for leaf in leaves for name in _team_mentions(pattern, leaf)}
-
-
-# A hyphen-joined score or record claim: "41-38", "13-0", "34 - 31", or a
-# three-part record with ties, "6-9-1". Never starts or ends inside a longer
-# number or a decimal, but may end at a sentence's full stop ("went 13-0.").
-_SCORE_OR_RECORD_RE = re.compile(
-    r"(?<!\d)(?<!\d\.)(\d+)\s*-\s*(\d+)(?:\s*-\s*(\d+))?(?!\d)(?!\.\d)"
-)
-
-
-def _claim_parts(match: re.Match[str]) -> tuple[int, ...]:
-    return tuple(int(group) for group in match.groups() if group is not None)
-
-
-def _fact_block_claims(fact_block_json: str) -> tuple[set[tuple[int, ...]], set[tuple[int, ...]]]:
-    """`(scores, records)` the fact block states.
-
-    `scores` are game score pairs, stored sorted, so a claim matches in either
-    order: which side is said first is attribution, production's rule-5
-    relational check (#26). They come from each game's own score fields, plus
-    any score written inside a string value (an `explanation` says "Beat them,
-    37-10").
-
-    `records` are each object's `(wins, losses)` and `(wins, losses, ties)`,
-    kept in order: a record read backwards ("went 0-13" for 13-0) is a
-    different, false claim, and no game-score allowance applies to it. A
-    record is accepted if any object in the block states it; which team it is
-    said about is not checked (#166).
-    """
-    scores: set[tuple[int, ...]] = set()
-    records: set[tuple[int, ...]] = set()
-    # `("team_score", "opponent_score")` covers both a game (`OpponentResultOut`)
-    # and a common-opponent meeting (`CommonOpponentMeetingOut`, #130).
-    score_keys = (
-        ("team_score", "opponent_score"),
-        ("home_points", "away_points"),
-    )
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            wins, losses, ties = node.get("wins"), node.get("losses"), node.get("ties")
-            if isinstance(wins, int) and isinstance(losses, int):
-                records.add((wins, losses))
-                if isinstance(ties, int):
-                    records.add((wins, losses, ties))
-            for first, second in score_keys:
-                if isinstance(node.get(first), int) and isinstance(node.get(second), int):
-                    scores.add(tuple(sorted((node[first], node[second]))))
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for item in node:
-                walk(item)
-        elif isinstance(node, str):
-            for match in _SCORE_OR_RECORD_RE.finditer(node):
-                parts = _claim_parts(match)
-                if len(parts) == 2:
-                    scores.add(tuple(sorted(parts)))
-
-    walk(json.loads(fact_block_json))
-    return scores, records
-
-
-def _invented_claims(text: str, fact_block_json: str) -> list[str]:
-    """Hyphen-joined pairs in `text` that are neither a stated game score (in
-    either order) nor a stated record (in its order), as written."""
-    scores, records = _fact_block_claims(fact_block_json)
-    invented: set[str] = set()
-    for match in _SCORE_OR_RECORD_RE.finditer(text):
-        parts = _claim_parts(match)
-        if parts in records:
-            continue
-        if len(parts) == 2 and tuple(sorted(parts)) in scores:
-            continue
-        invented.add(match.group(0))
-    return sorted(invented)
-
-
-def _grounding_violations(text: str, fact_block_json: str, pattern: re.Pattern[str]) -> list[str]:
-    """§8 property 2, all three checks (see the module docstring), each
-    reported as its own violation."""
-    violations: list[str] = []
-
-    # 2a. grounded: every number is in the fact block verbatim, or is a rating
-    # rounded or displayed the way the site displays it
-    invented_numbers = _number_tokens(text) - _grounded_number_forms(fact_block_json)
-    if invented_numbers:
-        violations.append(
-            "grounded: numbers neither in the fact block nor a rounded/displayed rating "
-            f"{sorted(invented_numbers)}"
-        )
-
-    # 2b. grounded: every catalog team mentioned is mentioned in the fact block
-    invented_teams = _team_mentions(pattern, text) - _fact_block_team_mentions(
-        pattern, fact_block_json
-    )
-    if invented_teams:
-        violations.append(f"grounded: teams not in the fact block {sorted(invented_teams)}")
-
-    # 2c. grounded: every hyphen-joined pair is a stated score or record
-    invented_claims = _invented_claims(text, fact_block_json)
-    if invented_claims:
-        violations.append(f"grounded: scores/records not in the fact block {invented_claims}")
-
-    return violations
-
-
-# ---------------------------------------------------------------------------
-# #228: a loss is said winner-first, in a sentence that says it was lost
-# ---------------------------------------------------------------------------
-
-# Rule 5 of the persona prompt (persona-v10, issue #228): a loss's score is
-# the winner's points first, and the sentence says the game was lost. These
-# are the loss cues production's grounding accepts, restated here rather than
-# imported, like everything else this eval checks with.
-_LOSS_CUE_RE = re.compile(r"\b(?:lost|fell|dropped)\b", re.IGNORECASE)
-
-# The naive split production's grounding scopes its sentence rules with; a
-# loss cue counts only inside the sentence that cites the score.
-_LOSS_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
-
-
-def _loss_order_violations(text: str, case: TeamCaseOut) -> list[str]:
-    """Every citation in `text` of the score of one of `case`'s losses that
-    breaks rule 5 (#228): said losing-score-first (`team_score` then
-    `opponent_score`, "Texas got them 38-41" for USC's 38-41 loss), or said
-    winner-first in a sentence with no loss cue ("Texas got them 41-38").
-    "USC lost 41-38 to Texas" is what the rule asks for.
-
-    Only a pair that is one of the case's `games[]` losses, in either order,
-    is judged, and never one that is also a win's `(team_score,
-    opponent_score)`: a season with a 41-38 win and a 38-41 loss would make
-    the pair ambiguous, and this check makes no attribution to a team (that
-    is production's #26 rule). A W-L record, a win's score and a pair from
-    no game of the case's are left to the other checks.
-    """
-    losses = {
-        (game.team_score, game.opponent_score): game.opponent_name
-        for game in case.games
-        if game.result == "L"
-    }
-    wins = {(game.team_score, game.opponent_score) for game in case.games if game.result == "W"}
-    violations: list[str] = []
-    for sentence in _LOSS_SENTENCE_SPLIT_RE.split(text.strip()):
-        lost = _LOSS_CUE_RE.search(sentence) is not None
-        for match in _SCORE_OR_RECORD_RE.finditer(sentence):
-            parts = _claim_parts(match)
-            if len(parts) != 2 or parts in wins:
-                continue
-            first, second = parts
-            written = match.group(0)
-            if parts in losses:
-                violations.append(
-                    f"loss-order: {written} says {case.team_name}'s loss to {losses[parts]} "
-                    f"losing-score-first; say it {second}-{first} in a sentence that says "
-                    "the game was lost"
-                )
-            elif (second, first) in losses and not lost:
-                violations.append(
-                    f"loss-order: {written} is {case.team_name}'s loss to "
-                    f"{losses[(second, first)]}, but the sentence never says it was lost "
-                    "(lost / fell / dropped)"
-                )
-    return violations
-
-
-# ---------------------------------------------------------------------------
-# length and banned words
-# ---------------------------------------------------------------------------
-
-# A candidate sentence break: . ! or ?, optionally followed by closing
-# quotes/parens, then whitespace, then a capital letter (optionally behind an
-# opening quote). Requiring the capital keeps a mid-sentence exclamation like
-# "USC -- USC! -- 41-38" (the prompt's own GOOD example) as one sentence, and
-# never splits before a digit, so "No. 1" and "... 13-0" never start a new
-# sentence. A real sentence that starts with a digit is merged with the one
-# before: an undercount, never an overcount, and the 700-character cap still
-# bounds the length.
-_SENTENCE_BREAK_RE = re.compile("[.!?]+[\"'”’)]*\\s+(?=[\"'“‘(]*[A-Z])")
-
-# A "." after one of these is an abbreviation, not the end of a sentence
-# ("vs. USC", "St. John's", "U.S. Bank Stadium").
-_ABBREVIATIONS = frozenset({"no", "vs", "st", "jr", "sr", "mt", "ft", "dr", "mr", "mrs", "u.s"})
-_WORD_BEFORE_RE = re.compile(r"[A-Za-z][A-Za-z.]*$")
-
-
-def _sentence_count(text: str) -> int:
-    stripped = text.strip()
-    if not stripped:
-        return 0
-    count = 1
-    for match in _SENTENCE_BREAK_RE.finditer(stripped):
-        if stripped[match.start()] == ".":
-            word = _WORD_BEFORE_RE.search(stripped, 0, match.start())
-            if word is not None and word.group(0).lower() in _ABBREVIATIONS:
-                continue
-        count += 1
-    return count
-
-
-# Profanity and slurs, as exact word forms (no open-ended stems), so a word
-# that merely starts with one ("cocky", which the prompt asks for,
-# "Scunthorpe", "Spicer", "Hancock") never hits. Short by design: a smoke check
-# that the prompt's "no slurs, no profanity" rule still binds, not a content
-# filter. Mild PG-13 words the prompt allows ("hell of a season", "damn") are
-# deliberately out. No catalog team name hits (checked offline), and neither
-# does any coach or player name we know of, except as handled below.
-_PROFANITY_AND_SLURS_RE = re.compile(
-    r"\b(?:"
-    r"(?:mother)?fuck(?:s|ed|er|ers|ing|in)?|bullshit|shit(?:s|ty|ting|ted)?"
-    r"|bitch(?:es|ing|y)?|cunts?|assholes?|bastards?"
-    r"|fags?|faggots?|retards?|retarded|niggers?|niggas?|spics?|trann(?:y|ies)|wetbacks?"
-    r")\b",
-    re.IGNORECASE,
-)
-
-# Slur forms that are also real names -- "Dykes" (Sonny Dykes, a college
-# coach) and "Kike" (a common Spanish nickname) -- match only in lowercase,
-# where they cannot be a proper noun. The chosen trade-off: a capitalised
-# slur of this kind at the start of a sentence is missed rather than flagging
-# a real name.
-_NAME_HOMOGRAPH_SLURS_RE = re.compile(r"\b(?:dykes?|kikes?)\b")
-
-# Real AI disclaimers the prompt forbids ("no meta-commentary about being an
-# AI"), not bar talk: "I cannot believe Texas went 13-0" must not hit. Both
-# apostrophe forms, since the model sometimes writes a curly one.
-_AI_META_RE = re.compile(
-    r"\bas an AI\b|\blanguage model\b|\bI(?:'|’)m (?:just )?an AI\b|\bI am (?:just )?an AI\b"
-    r"|\bI cannot (?:help|assist|provide|comply)\b|\bI(?:'|’)m not able to\b|\bI am not able to\b",
-    re.IGNORECASE,
-)
-
-
-def _banned_hits(text: str) -> list[str]:
-    return [
-        match.group(0)
-        for pattern in (_PROFANITY_AND_SLURS_RE, _NAME_HOMOGRAPH_SLURS_RE, _AI_META_RE)
-        for match in pattern.finditer(text)
-    ]
-
-
-# Recorded, never asserted: whether a contested year's narration says so in
-# character. Wording varies too much to assert on.
-_CONTESTED_DISCLOSURE_RE = re.compile(
-    r"\bpolls?\b|\bcontested\b|\bdebat\w*|\bargu\w*|\bcontrovers\w*|\bsplit\b"
-    r"|\bdisagree\w*|\bvoters?\b|\bhumans?\b|\bBCS\b|\bAP\b|\bcoaches\b|\bsaw it\b",
-    re.IGNORECASE,
-)
-
-# ---------------------------------------------------------------------------
-# #107 diagnosis (reported, never asserted)
-# ---------------------------------------------------------------------------
-
-_FEEDBACK_PAIR_RE = re.compile(r"(\d+)-(\d+)")
-
-
-def _issue_107_suspect(grounding_feedback: str | None, case: TeamCaseOut) -> bool:
-    """Whether production's grounding feedback objects to a pair equal to the
-    team's own W-L record, the shape of #107's false positive ("Oklahoma's
-    score should be stated 21-14, not 13-1" for a 13-1 team). Only the first
-    attempt's objection is visible: a second rejection leads to the fallback
-    without another call, so its feedback is never sent."""
-    if grounding_feedback is None:
-        return False
-    record = (case.wins, case.losses)
-    return any(
-        (int(first), int(second)) == record
-        for first, second in _FEEDBACK_PAIR_RE.findall(grounding_feedback)
-    )
-
-
-# ---------------------------------------------------------------------------
-# the eval
-# ---------------------------------------------------------------------------
-
-
-class _RecordingNarrator:
-    """Pass-through around the production narrator. Records every call's
-    messages and, for every reply, the text production would serve for it,
-    so check 5 can require the served text to be one of them, and the
-    summary can say whether it was the first call or the retry, without
-    touching production code.
-
-    Since #291 a reply is a `submit_narration` tool call, so the recorded
-    output is `check_and_render`'s rendering of it against the FACT BLOCK the
-    call carried and the fixture's CFB catalog; a rejected reply records its
-    raw `text` (or "" with no tool call), which production never serves.
-    #293 moves this eval onto the production validator properly.
-    """
-
-    def __init__(self, inner: Narrator) -> None:
-        self._inner = inner
-        self.calls: list[list[MessageParam]] = []
-        self.outputs: list[str] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(list(messages))
-        reply = self._inner.submit(system=system, messages=messages)
-        self.outputs.append(_served_text(reply, messages))
-        return reply
-
-
-def _user_turn(message: MessageParam) -> str:
-    content = message["content"]
-    assert isinstance(content, str), content
-    return content
-
-
-def _served_text(reply: NarratorReply, messages: list[MessageParam]) -> str:
-    """What production serves for `reply`, or its raw text when rejected."""
-    if reply.tool_call is None:
-        return ""
-    first = _user_turn(messages[0])
-    header = "FACT BLOCK (JSON):\n"
-    fact_block_json = first[len(header) : first.rindex("\n\ncontested: ")]
-    conn = get_conn(FIXTURE_DB, read_only=True)
-    try:
-        catalog = list_team_records(conn, "cfb")
-    finally:
-        conn.close()
-    outcome = check_and_render(reply.tool_call.input, fact_block_json, catalog)
-    if outcome.text is not None:
-        return outcome.text
-    tool_input = reply.tool_call.input
-    raw = tool_input.get("text") if isinstance(tool_input, dict) else None
-    return raw if isinstance(raw, str) else ""
-
-
-def _retry_feedback(recorder: _RecordingNarrator) -> str | None:
-    """The feedback production sent before the retry, when there was one: an
-    `is_error` tool_result's content, or a plain user turn's text."""
-    if len(recorder.calls) < 2:
-        return None
-    content = recorder.calls[1][-1]["content"]
-    if isinstance(content, str):
-        return content
-    for block in content:
-        if isinstance(block, dict) and block.get("type") == "tool_result":
-            feedback = dict(block).get("content")
-            return feedback if isinstance(feedback, str) else repr(feedback)
-    return None
-
-
-def _catalog_team_names(client: TestClient) -> list[str]:
-    response = client.get("/api/teams", params={"sport": "cfb"})
-    assert response.status_code == 200, response.text
-    names: list[str] = response.json()["teams"]
-    assert names, "the fixture db's CFB team catalog is empty"
-    return names
-
+# The team case with a loss (issue #228): 2005 USC, 12-1, whose one loss is
+# 38-41 to Texas in the postseason. Pinned against the fixture in the test
+# itself, so a fixture change fails loudly rather than quietly changing what
+# the eval narrates.
+TEAM_CASE_YEAR = 2005
+TEAM_CASE_TEAM = "USC"
+TEAM_CASE_LOSSES = [("Texas", 38, 41)]
 
 _NO_KEY = pytest.mark.skipif(
     not ANTHROPIC_API_KEY,
@@ -611,7 +134,32 @@ _NO_KEY = pytest.mark.skipif(
 )
 
 
-def _recording_production_narrator() -> _RecordingNarrator:
+@pytest.fixture(scope="module")
+def eval_records() -> Iterator[list[NarrationRecord]]:
+    """Every narration this module's run judged, for the one summary line
+    printed at the end. A skipped test never requests it."""
+    records: list[NarrationRecord] = []
+    yield records
+    print(
+        format_summary(
+            summarize(records),
+            prompt_version=PROMPT_VERSION,
+            grounding_version=GROUNDING_VERSION,
+        )
+    )
+
+
+def _assert_the_judge_rejects_the_planted_submission(fact_block_json: str) -> None:
+    judgement = judge_planted_invalid(
+        fact_block_json, cfb_catalog(), fallback_text="(the canary has no fallback)"
+    )
+    assert any(v.startswith("grounded:") for v in judgement.violations), (
+        "the judge accepted a planted invalid submission (a typed number, no claims), so "
+        f"property 2 would be vacuous; violations: {judgement.violations!r}"
+    )
+
+
+def _recording_production_narrator() -> RecordingNarrator:
     """The production narrator, wrapped in a recorder and installed as the
     app's narrator for this test. `client` (conftest.py) already wires the
     fixture db and a fresh InMemoryNarrationCache per request; only the
@@ -621,211 +169,128 @@ def _recording_production_narrator() -> _RecordingNarrator:
         "get_narrator() did not resolve the production ClaudeNarrator "
         f"(got {type(production_narrator).__name__}); is APP_TEST_MODE set?"
     )
-    recorder = _RecordingNarrator(production_narrator)
+    recorder = RecordingNarrator(production_narrator)
     app.dependency_overrides[get_narrator] = lambda: recorder
     return recorder
 
 
+def _catalog_team_names(client: TestClient) -> list[str]:
+    response = client.get("/api/teams", params={"sport": "cfb"})
+    assert response.status_code == 200, response.text
+    names: list[str] = response.json()["teams"]
+    assert names, "the fixture db's CFB team catalog is empty"
+    return names
+
+
+def _judge_served_narration(
+    *,
+    client: TestClient,
+    label: str,
+    body: dict[str, Any],
+    recorder: RecordingNarrator,
+    expected_team: str,
+    records: list[NarrationRecord],
+) -> tuple[str, ...]:
+    """Record, print and judge one served narration; returns its §8
+    violations. The record and its printout are measurements only."""
+    case = TeamCaseOut.model_validate(body["evidence"])
+    narration = body["narration"]
+    text: str = narration["text"]
+    fact_block_json = team_case_fact_block_json(case)
+
+    # The fact block judged against must be the one the model was given, on
+    # every call, or property 2 would be checking the wrong thing.
+    assert recorder.messages, (
+        "no narrator call completed (a transport error on the first call serves the fallback); "
+        f"served text: {text!r}"
+    )
+    assert recorder.messages[0][0]["content"] == build_user_message(
+        fact_block_json, contested=narration["contested"]
+    ), "reconstructed fact block differs from the one sent to the narrator"
+    calls = recorder.recorded_calls()
+    assert all(call.fact_block_json == fact_block_json for call in calls)
+    assert narration["cached"] is False
+
+    judgement = judge_narration(
+        served_text=text,
+        calls=calls,
+        catalog=cfb_catalog(),
+        fallback_text=team_case_fallback_text(case),
+    )
+    record = build_record(label, judgement)
+    records.append(record)
+    printout = format_record(record)
+    if narration["contested"]:
+        disclosure = contested_disclosure_words(text)
+        printout += f"\n[persona-eval] {label} contested disclosure_words={disclosure or 'none'}"
+    print(printout)
+
+    return section_8_violations(
+        served_text=text,
+        expected_team=expected_team,
+        evidence_team=case.team_name,
+        catalog_names=_catalog_team_names(client),
+        judgement=judgement,
+    )
+
+
 @_NO_KEY
 @pytest.mark.parametrize("year", sorted(EXPECTED_KEENER_NUMBER_ONE))
-def test_champion_narration_meets_the_section_8_properties(client: TestClient, year: int) -> None:
+def test_champion_narration_meets_the_section_8_properties(
+    client: TestClient, year: int, eval_records: list[NarrationRecord]
+) -> None:
+    expected_team = EXPECTED_KEENER_NUMBER_ONE[year]
+    _assert_the_judge_rejects_the_planted_submission(cfb_team_case_block(year, expected_team))
     recorder = _recording_production_narrator()
 
     response = client.post("/api/verdict/champion", json={"year": year})
     assert response.status_code == 200, response.text
     body = response.json()
 
-    case = TeamCaseOut.model_validate(body["evidence"])
-    narration = body["narration"]
-    text: str = narration["text"]
-    team_name = case.team_name
-    fact_block_json = team_case_fact_block_json(case)
-    fallback_text = team_case_fallback_text(case)
-    # The retry's last user turn is production's grounding feedback, so a
-    # retry or fallback shows what `api.persona.grounding` objected to.
-    grounding_feedback = _retry_feedback(recorder)
-
-    if recorder.outputs and text == recorder.outputs[0]:
-        served = "first"
-    elif text in recorder.outputs:
-        served = "retry"
-    elif text == fallback_text:
-        served = "fallback"
-    else:
-        served = "not-a-narrator-output"
-    sentences = _sentence_count(text)
-    disclosure = sorted({m.group(0).lower() for m in _CONTESTED_DISCLOSURE_RE.finditer(text)})
-    summary = (
-        f"[persona-eval] {year} #1={team_name} chars={len(text)} sentences={sentences} "
-        f"claude_calls={len(recorder.calls)} served={served} "
-        f"contested={narration['contested']}"
-    )
-    if narration["contested"]:
-        summary += f" disclosure_words={disclosure or 'none'}"
-    if grounding_feedback is not None:
-        summary += f" issue107_suspect={_issue_107_suspect(grounding_feedback, case)}"
-    lines = [summary, f"[persona-eval] {year} text: {text}"]
-    if grounding_feedback is not None:
-        lines.append(f"[persona-eval] {year} first attempt: {recorder.outputs[0]}")
-        lines.append(f"[persona-eval] {year} grounding feedback: {grounding_feedback}")
-    print("\n".join(lines))
-
-    # The fact block this test grounds against must be the one the model was
-    # actually given, or check 2 would be checking the wrong thing.
-    assert recorder.calls, "the narrator was never called"
-    first_user_turn = _user_turn(recorder.calls[0][0])
-    assert fact_block_json in first_user_turn, "the fact block was not sent to the narrator"
-    assert first_user_turn == build_user_message(
-        fact_block_json, contested=narration["contested"]
-    ), "reconstructed fact block differs from the one sent to the narrator"
-    assert narration["cached"] is False
-
     # contested flag: true for exactly 2003 and 2017.
-    assert narration["contested"] is (year in EXPECTED_CONTESTED_YEARS)
+    assert body["narration"]["contested"] is (year in EXPECTED_CONTESTED_YEARS)
 
-    violations = _section_8_violations(
-        year=year,
-        text=text,
-        case=case,
-        catalog=_catalog_team_names(client),
-        claude_calls=len(recorder.calls),
-        model_outputs=recorder.outputs,
-        grounding_feedback=grounding_feedback,
+    violations = _judge_served_narration(
+        client=client,
+        label=f"{year} champion",
+        body=body,
+        recorder=recorder,
+        expected_team=expected_team,
+        records=eval_records,
     )
-    assert not violations, f"{year}: " + "; ".join(violations) + f" -- text: {text!r}"
-
-
-# The team case with a loss for the #228 eval: 2005 USC, 12-1, whose one loss
-# is 38-41 to Texas in the Rose Bowl -- the game any narration of that season
-# cites. Pinned against the fixture in the test itself, so a fixture change
-# fails loudly rather than making the check vacuous.
-LOSS_CASE_YEAR = 2005
-LOSS_CASE_TEAM = "USC"
-LOSS_CASE_LOSSES = [("Texas", 38, 41)]
+    assert not violations, f"{year}: " + "; ".join(violations)
 
 
 @_NO_KEY
-def test_team_case_narration_states_its_loss_winner_first(client: TestClient) -> None:
-    """Issue #228: `POST /api/verdict/team-case` for a team with a loss. If
-    the narration cites the loss's score, that sentence says the winner's
-    points first and says the game was lost (rule 5, persona-v10), and the
-    narration is grounded by this module's own checks (§8 property 2) and was
-    served by the narrator, not the fallback (property 5). Which team the
-    score is credited to is production's rule (#26), not this eval's."""
+def test_team_case_narration_meets_the_section_8_properties(
+    client: TestClient, eval_records: list[NarrationRecord]
+) -> None:
+    """A team case with a loss (#228), judged like the champions. Loss order
+    is no longer checked: the renderer prints every score winner-first."""
+    _assert_the_judge_rejects_the_planted_submission(
+        cfb_team_case_block(TEAM_CASE_YEAR, TEAM_CASE_TEAM)
+    )
     recorder = _recording_production_narrator()
 
     response = client.post(
-        "/api/verdict/team-case", json={"year": LOSS_CASE_YEAR, "team": LOSS_CASE_TEAM}
+        "/api/verdict/team-case", json={"year": TEAM_CASE_YEAR, "team": TEAM_CASE_TEAM}
     )
     assert response.status_code == 200, response.text
     body = response.json()
 
     case = TeamCaseOut.model_validate(body["evidence"])
-    narration = body["narration"]
-    text: str = narration["text"]
-    fact_block_json = team_case_fact_block_json(case)
-    assert case.team_name == LOSS_CASE_TEAM
     assert [
         (game.opponent_name, game.team_score, game.opponent_score)
         for game in case.games
         if game.result == "L"
-    ] == LOSS_CASE_LOSSES, "the fixture's loss changed; this eval's premise no longer holds"
-    grounding_feedback = _retry_feedback(recorder)
+    ] == TEAM_CASE_LOSSES, "the fixture's loss changed; this eval's premise no longer holds"
 
-    cited = [m.group(0) for m in _SCORE_OR_RECORD_RE.finditer(text)]
-    lines = [
-        f"[persona-eval] {LOSS_CASE_YEAR} {LOSS_CASE_TEAM} team case chars={len(text)} "
-        f"claude_calls={len(recorder.calls)} pairs_cited={cited or 'none'}",
-        f"[persona-eval] {LOSS_CASE_YEAR} {LOSS_CASE_TEAM} text: {text}",
-    ]
-    if grounding_feedback is not None:
-        lines.append(f"[persona-eval] first attempt: {recorder.outputs[0]}")
-        lines.append(f"[persona-eval] grounding feedback: {grounding_feedback}")
-    print("\n".join(lines))
-
-    assert recorder.calls, "the narrator was never called"
-    first_user_turn = _user_turn(recorder.calls[0][0])
-    assert fact_block_json in first_user_turn, "the fact block was not sent to the narrator"
-    assert narration["cached"] is False
-
-    violations = _loss_order_violations(text, case)
-    violations += _grounding_violations(
-        text, fact_block_json, _team_mention_pattern(_catalog_team_names(client))
+    violations = _judge_served_narration(
+        client=client,
+        label=f"{TEAM_CASE_YEAR} {TEAM_CASE_TEAM} team case",
+        body=body,
+        recorder=recorder,
+        expected_team=TEAM_CASE_TEAM,
+        records=eval_records,
     )
-    if text not in recorder.outputs:
-        violations.append(
-            "not-fallback: the served text is not any narrator output "
-            f"(matches team_case_fallback_text: {text == team_case_fallback_text(case)}; "
-            f"grounding feedback: {grounding_feedback!r})"
-        )
-    assert not violations, "; ".join(violations) + f" -- text: {text!r}"
-
-
-def _section_8_violations(
-    *,
-    year: int,
-    text: str,
-    case: TeamCaseOut,
-    catalog: list[str],
-    claude_calls: int,
-    model_outputs: list[str],
-    grounding_feedback: str | None = None,
-) -> list[str]:
-    """Every §8 property `text` violates for `case`, empty when it passes.
-
-    `model_outputs` are the texts the narrator actually returned, in call
-    order; check 5 requires `text` to be one of them. All properties are
-    evaluated and reported together, so a red run says which of them broke
-    rather than only the first.
-    """
-    violations: list[str] = []
-    team_name = case.team_name
-    fact_block_json = team_case_fact_block_json(case)
-    pattern = _team_mention_pattern(catalog)
-    mentions = _team_mentions(pattern, text)
-
-    # 1. correct #1 named: the right team, and named as itself, not inside a
-    # longer catalog name ("Texas Tech" does not name "Texas")
-    if team_name != EXPECTED_KEENER_NUMBER_ONE[year]:
-        violations.append(
-            f"correct-#1: evidence #1 is {team_name!r}, expected "
-            f"{EXPECTED_KEENER_NUMBER_ONE[year]!r}"
-        )
-    if team_name not in mentions:
-        violations.append(
-            f"correct-#1: narration does not name {team_name!r} (team mentions found: "
-            f"{sorted(mentions)})"
-        )
-
-    # 2. grounded (2a numbers, 2b teams, 2c scores and records)
-    violations += _grounding_violations(text, fact_block_json, pattern)
-
-    # 3. length bounded
-    sentences = _sentence_count(text)
-    if not MIN_SENTENCES <= sentences <= MAX_SENTENCES:
-        violations.append(f"length: {sentences} sentences, want {MIN_SENTENCES}-{MAX_SENTENCES}")
-    if len(text) > MAX_CHARACTERS:
-        violations.append(f"length: {len(text)} characters, want <= {MAX_CHARACTERS}")
-
-    # 4. no banned-word hits
-    hits = _banned_hits(text)
-    if hits:
-        violations.append(f"banned-words: {hits}")
-
-    # 5. served by the narrator: structural, so a drifted fallback template
-    # cannot pass by no longer equalling `team_case_fallback_text`
-    if text not in model_outputs:
-        first_attempt = model_outputs[0] if model_outputs else None
-        retry_attempt = model_outputs[1] if len(model_outputs) > 1 else None
-        violations.append(
-            "not-fallback: the served text is not any narrator output "
-            f"(claude_calls={claude_calls}; matches team_case_fallback_text: "
-            f"{text == team_case_fallback_text(case)}). Served text: {text!r}. "
-            f"First attempt: {first_attempt!r}. Retry attempt: {retry_attempt!r}. "
-            f"Production grounding feedback on the first attempt: {grounding_feedback!r}. "
-            "One possible cause: production grounding's known false positive that reads "
-            "a team's own W-L record as a game score (#107); feedback naming the team's "
-            f"own record here: {_issue_107_suspect(grounding_feedback, case)}"
-        )
-
-    return violations
+    assert not violations, "; ".join(violations)
