@@ -112,6 +112,7 @@ has five independent modules behind `import-linter` contracts.
 | `mcp-agent` | `cfb_strength/mcp_server/` + its integration test | everything else |
 | `validator` | nothing (read-only) | everything — golden dataset + persona smoke eval |
 | `reviewer` | nothing (read-only) | everything — independent review of a diff and its seams |
+| `prompt-engineer` | nothing (read-only) | everything — reviews model-read text as prompts and compares variants by eval score (#327) |
 
 The exact globs live in `.claude/ownership.json`, which the edit-scope hook and the
 brief validator read. Coordinator-owned: everything no agent owns (this file, `.claude/`,
@@ -185,6 +186,7 @@ this architecture.
 | "Is this done?" | `reviewer` + `validator` in parallel; the reviewer gets only the brief and the diff | — |
 | Pre-existing findings from any return, or an untracked gap | coordinator via `/triage` | all spokes |
 | Persona *voice/tone quality* ("does this read as a good bar-stool guy?") | **coordinator directly** — a continuous, subjective, iterative judgment, not a scoped task | all spokes, until there is a specific, scoped prompt change to delegate |
+| A prompt-facing change (persona prompt, tool schema descriptions, retry feedback, MCP tool descriptions), or a narrator misbehavior that keeps recurring | `prompt-engineer` for scores and proposed diffs; the coordinator makes the voice call, then `api-agent` / `mcp-agent` implements | reviewer, validator (they gate a diff, not a prompt's quality) |
 | Why a ranking disagrees with known outcomes | **coordinator directly** | ratings-agent, until there's a specific hypothesis to implement |
 | Typo, rename, one-line fix, config change | **nobody** — coordinator does it inline | all |
 | A contract (shared type/schema) needs a new field | coordinator amends and commits it, then re-delegates every affected spoke | — |
