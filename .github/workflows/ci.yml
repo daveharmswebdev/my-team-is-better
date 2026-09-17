@@ -53,7 +53,7 @@ jobs:
       # --strict reports `Module has no attribute ...` for that, but only if
       # the generator is type-checked.
       - name: mypy --strict (whole package + fixture generator)
-        run: uv run mypy --strict src/cfb_strength tests/fixtures/build_regression_fixtures.py
+        run: uv run mypy --strict src/cfb_strength tests/fixtures/build_regression_fixtures.py tests/fixtures/build_nfl_player_sample.py
 
       - name: import-linter
         run: uv run lint-imports

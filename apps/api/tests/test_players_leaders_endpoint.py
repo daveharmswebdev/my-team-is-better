@@ -42,7 +42,6 @@ from cfb_strength.contracts import (
 from cfb_strength.players import get_player_career, get_player_leaders
 from fastapi.testclient import TestClient
 from fixtures.player_api_fixture import (
-    PUBLISHED_STAT_NAMES,
     client_for_db,
     engine_json,
     fixture_conn,
@@ -109,6 +108,25 @@ def _get(client: TestClient, **params: str | int) -> Any:
 # ---------------------------------------------------------------------------
 
 
+# The ten stats the API publishes today, written out rather than derived.
+# `contracts.PlayerStats` has carried 34 columns since #313; `PlayerStatsOut`
+# still exposes only these, and widening it is #314 (receiving) and #315
+# (kicking and punting). Deriving this list from the response model would
+# make the assertion below tautological -- see the comment there.
+PUBLISHED_STATS_TODAY: tuple[str, ...] = (
+    "completions",
+    "attempts",
+    "passing_yards",
+    "passing_tds",
+    "passing_interceptions",
+    "sacks_suffered",
+    "sack_yards_lost",
+    "carries",
+    "rushing_yards",
+    "rushing_tds",
+)
+
+
 def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestClient) -> None:
     body = _get(client)
 
@@ -128,9 +146,13 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
     for row in body["rows"]:
         assert set(row) == ROW_KEYS
         assert set(row["record"]) == {"wins", "losses", "ties", "starts"}
-        # Exactly what the API publishes -- the original ten. `PlayerStats`
-        # has carried 34 since #313; surfacing the rest is #314/#315.
-        assert set(row["stats"]) == set(PUBLISHED_STAT_NAMES)
+        # Pinned literally rather than compared to `PUBLISHED_STAT_NAMES`.
+        # That constant is `tuple(PlayerStatsOut.model_fields)`, and this body
+        # is serialized by FastAPI from that same model, so the two move
+        # together by construction and the assertion could never fail
+        # (#313 review). A literal is the only version of this check that can.
+        # It is meant to go red when #314/#315 widen what the API publishes.
+        assert set(row["stats"]) == set(PUBLISHED_STATS_TODAY)
 
     top = [
         (r["rank"], r["display_name"], r["stats"]["passing_yards"], r["stats"]["passing_tds"])

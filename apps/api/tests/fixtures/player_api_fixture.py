@@ -18,8 +18,12 @@ engine modules apps/api is permitted (`cfb_strength.players`, `db`,
   set off the response model, so widening the API widens them with it and
   no expectation has to be rewritten by hand.
 - `make_player_db_with_null_stat` copies the committed fixture and NULLs
-  one real season row's stat. No 1999-2025 nflverse row is NULL (the
-  contract says so, and the committed fixture has none), so "a None stat
+  one real season row's stat. No 1999-2025 nflverse row is NULL *for the
+  stats this helper targets* -- that was true of all ten columns before
+  #313, and is still true of the passing and rushing ones it NULLs. It is
+  no longer true of the contract as a whole: `fg_long` and `pt_long` are
+  legitimately NULL for anyone who never kicked or punted (1,479 of 1,580
+  season rows in the committed fixture). So "a None stat
   stays null in JSON, never 0" can only be exercised on a copy.
 - `client_for_db` points the app's db dependency at such a copy. The player
   routes use no narrator or cache, so nothing else is overridden.
