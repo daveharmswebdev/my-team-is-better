@@ -42,7 +42,7 @@ from cfb_strength.contracts import (
 from cfb_strength.players import get_player_career, get_player_leaders
 from fastapi.testclient import TestClient
 from fixtures.player_api_fixture import (
-    STAT_NAMES,
+    PUBLISHED_STAT_NAMES,
     client_for_db,
     engine_json,
     fixture_conn,
@@ -128,7 +128,9 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
     for row in body["rows"]:
         assert set(row) == ROW_KEYS
         assert set(row["record"]) == {"wins", "losses", "ties", "starts"}
-        assert set(row["stats"]) == set(STAT_NAMES)
+        # Exactly what the API publishes -- the original ten. `PlayerStats`
+        # has carried 34 since #313; surfacing the rest is #314/#315.
+        assert set(row["stats"]) == set(PUBLISHED_STAT_NAMES)
 
     top = [
         (r["rank"], r["display_name"], r["stats"]["passing_yards"], r["stats"]["passing_tds"])
