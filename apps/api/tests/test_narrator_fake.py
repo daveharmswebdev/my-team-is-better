@@ -1,6 +1,6 @@
 """Failing-first tests for issue #212: one shared `Narrator` test double.
 
-Twenty near-identical doubles used to sit in twenty test files, each
+Twenty-two near-identical doubles used to sit in twenty-one test files, each
 re-deriving the same two behaviours: answer with a scripted reply, and record
 the `system` and `messages` the call carried. `tests/fixtures/narrator_fake.py`
 is now the only one, and this file pins the behaviours the twenty relied on so

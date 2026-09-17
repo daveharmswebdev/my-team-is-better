@@ -39,7 +39,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
@@ -52,9 +52,6 @@ from api.main import app
 from api.models import ComparisonResultOut, Method, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
-
-if TYPE_CHECKING:
-    pass
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 

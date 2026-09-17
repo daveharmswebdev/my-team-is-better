@@ -29,7 +29,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args
+from typing import Any, get_args
 
 import pytest
 from cfb_strength.db.connection import get_conn
@@ -45,9 +45,6 @@ from api.models import ComparisonResultOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
 from api.persona.claims import GROUNDING_VERSION
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
-
-if TYPE_CHECKING:
-    pass
 
 # No numbers and no team names: grounded against any fact block.
 NARRATION = "Solid case, no notes."

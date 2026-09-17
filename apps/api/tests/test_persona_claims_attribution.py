@@ -401,7 +401,7 @@ def test_no_form_of_a_rating_may_be_typed_into_the_prose(
     whole accepted list and #165's whole rejected list collapse into one
     rule, and the error still tells the narrator what the block holds."""
     errors = rejected(f"Elo rates Texas at {typed}.", [], texas_2005_elo, catalog)
-    assert_an_error_says(errors, typed.split(",")[0] if "," in typed else typed)
+    assert_an_error_says(errors, typed)
 
 
 @pytest.mark.parametrize(

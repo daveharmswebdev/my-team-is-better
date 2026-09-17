@@ -34,16 +34,13 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.narrator_fake import FakeNarrator
 from fixtures.team_catalog_fixture import NEW_YEAR, OLD_YEAR, RELOCATED_PAIRS, UNINGESTED_YEAR
-
-if TYPE_CHECKING:
-    pass
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 

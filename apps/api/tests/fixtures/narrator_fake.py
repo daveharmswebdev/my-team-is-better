@@ -1,6 +1,6 @@
 """The one `Narrator` test double for apps/api (issue #212).
 
-Twenty near-identical doubles used to sit in twenty test files, each
+Twenty-two near-identical doubles used to sit in twenty-one test files, each
 re-deriving the same two behaviours: answer with a scripted reply, and record
 the `system` and `messages` the call carried. `FakeNarrator` is now the only
 one. It covers everything those twenty did:
