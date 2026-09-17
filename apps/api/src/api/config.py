@@ -15,7 +15,7 @@ this app is scoped to. This module loads `apps/api/.env` (via
   (`api.persona.cache`) auto-busts instead of serving narration written
   under an old voice. It means prompt wording only, since issue #145: the
   cache key also hashes the exact fact block (the evidence JSON) a narration
-  was generated from and carries `api.persona.grounding.GROUNDING_VERSION`,
+  was generated from and carries `api.persona.claims.GROUNDING_VERSION`,
   so a change to the block's shape or content, or to the grounding rules, is
   a miss on its own and needs no bump here. Before #145 the key covered
   neither, which is why v2, v3, v8 and v9 below were bumped for fact-block

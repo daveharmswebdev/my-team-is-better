@@ -38,8 +38,9 @@ from typing import Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
-from conftest import FIXTURE_DB, _StubNarrator
+from conftest import FIXTURE_DB
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import FakeNarrator
 from jsonschema import Draft202012Validator
 
 CHAMPION = "/api/verdict/champion"
@@ -93,7 +94,7 @@ def headless_client(headless_2004_db: Path) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db_conn] = _override
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
-    app.dependency_overrides[get_narrator] = lambda: _StubNarrator()
+    app.dependency_overrides[get_narrator] = lambda: FakeNarrator()
     try:
         yield TestClient(app)
     finally:

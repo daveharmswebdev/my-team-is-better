@@ -40,10 +40,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import FakeNarrator
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
@@ -51,7 +51,6 @@ from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona import service
 from api.persona.cache import InMemoryNarrationCache
-from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.narrate import NarrationResult
 from api.persona.service import narrate_comparison, narrate_team_case
 from api.repositories.teams import TeamRecord, list_all_team_names, list_team_records
@@ -69,25 +68,11 @@ def catalog_reads(statements: list[str]) -> list[str]:
     return [s for s in statements if _TEAMS_SCAN.search(s) and not _ROW_LOOKUP.search(s)]
 
 
-class _RecordingNarrator:
-    """Passes the claim validator against any fact block (no numbers, no team
-    names, no claims); records how many times it was asked, so a test can
-    prove the request really went through the cache-miss path where the
-    catalog is needed."""
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls += 1
-        return tool_reply({"text": "Solid case, no notes.", "claims": []})
-
-
 class _Traced:
     """A TestClient whose every request's connection appends the SQL it runs
     to `statements` (expanded, so bound parameters are inlined)."""
 
-    def __init__(self, client: TestClient, statements: list[str], narrator: _RecordingNarrator):
+    def __init__(self, client: TestClient, statements: list[str], narrator: FakeNarrator):
         self.client = client
         self.statements = statements
         self.narrator = narrator
@@ -95,7 +80,7 @@ class _Traced:
 
 def _traced_client(db_path: Path) -> Iterator[_Traced]:
     statements: list[str] = []
-    narrator = _RecordingNarrator()
+    narrator = FakeNarrator()
 
     def _override() -> Iterator[sqlite3.Connection]:
         conn = get_conn(db_path, read_only=True)
@@ -146,7 +131,7 @@ def test_a_request_with_a_user_team_reads_the_catalog_once(
     response = traced.client.post(path, json={**body, "user_team": "Texas"})
 
     assert response.status_code == 200, response.text
-    assert traced.narrator.calls == 1, "cold cache: the request must have narrated"
+    assert len(traced.narrator.calls) == 1, "cold cache: the request must have narrated"
     reads = catalog_reads(traced.statements)
     assert len(reads) == 1, f"{len(reads)} catalog reads:\n" + "\n---\n".join(reads)
 
@@ -163,7 +148,7 @@ def test_a_request_without_a_user_team_still_reads_the_catalog_exactly_once(
     response = traced.client.post(path, json=body)
 
     assert response.status_code == 200, response.text
-    assert traced.narrator.calls == 1, "cold cache: the request must have narrated"
+    assert len(traced.narrator.calls) == 1, "cold cache: the request must have narrated"
     reads = catalog_reads(traced.statements)
     assert len(reads) == 1, f"{len(reads)} catalog reads:\n" + "\n---\n".join(reads)
 
@@ -273,7 +258,7 @@ def test_narrate_team_case_hands_narrate_exactly_the_given_catalog(
         sport="cfb",
         catalog=records,
         cache=InMemoryNarrationCache(),
-        narrator=_RecordingNarrator(),
+        narrator=FakeNarrator(),
     )
 
     assert [call["catalog"] for call in recorder.kwargs] == [records]
@@ -300,7 +285,7 @@ def test_narrate_comparison_hands_narrate_exactly_the_given_catalog(
         sport="cfb",
         catalog=records,
         cache=InMemoryNarrationCache(),
-        narrator=_RecordingNarrator(),
+        narrator=FakeNarrator(),
     )
 
     assert [call["catalog"] for call in recorder.kwargs] == [records]

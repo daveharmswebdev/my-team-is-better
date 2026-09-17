@@ -48,6 +48,12 @@ import httpx2
 import pytest
 from anthropic.types import Message, MessageParam, Usage
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import (
+    ACCEPTED_NARRATION,
+    FakeNarrator,
+    NarratorCall,
+    Scripted,
+)
 from fixtures.persona_eval import (
     JudgedCall,
     Judgement,
@@ -104,7 +110,7 @@ from api.config import PROMPT_VERSION
 from api.deps import get_narrator
 from api.main import app
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import MODEL, NarratorReply, StubNarrator, tool_reply
+from api.persona.claude_client import MODEL, NarratorReply, tool_reply
 from api.persona.prompt import build_system_prompt, build_user_message
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -149,41 +155,16 @@ def _no_tool_reply() -> NarratorReply:
     return NarratorReply(tool_call=None, assistant_content=(), stop_reason="end_turn")
 
 
-class _CapturingNoToolNarrator:
-    """Answers every call without a tool call, so the route serves its
-    fallback; records the system prompt each call carried."""
+def _scripted_by_block(script: dict[str, Sequence[NarratorReply]]) -> FakeNarrator:
+    """A narrator that replies by fact block: the first call of a narration
+    takes that block's first scripted reply, a retry (more than one message)
+    its second."""
 
-    def __init__(self) -> None:
-        self.systems: list[str] = []
+    def reply_for(call: NarratorCall) -> NarratorReply:
+        replies = script[fact_block_from_user_turn(call.user_texts[0])]
+        return replies[0] if len(call.messages) == 1 else replies[1]
 
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.systems.append(system)
-        return _no_tool_reply()
-
-
-class _ScriptedNarrator:
-    """Replies by fact block: the first call of a narration takes the script's
-    first reply, a retry (more than one message) its second."""
-
-    def __init__(self, script: dict[str, Sequence[NarratorReply]]) -> None:
-        self.script = script
-        self.calls: list[tuple[str, list[MessageParam]]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append((system, list(messages)))
-        first = messages[0]["content"]
-        assert isinstance(first, str)
-        replies = self.script[fact_block_from_user_turn(first)]
-        return replies[0] if len(messages) == 1 else replies[1]
-
-
-class _CountingNarrator:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls += 1
-        return StubNarrator().submit(system=system, messages=messages)
+    return FakeNarrator(reply_for=reply_for)
 
 
 class _FakeGrader:
@@ -211,28 +192,25 @@ TRANSPORT_ERROR_KINDS = ("connection", "status")
 TRANSPORT_ERROR_TYPES = {"connection": "APIConnectionError", "status": "APIStatusError"}
 
 
-class _OutageNarrator:
-    """The stub reply for every call, except that a call whose system prompt
-    isn't production's (so any variant but `baseline`) on one of
-    `outage_blocks` raises `error`: an outage that hits one variant only."""
+def _outage_narrator(
+    error: Exception, outage_blocks: Sequence[str]
+) -> tuple[FakeNarrator, list[str]]:
+    """The accepted stub reply for every call, except that a call whose system
+    prompt isn't production's (so any variant but `baseline`) on one of
+    `outage_blocks` raises `error`: an outage that hits one variant only.
+    Returns the narrator and the list each raise is appended to.
+    """
+    blocks = set(outage_blocks)
+    raised: list[str] = []
 
-    def __init__(self, error: Exception, outage_blocks: Sequence[str]) -> None:
-        self.error = error
-        self.outage_blocks = set(outage_blocks)
-        self.calls = 0
-        self.raised = 0
+    def reply_for(call: NarratorCall) -> Scripted:
+        block = fact_block_from_user_turn(call.user_texts[0])
+        if call.system != build_system_prompt(None) and block in blocks:
+            raised.append(block)
+            return error
+        return ACCEPTED_NARRATION
 
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls += 1
-        first = messages[0]["content"]
-        assert isinstance(first, str)
-        if (
-            system != build_system_prompt(None)
-            and fact_block_from_user_turn(first) in self.outage_blocks
-        ):
-            self.raised += 1
-            raise self.error
-        return StubNarrator().submit(system=system, messages=messages)
+    return FakeNarrator(reply_for=reply_for), raised
 
 
 class _FailingMessages:
@@ -334,7 +312,7 @@ def test_every_dataset_block_is_the_block_its_route_narrates(
         TestClient, request.getfixturevalue("sport_client" if spec.sport == "nfl" else "client")
     )
     case = dataset_by_id[spec.id]
-    inner = _CapturingNoToolNarrator()
+    inner = FakeNarrator(always=_no_tool_reply())
     recorder = RecordingNarrator(inner)
     app.dependency_overrides[get_narrator] = lambda: recorder
 
@@ -472,7 +450,7 @@ def test_the_runner_narrates_through_production_narrate(
     texas = dataset_by_id[TEXAS_CHAMPION]
     usc = dataset_by_id[USC_TEAM_CASE]
     alabama = dataset_by_id[ALABAMA_CHAMPION]
-    narrator = _ScriptedNarrator(
+    narrator = _scripted_by_block(
         {
             texas.fact_block_json: [tool_reply(GOOD_TEXAS_INPUT)],
             usc.fact_block_json: [tool_reply(TYPED_DIGITS_INPUT), tool_reply(GOOD_USC_INPUT)],
@@ -505,9 +483,9 @@ def test_the_runner_narrates_through_production_narrate(
     assert by_case[ALABAMA_CHAMPION].claims is None
     assert [record.narration.claude_calls for record in result.records] == [1, 2, 2]
     # production's retry: the replayed tool call and an is_error tool_result
-    retry_messages = narrator.calls[2][1]
+    retry_messages = narrator.calls[2].messages
     assert len(retry_messages) == 3
-    assert all(system == "CAND None" for system, _ in narrator.calls)
+    assert all(system == "CAND None" for system in narrator.systems)
     # every narration is graded, the fallback included, on what the user saw
     assert [narration for _, _, narration in grader.calls] == [
         GOOD_TEXAS_RENDERED,
@@ -522,7 +500,7 @@ def test_the_runner_narrates_through_production_narrate(
 def test_the_runner_records_code_grader_properties(dataset_by_id: dict[str, EvalCase]) -> None:
     texas = dataset_by_id[TEXAS_CHAMPION]
     long_text = " ".join(["Texas ran them off the field and it was loud."] * 5)
-    narrator = _ScriptedNarrator(
+    narrator = _scripted_by_block(
         {texas.fact_block_json: [tool_reply({"text": long_text, "claims": []})]}
     )
     result = run_eval(
@@ -979,7 +957,7 @@ def test_the_spread_check_reads_the_served_only_voice_mean_apart_from_fallbacks(
 
 def test_the_error_recorder_records_and_re_raises() -> None:
     error = _transport_error("connection")
-    recorder = ErrorRecordingNarrator(_OutageNarrator(error, outage_blocks=["{}"]))
+    recorder = ErrorRecordingNarrator(_outage_narrator(error, outage_blocks=["{}"])[0])
     messages: list[MessageParam] = [
         {"role": "user", "content": build_user_message("{}", contested=False)}
     ]
@@ -999,7 +977,7 @@ def test_a_narrator_transport_error_is_an_error_outcome_not_a_fallback(
     error outcome it reads as that variant's fallbacks, 'separated'."""
     texas = dataset_by_id[TEXAS_CHAMPION]
     usc = dataset_by_id[USC_TEAM_CASE]
-    narrator = _OutageNarrator(_transport_error(kind), outage_blocks=[usc.fact_block_json])
+    narrator, raised = _outage_narrator(_transport_error(kind), outage_blocks=[usc.fact_block_json])
     grader = _FakeGrader(score=7)
     budget = CallBudget(max_calls=100)
     degraded = Variant(name="degraded", source="test", build_system_prompt=lambda team: "DEGRADED")
@@ -1025,7 +1003,7 @@ def test_a_narrator_transport_error_is_an_error_outcome_not_a_fallback(
     assert all(r.served_by == "first" for r in result.records if r.served_by != "error")
     # only the six narrations that didn't error were graded
     assert len(grader.calls) == 6 == result.grader_calls
-    assert narrator.raised == 2
+    assert len(raised) == 2
 
     report = build_report(
         records=result.records,
@@ -1073,7 +1051,7 @@ def test_a_narrator_transport_error_warns_and_exits_non_zero(
     kind: str, tmp_path: Path, dataset_by_id: dict[str, EvalCase]
 ) -> None:
     usc = dataset_by_id[USC_TEAM_CASE]
-    narrator = _OutageNarrator(_transport_error(kind), outage_blocks=[usc.fact_block_json])
+    narrator, raised = _outage_narrator(_transport_error(kind), outage_blocks=[usc.fact_block_json])
     grader = _FakeGrader()
     out_dir = tmp_path / "out"
     err = io.StringIO()
@@ -1113,7 +1091,7 @@ def test_a_narrator_transport_error_warns_and_exits_non_zero(
 
 
 def test_a_grader_transport_error_is_counted_warned_and_exits_non_zero(tmp_path: Path) -> None:
-    narrator = _CountingNarrator()
+    narrator = FakeNarrator()
     grader = ModelGrader(cast(anthropic.Anthropic, _FailingAnthropic()))
     out_dir = tmp_path / "out"
     err = io.StringIO()
@@ -1278,7 +1256,7 @@ def test_the_budget_is_a_hard_cap() -> None:
 
 
 def test_max_calls_refuses_an_over_budget_estimate(tmp_path: Path) -> None:
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     err = io.StringIO()
     out_dir = tmp_path / "out"
     code = main(
@@ -1292,12 +1270,12 @@ def test_max_calls_refuses_an_over_budget_estimate(tmp_path: Path) -> None:
     )
     assert code == 2
     assert "66" in err.getvalue() and "65" in err.getvalue()
-    assert narrator.calls == 0 and grader.calls == []
+    assert len(narrator.calls) == 0 and grader.calls == []
     assert not out_dir.exists()
 
 
 def test_a_run_inside_the_budget_writes_the_three_files(tmp_path: Path) -> None:
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     out_dir = tmp_path / "out"
     code = main(
         [
@@ -1322,7 +1300,7 @@ def test_a_run_inside_the_budget_writes_the_three_files(tmp_path: Path) -> None:
         err=io.StringIO(),
     )
     assert code == 0
-    assert narrator.calls == 2 and len(grader.calls) == 2
+    assert len(narrator.calls) == 2 and len(grader.calls) == 2
     report = json.loads((out_dir / "report.json").read_text())
     assert report["complete"] is True
     assert [variant["name"] for variant in report["variants"]] == ["baseline", "degraded"]
@@ -1345,7 +1323,7 @@ def test_a_run_inside_the_budget_writes_the_three_files(tmp_path: Path) -> None:
 def test_the_run_stops_at_the_cap_mid_run_with_a_partial_report(
     tmp_path: Path, dataset: tuple[EvalCase, ...]
 ) -> None:
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     out_dir = tmp_path / "out"
     report = run_to_directory(
         cases=dataset[:3],
@@ -1358,8 +1336,8 @@ def test_the_run_stops_at_the_cap_mid_run_with_a_partial_report(
         out_dir=out_dir,
     )
     # two narrations (a narrator call and a grader call each), then the cap
-    assert narrator.calls + len(grader.calls) <= 5
-    assert narrator.calls == 3 and len(grader.calls) == 2
+    assert len(narrator.calls) + len(grader.calls) <= 5
+    assert len(narrator.calls) == 3 and len(grader.calls) == 2
     assert report.complete is False
     written = json.loads((out_dir / "report.json").read_text())
     assert written["complete"] is False
@@ -1386,7 +1364,7 @@ def test_an_existing_env_file_is_refused(tmp_path: Path) -> None:
             environ={"ANTHROPIC_API_KEY": NOT_A_KEY}, env_file=env_file, live=live
         )
         assert any(".env" in refusal for refusal in refusals)
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     code = main(
         ["--variant", "baseline", "--samples", "1", "--max-calls", "99", "--out", str(tmp_path)],
         environ={"ANTHROPIC_API_KEY": NOT_A_KEY},
@@ -1397,7 +1375,7 @@ def test_an_existing_env_file_is_refused(tmp_path: Path) -> None:
         err=io.StringIO(),
     )
     assert code == 2
-    assert narrator.calls == 0 and grader.calls == []
+    assert len(narrator.calls) == 0 and grader.calls == []
 
 
 @pytest.mark.parametrize("variable", ["DATABASE_URL", "MY_TEAM_IS_BETTER_API_ENV_FILE"])
@@ -1406,7 +1384,7 @@ def test_a_set_database_or_env_file_variable_is_refused(variable: str, tmp_path:
     for live in (True, False):
         refusals = preflight_refusals(environ=environ, env_file=NO_ENV_FILE, live=live)
         assert any(variable in refusal for refusal in refusals)
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     err = io.StringIO()
     code = main(
         ["--variant", "baseline", "--samples", "1", "--max-calls", "99", "--out", str(tmp_path)],
@@ -1419,7 +1397,7 @@ def test_a_set_database_or_env_file_variable_is_refused(variable: str, tmp_path:
     )
     assert code == 2
     assert variable in err.getvalue()
-    assert narrator.calls == 0 and grader.calls == []
+    assert len(narrator.calls) == 0 and grader.calls == []
 
 
 def test_an_unset_key_is_refused_for_a_live_run(tmp_path: Path) -> None:
@@ -1427,7 +1405,7 @@ def test_an_unset_key_is_refused_for_a_live_run(tmp_path: Path) -> None:
         refusals = preflight_refusals(environ=environ, env_file=NO_ENV_FILE, live=True)
         assert any("ANTHROPIC_API_KEY" in refusal for refusal in refusals)
         assert preflight_refusals(environ=environ, env_file=NO_ENV_FILE, live=False) == []
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     code = main(
         ["--variant", "baseline", "--samples", "1", "--max-calls", "99", "--out", str(tmp_path)],
         environ={},
@@ -1438,7 +1416,7 @@ def test_an_unset_key_is_refused_for_a_live_run(tmp_path: Path) -> None:
         err=io.StringIO(),
     )
     assert code == 2
-    assert narrator.calls == 0 and grader.calls == []
+    assert len(narrator.calls) == 0 and grader.calls == []
     assert (
         preflight_refusals(
             environ={"ANTHROPIC_API_KEY": NOT_A_KEY}, env_file=NO_ENV_FILE, live=True
@@ -1478,7 +1456,7 @@ def test_a_refusal_happens_before_api_config_is_imported() -> None:
 
 
 def test_dry_run_makes_no_calls_and_needs_no_key(tmp_path: Path) -> None:
-    narrator, grader = _CountingNarrator(), _FakeGrader()
+    narrator, grader = FakeNarrator(), _FakeGrader()
     out = io.StringIO()
     code = main(
         ["--dry-run", "--variant", "baseline", "--variant", "degraded", "--samples", "2"],
@@ -1490,7 +1468,7 @@ def test_dry_run_makes_no_calls_and_needs_no_key(tmp_path: Path) -> None:
         err=io.StringIO(),
     )
     assert code == 0
-    assert narrator.calls == 0 and grader.calls == []
+    assert len(narrator.calls) == 0 and grader.calls == []
     printed = out.getvalue()
     for spec in CASE_SPECS:
         assert spec.id in printed

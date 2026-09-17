@@ -44,7 +44,6 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING
 
 # `httpx2`, not `httpx`: both are installed, and starlette's `TestClient`
 # prefers `httpx2` when present, so that is the `Response` type these
@@ -52,11 +51,7 @@ from typing import TYPE_CHECKING
 import httpx2
 import pytest
 from fastapi.testclient import TestClient
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
-
-    from api.persona.claude_client import NarratorReply
+from fixtures.narrator_fake import FakeNarrator
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -64,20 +59,6 @@ FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 # (see tests/conftest.py) -- so the verdict POST below exercises a full
 # evidence build, not a 404 path that might never touch the connection.
 FIXTURE_YEAR = 2005
-
-
-class _StubNarrator:
-    """Minimal `Narrator` double -- same contract as `tests/conftest.py`'s,
-    kept local because this file's client fixture deliberately does not build
-    on the shared `client` fixture (see module docstring). Its submission has
-    no numbers, no team names and no claims, so the claim validator accepts it
-    against any fact block and it never triggers a retry.
-    """
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        from api.persona.claude_client import tool_reply
-
-        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 def _api_deps() -> ModuleType:
@@ -155,7 +136,7 @@ def concurrent_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setattr(api.main, "DATABASE_URL", "")
 
     app.dependency_overrides[deps.get_narration_cache] = lambda: InMemoryNarrationCache()
-    app.dependency_overrides[deps.get_narrator] = lambda: _StubNarrator()
+    app.dependency_overrides[deps.get_narrator] = lambda: FakeNarrator()
     try:
         # `raise_server_exceptions=False` so an unhandled exception comes
         # back as the HTTP 500 a real client would see, letting the

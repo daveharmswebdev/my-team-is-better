@@ -93,7 +93,7 @@ def cache_key(
     folded in as its own sha256 rather than as text, so the key stays one
     fixed-length digest whatever the block's size. `grounding_version` is
     `api.persona.claims.GROUNDING_VERSION`, the typed-claim validator's
-    (issue #291; `api.persona.grounding`'s before). A changed block, or tightened
+    (issue #291; the lexical checker's before, deleted in #292). A changed block, or tightened
     rules, now miss exactly the affected entries, and `PROMPT_VERSION` is
     back to meaning the prompt wording changed. Adding these two fields
     changed every key, which invalidated all older entries on purpose (the

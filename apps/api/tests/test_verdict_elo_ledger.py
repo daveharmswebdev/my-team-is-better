@@ -42,23 +42,20 @@ import math
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from cfb_strength.contracts import EloLedger
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.method_fixture import TEAM_A, TEAM_B, YEAR, make_method_fixture_db
+from fixtures.narrator_fake import FakeNarrator
 from pydantic.main import IncEx
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, EloLedgerOut, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
-from api.persona.claude_client import NarratorReply, tool_reply
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 FIXTURE_ELO_YEARS = [2001, 2003, 2004, 2005, 2013, 2017, 2019]
@@ -95,19 +92,6 @@ STEP_FIELDS = [
 ]
 RESULT_SCORE = {"W": 1.0, "T": 0.5, "L": 0.0}
 TOLERANCE = 1e-9
-
-
-class _RecordingNarrator:
-    """Accepted on the first try (no numbers, no team names, no claims) and
-    records the messages it was handed, so the fact block can be read back
-    out."""
-
-    def __init__(self) -> None:
-        self.calls: list[list[MessageParam]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(list(messages))
-        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 def _team_case(client: TestClient, team: str, method: str) -> Any:
@@ -331,7 +315,7 @@ def method_client(tmp_path: Path) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db_conn] = _override
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
-    app.dependency_overrides[get_narrator] = lambda: _RecordingNarrator()
+    app.dependency_overrides[get_narrator] = lambda: FakeNarrator()
     try:
         yield TestClient(app)
     finally:
@@ -363,10 +347,9 @@ def test_elo_career_verdicts_have_no_ledger(method_client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fact_block(narrator: _RecordingNarrator) -> str:
+def _fact_block(narrator: FakeNarrator) -> str:
     assert len(narrator.calls) == 1
-    content = narrator.calls[0][0]["content"]
-    assert isinstance(content, str)
+    content = narrator.calls[0].user_texts[0]
     prefix = "FACT BLOCK (JSON):\n"
     assert content.startswith(prefix)
     return content[len(prefix) : content.rindex("\n\ncontested: ")]
@@ -396,14 +379,14 @@ def _without_game_id(value: Any) -> Any:
 
 
 @pytest.fixture
-def recording_client(client: TestClient) -> Iterator[tuple[TestClient, _RecordingNarrator]]:
-    narrator = _RecordingNarrator()
+def recording_client(client: TestClient) -> Iterator[tuple[TestClient, FakeNarrator]]:
+    narrator = FakeNarrator()
     app.dependency_overrides[get_narrator] = lambda: narrator
     yield client, narrator
 
 
 def test_team_case_fact_block_excludes_the_ledger(
-    recording_client: tuple[TestClient, _RecordingNarrator],
+    recording_client: tuple[TestClient, FakeNarrator],
 ) -> None:
     client, narrator = recording_client
     evidence = _team_case(client, "Texas", "elo")
@@ -430,7 +413,7 @@ def test_team_case_fact_block_excludes_the_ledger(
 
 
 def test_comparison_fact_block_excludes_both_ledgers(
-    recording_client: tuple[TestClient, _RecordingNarrator],
+    recording_client: tuple[TestClient, FakeNarrator],
 ) -> None:
     client, narrator = recording_client
     evidence = _compare(client, "elo")

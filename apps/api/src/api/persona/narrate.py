@@ -27,8 +27,10 @@ order, then "…and N more errors", and the whole string is at most
 exceeds the budget is truncated to fit. The retry prompt and the fallback
 warning both go through it, so neither grows with what the narrator submits.
 
-Production no longer calls the lexical grounding check
-(`api.persona.grounding`); #292 removes that module.
+`check_and_render` is the only grounding check there is. The lexical one that
+read the finished prose was retired in #292, and nothing here matches numbers
+or team names after the fact: a claim either resolves against the block or
+becomes retry feedback.
 
 Cache lookups happen one layer up, in `api.persona.service` -- this module
 always makes at least one Claude call (or returns the fallback), never

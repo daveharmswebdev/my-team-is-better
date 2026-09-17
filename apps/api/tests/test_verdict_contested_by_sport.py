@@ -35,7 +35,7 @@ import pytest
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
-from fixtures.narration import user_text
+from fixtures.narrator_fake import FakeNarrator
 from fixtures.sport_fixture import make_sport_fixture_db
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
@@ -44,11 +44,10 @@ from api.main import app
 from api.models import ComparisonResultOut, Sport, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
 
 if TYPE_CHECKING:
-    from anthropic.types import MessageParam
+    pass
 
 # No numbers and no team names: grounded against any fact block.
 NARRATION = "Solid case, no notes."
@@ -85,25 +84,21 @@ EXPECTED_CONTESTED: list[tuple[Sport, int, bool]] = [
 ]
 
 
-class _RecordingNarrator:
-    """Always submits `NARRATION` with no claims, and records the
-    `contested:` value each call's user message carried (the trailing line
-    `build_user_message` appends after the fact block)."""
-
-    def __init__(self) -> None:
-        self.contested_seen: list[bool] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        content = user_text(messages[0])
+def contested_seen(narrator: FakeNarrator) -> list[bool]:
+    """The `contested:` value each call's user message carried (the trailing
+    line `build_user_message` appends after the fact block)."""
+    seen: list[bool] = []
+    for call in narrator.calls:
+        content = call.user_texts[0]
         flag = content[content.rindex("\n\ncontested: ") + len("\n\ncontested: ") :]
         assert flag in {"true", "false"}, f"unexpected contested line: {flag!r}"
-        self.contested_seen.append(flag == "true")
-        return tool_reply({"text": NARRATION, "claims": []})
+        seen.append(flag == "true")
+    return seen
 
 
 @contextmanager
 def _client(
-    db: Path, cache: InMemoryNarrationCache, narrator: _RecordingNarrator
+    db: Path, cache: InMemoryNarrationCache, narrator: FakeNarrator
 ) -> Iterator[TestClient]:
     def _conn() -> Iterator[sqlite3.Connection]:
         conn = get_conn(db, read_only=True)
@@ -171,7 +166,7 @@ def _key(db: Path, route: str, sport: Sport, year: int) -> str:
 def test_contested_flag_is_per_league_in_the_response_and_the_prompt(
     tmp_path: Path, route: str, sport: Sport, year: int, expected: bool
 ) -> None:
-    narrator = _RecordingNarrator()
+    narrator = FakeNarrator()
     cache = InMemoryNarrationCache()
 
     with _client(make_sport_fixture_db(tmp_path, year=year), cache, narrator) as client:
@@ -179,7 +174,7 @@ def test_contested_flag_is_per_league_in_the_response_and_the_prompt(
 
     assert narration["contested"] is expected
     assert narration["cached"] is False
-    assert narrator.contested_seen == [expected]
+    assert contested_seen(narrator) == [expected]
 
 
 def test_every_league_states_its_contested_years() -> None:
@@ -197,13 +192,13 @@ def test_stale_contested_cache_row_is_a_miss_and_is_overwritten(tmp_path: Path, 
     key = _key(db, route, "nfl", 2003)
     cache = InMemoryNarrationCache()
     cache.set(key, CachedNarration(text=STALE_NARRATION, contested=True))
-    narrator = _RecordingNarrator()
+    narrator = FakeNarrator()
 
     with _client(db, cache, narrator) as client:
         narration = _post(client, route, "nfl", 2003)
 
     assert narration == {"text": NARRATION, "contested": False, "cached": False}
-    assert narrator.contested_seen == [False]
+    assert contested_seen(narrator) == [False]
     assert cache.get(key) == CachedNarration(text=NARRATION, contested=False)
 
 
@@ -216,11 +211,11 @@ def test_cache_row_with_the_right_contested_flag_is_still_a_hit(
     key = _key(db, route, sport, 2003)
     cache = InMemoryNarrationCache()
     cache.set(key, CachedNarration(text=STALE_NARRATION, contested=contested))
-    narrator = _RecordingNarrator()
+    narrator = FakeNarrator()
 
     with _client(db, cache, narrator) as client:
         narration = _post(client, route, sport, 2003)
 
     assert narration == {"text": STALE_NARRATION, "contested": contested, "cached": True}
-    assert narrator.contested_seen == []
+    assert contested_seen(narrator) == []
     assert cache.get(key) == CachedNarration(text=STALE_NARRATION, contested=contested)

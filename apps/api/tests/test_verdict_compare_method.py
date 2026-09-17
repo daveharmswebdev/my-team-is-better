@@ -25,38 +25,23 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.method_fixture import METHODS, TEAM_A, TEAM_B, YEAR, make_method_fixture_db
-from fixtures.narration import user_text
+from fixtures.narrator_fake import FakeNarrator
 
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.persona.cache import InMemoryNarrationCache
-from api.persona.claude_client import NarratorReply, tool_reply
-
-
-class _RecordingNarrator:
-    """Always submits a line with no numbers, team names or claims (so it is
-    accepted on the first try), and records every message list it was
-    handed."""
-
-    def __init__(self) -> None:
-        self.calls: list[list[MessageParam]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(list(messages))
-        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 @pytest.fixture
-def narrator() -> _RecordingNarrator:
-    return _RecordingNarrator()
+def narrator() -> FakeNarrator:
+    return FakeNarrator()
 
 
 @pytest.fixture
-def method_client(tmp_path: Path, narrator: _RecordingNarrator) -> Iterator[TestClient]:
+def method_client(tmp_path: Path, narrator: FakeNarrator) -> Iterator[TestClient]:
     """Same wiring as conftest's `client`, against the every-method db."""
     db_path = make_method_fixture_db(tmp_path)
 
@@ -111,12 +96,12 @@ def test_compare_evidence_names_the_method_that_answered(
 
 @pytest.mark.parametrize("method", METHODS)
 def test_fact_block_given_to_the_compare_narrator_names_the_method(
-    method_client: TestClient, narrator: _RecordingNarrator, method: str
+    method_client: TestClient, narrator: FakeNarrator, method: str
 ) -> None:
     _compare(method_client, method)
 
     assert len(narrator.calls) == 1
-    fact_block = _fact_block_text(user_text(narrator.calls[0][0]))
+    fact_block = _fact_block_text(narrator.calls[0].user_texts[0])
     assert f'"method":"{method}"' in fact_block
     assert json.loads(fact_block)["method"] == method
 
