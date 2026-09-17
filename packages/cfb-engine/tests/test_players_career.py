@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from cfb_strength.contracts import (
+    PLAYER_STAT_MAX_FIELDS,
     PlayerCareer,
     PlayerCareerTotals,
     PlayerSeasonLine,
@@ -297,13 +298,29 @@ def _null_aware_sum(values: list[int | None]) -> int | None:
     return sum(v for v in values if v is not None)
 
 
-def test_career_totals_equal_the_sum_of_its_season_lines(db: PlayerDb) -> None:
+def _max_skipping_nulls(values: list[int | None]) -> int | None:
+    """SQL's MAX: NULL seasons are skipped, and an all-NULL group is None."""
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
+
+
+def test_career_totals_combine_the_season_lines_by_the_contracts_rule(db: PlayerDb) -> None:
+    """Every stat column is the null-aware sum of its season lines, except
+    `PLAYER_STAT_MAX_FIELDS`, which are the max (#334). The split is read
+    from the contract, so a MAX column added there later is checked here
+    rather than silently re-entering the sum loop."""
     home, away = db.team("Home"), db.team("Away")
     p = db.player("P")
-    db.season(p, 2000, games=16, **full_stats(passing_yards=4000, carries=30))
-    db.season(p, 2001, games=15, **full_stats(passing_yards=3500, carries=None))
-    db.season(p, 2002, games=None, **full_stats(passing_yards=0))
-    db.season(p, 2001, season_type="postseason", games=2, **full_stats(passing_yards=500))
+    db.season(p, 2000, games=16, **full_stats(passing_yards=4000, carries=30, fg_long=53))
+    db.season(p, 2001, games=15, **full_stats(passing_yards=3500, carries=None, fg_long=47))
+    db.season(p, 2002, games=None, **full_stats(passing_yards=0, fg_long=52, pt_long=None))
+    db.season(
+        p,
+        2001,
+        season_type="postseason",
+        games=2,
+        **full_stats(passing_yards=500, fg_long=44, pt_long=None),
+    )
     for week, (hp, ap) in enumerate([(20, 10), (10, 10), (3, 9)], 1):
         db.start(db.game(2001, home, away, hp, ap, week=week), home, p)
     db.start(db.game(2003, home, away, 1, 0), away, p)
@@ -327,5 +344,67 @@ def test_career_totals_equal_the_sum_of_its_season_lines(db: PlayerDb) -> None:
             sum(s.record.ties for s in lines),
         )
         for f in fields(PlayerStats):
-            expected = _null_aware_sum([getattr(s.stats, f.name) for s in lines])
-            assert getattr(totals.stats, f.name) == expected, (season_type, f.name)
+            values = [getattr(s.stats, f.name) for s in lines]
+            combine = _max_skipping_nulls if f.name in PLAYER_STAT_MAX_FIELDS else _null_aware_sum
+            assert getattr(totals.stats, f.name) == combine(values), (season_type, f.name)
+    # The rule actually differs on this fixture: the regular-season longs are
+    # 53, 47 and 52 plus a start-only line with none, so the sum rule would
+    # give None and a plain SUM 152.
+    assert career.regular_season is not None
+    assert career.regular_season.stats.fg_long == 53
+
+
+# --- the MAX columns (#334) -------------------------------------------------
+#
+# `contracts.PLAYER_STAT_MAX_FIELDS` names the columns a career combines with
+# MAX, not SUM: the longest field goal of three seasons is the longest of the
+# three, never their sum. Their NULL rule differs from `null_aware_sum`
+# deliberately -- MAX skips NULL seasons, so a player's one kicking season
+# survives the seasons he never kicked in instead of being erased by them.
+
+
+def test_career_long_is_the_max_of_the_season_longs_not_their_sum(db: PlayerDb) -> None:
+    p = db.player("Kicker", position="K")
+    for season, fg_long, pt_long in [(2000, 53, 61), (2001, 47, 58), (2002, 52, 62)]:
+        db.season(p, season, games=16, **full_stats(fg_long=fg_long, pt_long=pt_long))
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.fg_long == 53
+    assert totals.stats.pt_long == 62
+    # 152 and 53 are both non-null; only one of them is a field goal.
+    assert totals.stats.fg_long is not None and totals.stats.fg_long < 70
+    assert totals.stats.pt_long is not None and totals.stats.pt_long < 100
+    # The columns beside them still add up.
+    assert totals.stats.fg_made == 3
+
+
+def test_a_null_season_long_does_not_erase_the_seasons_that_have_one(db: PlayerDb) -> None:
+    p = db.player("Part Time Kicker")
+    db.season(p, 2000, games=16, **full_stats(fg_long=None, pt_long=None))
+    db.season(p, 2001, games=16, **full_stats(fg_long=48, pt_long=55))
+    db.season(p, 2002, games=16, **full_stats(fg_long=41, pt_long=None))
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.fg_long == 48
+    assert totals.stats.pt_long == 55
+    # The null-aware SUM rule is untouched for the columns beside them.
+    assert totals.stats.fg_made == 3
+
+
+def test_a_long_null_in_every_season_stays_none(db: PlayerDb) -> None:
+    p = db.player("Never Kicked")
+    db.season(p, 2000, games=16, **full_stats(fg_long=None, pt_long=None))
+    db.season(p, 2001, games=16, **full_stats(fg_long=None, pt_long=None))
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.fg_long is None
+    assert totals.stats.pt_long is None

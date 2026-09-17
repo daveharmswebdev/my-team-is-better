@@ -13,7 +13,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from cfb_strength.contracts import PlayerLeaderCategory, PlayerStats
+from cfb_strength.contracts import (
+    PLAYER_STAT_MAX_FIELDS,
+    PlayerLeaderCategory,
+    PlayerStats,
+)
 
 STAT_COLUMNS: tuple[str, ...] = tuple(PlayerStats.__dataclass_fields__)
 
@@ -40,6 +44,26 @@ def null_aware_sum(column: str) -> str:
     SUM skips NULLs, which would turn an untracked season into a partial
     total that reads as a career."""
     return f"CASE WHEN COUNT({column}) = COUNT(*) THEN SUM({column}) END"
+
+
+def stat_total(column: str) -> str:
+    """How a stat column combines several season lines into one total: the
+    null-aware SUM, except plain MAX for `contracts.PLAYER_STAT_MAX_FIELDS`
+    (issue #334). A "long" does not add up -- a kicker whose three season
+    longs are 53, 47 and 52 has a career long of 53, not 152.
+
+    The MAX is deliberately *not* null-aware. SQL's MAX skips NULLs and is
+    NULL over an all-NULL group, which is what a long wants: a player with
+    one kicking season keeps that season's long instead of losing it to the
+    seasons he never kicked in. A total that adds up can't do that, because
+    an untracked season would read as a partial career.
+
+    The column set comes from the contract, never a list here, so a third
+    MAX column is handled without touching this module.
+    """
+    if column in PLAYER_STAT_MAX_FIELDS:
+        return f"MAX({column})"
+    return null_aware_sum(column)
 
 
 def lines_cte(*, by_player: bool, by_season_type: bool) -> str:
@@ -98,8 +122,10 @@ def lines_cte(*, by_player: bool, by_season_type: bool) -> str:
 def totals_select(category: PlayerLeaderCategory = "passing") -> str:
     """The per-(player, season_type) aggregate over `lines`. `qualifies` is
     `category`'s leaderboard rule (`QUALIFYING`) holding on any line; the
-    totals themselves are the same whatever the category."""
-    stats = ", ".join(f"{null_aware_sum(c)} AS {c}" for c in STAT_COLUMNS)
+    totals themselves are the same whatever the category. Each stat column
+    combines by `stat_total`, so a career "long" is a MAX and everything
+    else a null-aware SUM."""
+    stats = ", ".join(f"{stat_total(c)} AS {c}" for c in STAT_COLUMNS)
     return f"""
     SELECT player_id, season_type,
            COUNT(*) AS seasons,

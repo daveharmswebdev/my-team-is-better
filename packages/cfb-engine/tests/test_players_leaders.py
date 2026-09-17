@@ -10,6 +10,7 @@ import pytest
 
 from cfb_strength.contracts import (
     PLAYER_LEADERS_MAX_LIMIT,
+    PLAYER_STAT_MAX_FIELDS,
     PlayerLeaderRow,
     PlayerStats,
     StarterRecord,
@@ -243,19 +244,50 @@ def test_no_season_rows_makes_every_total_and_games_none(db: PlayerDb) -> None:
 
 def test_a_start_only_season_makes_the_career_total_none(db: PlayerDb) -> None:
     # A season he started but has no stat row for is untracked, so a total
-    # over his seasons is partial and must not read as a career.
+    # over his seasons is partial and must not read as a career. The MAX
+    # columns are the deliberate exception (#334): a long is the best of the
+    # seasons that have one, so an untracked season skips it instead of
+    # erasing it.
     home, away = db.team("Home"), db.team("Away")
     p = db.player("Gap Year")
-    db.season(p, 2000, games=16, **full_stats(attempts=10, passing_yards=100))
+    db.season(p, 2000, games=16, **full_stats(attempts=10, passing_yards=100, fg_long=49))
     g = db.game(2001, home, away, 10, 3)
     db.start(g, home, p)
     conn = conn_of(db)
 
     row = get_player_leaders(conn, sport="nfl").rows[0]
 
-    assert row.stats == PlayerStats()
+    summed = {f.name: getattr(row.stats, f.name) for f in fields(PlayerStats)}
+    assert all(summed.pop(name) is not None for name in PLAYER_STAT_MAX_FIELDS)
+    assert set(summed.values()) == {None}
+    assert row.stats.fg_long == 49
     assert row.games is None
     assert (row.first_season, row.last_season) == (2000, 2001)
+
+
+# --- the MAX columns (#334) -------------------------------------------------
+
+
+def test_a_leaders_rows_long_is_the_max_of_the_season_longs_not_their_sum(db: PlayerDb) -> None:
+    # `totals_select` is shared, so a leaders row combines the
+    # `PLAYER_STAT_MAX_FIELDS` columns the same way a career page does.
+    p = db.player("Kicker", position="K")
+    for season, fg_long, pt_long in [(2000, 53, 61), (2001, 47, 58), (2002, 52, 62)]:
+        db.season(p, season, games=16, **full_stats(fg_long=fg_long, pt_long=pt_long))
+    q = db.player("Part Time Kicker")
+    db.season(q, 2000, games=16, **full_stats(attempts=1, fg_long=None, pt_long=None))
+    db.season(q, 2001, games=16, **full_stats(attempts=1, fg_long=48, pt_long=55))
+    conn = conn_of(db)
+
+    rows = {r.display_name: r for r in get_player_leaders(conn, sport="nfl").rows}
+
+    assert rows["Kicker"].stats.fg_long == 53
+    assert rows["Kicker"].stats.pt_long == 62
+    # A NULL season skips the MAX rather than poisoning it.
+    assert rows["Part Time Kicker"].stats.fg_long == 48
+    assert rows["Part Time Kicker"].stats.pt_long == 55
+    # The columns beside them keep the null-aware SUM rule.
+    assert rows["Kicker"].stats.fg_made == 3
 
 
 # --- W-L-T ------------------------------------------------------------------
