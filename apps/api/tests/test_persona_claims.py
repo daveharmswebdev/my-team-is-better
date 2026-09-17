@@ -36,6 +36,7 @@ from fixtures.claim_blocks import (
     cfb_catalog,
     cfb_comparison_block,
     cfb_team_case_block,
+    game_claim,
     method_comparison_block,
     nfl_tie_comparison_block,
     rejected,
@@ -121,22 +122,7 @@ def alabama_auburn_2017() -> str:
     return cfb_comparison_block(2017, "Alabama", "Auburn")
 
 
-def _game(
-    claim_id: str,
-    kind: str,
-    team: str,
-    opponent: str,
-    result: str,
-    **extra: object,
-) -> dict[str, object]:
-    return {
-        "id": claim_id,
-        "kind": kind,
-        "team": team,
-        "opponent": opponent,
-        "result": result,
-        **extra,
-    }
+_game = game_claim
 
 
 def _row(block: str, *path: str | int) -> Any:

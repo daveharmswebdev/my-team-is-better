@@ -78,16 +78,19 @@ def cfb_comparison_block(year: int, team_a: str, team_b: str, method: Method = "
     return comparison_fact_block_json(ComparisonResultOut.from_dataclass(comparison))
 
 
-def nfl_tie_comparison_block(sport_db: Path) -> str:
-    """2023 Kilo Kings vs Lima Lions (keener) from a `make_sport_fixture_db` db."""
+def nfl_comparison_block(sport_db: Path, team_a: str, team_b: str) -> str:
+    """A 2023 NFL comparison (keener) from a `make_sport_fixture_db` db."""
     conn = get_conn(sport_db, read_only=True)
     try:
-        comparison = build_comparison(
-            conn, NFL_YEAR, KILO_KINGS, LIMA_LIONS, method="keener", sport="nfl"
-        )
+        comparison = build_comparison(conn, NFL_YEAR, team_a, team_b, method="keener", sport="nfl")
     finally:
         conn.close()
     return comparison_fact_block_json(ComparisonResultOut.from_dataclass(comparison))
+
+
+def nfl_tie_comparison_block(sport_db: Path) -> str:
+    """2023 Kilo Kings vs Lima Lions (keener) from a `make_sport_fixture_db` db."""
+    return nfl_comparison_block(sport_db, KILO_KINGS, LIMA_LIONS)
 
 
 def catalog_of(db: Path, sport: str) -> tuple[TeamRecord, ...]:
@@ -109,6 +112,27 @@ def method_comparison_block(method_db: Path, method: Method) -> str:
     finally:
         conn.close()
     return comparison_fact_block_json(ComparisonResultOut.from_dataclass(comparison))
+
+
+def game_claim(
+    claim_id: str,
+    kind: str,
+    team: str,
+    opponent: str,
+    result: str,
+    **extra: object,
+) -> dict[str, object]:
+    """One `game_score`, `margin`, `when` or `where` claim, which name two
+    teams and a result; `extra` carries `week` / `season_type` when a rematch
+    needs picking apart."""
+    return {
+        "id": claim_id,
+        "kind": kind,
+        "team": team,
+        "opponent": opponent,
+        "result": result,
+        **extra,
+    }
 
 
 def submit(

@@ -23,7 +23,7 @@ blob, not on narration content -- never needs to know persona internals
 exist, and never opens a real Postgres connection or calls the real Claude
 API. Tests that care about narration behavior specifically (
 `test_verdict_persona.py`) override these two further, on top of this
-fixture, with their own scripted fakes.
+fixture, with a scripted `FakeNarrator` of their own.
 
 Since issue #296 that db also carries a real NFL 1999 + 2023 slice of games
 and player stats, with no NFL ratings, for the player endpoints
@@ -50,33 +50,14 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import FakeNarrator
 from fixtures.sport_fixture import make_sport_fixture_db
 
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
-
-    from api.persona.claude_client import NarratorReply
-
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
-
-
-class _StubNarrator:
-    """Default `Narrator` test double for the base `client` fixture. It
-    submits a line with no numbers, no proper-noun team names and no claims,
-    so the claim validator accepts it regardless of the fact block it's
-    given, and it never needs a retry -- `test_verdict.py` only cares that a
-    `narration` key exists in the envelope, not what it says.
-    """
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        from api.persona.claude_client import tool_reply
-
-        return tool_reply({"text": "Solid case, no notes.", "claims": []})
 
 
 @pytest.fixture
@@ -106,7 +87,7 @@ def client() -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db_conn] = _override
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
-    app.dependency_overrides[get_narrator] = lambda: _StubNarrator()
+    app.dependency_overrides[get_narrator] = lambda: FakeNarrator()
     try:
         yield TestClient(app)
     finally:
@@ -135,7 +116,7 @@ def sport_client(tmp_path: Path) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db_conn] = _override
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
-    app.dependency_overrides[get_narrator] = lambda: _StubNarrator()
+    app.dependency_overrides[get_narrator] = lambda: FakeNarrator()
     try:
         yield TestClient(app)
     finally:
@@ -167,7 +148,7 @@ def team_catalog_client(tmp_path: Path) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_db_conn] = _override
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
-    app.dependency_overrides[get_narrator] = lambda: _StubNarrator()
+    app.dependency_overrides[get_narrator] = lambda: FakeNarrator()
     try:
         yield TestClient(app)
     finally:

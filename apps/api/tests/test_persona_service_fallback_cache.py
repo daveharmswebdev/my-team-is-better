@@ -22,15 +22,14 @@ from pathlib import Path
 import anthropic
 import httpx2
 import pytest
-from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
+from fixtures.narrator_fake import FakeNarrator
 
 from api.config import PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
 from api.persona.service import (
     comparison_fact_block_json,
@@ -48,19 +47,6 @@ ROUTES = ["team_case", "compare"]
 REAL_NARRATION = "Solid case, no notes."
 # A number typed into the prose instead of claimed: rejected every time.
 REJECTED_NARRATION = "They won that one by 987654 points."
-
-
-class _ScriptedNarrator:
-    def __init__(self, responses: list[str] | None = None, error: Exception | None = None) -> None:
-        self.responses = list(responses or [])
-        self.error = error
-        self.calls: list[list[MessageParam]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(messages)
-        if self.error is not None:
-            raise self.error
-        return tool_reply({"text": self.responses.pop(0), "claims": []})
 
 
 @pytest.fixture
@@ -88,7 +74,7 @@ def _ask(
     route: str,
     conn: sqlite3.Connection,
     cache: InMemoryNarrationCache,
-    narrator: _ScriptedNarrator,
+    narrator: FakeNarrator,
 ) -> NarrationOut:
     # The catalog the route reads once for `user_team` (issues #245, #291).
     catalog = list_team_records(conn, "cfb")
@@ -155,7 +141,7 @@ def test_real_narration_is_cached_under_the_expected_key(
     """Guards `_key`: without it, the "not cached" assertions below could
     pass vacuously by looking up the wrong key."""
     cache = InMemoryNarrationCache()
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     out = _ask(route, conn, cache, narrator)
 
@@ -168,7 +154,7 @@ def test_rejected_submission_fallback_is_served_uncached_and_not_stored(
     route: str, conn: sqlite3.Connection
 ) -> None:
     cache = InMemoryNarrationCache()
-    narrator = _ScriptedNarrator([REJECTED_NARRATION, REJECTED_NARRATION])
+    narrator = FakeNarrator([REJECTED_NARRATION, REJECTED_NARRATION])
 
     out = _ask(route, conn, cache, narrator)
 
@@ -183,7 +169,7 @@ def test_transport_error_fallback_is_served_uncached_and_not_stored(
 ) -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     cache = InMemoryNarrationCache()
-    narrator = _ScriptedNarrator(error=anthropic.APIConnectionError(request=request))
+    narrator = FakeNarrator(always=anthropic.APIConnectionError(request=request))
 
     out = _ask(route, conn, cache, narrator)
 
@@ -200,7 +186,7 @@ def test_request_after_a_fallback_asks_the_narrator_again(
     happens to catch a fallback that was wrongly cached. Hence the empty-cache
     check between the two requests."""
     cache = InMemoryNarrationCache()
-    narrator = _ScriptedNarrator([REJECTED_NARRATION, REJECTED_NARRATION, REAL_NARRATION])
+    narrator = FakeNarrator([REJECTED_NARRATION, REJECTED_NARRATION, REAL_NARRATION])
 
     first = _ask(route, conn, cache, narrator)
 
@@ -220,7 +206,7 @@ def test_legacy_cached_fallback_is_a_miss_and_is_overwritten_by_a_real_narration
 ) -> None:
     cache = InMemoryNarrationCache()
     cache.set(_key(route, conn), CachedNarration(text=_fallback_text(route, conn), contested=False))
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     first = _ask(route, conn, cache, narrator)
 
@@ -243,7 +229,7 @@ def test_legacy_cached_fallback_that_fails_again_is_served_uncached(
     fallback = _fallback_text(route, conn)
     cache = InMemoryNarrationCache()
     cache.set(_key(route, conn), CachedNarration(text=fallback, contested=False))
-    narrator = _ScriptedNarrator([REJECTED_NARRATION, REJECTED_NARRATION])
+    narrator = FakeNarrator([REJECTED_NARRATION, REJECTED_NARRATION])
 
     out = _ask(route, conn, cache, narrator)
 
@@ -259,7 +245,7 @@ def test_real_cached_narration_is_still_served_without_a_narrator_call(
     cache.set(
         _key(route, conn), CachedNarration(text="A real, earlier narration.", contested=False)
     )
-    narrator = _ScriptedNarrator([])
+    narrator = FakeNarrator([])
 
     out = _ask(route, conn, cache, narrator)
 

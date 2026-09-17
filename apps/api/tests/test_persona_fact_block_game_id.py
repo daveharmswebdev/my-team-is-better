@@ -39,23 +39,19 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fastapi.testclient import TestClient
-from fixtures.narration import user_text
+from fixtures.narrator_fake import FakeNarrator
 
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, Method, TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache
-from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import comparison_fact_block_json, team_case_fact_block_json
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -292,21 +288,8 @@ def test_comparison_fact_block_is_the_pre_218_block_byte_for_byte(
 # ---------------------------------------------------------------------------
 
 
-class _RecordingNarrator:
-    """Records every user message it is handed and submits a line with no
-    numbers, no team names and no claims, so the claim validator always
-    accepts it."""
-
-    def __init__(self) -> None:
-        self.messages: list[str] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.messages.extend(user_text(m) for m in messages)
-        return tool_reply({"text": "Solid case, no notes.", "claims": []})
-
-
 @contextmanager
-def _wired(narrator: _RecordingNarrator) -> Iterator[None]:
+def _wired(narrator: FakeNarrator) -> Iterator[None]:
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
     app.dependency_overrides[get_narrator] = lambda: narrator
     try:
@@ -327,7 +310,7 @@ def _fact_block_of(user_message: str) -> Any:
 def test_team_case_response_carries_game_id_but_the_narrator_never_sees_it(
     client: TestClient,
 ) -> None:
-    narrator = _RecordingNarrator()
+    narrator = FakeNarrator()
     with _wired(narrator):
         response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "Texas"})
 
@@ -341,7 +324,7 @@ def test_team_case_response_carries_game_id_but_the_narrator_never_sees_it(
         253370251,
     ]
 
-    (user_message,) = narrator.messages
+    ((user_message,),) = (call.user_texts for call in narrator.calls)
     assert "game_id" not in set(_keys(_fact_block_of(user_message)))
     assert _NINE_DIGITS.search(user_message) is None
 
@@ -349,7 +332,7 @@ def test_team_case_response_carries_game_id_but_the_narrator_never_sees_it(
 def test_compare_response_carries_game_id_but_the_narrator_never_sees_it(
     client: TestClient,
 ) -> None:
-    narrator = _RecordingNarrator()
+    narrator = FakeNarrator()
     with _wired(narrator):
         response = client.post(
             "/api/verdict/compare",
@@ -365,6 +348,6 @@ def test_compare_response_carries_game_id_but_the_narrator_never_sees_it(
             for meeting in common[side]:
                 assert isinstance(meeting["game_id"], int) and meeting["game_id"] > 0
 
-    (user_message,) = narrator.messages
+    ((user_message,),) = (call.user_texts for call in narrator.calls)
     assert "game_id" not in set(_keys(_fact_block_of(user_message)))
     assert _NINE_DIGITS.search(user_message) is None

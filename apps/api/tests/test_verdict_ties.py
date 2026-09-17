@@ -17,9 +17,8 @@ from typing import Any
 
 import anthropic
 import httpx2
-from anthropic.types import MessageParam
 from fastapi.testclient import TestClient
-from fixtures.narration import user_text
+from fixtures.narrator_fake import FakeNarrator
 from fixtures.sport_fixture import (
     TIE_OPPONENT,
     TIE_RIVAL,
@@ -31,29 +30,10 @@ from fixtures.sport_fixture import (
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.persona.cache import InMemoryNarrationCache
-from api.persona.claude_client import NarratorReply, tool_reply
-
-
-class _RecordingNarrator:
-    """Submits scripted tool inputs (or raises `error` on every call), and
-    records every message list it was handed."""
-
-    def __init__(
-        self, responses: list[dict[str, object]] | None = None, error: Exception | None = None
-    ) -> None:
-        self.responses = list(responses or [])
-        self.error = error
-        self.calls: list[list[MessageParam]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(list(messages))
-        if self.error is not None:
-            raise self.error
-        return tool_reply(self.responses.pop(0))
 
 
 @contextmanager
-def _wired(narrator: _RecordingNarrator) -> Iterator[None]:
+def _wired(narrator: FakeNarrator) -> Iterator[None]:
     app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
     app.dependency_overrides[get_narrator] = lambda: narrator
     try:
@@ -190,8 +170,8 @@ def test_openapi_schema_carries_ties_and_the_t_result() -> None:
 def test_fact_block_given_to_claude_describes_the_tie_as_a_tie(
     sport_client: TestClient,
 ) -> None:
-    narrator = _RecordingNarrator(
-        responses=[
+    narrator = FakeNarrator(
+        [
             {
                 "text": "Look at {rec} in {yr}.",
                 "claims": [
@@ -205,7 +185,7 @@ def test_fact_block_given_to_claude_describes_the_tie_as_a_tie(
     with _wired(narrator):
         body = _team_case(sport_client)
 
-    facts = _fact_block(user_text(narrator.calls[0][0]))
+    facts = _fact_block(narrator.calls[0].user_texts[0])
     assert facts["ties"] == 1
     # Kilo Kings met Mike Mustangs twice (#130); the week-2 tie is still a tie.
     mustangs_results = [g["result"] for g in facts["games"] if g["opponent_name"] == TIE_OPPONENT]
@@ -221,7 +201,7 @@ def test_fallback_narration_for_a_tied_team_states_its_w_l_t_record(
     sport_client: TestClient,
 ) -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-    narrator = _RecordingNarrator(error=anthropic.APIConnectionError(request=request))
+    narrator = FakeNarrator(always=anthropic.APIConnectionError(request=request))
 
     with _wired(narrator):
         body = _team_case(sport_client)

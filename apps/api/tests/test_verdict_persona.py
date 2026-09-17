@@ -22,6 +22,7 @@ from anthropic.types import MessageParam
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_team_case
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import FakeNarrator
 
 from api.config import PROMPT_VERSION
 from api.deps import get_narration_cache, get_narrator
@@ -29,7 +30,6 @@ from api.main import app
 from api.models import TeamCaseOut
 from api.persona.cache import InMemoryNarrationCache, NarrationCacheStore, cache_key
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.service import team_case_fact_block_json
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
@@ -73,27 +73,6 @@ def _usc_2005_team_case_key() -> str:
     )
 
 
-class FakeNarrator:
-    """Test double for `Narrator` -- submits a scripted sequence of tool
-    inputs (or raises a scripted exception on every call), and records every
-    call it received so tests can assert on call count and on the retry
-    feedback's content without a live API key.
-    """
-
-    def __init__(
-        self, responses: list[dict[str, object]] | None = None, error: Exception | None = None
-    ) -> None:
-        self.responses = list(responses or [])
-        self.error = error
-        self.calls: list[list[MessageParam]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(messages)
-        if self.error is not None:
-            raise self.error
-        return tool_reply(self.responses.pop(0))
-
-
 def _retry_feedback(message: MessageParam) -> str:
     """The claim errors a retry's `is_error` tool_result carries."""
     content = message["content"]
@@ -125,7 +104,7 @@ def _wired(
 
 
 def test_champion_response_wraps_evidence_and_narration(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=[TEXAS_RAN_THE_TABLE])
+    narrator = FakeNarrator([TEXAS_RAN_THE_TABLE])
 
     with _wired(narrator):
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -141,9 +120,7 @@ def test_champion_response_wraps_evidence_and_narration(client: TestClient) -> N
 
 def test_team_case_response_wraps_evidence_and_narration(client: TestClient) -> None:
     narrator = FakeNarrator(
-        responses=[
-            {"text": "{rec} put up a real season in {yr}.", "claims": [_record("USC"), _YEAR]}
-        ]
+        [{"text": "{rec} put up a real season in {yr}.", "claims": [_record("USC"), _YEAR]}]
     )
 
     with _wired(narrator):
@@ -156,7 +133,7 @@ def test_team_case_response_wraps_evidence_and_narration(client: TestClient) -> 
 
 
 def test_compare_response_wraps_evidence_and_narration(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=[{"text": "Texas edges out USC in {yr}.", "claims": [_YEAR]}])
+    narrator = FakeNarrator([{"text": "Texas edges out USC in {yr}.", "claims": [_YEAR]}])
 
     with _wired(narrator):
         response = client.post(
@@ -176,7 +153,7 @@ def test_compare_response_wraps_evidence_and_narration(client: TestClient) -> No
 
 
 def test_cache_miss_calls_claude_and_stores_the_result(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=[TEXAS_RAN_THE_TABLE])
+    narrator = FakeNarrator([TEXAS_RAN_THE_TABLE])
 
     with _wired(narrator) as cache:
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -189,7 +166,7 @@ def test_cache_miss_calls_claude_and_stores_the_result(client: TestClient) -> No
 
 
 def test_cache_hit_skips_the_claude_call_entirely(client: TestClient) -> None:
-    narrator = FakeNarrator(responses=[TEXAS_RAN_THE_TABLE])
+    narrator = FakeNarrator([TEXAS_RAN_THE_TABLE])
 
     with _wired(narrator):
         first = client.post("/api/verdict/champion", json={"year": 2005})
@@ -215,9 +192,7 @@ def test_same_named_team_in_another_sport_does_not_get_the_other_sports_cached_n
     """
     nfl_text = "the pro version, no notes."
     cfb_text = "the college version, no notes."
-    narrator = FakeNarrator(
-        responses=[{"text": nfl_text, "claims": []}, {"text": cfb_text, "claims": []}]
-    )
+    narrator = FakeNarrator([{"text": nfl_text, "claims": []}, {"text": cfb_text, "claims": []}])
 
     with _wired(narrator):
         nfl = sport_client.post(
@@ -249,7 +224,7 @@ def test_a_rejected_submission_retries_once_with_the_claim_errors_fed_back(
     client: TestClient,
 ) -> None:
     narrator = FakeNarrator(
-        responses=[
+        [
             # Alabama is not a team in USC's 2005 fact block.
             {"text": "USC would have smoked Alabama too, probably.", "claims": []},
             {"text": "USC put together a real season in {yr}.", "claims": [_YEAR]},
@@ -262,7 +237,7 @@ def test_a_rejected_submission_retries_once_with_the_claim_errors_fed_back(
     assert response.status_code == 200
     assert response.json()["narration"]["text"] == "USC put together a real season in 2005."
     assert len(narrator.calls) == 2
-    assert "Alabama" in _retry_feedback(narrator.calls[1][-1])
+    assert "Alabama" in _retry_feedback(narrator.calls[1].messages[-1])
     # A successful retry is cached under the key the fallback test below
     # checks, so that test's "not cached" can't pass on a wrong key.
     cached = cache.get(_usc_2005_team_case_key())
@@ -274,7 +249,7 @@ def test_two_rejected_submissions_serve_the_fallback_and_never_make_a_third_call
     client: TestClient,
 ) -> None:
     narrator = FakeNarrator(
-        responses=[
+        [
             {"text": "USC would have smoked Alabama too, probably.", "claims": []},
             {"text": "Honestly Alabama could have gone undefeated as well.", "claims": []},
         ]
@@ -295,7 +270,7 @@ def test_two_rejected_submissions_serve_the_fallback_and_never_make_a_third_call
 
 def test_claude_api_error_falls_back_safely_instead_of_500ing(client: TestClient) -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
-    narrator = FakeNarrator(error=anthropic.APIConnectionError(request=request))
+    narrator = FakeNarrator(always=anthropic.APIConnectionError(request=request))
 
     with _wired(narrator):
         response = client.post("/api/verdict/team-case", json={"year": 2005, "team": "USC"})

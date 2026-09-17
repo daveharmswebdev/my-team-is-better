@@ -30,30 +30,19 @@ from typing import Any
 
 import psycopg
 import pytest
-from anthropic.types import MessageParam
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import FakeNarrator
 
 import api.main as main_module
 import api.persona.cache as cache_module
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.persona.cache import CachedNarration, PostgresNarrationCache
-from api.persona.claude_client import NarratorReply, tool_reply
 
 REAL_NARRATION = "Solid case, no notes."
 READ_ERROR = "read side: server closed the connection unexpectedly"
 WRITE_ERROR = "write side: could not connect to server"
 FAKE_DSN = "postgresql://cache.invalid/persona"
-
-
-class _ScriptedNarrator:
-    def __init__(self, responses: list[str]) -> None:
-        self.responses = list(responses)
-        self.calls = 0
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls += 1
-        return tool_reply({"text": self.responses.pop(0), "claims": []})
 
 
 class _FailingStore:
@@ -86,7 +75,7 @@ class _FailingStore:
 
 
 @contextmanager
-def _wired(store: _FailingStore, narrator: _ScriptedNarrator) -> Iterator[None]:
+def _wired(store: _FailingStore, narrator: FakeNarrator) -> Iterator[None]:
     app.dependency_overrides[get_narration_cache] = lambda: store
     app.dependency_overrides[get_narrator] = lambda: narrator
     try:
@@ -109,7 +98,7 @@ def test_cache_read_failure_is_a_logged_miss_and_the_verdict_still_narrates(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = _FailingStore(get_error=psycopg.OperationalError(READ_ERROR))
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     with _wired(store, narrator), caplog.at_level(logging.WARNING):
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -119,7 +108,7 @@ def test_cache_read_failure_is_a_logged_miss_and_the_verdict_still_narrates(
     assert body["evidence"]["team_name"] == "Texas"
     assert body["narration"]["text"] == REAL_NARRATION
     assert body["narration"]["cached"] is False
-    assert narrator.calls == 1
+    assert len(narrator.calls) == 1
     # The write side is healthy, so the narration is still stored.
     assert list(store.store.values()) == [CachedNarration(text=REAL_NARRATION, contested=False)]
     warnings = _api_warnings(caplog)
@@ -131,7 +120,7 @@ def test_cache_write_failure_is_logged_and_the_verdict_is_still_returned(
     client: TestClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     store = _FailingStore(set_error=psycopg.OperationalError(WRITE_ERROR))
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     with _wired(store, narrator), caplog.at_level(logging.WARNING):
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -153,7 +142,7 @@ def test_cache_read_and_write_both_failing_still_serves_the_verdict(
         get_error=psycopg.OperationalError(READ_ERROR),
         set_error=psycopg.OperationalError(WRITE_ERROR),
     )
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     with _wired(store, narrator), caplog.at_level(logging.WARNING):
         response = client.post("/api/verdict/champion", json={"year": 2005})
@@ -170,7 +159,7 @@ def test_cache_read_and_write_both_failing_still_serves_the_verdict(
 
 def test_healthy_store_still_serves_a_cached_hit(client: TestClient) -> None:
     store = _FailingStore()
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     with _wired(store, narrator):
         first = client.post("/api/verdict/champion", json={"year": 2005})
@@ -179,7 +168,7 @@ def test_healthy_store_still_serves_a_cached_hit(client: TestClient) -> None:
     assert first.json()["narration"]["cached"] is False
     assert second.json()["narration"]["cached"] is True
     assert second.json()["narration"]["text"] == REAL_NARRATION
-    assert narrator.calls == 1
+    assert len(narrator.calls) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +178,7 @@ def test_healthy_store_still_serves_a_cached_hit(client: TestClient) -> None:
 
 def test_non_database_error_from_cache_read_still_propagates(client: TestClient) -> None:
     store = _FailingStore(get_error=RuntimeError("a programming bug in the cache path"))
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     with _wired(store, narrator), pytest.raises(RuntimeError, match="programming bug"):
         client.post("/api/verdict/champion", json={"year": 2005})
@@ -197,7 +186,7 @@ def test_non_database_error_from_cache_read_still_propagates(client: TestClient)
 
 def test_non_database_error_from_cache_write_still_propagates(client: TestClient) -> None:
     store = _FailingStore(set_error=RuntimeError("a programming bug in the cache path"))
-    narrator = _ScriptedNarrator([REAL_NARRATION])
+    narrator = FakeNarrator([REAL_NARRATION])
 
     with _wired(store, narrator), pytest.raises(RuntimeError, match="programming bug"):
         client.post("/api/verdict/champion", json={"year": 2005})
