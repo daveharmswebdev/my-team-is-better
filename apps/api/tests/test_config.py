@@ -213,7 +213,7 @@ def test_prompt_version_is_past_the_losing_score_first_rule_5() -> None:
 
 def test_prompt_version_is_past_the_typed_score_prompt() -> None:
     """Issue #291 changed the system prompt itself: the narrator no longer
-    types numbers and has them checked by `api.persona.grounding`; it submits
+    types numbers for a lexical checker to match (#292 deleted it); it submits
     a `submit_narration` tool call whose placeholders the server renders from
     typed claims. Rule 1, rule 5 and the worked examples were rewritten, and
     the tool schema's description strings are prompt-facing too. Since #145

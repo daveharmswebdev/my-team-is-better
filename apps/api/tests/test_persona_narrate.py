@@ -20,17 +20,14 @@ path below asserts that flag, not just the text.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from dataclasses import dataclass
 
 import anthropic
 import httpx2
 import pytest
 from anthropic.types import MessageParam
 from fixtures.claim_blocks import cfb_catalog, cfb_team_case_block
+from fixtures.narrator_fake import FakeNarrator, no_tool_reply
 
-from api.persona import grounding
-from api.persona import narrate as narrate_module
 from api.persona.claims import TOOL_NAME, check_and_render
 from api.persona.claude_client import NarratorReply, ToolCall, tool_reply
 from api.persona.narrate import (
@@ -70,36 +67,7 @@ def _block() -> str:
     return cfb_team_case_block(2005, "Texas")
 
 
-@dataclass(frozen=True)
-class _Call:
-    system: str
-    messages: list[MessageParam]
-
-
-class _ScriptedNarrator:
-    """Answers each call with the next scripted reply, or raises it."""
-
-    def __init__(self, replies: Sequence[NarratorReply | Exception]) -> None:
-        self.replies = list(replies)
-        self.calls: list[_Call] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        self.calls.append(_Call(system=system, messages=list(messages)))
-        reply = self.replies.pop(0)
-        if isinstance(reply, Exception):
-            raise reply
-        return reply
-
-
-def _no_tool_call(text: str = "Texas, easy.") -> NarratorReply:
-    return NarratorReply(
-        tool_call=None,
-        assistant_content=({"type": "text", "text": text},),
-        stop_reason="end_turn",
-    )
-
-
-def _narrate(narrator: _ScriptedNarrator, *, user_team: str | None = None) -> NarrationResult:
+def _narrate(narrator: FakeNarrator, *, user_team: str | None = None) -> NarrationResult:
     return narrate(
         fact_block_json=_block(),
         user_team=user_team,
@@ -145,7 +113,7 @@ def test_the_fixture_submissions_are_what_these_tests_say() -> None:
 
 
 def test_a_valid_first_submission_serves_the_rendered_text_with_one_call() -> None:
-    narrator = _ScriptedNarrator([tool_reply(GOOD)])
+    narrator = FakeNarrator([tool_reply(GOOD)])
 
     result = _narrate(narrator)
 
@@ -161,7 +129,7 @@ def test_a_valid_first_submission_serves_the_rendered_text_with_one_call() -> No
 
 def test_a_rejected_submission_is_retried_once_with_its_errors_as_an_error_tool_result() -> None:
     first = tool_reply(BAD, tool_use_id="toolu_first")
-    narrator = _ScriptedNarrator([first, tool_reply(RETRY_GOOD, tool_use_id="toolu_second")])
+    narrator = FakeNarrator([first, tool_reply(RETRY_GOOD, tool_use_id="toolu_second")])
 
     result = _narrate(narrator)
 
@@ -183,13 +151,13 @@ def test_a_rejected_submission_is_retried_once_with_its_errors_as_an_error_tool_
 
 
 def test_a_second_rejection_serves_the_fallback_and_never_makes_a_third_call() -> None:
-    narrator = _ScriptedNarrator([tool_reply(BAD), tool_reply(BAD), tool_reply(GOOD)])
+    narrator = FakeNarrator([tool_reply(BAD), tool_reply(BAD), tool_reply(GOOD)])
 
     result = _narrate(narrator)
 
     assert result == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 2
-    assert len(narrator.replies) == 1
+    assert narrator.pending == 1, "the third scripted reply must never be asked for"
 
 
 def test_an_over_cap_submission_is_never_served() -> None:
@@ -199,7 +167,7 @@ def test_an_over_cap_submission_is_never_served() -> None:
         "text": " ".join(f"{{y{i}}}" for i in range(9)),
         "claims": claims,
     }
-    narrator = _ScriptedNarrator([tool_reply(over_cap), tool_reply(over_cap)])
+    narrator = FakeNarrator([tool_reply(over_cap), tool_reply(over_cap)])
 
     result = _narrate(narrator)
 
@@ -209,7 +177,7 @@ def test_an_over_cap_submission_is_never_served() -> None:
 
 
 def test_a_reply_with_no_tool_call_is_retried_with_a_text_turn() -> None:
-    narrator = _ScriptedNarrator([_no_tool_call(), tool_reply(GOOD)])
+    narrator = FakeNarrator([no_tool_reply(), tool_reply(GOOD)])
 
     result = _narrate(narrator)
 
@@ -226,21 +194,21 @@ def test_a_reply_with_no_tool_call_is_retried_with_a_text_turn() -> None:
 
 
 def test_two_replies_with_no_tool_call_serve_the_fallback() -> None:
-    narrator = _ScriptedNarrator([_no_tool_call(), _no_tool_call("Still Texas.")])
+    narrator = FakeNarrator([no_tool_reply(), no_tool_reply("Still Texas.")])
 
     assert _narrate(narrator) == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 2
 
 
 def test_a_connection_error_on_the_first_call_serves_the_fallback() -> None:
-    narrator = _ScriptedNarrator([_connection_error()])
+    narrator = FakeNarrator([_connection_error()])
 
     assert _narrate(narrator) == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 1
 
 
 def test_a_connection_error_on_the_retry_serves_the_fallback() -> None:
-    narrator = _ScriptedNarrator([tool_reply(BAD), _connection_error()])
+    narrator = FakeNarrator([tool_reply(BAD), _connection_error()])
 
     assert _narrate(narrator) == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 2
@@ -250,7 +218,7 @@ def test_a_status_error_serves_the_fallback() -> None:
     request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
     response = httpx2.Response(status_code=529, request=request)
     error = anthropic.APIStatusError("overloaded", response=response, body=None)
-    narrator = _ScriptedNarrator([error])
+    narrator = FakeNarrator([error])
 
     assert _narrate(narrator) == NarrationResult(text=FALLBACK_TEXT, is_fallback=True)
     assert len(narrator.calls) == 1
@@ -262,22 +230,16 @@ def test_a_hostile_tool_input_is_a_rejection_not_a_crash() -> None:
         assistant_content=(),
         stop_reason="tool_use",
     )
-    narrator = _ScriptedNarrator([hostile, tool_reply(GOOD)])
+    narrator = FakeNarrator([hostile, tool_reply(GOOD)])
 
     assert _narrate(narrator) == NarrationResult(text=GOOD_RENDERED, is_fallback=False)
 
 
-def test_production_narration_never_calls_the_lexical_grounding_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def _boom(*args: object, **kwargs: object) -> list[str]:
-        raise AssertionError("find_ungrounded_tokens was called")
-
-    monkeypatch.setattr(grounding, "find_ungrounded_tokens", _boom)
-    narrator = _ScriptedNarrator([tool_reply(BAD), tool_reply(GOOD)])
-
-    assert _narrate(narrator) == NarrationResult(text=GOOD_RENDERED, is_fallback=False)
-    assert not hasattr(narrate_module, "find_ungrounded_tokens")
+# `test_production_narration_never_calls_the_lexical_grounding_check` stood
+# here until #292. It monkeypatched `api.persona.grounding.find_ungrounded_tokens`
+# to raise and proved production never reached it; with that module deleted the
+# property is structural, and there is nothing left to import, let alone patch.
+# The rejection path it exercised is covered above, by `check_and_render`.
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +253,7 @@ def test_the_cap_is_ten_errors_and_eight_thousand_characters() -> None:
 
 def test_a_four_thousand_number_flood_feeds_back_exactly_the_first_ten_errors() -> None:
     errors = check_and_render(FLOOD, _block(), cfb_catalog()).errors
-    narrator = _ScriptedNarrator([tool_reply(FLOOD), tool_reply(GOOD)])
+    narrator = FakeNarrator([tool_reply(FLOOD), tool_reply(GOOD)])
 
     assert _narrate(narrator) == NarrationResult(text=GOOD_RENDERED, is_fallback=False)
 
@@ -336,7 +298,7 @@ def test_ten_or_fewer_short_errors_are_fed_back_whole() -> None:
 
 def test_the_fallback_warning_log_is_capped_too(caplog: pytest.LogCaptureFixture) -> None:
     errors = check_and_render(FLOOD, _block(), cfb_catalog()).errors
-    narrator = _ScriptedNarrator([tool_reply(FLOOD), tool_reply(FLOOD)])
+    narrator = FakeNarrator([tool_reply(FLOOD), tool_reply(FLOOD)])
 
     with caplog.at_level(logging.WARNING, logger="api.persona.narrate"):
         result = _narrate(narrator)

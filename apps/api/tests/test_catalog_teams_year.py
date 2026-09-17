@@ -34,17 +34,13 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pytest
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
+from fixtures.narrator_fake import FakeNarrator
 from fixtures.team_catalog_fixture import NEW_YEAR, OLD_YEAR, RELOCATED_PAIRS, UNINGESTED_YEAR
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
-
-    from api.persona.claude_client import NarratorReply
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -202,33 +198,6 @@ def test_teams_year_stays_within_its_sport(team_catalog_client: TestClient) -> N
 # ---------------------------------------------------------------------------
 
 
-class _RecordingNarrator:
-    """Narrator double that submits a scripted sequence of claim-less texts
-    and records the messages of every call it received (so a claim retry is
-    visible as a second call carrying the retry feedback)."""
-
-    def __init__(self, responses: list[str]) -> None:
-        self.responses = list(responses)
-        self.calls: list[list[MessageParam]] = []
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        from api.persona.claude_client import tool_reply
-
-        self.calls.append(list(messages))
-        return tool_reply({"text": self.responses.pop(0), "claims": []})
-
-
-def _retry_feedback(message: MessageParam) -> str:
-    """The claim errors a retry's `is_error` tool_result carries."""
-    content = message["content"]
-    assert not isinstance(content, str)
-    (block,) = list(content)
-    assert isinstance(block, dict) and block["type"] == "tool_result"
-    feedback = dict(block)["content"]
-    assert isinstance(feedback, str)
-    return feedback
-
-
 def test_grounding_team_universe_is_still_unscoped(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -247,8 +216,8 @@ def test_grounding_team_universe_is_still_unscoped(
     from api.main import app
     from api.persona.cache import InMemoryNarrationCache
 
-    narrator = _RecordingNarrator(
-        responses=[
+    narrator = FakeNarrator(
+        [
             "Abilene Christian never showed up on that schedule.",
             "Nobody in the country could hang with them.",
         ]
@@ -262,7 +231,9 @@ def test_grounding_team_universe_is_still_unscoped(
 
     assert response.status_code == 200
     assert len(narrator.calls) == 2, "the claim validator did not flag the unrated-team mention"
-    assert "Abilene Christian" in _retry_feedback(narrator.calls[1][-1])
+    feedback = narrator.calls[1].retry_feedback
+    assert feedback is not None
+    assert "Abilene Christian" in feedback
     assert response.json()["narration"]["text"] == "Nobody in the country could hang with them."
 
 

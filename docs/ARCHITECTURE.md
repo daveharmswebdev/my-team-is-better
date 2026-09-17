@@ -263,38 +263,61 @@ don't actually improve precision):
   split-decision years (2003, 2017 — the same list already used in
   `cfb-engine`'s validator) and instruct the persona to disclose it in
   character when true, argue it as unambiguous when false.
-- **Post-generation check, not just prompt instructions**: extract team
-  names/numbers mentioned in the persona's response with a cheap regex pass
-  and confirm they're a subset of the fact block's own team names/numbers.
-  Ratings are the only widening: a rating rounded to fewer decimals (#162),
-  or quoted the way the card displays it (#165), also counts (see
-  `api.persona.grounding`).
-  Fail → one retry with the specific mismatch appended as feedback (Domain
-  4.4's retry-with-error-feedback pattern — this works because the failure
-  is "said something not grounded," a correctable instruction-following
-  slip, not "the information doesn't exist," which retries can't fix
-  anyway). Fail twice → serve a safe templated fallback line instead of a
-  third Claude call, and log it for prompt iteration.
+- **Typed claims the server checks and renders, not a check on free text**
+  (epic #199, landed in #290/#291): the narrator never writes a number. It
+  answers with one forced `submit_narration` tool call
+  (`api.persona.claims.TOOL_NAME`) holding prose with `{placeholder}` ids and
+  a list of typed claims -- `record`, `rating`, `rank`, `game_score`,
+  `margin`, `rating_gap`, `year`, `count`, `win_pct`, `when`, `where` -- each
+  naming the team it is about. `api.persona.claims.check_and_render`
+  validates every claim against the fact block the `TeamCaseOut` /
+  `ComparisonResultOut` models built, and renders the numbers itself. What is
+  served is always that rendering (`ClaimOutcome.text`), never the narrator's
+  raw text. Because a claim carries its own team, a number can no longer be
+  credited to the wrong one -- the failure the lexical checker could not see
+  (Domain 5.6: the claim-source mapping is preserved structurally rather than
+  reconstructed afterwards).
+  A claim is capped at `MAX_CLAIMS` (8) with at most `MAX_GAME_SCORE_CLAIMS`
+  (3) game scores, and prose carrying a digit no claim rendered is rejected.
+  Fail -> one retry, the specific validator errors replayed as a
+  `tool_result` with `is_error: true` (Domain 4.4's retry-with-error-feedback
+  pattern -- this works because the failure is "said something not grounded,"
+  a correctable instruction-following slip, not "the information doesn't
+  exist," which retries can't fix anyway). The feedback is capped, because the
+  validator's error list is unbounded. Fail twice -> a safe templated fallback
+  instead of a third Claude call, logged for prompt iteration. A Claude
+  transport error skips straight to the fallback.
 - Show the underlying evidence (record, quality wins, worst loss, common
-  opponents) in the UI alongside the persona's paragraph, always — the
+  opponents) in the UI alongside the persona's paragraph, always -- the
   "receipts" stay visible so a checkable claim never depends solely on
   trusting the model's narration (Domain 5.6: preserve the claim-source
   mapping instead of letting the generation step be the only surface).
 
-**Redesign decided (founder, 2026-09-14; epic #199).** The post-generation
-check above is how grounding works today, and matching numbers in free text
-after the fact is the root cause of the grounding issue cluster: it can't tell
-which team a number is said about. The accepted direction is typed claims.
+**How this replaced the original design (epic #199).** Grounding used to be a
+post-generation lexical check: `api.persona.grounding` pulled team names and
+numbers out of the finished prose with regexes and confirmed they were a
+subset of the fact block's, widening for ratings rounded to fewer decimals
+(#162) or quoted the way the card displays them (#165). Nothing tied a number
+to the team it was said about, so every fix added one more accepted form and
+the module grew from 561 lines to 1,580. The spike (#200) measured it
+rejecting 5 of 15 *correct* narrations, and the founder accepted typed claims
+on 2026-09-15. The lexical checker was replaced, not layered under the new
+one, and #292 deleted it.
 
-- The narrator returns placeholders or claims (`{kind: score|record|rating|rank,
-  team, ...}`) through tool use, used for structured output only. It still
-  gets no lookup tools, so §4.1's rule stands.
-- The server validates each claim against the `TeamCaseOut` /
-  `ComparisonResultOut` models and renders the number itself.
-- The lexical check shrinks to "no digits outside placeholders".
+Two consequences worth knowing:
 
-A timeboxed spike (#200) decides go/no-go first. Until the epic lands, no new
-grounding patches, security fixes excepted.
+- **The cache key carries the checker's version.** `api.persona.cache` keys on
+  `(sport, method, PROMPT_VERSION, sha256(fact block), GROUNDING_VERSION)`, and
+  `GROUNDING_VERSION` is `api.persona.claims`'s (`claims-v1`) since #291. A
+  tightening of what the validator accepts invalidates exactly the rows checked
+  under the old rules (#145).
+- **Timing and venue are rendered, never typed** (founder decision, option C,
+  2026-09-15): `when` renders from the game's position in the date-ordered list
+  and `where` from the game row, with no production word list policing the
+  narrator's phrasing. A rate detector in the persona eval measures how often
+  narrator-typed timing or venue wording still appears; it never blocks a
+  response. Home/away on evidence rows (#294) is what will let `where` say "at
+  home" or "on the road" rather than only flagging a neutral site.
 
 ### 4.4 Error handling as persona copy (Domain 2.2, 5.3)
 

@@ -32,9 +32,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import pytest
-from anthropic.types import MessageParam
 from fastapi.testclient import TestClient
 from fixtures.claim_blocks import cfb_catalog, cfb_team_case_block
+from fixtures.narrator_fake import FakeNarrator
 from fixtures.persona_eval import (
     MAX_CHARACTERS,
     EvalSummary,
@@ -392,19 +392,11 @@ def test_fact_block_from_user_turn_rejects_a_changed_turn_shape(texas_block: str
         fact_block_from_user_turn("FACTS:\n" + texas_block)
 
 
-class _ScriptedNarrator:
-    def __init__(self, replies: Sequence[NarratorReply]) -> None:
-        self._replies = list(replies)
-
-    def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
-        return self._replies.pop(0)
-
-
 def test_recording_narrator_records_each_call_and_the_block_it_carried(
     texas_block: str,
 ) -> None:
     no_call = NarratorReply(tool_call=None, assistant_content=(), stop_reason="end_turn")
-    inner = _ScriptedNarrator([no_call, tool_reply(GOOD_TEXAS_INPUT)])
+    inner = FakeNarrator([no_call, tool_reply(GOOD_TEXAS_INPUT)])
     recorder = RecordingNarrator(inner)
     first_turn = build_user_message(texas_block, contested=False)
     assert (
