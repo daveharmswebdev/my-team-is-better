@@ -17,9 +17,15 @@ projected cache, one file per season, plus the matching `players.csv` rows:
 
 A starter is decided per side from that side's own lines, so a cut that
 keeps every line of a team reproduces that team's full-season starters and
-totals exactly. `test_player_sample_rows_are_in_the_committed_cache` keeps
-the cut honest, and the committed-cache tests at the bottom check the
-season-wide counts the cut can't.
+totals exactly. `tests/fixtures/build_nfl_player_sample.py` makes the cut
+and the two tests at the bottom keep it honest -- one rebuilds it and
+compares byte-for-byte, the other checks every row is still in the
+committed cache -- while the committed-cache tests check the season-wide
+counts the cut can't.
+
+Issue #313 widened the stat columns from ten to 34, so the cut was remade
+from the refetched cache: it now carries the receiving, kicking and punting
+lines the ten-column row filter dropped (1999 grew from 149 rows to 432).
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ from pathlib import Path
 import pytest
 
 from cfb_strength.config import RAW_DIR
+from cfb_strength.contracts import PLAYER_STAT_MAX_FIELDS
 from cfb_strength.db.connection import get_conn
 from cfb_strength.ingest.nflverse import client as nflverse_client
 from cfb_strength.ingest.nflverse import player_normalize
@@ -44,6 +51,7 @@ from cfb_strength.ingest.nflverse.ingest_players import (
 )
 from cfb_strength.ingest.nflverse.normalize import mint_surrogate_id
 from cfb_strength.ingest.nflverse.player_normalize import STAT_FIELDS, PlayerSeasonReport
+from tests.fixtures import build_nfl_player_sample
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 PLAYER_SAMPLE_DIR = FIXTURES_DIR / "raw_nfl_player_sample" / "nfl"
@@ -201,40 +209,93 @@ def test_postseason_totals_and_starter_records_match_the_contract(
     assert _starter_record(conn, name, season, "postseason") == record
 
 
-def test_season_row_is_the_sum_of_its_game_rows_with_the_one_team(
+def _aggregate_of_game_rows(
+    conn: sqlite3.Connection, player_id: int, season: int, season_type: str
+) -> sqlite3.Row:
+    """One player's game rows aggregated the way rule 6 says a season row
+    is: SUM, except MAX for `PLAYER_STAT_MAX_FIELDS`."""
+    columns = ", ".join(
+        f"{'MAX' if c in PLAYER_STAT_MAX_FIELDS else 'SUM'}({c}) AS {c}" for c in STAT_FIELDS
+    )
+    row = conn.execute(
+        f"""
+        SELECT COUNT(*) AS games, {columns},
+               COUNT(DISTINCT p.team_id) AS teams, MIN(p.team_id) AS team_id
+        FROM player_game_stats p JOIN games g ON g.id = p.game_id
+        WHERE p.player_id = ? AND g.season = ? AND g.season_type = ?
+        """,
+        (player_id, season, season_type),
+    ).fetchone()
+    assert row is not None
+    return row
+
+
+def test_season_row_aggregates_its_game_rows_with_the_one_team(
     ingested: tuple[sqlite3.Connection, PlayerIngestReport],
 ) -> None:
     conn, _ = ingested
     warner = _player_id(conn, "Kurt Warner")
-    sums = conn.execute(
-        f"""
-        SELECT COUNT(*) AS games, {", ".join(f"SUM({c}) AS {c}" for c in STAT_FIELDS)},
-               COUNT(DISTINCT p.team_id) AS teams, MIN(p.team_id) AS team_id
-        FROM player_game_stats p JOIN games g ON g.id = p.game_id
-        WHERE p.player_id = ? AND g.season = 1999 AND g.season_type = 'regular'
-        """,
-        (warner,),
-    ).fetchone()
+    sums = _aggregate_of_game_rows(conn, warner, 1999, "regular")
     row = _season_row(conn, "Kurt Warner", 1999, "regular")
 
     assert all(row[c] == sums[c] for c in STAT_FIELDS)
     assert row["games"] == sums["games"]
     assert sums["teams"] == 1
     assert row["team_id"] == sums["team_id"] == mint_surrogate_id("nfl_team", "STL")
+    # #298: nflverse publishes the 176 yards Warner lost to sacks as -176.
+    assert row["sack_yards_lost"] == 176
 
 
-def test_no_season_row_invents_a_null_stat_in_the_sample_seasons(
+def test_a_kickers_season_long_is_his_longest_game_not_the_sum_of_them(
     ingested: tuple[sqlite3.Connection, PlayerIngestReport],
 ) -> None:
     conn, _ = ingested
-    # Every stat line in the projected cache carries all ten columns, so a
-    # NULL can only come from a column the source leaves empty. None do in
-    # these seasons: nothing may have been invented as NULL either.
-    nulls = conn.execute(
-        f"SELECT COUNT(*) FROM player_season_stats WHERE "
-        f"{' OR '.join(f'{c} IS NULL' for c in STAT_FIELDS)}"
-    ).fetchone()[0]
-    assert nulls == 0
+    # Mike Vanderjagt, 1999 Indianapolis: 15 games with a field goal, a
+    # season long of 53 -- a kickable distance, not the 578 a sum gives.
+    vanderjagt = _player_id(conn, "Mike Vanderjagt")
+    games = conn.execute(
+        """
+        SELECT p.fg_long FROM player_game_stats p JOIN games g ON g.id = p.game_id
+        WHERE p.player_id = ? AND g.season = 1999 AND g.season_type = 'regular'
+          AND p.fg_long IS NOT NULL
+        """,
+        (vanderjagt,),
+    ).fetchall()
+    longs = [int(r["fg_long"]) for r in games]
+    assert len(longs) >= 10
+    assert sum(longs) == 578
+
+    row = _season_row(conn, "Mike Vanderjagt", 1999, "regular")
+
+    assert row["fg_long"] == max(longs) == 53
+    assert row["fg_long"] < 70
+    assert row["fg_made"] == sum(
+        int(r["fg_made"])
+        for r in conn.execute(
+            "SELECT p.fg_made FROM player_game_stats p JOIN games g ON g.id = p.game_id "
+            "WHERE p.player_id = ? AND g.season = 1999 AND g.season_type = 'regular'",
+            (vanderjagt,),
+        ).fetchall()
+    )
+
+
+def test_a_season_row_is_null_only_where_the_source_leaves_the_cell_empty(
+    ingested: tuple[sqlite3.Connection, PlayerIngestReport],
+) -> None:
+    conn, _ = ingested
+    # nflverse fills every one of the 34 columns with a number except
+    # `fg_long` and `pt_long`, which are empty for a game with no field goal
+    # and no punt. So those two are the only columns a season row may hold
+    # NULL in; a NULL anywhere else would have been invented here.
+    nulls = {
+        column: conn.execute(
+            f"SELECT COUNT(*) FROM player_season_stats WHERE {column} IS NULL"
+        ).fetchone()[0]
+        for column in STAT_FIELDS
+    }
+
+    assert {column for column, count in nulls.items() if count} == set(PLAYER_STAT_MAX_FIELDS)
+    assert nulls["fg_long"] > 0 and nulls["pt_long"] > 0
 
 
 def test_a_stat_missing_on_every_game_row_stays_null_while_an_all_zero_stat_stays_zero(
@@ -548,6 +609,22 @@ def test_the_ingest_makes_no_network_call_when_the_cache_is_present(
 
 
 # --- the committed cache ----------------------------------------------------
+
+
+def test_the_player_sample_is_exactly_what_the_builder_cuts_from_the_cache(
+    tmp_path: Path,
+) -> None:
+    # The cut is a projection of the committed cache, so it goes stale the
+    # moment the cache is refetched with different columns (#313 widened
+    # them from ten to 34). Rebuilding it here proves the committed files
+    # are the documented cut of the current cache, not a stale hand cut.
+    out = build_nfl_player_sample.build(tmp_path / "nfl")
+
+    rebuilt = {p.name: p.read_bytes() for p in sorted(out.iterdir())}
+    committed = {p.name: p.read_bytes() for p in sorted(PLAYER_SAMPLE_DIR.iterdir())}
+    assert sorted(rebuilt) == sorted(committed)
+    for name in committed:
+        assert rebuilt[name] == committed[name], f"{name} is not the builder's cut any more"
 
 
 def test_player_sample_rows_are_in_the_committed_cache() -> None:

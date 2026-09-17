@@ -1,5 +1,5 @@
-player_id,player_display_name,position,season,week,season_type,game_id,team,opponent_team,completions,attempts,passing_yards,passing_tds,passing_interceptions,sacks_suffered,sack_yards_lost,carries,rushing_yards,rushing_tds,player_name,position_group,receptions,receiving_yards
-00-0039164,Anthony Richardson,QB,2024,8,REG,2024_08_IND_HOU,IND,HOU,10,32,175,1,1,5,-35,6,45,0,A.Richardson,QB,0,0
-00-0038997,Josh Downs,WR,2024,8,REG,2024_08_IND_HOU,IND,HOU,0,0,0,0,0,0,0,0,13,0,J.Downs,WR,4,109
-00-0030431,Robert Woods,WR,2024,8,REG,2024_08_IND_HOU,HOU,IND,0,0,0,0,0,0,0,0,0,0,R.Woods,WR,2,18
-00-0031254,Denico Autry,DT,2024,8,REG,2024_08_IND_HOU,HOU,IND,0,0,0,0,0,0,0,0,0,0,D.Autry,DL,0,0
+player_id,player_display_name,position,season,week,season_type,game_id,team,opponent_team,completions,attempts,passing_yards,passing_tds,passing_interceptions,sacks_suffered,sack_yards_lost,carries,rushing_yards,rushing_tds,rushing_first_downs,rushing_fumbles_lost,receptions,targets,receiving_yards,receiving_tds,receiving_first_downs,receiving_fumbles_lost,fg_made,fg_att,fg_long,fg_made_0_19,fg_made_20_29,fg_made_30_39,fg_made_40_49,fg_made_50_59,fg_made_60_,pat_made,pat_att,pt_att,pt_yards,pt_net_yards,pt_long,pt_inside_20,player_name,position_group,receiving_air_yards,def_sacks
+00-0039164,Anthony Richardson,QB,2024,8,REG,2024_08_IND_HOU,IND,HOU,10,32,175,1,1,5,-35,6,45,0,4,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0,A.Richardson,QB,0,0
+00-0038997,Josh Downs,WR,2024,8,REG,2024_08_IND_HOU,IND,HOU,0,0,0,0,0,0,0,0,13,0,0,0,4,9,109,1,3,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0,J.Downs,WR,102,0
+00-0030431,Robert Woods,WR,2024,8,REG,2024_08_IND_HOU,HOU,IND,0,0,0,0,0,0,0,0,0,0,0,0,2,2,18,0,2,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0,R.Woods,WR,13,0
+00-0031254,Denico Autry,DT,2024,8,REG,2024_08_IND_HOU,HOU,IND,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0,D.Autry,DL,0,0

@@ -9,9 +9,13 @@ row to write plus the season's report.
 The rules, in the order a stat line meets them:
 
 1. Row filter (`has_any_stat`, applied when the cache is written): a row is
-   kept only if at least one `PlayerStats` column is non-empty and non-zero.
-   Filtering on attempts/carries alone would drop real lines (2024 Josh
-   Downs: 13 rushing yards on 0 carries).
+   kept only if at least one `PlayerStats` column is non-empty and non-zero,
+   judged on the cell as nflverse publishes it (before the sign flip of
+   rule 8). Filtering on attempts/carries alone would drop real lines (2024
+   Josh Downs: 13 rushing yards on 0 carries), and since issue #313 widened
+   the columns to 34 the filter also keeps receiving, kicking and punting
+   lines -- which is why refetching with `--force` roughly quadrupled the
+   cached rows a season.
 2. Game: the stat `game_id` must be a `games.source_id` of the season, and
    its REG/POST must agree with that game's `season_type`. Either failing
    raises, naming the game_id and player_id.
@@ -32,14 +36,22 @@ The rules, in the order a stat line meets them:
    is built from its stat row's name and position (or, for a listed QB with
    no line, the schedule's QB name) with only a gsis source id, and counted.
    A player is written only if a stored line or starter references them.
-6. Season rows: per (player, season_type), the sum of the game rows; games
-   = the line count; team_id = the one team, else None; a stat is None only
-   if it is None on every line.
+6. Season rows: per (player, season_type), the sum of the game rows --
+   except `contracts.PLAYER_STAT_MAX_FIELDS` (`fg_long`, `pt_long`), which
+   take the MAX of the game rows, because a "long" doesn't add up (#313).
+   games = the line count; team_id = the one team, else None; a stat is None
+   only if it is None on every line.
 7. Starters: for each completed game and side, the schedule's listed QB if
    the side has no lines at all or the listed QB has a line for that side
    (`nflverse_schedule`); otherwise that side's player with the most
    attempts, then carries, then lowest gsis id (`derived_most_attempts`);
    if nobody on the side attempted a pass, no starter, reported.
+8. Signs (#298): `SOURCE_NEGATED_FIELDS` names the columns nflverse
+   publishes with the opposite sign to the one the contract stores. Only
+   `sack_yards_lost` is flipped, from nflverse's negative to the positive
+   an official stat line reads; net yardage that is genuinely negative
+   (`rushing_yards`, `receiving_yards`, `pt_net_yards`) is stored as
+   published.
 """
 
 from __future__ import annotations
@@ -52,6 +64,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from cfb_strength.contracts import (
+    PLAYER_STAT_MAX_FIELDS,
     GameStarterRow,
     PlayerGameStatRow,
     PlayerRow,
@@ -63,8 +76,21 @@ from cfb_strength.contracts import (
 from cfb_strength.ingest.nflverse.normalize import mint_surrogate_id
 
 STAT_FIELDS: tuple[str, ...] = tuple(f.name for f in dataclasses.fields(PlayerStats))
-"""The ten `PlayerStats` columns, in contract order. nflverse's weekly file
-uses exactly these names."""
+"""Every `PlayerStats` column, in contract order (34 since issue #313
+widened them from the ten passing/rushing ones to receiving, kicking and
+punting). nflverse's weekly file uses exactly these names, so widening the
+contract widens the cache projection and this parse together."""
+
+SOURCE_NEGATED_FIELDS: frozenset[str] = frozenset({"sack_yards_lost"})
+"""Columns nflverse publishes with the opposite sign to the one
+`contracts.PlayerStats` stores (#298): yardage a player *lost* is stored
+positive, so Brady 2007 reads 21 sacks for 128 yards. The flip is `-value`,
+not `abs(value)` -- measured over 1999-2025, nflverse's `sack_yards_lost` is
+negative or zero on every row, so a positive one would mean the source
+changed convention, and that should fail loudly downstream rather than be
+silently absorbed. Every other column (including net yardage like
+`rushing_yards`, genuinely negative on 4,603 rows) keeps the source's
+sign."""
 
 SEASON_ROW_SOURCE = "nflverse"
 STARTER_FROM_SCHEDULE = "nflverse_schedule"
@@ -102,7 +128,11 @@ def _is_nonzero(cell: str) -> bool:
 
 def has_any_stat(row: Mapping[str, str]) -> bool:
     """Rule 1's cache row filter: any `PlayerStats` column non-empty and
-    non-zero. Negative values (sack yards, rushing losses) count."""
+    non-zero. The filter runs on the *source's* cells, before
+    `SOURCE_NEGATED_FIELDS` flips any sign, so a value counts whichever way
+    round it is published: a sacked quarterback's `sack_yards_lost` (-7 in
+    the file, 7 stored) keeps its row, as does a receiver's -3 yard
+    reception."""
     return any(_is_nonzero(row.get(name, "")) for name in STAT_FIELDS)
 
 
@@ -111,16 +141,20 @@ def _parse_stat(row: Mapping[str, str], name: str) -> int | None:
     if value in _EMPTY_CELLS:
         return None
     try:
-        return int(value)
+        parsed = int(value)
     except ValueError as e:
         raise ValueError(
             f"stat column {name!r} holds {value!r}, not a whole number "
             f"(game_id={row.get('game_id')!r} player_id={row.get('player_id')!r})"
         ) from e
+    return -parsed if name in SOURCE_NEGATED_FIELDS else parsed
 
 
 def parse_stats(row: Mapping[str, str]) -> PlayerStats:
-    """A stat row's ten columns; an empty cell is None, never 0."""
+    """A stat row's `STAT_FIELDS` columns, in the stored sign convention; an
+    empty cell is None, never 0. A column the row doesn't have raises
+    `KeyError`, which is the point: a season nflverse publishes without one
+    must fail loudly, not read as an era that didn't track the stat."""
     return PlayerStats(**{name: _parse_stat(row, name) for name in STAT_FIELDS})
 
 
@@ -369,11 +403,20 @@ def _where(row: Mapping[str, str]) -> str:
     return f"stat line game_id={row['game_id']!r} player_id={row['player_id']!r}"
 
 
-def _sum_stats(lines: Sequence[_Line]) -> PlayerStats:
+def _aggregate_stats(lines: Sequence[_Line]) -> PlayerStats:
+    """Rule 6's season aggregate: the sum of the game rows, except for
+    `contracts.PLAYER_STAT_MAX_FIELDS` (`fg_long`, `pt_long`), which take
+    the MAX -- summing a kicker's 16 game-longs would report a season long
+    of several hundred yards. A stat None on every line stays None."""
     totals: dict[str, int | None] = {}
     for name in STAT_FIELDS:
         present = [v for v in (getattr(line.stats, name) for line in lines) if v is not None]
-        totals[name] = sum(present) if present else None
+        if not present:
+            totals[name] = None
+        elif name in PLAYER_STAT_MAX_FIELDS:
+            totals[name] = max(present)
+        else:
+            totals[name] = sum(present)
     return PlayerStats(**totals)
 
 
@@ -538,7 +581,7 @@ def build_player_season(
                 games=len(group),
                 source=SEASON_ROW_SOURCE,
                 sport="nfl",
-                stats=_sum_stats(group),
+                stats=_aggregate_stats(group),
             )
         )
 
