@@ -1,11 +1,24 @@
-player_id,player_display_name,position,season,week,season_type,game_id,team,opponent_team,completions,attempts,passing_yards,passing_tds,passing_interceptions,sacks_suffered,sack_yards_lost,carries,rushing_yards,rushing_tds
-00-0000865,Charlie Batch,QB,2001,11,REG,2001_11_GB_DET,DET,GB,8,19,118,0,1,1,-7,0,0,0
-00-0005106,Brett Favre,QB,2001,11,REG,2001_11_GB_DET,GB,DET,18,26,252,2,0,2,-17,1,-1,0
-00-0006305,Ahman Green,RB,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,22,102,1
-00-0009829,Dorsey Levens,RB,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,4,3,0
-00-0014450,Cory Schlesinger,FB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,5,39,0
-00-0015698,James Stewart,RB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,14,102,0
-00-0017218,Lamont Warren,RB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,2,11,1
-00-0019231,Larry Foster,WR,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,1,3,0
-00-0020308,Mike McMahon,QB,2001,11,REG,2001_11_GB_DET,DET,GB,9,20,89,1,0,2,-7,3,12,0
-,,,2001,11,REG,2001_11_GB_DET,GB,DET,1,1,42,0,0,0,0,0,0,0
+player_id,player_display_name,position,season,week,season_type,game_id,team,opponent_team,completions,attempts,passing_yards,passing_tds,passing_interceptions,sacks_suffered,sack_yards_lost,carries,rushing_yards,rushing_tds,rushing_first_downs,rushing_fumbles_lost,receptions,targets,receiving_yards,receiving_tds,receiving_first_downs,receiving_fumbles_lost,fg_made,fg_att,fg_long,fg_made_0_19,fg_made_20_29,fg_made_30_39,fg_made_40_49,fg_made_50_59,fg_made_60_,pat_made,pat_att,pt_att,pt_yards,pt_net_yards,pt_long,pt_inside_20
+00-0000865,Charlie Batch,QB,2001,11,REG,2001_11_GB_DET,DET,GB,8,19,118,0,1,1,-7,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0001231,Josh Bidwell,P,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,4,186,153,60,1
+00-0001627,Corey Bradford,WR,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,2,3,14,0,1,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0005106,Brett Favre,QB,2001,11,REG,2001_11_GB_DET,GB,DET,18,26,252,2,0,2,-17,1,-1,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0005562,Antonio Freeman,WR,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,6,7,89,0,4,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0006305,Ahman Green,RB,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,22,102,1,5,0,2,3,48,1,2,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0006800,Jason Hanson,K,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,54,0,0,1,0,1,0,1,1,0,0,0,,0
+00-0008401,John Jett,P,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,3,145,119,50,1
+00-0009829,Dorsey Levens,RB,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,4,3,0,0,0,3,3,25,0,1,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0010072,Ryan Longwell,K,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,46,0,0,1,1,0,0,3,3,0,0,0,,0
+00-0011727,Johnnie Morton,WR,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,0,0,0,0,0,4,10,67,0,2,1,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0014450,Cory Schlesinger,FB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,5,39,0,2,0,6,8,41,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0014489,Bill Schroeder,WR,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,2,5,30,0,2,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0015048,David Sloan,TE,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0015698,James Stewart,RB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,14,102,0,3,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0017218,Lamont Warren,RB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,2,11,1,2,0,2,6,15,0,1,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0019231,Larry Foster,WR,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,1,3,0,0,0,1,1,12,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0019644,Bubba Franks,TE,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,2,3,45,0,2,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0020094,Stephen Trejo,RB,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,0,0,0,0,0,1,1,15,0,1,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0020308,Mike McMahon,QB,2001,11,REG,2001_11_GB_DET,DET,GB,9,20,89,1,0,2,-7,3,12,0,1,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0020332,David Martin,TE,2001,11,REG,2001_11_GB_DET,GB,DET,0,0,0,0,0,0,0,0,0,0,0,0,1,2,1,1,1,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+00-0020370,Scotty Anderson,WR,2001,11,REG,2001_11_GB_DET,DET,GB,0,0,0,0,0,0,0,0,0,0,0,0,3,10,57,1,3,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0
+,,,2001,11,REG,2001_11_GB_DET,GB,DET,1,1,42,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,,0,0,0,0,0,0,0,0,0,0,0,,0

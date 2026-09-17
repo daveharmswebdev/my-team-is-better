@@ -29,10 +29,19 @@ carry some 150 columns this project doesn't use:
 
 * `data/raw/nfl/stats_player_week_<year>.csv` keeps only
   `STATS_PLAYER_WEEK_CACHE_COLUMNS` (ids, week, season type, game, teams and
-  the ten `contracts.PlayerStats` columns), and only rows where at least one
-  of those ten is non-empty and non-zero (`player_normalize.has_any_stat`).
-  About 2,100-2,500 of 17,000-19,500 rows a season, ~180-215 KB.
+  every `contracts.PlayerStats` column), and only rows where at least one of
+  those stat columns is non-empty and non-zero
+  (`player_normalize.has_any_stat`). Since issue #313 widened the stats from
+  ten (passing and rushing) to 34 (adding receiving, kicking and punting),
+  that keeps about 5,700-6,800 of 17,000-19,500 rows a season, ~700-900 KB:
+  roughly 21 MB for 1999-2025, against 5 MB before the widening, measured on
+  the refetched cache.
 * `data/raw/nfl/players.csv` keeps only `PLAYERS_CACHE_COLUMNS`.
+
+The cache is a faithful projection of the source: it holds nflverse's own
+cells, signs included, and the stored sign convention (#298) is applied when
+a row is parsed (`player_normalize.SOURCE_NEGATED_FIELDS`), not when it is
+cached.
 
 So the cache holds nothing a new stat could be read from. Adding a stat means
 widening `PlayerStats` (and the tables), which widens the projection through

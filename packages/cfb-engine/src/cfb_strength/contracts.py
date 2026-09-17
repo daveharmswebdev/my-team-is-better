@@ -159,8 +159,28 @@ class PlayerStats:
     both tables.
 
     None means the source did not track the stat, never zero: an era
-    before a stat was recorded must not read as a player who had none."""
+    before a stat was recorded must not read as a player who had none.
 
+    Order is append-only. Both tables pin these as their *trailing*
+    columns, and a pre-existing db reaches the same shape through
+    `connection._migrate_player_stat_columns`, whose ALTER TABLE can only
+    append -- so a field inserted in the middle would give a fresh db and a
+    migrated one different column orders.
+
+    Every column here is a whole number in the source. Deliberately absent:
+    rate columns (`fg_pct`, `pat_pct`) are derived from the counts beside
+    them, and nflverse's `def_sacks` is fractional (0.5 for a shared sack),
+    which the integer parse would reject -- the defensive columns arrive in
+    their own widening once #316 has verified them, and that round has to
+    settle the fractional case (#317).
+
+    Issue #298 -- the sign convention, previously unstated: yardage a
+    player *lost* is stored **positive**, so `sack_yards_lost` reads the way
+    its name and an official stat line read (Brady 2007: 21 sacks, 128
+    yards). nflverse publishes it signed negative, so the ingest negates it.
+    """
+
+    # Passing (issue #289).
     completions: int | None = None
     attempts: int | None = None
     passing_yards: int | None = None
@@ -168,9 +188,63 @@ class PlayerStats:
     passing_interceptions: int | None = None
     sacks_suffered: int | None = None
     sack_yards_lost: int | None = None
+    # Rushing: the first three from #289, the rest from #313.
     carries: int | None = None
     rushing_yards: int | None = None
     rushing_tds: int | None = None
+    rushing_first_downs: int | None = None
+    rushing_fumbles_lost: int | None = None
+    # Receiving (#313). `receiving_air_yards` and
+    # `receiving_yards_after_catch` are deliberately left out: measured on
+    # the raw weekly files, they carry 506 and 108 non-zero rows in 1999
+    # against 4,468 and 3,762 in 2023, so a career spanning the gap would
+    # compare an era that tracked them against one that didn't.
+    receptions: int | None = None
+    targets: int | None = None
+    receiving_yards: int | None = None
+    receiving_tds: int | None = None
+    receiving_first_downs: int | None = None
+    receiving_fumbles_lost: int | None = None
+    # Kicking (#313). The `fg_made_*` buckets partition `fg_made` by
+    # distance; `fg_made_60_` keeps nflverse's trailing underscore rather
+    # than inventing a tidier name the projection would have to translate.
+    # A 0 in the 60+ bucket is a real zero (nobody made one in 1999), not an
+    # untracked stat.
+    fg_made: int | None = None
+    fg_att: int | None = None
+    fg_long: int | None = None
+    fg_made_0_19: int | None = None
+    fg_made_20_29: int | None = None
+    fg_made_30_39: int | None = None
+    fg_made_40_49: int | None = None
+    fg_made_50_59: int | None = None
+    fg_made_60_: int | None = None
+    pat_made: int | None = None
+    pat_att: int | None = None
+    # Punting (#313).
+    pt_att: int | None = None
+    pt_yards: int | None = None
+    pt_net_yards: int | None = None
+    pt_long: int | None = None
+    pt_inside_20: int | None = None
+
+
+PLAYER_STAT_MAX_FIELDS: frozenset[str] = frozenset({"fg_long", "pt_long"})
+"""The `PlayerStats` columns whose season total is the MAX of the game
+rows, not the sum (issue #313).
+
+Every other column is a count or a yardage that adds up over a season. A
+"long" does not: summing a kicker's 16 game-long field goals would report a
+season long of several hundred yards. They are stored anyway, rather than
+left out of season rows, because "longest field goal" is a leaders column in
+its own right (#315).
+
+Named here rather than in the ingest because both halves of the boundary
+need it -- the ingest aggregates by it, and any later reader combining
+seasons into a career has to combine these the same way. Kept as a set of
+names, not a per-field enum, because MAX is the only exception so far;
+tests/test_player_schema.py checks every name is a real `PlayerStats` field.
+"""
 
 
 @dataclass(frozen=True)

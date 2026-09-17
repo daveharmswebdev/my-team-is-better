@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 from cfb_strength.players import get_player_comparison
 from fastapi.testclient import TestClient
-from fixtures.player_api_fixture import STAT_NAMES, engine_json, fixture_conn
+from fixtures.player_api_fixture import engine_json, fixture_conn, stats_body
 
 COMPARE = "/api/players/compare"
 
@@ -57,18 +57,77 @@ GAME_KEYS = {
 }
 
 
-def _stats(*values: int) -> dict[str, int]:
-    assert len(values) == len(STAT_NAMES)
-    return dict(zip(STAT_NAMES, values, strict=True))
+# One side of each measured game: (team, points, stats). Named, not
+# positional: `PlayerStats` is append-only (34 fields since #313) and these
+# are quarterback starts, so every stat not named here -- receiving, kicking,
+# punting -- is None rather than a zero. `sack_yards_lost` is positive since
+# #298; it was negative in these same four games before.
+_WARNER_REGULAR = (
+    "St. Louis Rams",
+    21,
+    stats_body(
+        completions=29,
+        attempts=46,
+        passing_yards=328,
+        passing_tds=3,
+        passing_interceptions=0,
+        sacks_suffered=6,
+        sack_yards_lost=41,
+        carries=2,
+        rushing_yards=22,
+        rushing_tds=0,
+    ),
+)
+_MCNAIR_REGULAR = (
+    "Tennessee Titans",
+    24,
+    stats_body(
+        completions=13,
+        attempts=29,
+        passing_yards=186,
+        passing_tds=2,
+        passing_interceptions=0,
+        sacks_suffered=1,
+        sack_yards_lost=8,
+        carries=12,
+        rushing_yards=36,
+        rushing_tds=1,
+    ),
+)
+_WARNER_POSTSEASON = (
+    "St. Louis Rams",
+    23,
+    stats_body(
+        completions=24,
+        attempts=45,
+        passing_yards=414,
+        passing_tds=2,
+        passing_interceptions=0,
+        sacks_suffered=2,
+        sack_yards_lost=7,
+        carries=1,
+        rushing_yards=1,
+        rushing_tds=0,
+    ),
+)
+_MCNAIR_POSTSEASON = (
+    "Tennessee Titans",
+    16,
+    stats_body(
+        completions=22,
+        attempts=36,
+        passing_yards=214,
+        passing_tds=0,
+        passing_interceptions=0,
+        sacks_suffered=1,
+        sack_yards_lost=6,
+        carries=8,
+        rushing_yards=64,
+        rushing_tds=0,
+    ),
+)
 
-
-# One side of each measured game: (team, points, stats in STAT_NAMES order).
-_WARNER_REGULAR = ("St. Louis Rams", 21, _stats(29, 46, 328, 3, 0, 6, -41, 2, 22, 0))
-_MCNAIR_REGULAR = ("Tennessee Titans", 24, _stats(13, 29, 186, 2, 0, 1, -8, 12, 36, 1))
-_WARNER_POSTSEASON = ("St. Louis Rams", 23, _stats(24, 45, 414, 2, 0, 2, -7, 1, 1, 0))
-_MCNAIR_POSTSEASON = ("Tennessee Titans", 16, _stats(22, 36, 214, 0, 0, 1, -6, 8, 64, 0))
-
-Side = tuple[str, int, dict[str, int]]
+Side = tuple[str, int, dict[str, int | None]]
 
 
 def _game(

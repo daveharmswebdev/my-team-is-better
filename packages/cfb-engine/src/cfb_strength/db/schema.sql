@@ -175,6 +175,23 @@ CREATE TABLE IF NOT EXISTS elo_ledger_configs (
 --   * a stat a source didn't track is NULL, never 0.
 -- The stat columns of both stat tables are exactly `contracts.PlayerStats`,
 -- in order (tests/test_player_schema.py).
+--
+-- Issue #313 widened those columns from ten (passing and rushing) to 34,
+-- adding rushing extras, receiving, kicking and punting, so that
+-- /nfl/leaders can rank someone who isn't a quarterback. They are appended
+-- rather than grouped, because a pre-existing db reaches this shape through
+-- `connection._migrate_player_stat_columns` and ALTER TABLE can only append.
+-- The nine defensive columns are NOT here: nflverse counts them from
+-- play-by-play and nobody has checked them against official totals (#316),
+-- so they get their own widening once they are trusted (#317).
+--
+-- Sign convention (#298): yardage a player *lost* is stored positive, so
+-- `sack_yards_lost` reads as its name does. nflverse publishes it negative;
+-- the ingest negates it.
+--
+-- `fg_long` and `pt_long` are maxima, not totals: a season row holds the
+-- longest of its game rows (`contracts.PLAYER_STAT_MAX_FIELDS`), never
+-- their sum.
 CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY,
     sport TEXT NOT NULL,
@@ -218,6 +235,30 @@ CREATE TABLE IF NOT EXISTS player_game_stats (
     carries INTEGER,
     rushing_yards INTEGER,
     rushing_tds INTEGER,
+    rushing_first_downs INTEGER,
+    rushing_fumbles_lost INTEGER,
+    receptions INTEGER,
+    targets INTEGER,
+    receiving_yards INTEGER,
+    receiving_tds INTEGER,
+    receiving_first_downs INTEGER,
+    receiving_fumbles_lost INTEGER,
+    fg_made INTEGER,
+    fg_att INTEGER,
+    fg_long INTEGER,
+    fg_made_0_19 INTEGER,
+    fg_made_20_29 INTEGER,
+    fg_made_30_39 INTEGER,
+    fg_made_40_49 INTEGER,
+    fg_made_50_59 INTEGER,
+    fg_made_60_ INTEGER,
+    pat_made INTEGER,
+    pat_att INTEGER,
+    pt_att INTEGER,
+    pt_yards INTEGER,
+    pt_net_yards INTEGER,
+    pt_long INTEGER,
+    pt_inside_20 INTEGER,
     PRIMARY KEY (player_id, game_id)
 );
 CREATE INDEX IF NOT EXISTS idx_player_game_stats_game ON player_game_stats(game_id);
@@ -241,6 +282,30 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     carries INTEGER,
     rushing_yards INTEGER,
     rushing_tds INTEGER,
+    rushing_first_downs INTEGER,
+    rushing_fumbles_lost INTEGER,
+    receptions INTEGER,
+    targets INTEGER,
+    receiving_yards INTEGER,
+    receiving_tds INTEGER,
+    receiving_first_downs INTEGER,
+    receiving_fumbles_lost INTEGER,
+    fg_made INTEGER,
+    fg_att INTEGER,
+    fg_long INTEGER,
+    fg_made_0_19 INTEGER,
+    fg_made_20_29 INTEGER,
+    fg_made_30_39 INTEGER,
+    fg_made_40_49 INTEGER,
+    fg_made_50_59 INTEGER,
+    fg_made_60_ INTEGER,
+    pat_made INTEGER,
+    pat_att INTEGER,
+    pt_att INTEGER,
+    pt_yards INTEGER,
+    pt_net_yards INTEGER,
+    pt_long INTEGER,
+    pt_inside_20 INTEGER,
     PRIMARY KEY (player_id, season, season_type)
 );
 

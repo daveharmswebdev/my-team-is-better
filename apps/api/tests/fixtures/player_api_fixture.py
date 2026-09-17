@@ -1,18 +1,29 @@
 """Shared helpers for the player endpoint tests (issue #296).
 
-Not a test module. Imported by `tests/test_players_leaders_endpoint.py` and
-`tests/test_players_career_endpoint.py`; it imports only the engine modules
-apps/api is permitted (`cfb_strength.players`, `db`, `contracts`), never
-`ratings` or `ingest`.
+Not a test module. Imported by the four `tests/test_players_*_endpoint.py`
+modules and by `tests/test_players_widened_stats.py`; it imports only the
+engine modules apps/api is permitted (`cfb_strength.players`, `db`,
+`contracts`), never `ratings` or `ingest`.
 
 - `engine_json` is what "faithful to the engine dataclasses, field for
   field" means as a value: every dataclass field under its own name, with
   `StarterRecord.starts` (a property, so absent from `dataclasses.asdict`)
   added as the one derived field the API publishes. Comparing a response
   body to it checks names, nesting, order of rows and every number at once.
+  Its one narrowing is `PlayerStats`, which since #313 carries 24 stats the
+  API does not publish yet (`published_stats` below).
+- `PUBLISHED_STAT_NAMES` / `published_stats` / `stats_body` are the seam
+  between the 34-field engine contract and the 10 fields `PlayerStatsOut`
+  publishes (#314 and #315 close that gap). All three read the published
+  set off the response model, so widening the API widens them with it and
+  no expectation has to be rewritten by hand.
 - `make_player_db_with_null_stat` copies the committed fixture and NULLs
-  one real season row's stat. No 1999-2025 nflverse row is NULL (the
-  contract says so, and the committed fixture has none), so "a None stat
+  one real season row's stat. No 1999-2025 nflverse row is NULL *for the
+  stats this helper targets* -- that was true of all ten columns before
+  #313, and is still true of the passing and rushing ones it NULLs. It is
+  no longer true of the contract as a whole: `fg_long` and `pt_long` are
+  legitimately NULL for anyone who never kicked or punted (1,479 of 1,580
+  season rows in the committed fixture). So "a None stat
   stays null in JSON, never 0" can only be exercised on a copy.
 - `client_for_db` points the app's db dependency at such a copy. The player
   routes use no narrator or cache, so nothing else is overridden.
@@ -32,9 +43,62 @@ from cfb_strength.contracts import PlayerSeasonType, PlayerStats, StarterRecord
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 
+from api.models import PlayerStatsOut
+
 FIXTURE_DB = Path(__file__).resolve().parent / "cfb_verdict_fixture.sqlite3"
 
+# Every stat the engine contract carries (34 since issue #313)...
 STAT_NAMES: tuple[str, ...] = tuple(field.name for field in dataclasses.fields(PlayerStats))
+# ...and the subset the API publishes, read off the response model rather
+# than repeated here, so that #314/#315 widening `PlayerStatsOut` widens
+# these helpers with it and no call site has to be edited.
+PUBLISHED_STAT_NAMES: tuple[str, ...] = tuple(PlayerStatsOut.model_fields)
+
+_UNPUBLISHED = set(PUBLISHED_STAT_NAMES) - set(STAT_NAMES)
+if _UNPUBLISHED:
+    raise AssertionError(f"PlayerStatsOut publishes non-contract stats: {sorted(_UNPUBLISHED)}")
+
+
+def published_stats(stats: PlayerStats) -> dict[str, int | None]:
+    """The engine's stats projected onto what the API publishes today.
+
+    `PlayerStats` has carried receiving, kicking and punting since #313, but
+    `PlayerStatsOut` deliberately still exposes only the original ten fields
+    -- publishing the rest is #314 and #315. So "faithful to the engine,
+    field for field" means: every *published* field equals the engine's value
+    under its own name. The projection is derived from the response model, so
+    a field added there is checked against the engine automatically, and a
+    field silently dropped from it is caught by `PUBLISHED_STAT_NAMES`'
+    consumers rather than passing unnoticed.
+    """
+    return {name: getattr(stats, name) for name in PUBLISHED_STAT_NAMES}
+
+
+def stats_body(**values: int) -> dict[str, int | None]:
+    """An expected `PlayerStatsOut` body, named rather than positional.
+
+    Every published stat not named is `None` -- *not applicable*, never 0.
+    The four head-to-head games this is used for are quarterback starts, so
+    every kicking and punting column is genuinely None rather than a zero
+    that would read as "he attempted a field goal and missed".
+
+    Naming rather than positioning is what makes this survive the next
+    widening: `PlayerStats` is append-only, so a positional helper silently
+    re-binds every value when a field is inserted, and needs a new argument
+    at every call site when one is appended.
+
+    A name that is not a stat at all, or one the API does not publish yet,
+    is a `ValueError` -- an expectation for a field no response carries can
+    only ever be dead weight.
+    """
+    for name in values:
+        if name not in STAT_NAMES:
+            raise ValueError(f"{name!r} is not a PlayerStats field")
+        if name not in PUBLISHED_STAT_NAMES:
+            raise ValueError(
+                f"{name!r} is a PlayerStats field the API does not publish yet (#314/#315)"
+            )
+    return {name: values.get(name) for name in PUBLISHED_STAT_NAMES}
 
 
 def engine_json(value: object) -> Any:
@@ -46,6 +110,8 @@ def engine_json(value: object) -> Any:
             "ties": value.ties,
             "starts": value.starts,
         }
+    if isinstance(value, PlayerStats):
+        return published_stats(value)
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return {
             field.name: engine_json(getattr(value, field.name))

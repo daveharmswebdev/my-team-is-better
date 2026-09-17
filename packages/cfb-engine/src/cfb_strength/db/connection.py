@@ -1,9 +1,11 @@
+import dataclasses
 import sqlite3
 import urllib.request
 import warnings
 from pathlib import Path
 
 from cfb_strength.config import DB_PATH
+from cfb_strength.contracts import PlayerStats
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -26,6 +28,21 @@ _SOURCE_ID_TABLES = ("teams", "games")
 # Nullable with no default -- unlike `sport`, there is no sensible backfill
 # value, and populating them is the ingest's job, not the migration's.
 _TEAM_ALIAS_COLUMNS = (("mascot", "TEXT"), ("alternate_names", "TEXT"))
+
+# The two tables whose trailing columns are exactly `contracts.PlayerStats`
+# (#289), and the stat columns issue #313 appended to them -- rushing extras,
+# receiving, kicking and punting -- so a db built before #313 can be brought
+# up to shape in place.
+#
+# Read off the dataclass instead of listed here: a hand-kept copy is a second
+# source for the same list, and the next widening (the defensive columns,
+# #317) would have to remember to update both. `_migrate_player_stat_columns`
+# only adds what a table is missing, so naming the whole contract rather than
+# just #313's slice is both correct and self-maintaining. Importing
+# `contracts` from `db` is within the layer contract: .importlinter puts
+# `cfb_strength.db` above `cfb_strength.contracts`.
+_PLAYER_STAT_TABLES = ("player_game_stats", "player_season_stats")
+_PLAYER_STAT_COLUMNS: tuple[str, ...] = tuple(f.name for f in dataclasses.fields(PlayerStats))
 
 
 class StaleDatabaseWarning(UserWarning):
@@ -209,6 +226,37 @@ def _migrate_elo_ledger_floor_column(conn: sqlite3.Connection) -> list[str]:
     return []
 
 
+def _migrate_player_stat_columns(conn: sqlite3.Connection) -> list[str]:
+    """Add issue #313's 24 stat columns -- rushing extras, receiving,
+    kicking and punting -- to a db whose player stat tables still hold only
+    #289's original ten.
+
+    Driven off `contracts.PlayerStats` rather than a list written out here,
+    so the migration cannot fall behind the contract the way a hand-kept
+    copy would; schema.sql already declares them on a fresh db, where every
+    `_has_column` check below is a no-op.
+
+    Existing rows are left NULL rather than backfilled, and that is the
+    honest value: NULL means "this db has never been told the stat", which
+    is exactly true until the season is re-ingested. Backfilling 0 would
+    claim a receiver caught nothing. The columns are populated by a
+    `--force` refetch and re-ingest, which rewrites a season's rows
+    wholesale; production always builds from an empty db, so it never sees
+    the NULL window.
+
+    ALTER TABLE can only append, which is why `PlayerStats` is append-only
+    (see its docstring): a fresh db and a migrated one must end up with the
+    same column order for tests/test_player_schema.py to hold on both.
+    """
+    added: list[str] = []
+    for table in _PLAYER_STAT_TABLES:
+        for column in _PLAYER_STAT_COLUMNS:
+            if not _has_column(conn, table, column):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
+                added.append(f"{table}.{column}")
+    return added
+
+
 def _schema_objects(conn: sqlite3.Connection) -> set[str]:
     return {
         f"{row[0]} {row[1]}"
@@ -227,6 +275,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         *_migrate_team_alias_columns(conn),
         *_migrate_ratings_ties_column(conn),
         *_migrate_elo_ledger_floor_column(conn),
+        *_migrate_player_stat_columns(conn),
     ]
     # Whole tables/indexes too, not only ALTER TABLE columns: schema.sql's
     # `CREATE ... IF NOT EXISTS` and the migration's indexes also only add
