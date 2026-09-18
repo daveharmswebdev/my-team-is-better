@@ -983,7 +983,27 @@ class OpponentResult:
     opponent_score: int
     week: int | None
     season_type: str
+    # Where this team played the game (issue #294). Same vocabulary and same
+    # meaning as `EloGameStep.venue` -- this team's side, NOT the stadium
+    # name. (`GameRow.venue` is the stadium name; the collision is
+    # pre-existing and deliberate on the Elo side, so match it here rather
+    # than invent a third spelling.)
+    #
+    # `neutral_site` is kept alongside it, not replaced by a property, for
+    # one concrete reason: `mcp_server/server.py` serialises team cases with
+    # `dataclasses.asdict`, which skips properties, so a property would drop
+    # the field from the MCP payload silently. The two are kept honest by
+    # `__post_init__` instead, and there is exactly one construction site
+    # (`evidence/proof.py::_opponent_result`) to keep in step.
+    venue: Literal["home", "away", "neutral"]
     neutral_site: bool
+
+    def __post_init__(self) -> None:
+        if self.neutral_site != (self.venue == "neutral"):
+            raise ValueError(
+                f"OpponentResult venue/neutral_site disagree: venue={self.venue!r}, "
+                f"neutral_site={self.neutral_site!r} (game_id={self.game_id})"
+            )
 
 
 @dataclass(frozen=True)
@@ -1064,6 +1084,12 @@ class CommonOpponentMeeting:
     opponent_score: int
     week: int | None
     season_type: str
+    # Issue #294, and team-relative like everything else here. A meeting is a
+    # straight projection of that side's `OpponentResult`
+    # (`_meetings_by_opponent`), so this is that row's `venue` copied, never
+    # re-derived. No `neutral_site` companion: this shape never had one, so
+    # nothing reads it, and `venue == "neutral"` says the same thing.
+    venue: Literal["home", "away", "neutral"]
 
 
 @dataclass(frozen=True)

@@ -67,11 +67,14 @@ score is resolved from a named team's side with its result, so the winner is
 checked; it prints winner-first. `when` and `where` follow founder decision C
 on #199: they print only what the block records ("in the postseason", "to
 open the season" for the first game of a team case's games[], "in week 11",
-"at a neutral site"), and a game row that isn't neutral cannot yet say home or
-away (#294). `when` no longer prints "in the regular-season finale" (founder
-decision on #291, 2026-09-15): the last season_type 'regular' game is a
-conference title game in five of the nine fixture team cases measured, so
-until #300 tells the two apart it prints its week like any other.
+"at a neutral site"). Since #294 every game row in the block carries a
+team-relative `venue`, so `where` also prints "at home" and "on the road" --
+the narrator's register for an away game -- and there is no longer a game
+whose venue the block fails to record. `when` no longer prints "in the
+regular-season finale" (founder decision on #291, 2026-09-15): the last
+season_type 'regular' game is a conference title game in five of the nine
+fixture team cases measured, so until #300 tells the two apart it prints its
+week like any other.
 
 At most `MAX_CLAIMS` claims, and at most `MAX_GAME_SCORE_CLAIMS` of kind
 game_score, per submission (founder decision on #291, 2026-09-15): the
@@ -102,7 +105,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
-from typing import Any, Final, cast, get_args
+from typing import Any, Final, Literal, cast, get_args
 
 from api.models import Method
 from api.rating_display import RATING_DISPLAY, display_value
@@ -236,6 +239,24 @@ _SURROGATE: Final = "a lone surrogate, which is not valid Unicode text"
 _AP_WORDS: Final = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 _FLIP: Final[Mapping[str, str]] = {"W": "L", "L": "W", "T": "T"}
 _QUOTE_LIMIT: Final = 60
+
+# A game's venue from one team's side (issue #294), and how a `where` claim
+# prints it. "on the road" is the narrator's register; "away" is not. Founder
+# decision C on #199 called for home/away rendering; these particular words are
+# the coordinator's call on #294, not the founder's, and are cheap to change
+# until narrations cache against them. Neutral takes precedence: it is neutral
+# for both teams.
+Venue = Literal["home", "away", "neutral"]
+_WHERE_PHRASE: Final[Mapping[Venue, str]] = {
+    "home": "at home",
+    "away": "on the road",
+    "neutral": "at a neutral site",
+}
+_VENUE_FLIP: Final[Mapping[Venue, Venue]] = {
+    "home": "away",
+    "away": "home",
+    "neutral": "neutral",
+}
 
 
 @dataclass(frozen=True)
@@ -494,7 +515,10 @@ class _Game:
     opponent_score: int
     week: int | None
     season_type: str
-    neutral_site: bool | None
+    # Team-relative, like `result` and the score pair, and never absent since
+    # #294: every game row in the block carries it, common-opponent meetings
+    # included. `mirrored()` flips it with the rest of the side.
+    venue: Venue
 
     @property
     def key(self) -> tuple[str, str, int | None, str]:
@@ -518,6 +542,7 @@ class _Game:
             result=_FLIP[self.result],
             team_score=self.opponent_score,
             opponent_score=self.team_score,
+            venue=_VENUE_FLIP[self.venue],
         )
 
 
@@ -562,11 +587,11 @@ class _Block:
 
     def add_game(self, game: _Game) -> None:
         """Index `game` from both sides, deduped by (team, opponent, week,
-        season_type); the first row for a game is kept. The parsers add every
-        row that carries `neutral_site` (games[], quality_wins, worst_loss,
-        head_to_head) before the common-opponent rows that don't, so a
-        common-opponent meeting keeps `neutral_site` from another row for the
-        same game when one exists."""
+        season_type); the first row for a game is kept. Every parser supplies
+        a `venue` since #294 -- common-opponent meetings included -- so which
+        row wins the dedupe no longer decides whether the game can say where
+        it was played. The mirrored side flips the venue with the result and
+        the scores, so the opponent's row says "at home" for a road game."""
         for side in (game, game.mirrored()):
             self.games.setdefault(side.key, side)
 
@@ -650,7 +675,10 @@ def _parse_comparison(data: Any, block: _Block) -> None:
                 opponent_score=away_points,
                 week=_week(meeting["week"]),
                 season_type=str(meeting["season_type"]),
-                neutral_site=bool(meeting["neutral_site"]),
+                # A head-to-head row is home/away-oriented, not team-relative:
+                # this `_Game` is the home team's side, and `add_game` mirrors
+                # it for the away team.
+                venue="neutral" if meeting["neutral_site"] else "home",
             )
         )
     for common in data["common_opponents"]:
@@ -670,7 +698,7 @@ def _parse_comparison(data: Any, block: _Block) -> None:
                         opponent_score=int(meeting["opponent_score"]),
                         week=_week(meeting["week"]),
                         season_type=str(meeting["season_type"]),
-                        neutral_site=None,
+                        venue=_venue(meeting["venue"]),
                     )
                 )
     block.common_opponents = len(data["common_opponents"])
@@ -718,7 +746,7 @@ def _parse_row(team: str, row: Any, block: _Block) -> _Game:
         opponent_score=int(row["opponent_score"]),
         week=_week(row["week"]),
         season_type=str(row["season_type"]),
-        neutral_site=bool(row["neutral_site"]),
+        venue=_venue(row["venue"]),
     )
     block.add_game(game)
     return game
@@ -726,6 +754,17 @@ def _parse_row(team: str, row: Any, block: _Block) -> _Game:
 
 def _week(value: Any) -> int | None:
     return None if value is None else int(value)
+
+
+def _venue(value: Any) -> Venue:
+    """One game row's venue. The block is this server's own dump of models
+    whose `venue` is that Literal, so anything else means the string isn't a
+    production fact block -- `_parse_block` turns this into that error, the
+    same way `int()` does for a malformed score."""
+    venue = str(value)
+    if venue not in _WHERE_PHRASE:
+        raise ValueError(f"unknown venue {venue!r}")
+    return cast(Venue, venue)
 
 
 def _result(team_score: int, opponent_score: int) -> str:
@@ -997,20 +1036,10 @@ def _when(where: str, game: _Game, block: _Block) -> tuple[str | None, list[str]
 
 
 def _where(where: str, game: _Game) -> tuple[str | None, list[str]]:
-    if game.neutral_site is True:
-        return "at a neutral site", []
-    if game.neutral_site is False:
-        # A head-to-head row does carry home_team/away_team: the claim model just
-        # can't print it yet, so never say the block lacks it.
-        return None, [
-            f"{where}: {game.team} vs {game.opponent} ({game.label}) was not at a neutral "
-            'site, and a "where" claim can only say where a game was played when the fact '
-            "block marks it neutral-site; home/away rendering arrives with #294"
-        ]
-    return None, [
-        f"{where}: the fact block does not record where {game.team} vs {game.opponent} "
-        f"({game.label}) was played"
-    ]
+    # Never rejects since #294: every row in the block carries a venue, so
+    # there is no game whose venue the block fails to record. `where` is kept
+    # in the resolver's (value, errors) shape, which it shares with `_when`.
+    return _WHERE_PHRASE[game.venue], []
 
 
 def _resolve_count(where: str, raw: dict[Any, Any], block: _Block) -> tuple[str | None, list[str]]:

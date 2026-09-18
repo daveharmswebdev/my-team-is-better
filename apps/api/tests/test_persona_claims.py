@@ -108,6 +108,11 @@ def texas_usc_2005() -> str:
 
 
 @pytest.fixture(scope="module")
+def texas_colorado_2005() -> str:
+    return cfb_comparison_block(2005, "Texas", "Colorado")
+
+
+@pytest.fixture(scope="module")
 def auburn_2017() -> str:
     return cfb_team_case_block(2017, "Auburn")
 
@@ -144,9 +149,19 @@ def test_fixture_facts_these_tests_rely_on(
         1,
         True,
     )
+    assert games[0]["venue"] == "neutral"
+    # A home game and a road game, for the two renderings #294 added.
+    by_opponent = {g["opponent_name"]: g for g in games}
+    assert (by_opponent["Tennessee"]["week"], by_opponent["Tennessee"]["venue"]) == (8, "home")
     regular = [g for g in games if g["season_type"] == "regular"]
     assert regular[-1]["opponent_name"] == "Auburn"
     assert (regular[-1]["result"], regular[-1]["neutral_site"]) == ("L", False)
+    # Auburn hosted the 2017 Iron Bowl, so Alabama's side of it is "away".
+    assert (regular[-1]["venue"], regular[-1]["team_score"], regular[-1]["opponent_score"]) == (
+        "away",
+        14,
+        26,
+    )
     postseason = {g["opponent_name"]: g for g in games if g["season_type"] == "postseason"}
     assert postseason["Georgia"]["week"] == postseason["Clemson"]["week"] == 1
     assert postseason["Georgia"]["opponent_rank"] == 3
@@ -175,7 +190,11 @@ def test_fixture_facts_these_tests_rely_on(
     assert [
         (m["result"], m["team_score"], m["opponent_score"]) for m in common["team_b_meetings"]
     ] == [("W", 27, 10)]
+    # A common-opponent meeting carries `venue` and never a `neutral_site`
+    # companion (#294): "neutral" says the same thing.
     assert "neutral_site" not in common["team_a_meetings"][0]
+    assert [m["venue"] for m in common["team_a_meetings"]] == ["home", "home"]
+    assert [m["venue"] for m in common["team_b_meetings"]] == ["home"]
 
 
 # ---------------------------------------------------------------------------
@@ -707,45 +726,113 @@ def test_where_at_a_neutral_site(
     assert rendered("{v}", [h2h], texas_usc_2005, catalog) == "at a neutral site"
 
 
-def test_where_for_a_game_that_was_not_neutral_is_rejected(
-    alabama_2017: str, catalog: tuple[TeamRecord, ...]
-) -> None:
+def test_where_at_home(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    """A home game says so since #294; before it, only a neutral site could
+    be rendered at all."""
+    claim = _game("v", "where", "Alabama", "Tennessee", "W")
+    assert rendered("{v}", [claim], alabama_2017, catalog) == "at home"
+
+
+def test_where_on_the_road(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
+    """An away game is "on the road", the narrator's register, not "away"
+    (founder's voice call on #294); and it composes after a score."""
     claim = _game("v", "where", "Alabama", "Auburn", "L")
-    errors = rejected("Alabama lost {v}.", [claim], alabama_2017, catalog)
-    assert_an_error_says(errors, '"v"', "Auburn", "home", "neutral")
+    assert rendered("{v}", [claim], alabama_2017, catalog) == "on the road"
+    score = _game("s", "game_score", "Alabama", "Auburn", "L")
+    assert (
+        rendered("Alabama lost {s} {v}.", [score, claim], alabama_2017, catalog)
+        == "Alabama lost 26-14 on the road."
+    )
 
 
-def test_where_for_a_head_to_head_meeting_that_was_not_neutral_points_at_294(
-    catalog: tuple[TeamRecord, ...],
+def test_where_renders_the_side_of_the_team_the_claim_names(
+    alabama_2017: str, auburn_2017: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
-    # A head-to-head meeting row carries home_team / away_team (Auburn hosted
-    # the 2017 Iron Bowl), so the error must not claim the block lacks home or
-    # away: the claim model just can't print it until #294.
-    block = cfb_comparison_block(2017, "Alabama", "Auburn")
-    (meeting,) = _row(block, "head_to_head", "meetings")
-    assert (meeting["home_team"], meeting["neutral_site"]) == ("Auburn", False)
-    claim = _game("v", "where", "Alabama", "Auburn", "L")
-    errors = rejected("Alabama lost {v}.", [claim], block, catalog)
-    assert_an_error_says(errors, '"v"', "Auburn", "neutral-site", "home/away", "#294")
-    assert not any("does not record home or away" in error for error in errors), errors
+    """Venue is team-relative, like the score pair: the same Iron Bowl is
+    "on the road" from Alabama's side and "at home" from Auburn's."""
+    alabama = _game("v", "where", "Alabama", "Auburn", "L")
+    auburn = _game("v", "where", "Auburn", "Alabama", "W")
+    assert rendered("{v}", [alabama], alabama_2017, catalog) == "on the road"
+    assert rendered("{v}", [auburn], auburn_2017, catalog) == "at home"
+    # ... including the mirrored row the block indexes for the opponent, which
+    # is the only place Auburn's side of the game exists in Alabama's block.
+    assert rendered("{v}", [auburn], alabama_2017, catalog) == "at home"
 
 
-def test_where_for_a_common_opponent_meeting_uses_another_row_for_the_same_game(
+def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
+    texas_colorado_2005: str, texas_usc_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    """A head-to-head meeting row is home/away-oriented (`home_team` /
+    `away_team` / `neutral_site`), not team-relative, so its venue is read
+    from the home team's side and mirrored for the away team."""
+    # Neither 2005 Texas-Colorado meeting is a quality win or a worst loss on
+    # either side, so head_to_head is the only row in the block that holds it.
+    meetings = _row(texas_colorado_2005, "head_to_head", "meetings")
+    assert [(m["home_team"], m["week"], m["neutral_site"]) for m in meetings] == [
+        ("Texas", 7, False),
+        ("Colorado", 14, False),
+    ]
+    for side in ("team_a", "team_b"):
+        rows = _row(texas_colorado_2005, side, "quality_wins")
+        worst = _row(texas_colorado_2005, side, "worst_loss")
+        assert all(row["opponent_name"] not in ("Texas", "Colorado") for row in rows)
+        assert worst is None or worst["opponent_name"] not in ("Texas", "Colorado")
+
+    home = _game("v", "where", "Texas", "Colorado", "W", week=7)
+    # Week 14 is the 2005 Big 12 Championship, played at Reliant Stadium in
+    # Houston -- so "at home" below is what the FACT BLOCK says, not what is
+    # true. `games.neutral_site` is 0 for it (issue #343): this asserts the
+    # renderer is faithful to the block, and the block is wrong. When #343
+    # lands, this expectation becomes "at a neutral site".
+    away = _game("v", "where", "Colorado", "Texas", "L", week=14, season_type="regular")
+    assert rendered("{v}", [home], texas_colorado_2005, catalog) == "at home"
+    assert rendered("{v}", [away], texas_colorado_2005, catalog) == "at home"
+    mirrored = _game("v", "where", "Colorado", "Texas", "L", week=7)
+    assert rendered("{v}", [mirrored], texas_colorado_2005, catalog) == "on the road"
+
+    # A neutral meeting reads the same from either side.
+    (neutral,) = _row(texas_usc_2005, "head_to_head", "meetings")
+    assert neutral["neutral_site"] is True
+    usc = _game("v", "where", "USC", "Texas", "L")
+    assert rendered("{v}", [usc], texas_usc_2005, catalog) == "at a neutral site"
+
+
+def test_where_for_a_common_opponent_meeting_renders_that_sides_own_venue(
+    alabama_auburn_2017: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    """The case that could not render at all before #294: a common-opponent
+    meeting carried no venue, so the claim was rejected. The two sides played
+    the shared opponent in different places, and each renders its own."""
+    (mississippi_state,) = [
+        c
+        for c in _row(alabama_auburn_2017, "common_opponents")
+        if c["opponent_name"] == "Mississippi State"
+    ]
+    assert [(m["week"], m["venue"]) for m in mississippi_state["team_a_meetings"]] == [(11, "away")]
+    assert [(m["week"], m["venue"]) for m in mississippi_state["team_b_meetings"]] == [(5, "home")]
+    # and those meetings are in no other row of the block
+    for side in ("team_a", "team_b"):
+        rows = _row(alabama_auburn_2017, side, "quality_wins")
+        worst = _row(alabama_auburn_2017, side, "worst_loss")
+        assert all(row["opponent_name"] != "Mississippi State" for row in rows)
+        assert worst is None or worst["opponent_name"] != "Mississippi State"
+
+    alabama = _game("v", "where", "Alabama", "Mississippi State", "W")
+    auburn = _game("v", "where", "Auburn", "Mississippi State", "W")
+    assert rendered("{v}", [alabama], alabama_auburn_2017, catalog) == "on the road"
+    assert rendered("{v}", [auburn], alabama_auburn_2017, catalog) == "at home"
+
+
+def test_where_for_a_common_opponent_meeting_no_other_row_holds(
     kilo_lima: str, nfl_catalog: tuple[TeamRecord, ...]
 ) -> None:
-    # Lima Lions vs Mike Mustangs (week 2) is in common_opponents (no
-    # neutral_site) and in Lima Lions' quality_wins (neutral_site false), so
-    # the block does know it was not neutral.
-    lima = _game("v", "where", LIMA_LIONS, MIKE_MUSTANGS, "W")
-    assert_an_error_says(
-        rejected("{v}", [lima], kilo_lima, nfl_catalog), '"v"', "not at a neutral site"
-    )
-    # Kilo Kings' week-2 tie appears only in common_opponents: nothing says
-    # where it was played.
+    """Kilo Kings' week-2 tie with Mike Mustangs appears only in
+    common_opponents; before #294 nothing in the block said where it was
+    played."""
     kilo = _game("v", "where", KILO_KINGS, MIKE_MUSTANGS, "T", week=2)
-    assert_an_error_says(
-        rejected("{v}", [kilo], kilo_lima, nfl_catalog), '"v"', "does not record where"
-    )
+    assert rendered("{v}", [kilo], kilo_lima, nfl_catalog) == "at home"
+    lima = _game("v", "where", LIMA_LIONS, MIKE_MUSTANGS, "W")
+    assert rendered("{v}", [lima], kilo_lima, nfl_catalog) == "at home"
 
 
 # ---------------------------------------------------------------------------
