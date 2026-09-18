@@ -184,6 +184,10 @@ class OpponentResultOut(BaseModel):
     opponent_score: int
     week: int | None
     season_type: str
+    # This team's side of the game (issue #294), team-relative like `result`
+    # and the score pair; not a stadium. `neutral_site` is kept beside it --
+    # `apps/web` reads it -- and always equals `venue == "neutral"`.
+    venue: Literal["home", "away", "neutral"]
     neutral_site: bool
 
     @classmethod
@@ -199,6 +203,7 @@ class OpponentResultOut(BaseModel):
             opponent_score=o.opponent_score,
             week=o.week,
             season_type=o.season_type,
+            venue=o.venue,
             neutral_site=o.neutral_site,
         )
 
@@ -463,9 +468,10 @@ class CommonOpponentMeetingOut(BaseModel):
     """One game a compared side played against a shared opponent (issue
     #130), faithful to `cfb_strength.contracts.CommonOpponentMeeting`.
 
-    Team-relative, like `OpponentResultOut`: `result` and the score pair are
-    from that side's perspective, so `team_score` is always the compared
-    team's own points -- the order the persona grounding check accepts.
+    Team-relative, like `OpponentResultOut`: `result`, the score pair and
+    `venue` are from that side's perspective, so `team_score` is always the
+    compared team's own points -- the order the persona grounding check
+    accepts.
     """
 
     # `games.id` (issue #218) -- see `cfb_strength.contracts.OpponentResult.game_id`.
@@ -475,6 +481,9 @@ class CommonOpponentMeetingOut(BaseModel):
     opponent_score: int
     week: int | None
     season_type: str
+    # This side's own venue (issue #294). No `neutral_site` companion, here or
+    # in the engine contract: "neutral" already says it, for both teams.
+    venue: Literal["home", "away", "neutral"]
 
     @classmethod
     def from_dataclass(cls, meeting: CommonOpponentMeeting) -> CommonOpponentMeetingOut:
@@ -485,6 +494,7 @@ class CommonOpponentMeetingOut(BaseModel):
             opponent_score=meeting.opponent_score,
             week=meeting.week,
             season_type=meeting.season_type,
+            venue=meeting.venue,
         )
 
 

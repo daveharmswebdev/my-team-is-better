@@ -29,6 +29,21 @@ routes build it from the committed `cfb_verdict_fixture.sqlite3`. Where
 * `common_opponents[*].team_a_meetings/team_b_meetings`: Texas vs Colorado
   2005 shares four opponents (Missouri, Oklahoma State, Kansas, Texas A&M),
   one meeting per side each, and its head-to-head has both Colorado games.
+
+`venue` is in the block on purpose (issue #294), and this file is where that
+decision is pinned rather than assumed. The exclusion above exists because
+*any number* in the block enters grounding's accepted-number set; `venue` is
+not a number but a closed three-value string vocabulary ("home", "away",
+"neutral"), so it widens no accepted-number set and licenses no figure. It is
+there by founder decision -- epic #199, condition 5, option C: "Rendered
+`when`/`where` claims... Home/away is carried by #294" -- because a `where`
+claim could otherwise only ever say "at a neutral site". Adding it changes
+every block that holds a game, and so every narration cache key (since #145
+the key hashes the block), which is the intended and sufficient invalidation;
+`PROMPT_VERSION` does not move for it. What must not happen is the opposite
+fix: excluding `venue` here to keep the byte-for-byte pins green would publish
+the field to `apps/web` while hiding it from the narrator, which is exactly
+what #294 exists to prevent.
 """
 
 from __future__ import annotations
@@ -171,6 +186,7 @@ def test_team_case_fact_block_keeps_the_games_with_their_other_fields(
             "opponent_score",
             "week",
             "season_type",
+            "venue",
             "neutral_site",
         }
 
@@ -252,7 +268,100 @@ def test_comparison_fact_block_texas_colorado_common_opponents_have_no_game_id(
                     "opponent_score",
                     "week",
                     "season_type",
+                    "venue",
                 }
+
+
+# ---------------------------------------------------------------------------
+# (b2) venue IS published to the narrator (issue #294) -- see the module
+#      docstring for why this field, unlike game_id, belongs in the block
+# ---------------------------------------------------------------------------
+
+_VENUES = {"home", "away", "neutral"}
+
+
+def _venues(value: Any) -> Iterator[str]:
+    """Every `venue` value anywhere in a parsed JSON document."""
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if key == "venue":
+                assert isinstance(nested, str), nested
+                yield nested
+            else:
+                yield from _venues(nested)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _venues(item)
+
+
+def test_team_case_fact_block_publishes_venue_for_every_game_row(
+    conn: sqlite3.Connection,
+) -> None:
+    """`games`, `quality_wins` and `worst_loss` each carry the team-relative
+    `venue`, so a `where` claim can be rendered for any of them -- not only
+    for a neutral-site game, which was all #199's renderer could say."""
+    usc = _team_case(conn, "USC", "keener")  # the 2005 case with a worst_loss
+    parsed = json.loads(team_case_fact_block_json(usc))
+
+    assert {g["venue"] for g in parsed["games"]} == {"home", "away", "neutral"}
+    assert all(q["venue"] in _VENUES for q in parsed["quality_wins"])
+    assert parsed["worst_loss"] is not None
+    assert set(parsed["worst_loss"]) == {
+        "opponent_team_id",
+        "opponent_name",
+        "opponent_rank",
+        "opponent_rating",
+        "result",
+        "team_score",
+        "opponent_score",
+        "week",
+        "season_type",
+        "venue",
+        "neutral_site",
+    }
+    # `venue` and `neutral_site` agree wherever both are published; the
+    # engine contract rejects a disagreeing pair.
+    for row in parsed["games"] + parsed["quality_wins"] + [parsed["worst_loss"]]:
+        assert row["neutral_site"] == (row["venue"] == "neutral"), row
+
+
+def test_comparison_fact_block_publishes_venue_on_both_sides_meetings(
+    conn: sqlite3.Connection,
+) -> None:
+    """Both sides' common-opponent meetings carry it. This is the shape that
+    had no venue at all before #294 -- and it gains no `neutral_site`
+    companion, because "neutral" already says that."""
+    comparison = _comparison(conn, "Texas", "Colorado")
+    parsed = json.loads(comparison_fact_block_json(comparison))
+
+    seen: list[str] = []
+    for common in parsed["common_opponents"]:
+        for side in ("team_a_meetings", "team_b_meetings"):
+            assert common[side], (common["opponent_name"], side)
+            for meeting in common[side]:
+                assert meeting["venue"] in _VENUES, meeting
+                assert "neutral_site" not in meeting
+                seen.append(meeting["venue"])
+    assert len(seen) == 8  # four shared opponents, one meeting per side
+
+    # every venue anywhere in either block is from the closed vocabulary
+    for block in (
+        comparison_fact_block_json(comparison),
+        team_case_fact_block_json(_team_case(conn, "Texas", "keener")),
+    ):
+        values = list(_venues(json.loads(block)))
+        assert values and set(values) <= _VENUES, sorted(set(values))
+
+
+def test_venue_adds_no_number_to_the_block(conn: sqlite3.Connection) -> None:
+    """The reason `game_id` is excluded is that a number in the block enters
+    grounding's accepted-number set. `venue` is a string vocabulary, so the
+    digits in the block are exactly the digits a venue-free block has."""
+    block = comparison_fact_block_json(_comparison(conn, "Texas", "Colorado"))
+    venue_free = re.sub(r'"venue":"(?:home|away|neutral)",?', "", block)
+
+    assert '"venue"' in block and '"venue"' not in venue_free
+    assert re.findall(r"\d+", block) == re.findall(r"\d+", venue_free)
 
 
 # ---------------------------------------------------------------------------
