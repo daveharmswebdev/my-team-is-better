@@ -501,9 +501,14 @@ def test_sort_none_resolves_to_the_categorys_first_sort_and_is_echoed(db: Player
         ("rushing", "passing_tds"),
         ("passing", "carries"),
         ("passing", "rushing_yards"),
-        ("receiving", None),
+        ("passing", "receptions"),
+        ("rushing", "receiving_yards"),
         ("receiving", "passing_yards"),
+        ("receiving", "carries"),
         ("rushing", "yards_per_carry"),
+        # An unknown category, which `receiving` used to stand for here
+        # before #314 made it real.
+        ("kicking", None),
     ],
 )
 def test_a_sort_outside_the_category_or_an_unknown_category_raises(
@@ -617,3 +622,395 @@ def test_every_rushing_leaders_row_equals_that_players_career_totals(db: PlayerD
     by_name = {r.display_name: r for r in regular.rows}
     assert by_name["Running QB"].record == StarterRecord(1, 1, 1)
     assert by_name["Partial"].stats.rushing_tds is None and by_name["Partial"].games is None
+
+
+# --- the receiving category (#314) ------------------------------------------
+
+RECEIVING_SORTS = ("receiving_yards", "receiving_tds", "receptions")
+
+
+def test_receiving_qualify_rule_one_target_qualifies_even_with_no_catches(db: PlayerDb) -> None:
+    # The settled rule (#314) is `targets > 0`, not `receptions > 0`: on the
+    # committed NFL fixture 24 players in 1999 and 18 in 2023 were thrown to
+    # and caught nothing, and every one of them belongs on the board with 0
+    # receptions rather than missing from it.
+    home, away = db.team("Home"), db.team("Away")
+    dropped = db.player("Caught Nothing", position="WR")
+    db.season(dropped, 2000, **full_stats(attempts=0, carries=0, targets=3, receptions=0))
+    caught = db.player("Caught Some", position="WR")
+    db.season(caught, 2000, **full_stats(attempts=0, carries=0, targets=5, receptions=4))
+    db.season(
+        db.player("Runner Only", position="RB"),
+        2000,
+        **full_stats(attempts=0, carries=20, targets=0, receptions=0),
+    )
+    passer = db.player("Pocket Passer", position="QB")
+    db.season(passer, 2000, **full_stats(attempts=30, carries=0, targets=0, receptions=0))
+    starts_only = db.player("Starts Only", position="QB")
+    db.start(db.game(2000, home, away, 10, 3), home, starts_only)
+    later = db.player("Targeted Later", position="TE")
+    db.season(later, 2000, **full_stats(attempts=0, carries=0, targets=0, receptions=0))
+    db.season(later, 2001, **full_stats(attempts=0, carries=0, targets=1, receptions=0))
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving")
+
+    assert sorted(_names(board.rows)) == ["Caught Nothing", "Caught Some", "Targeted Later"]
+    assert board.total == 3
+    by_name = {r.display_name: r for r in board.rows}
+    assert by_name["Caught Nothing"].stats.receptions == 0
+    assert by_name["Caught Nothing"].stats.targets == 3
+    assert by_name["Targeted Later"].stats.receptions == 0
+    # The other two boards are untouched by the receiving rule.
+    assert sorted(_names(get_player_leaders(conn, sport="nfl").rows)) == [
+        "Pocket Passer",
+        "Starts Only",
+    ]
+    assert sorted(_names(get_player_leaders(conn, sport="nfl", category="rushing").rows)) == [
+        "Runner Only"
+    ]
+
+
+def test_a_season_with_both_targets_and_receptions_null_never_qualifies(db: PlayerDb) -> None:
+    # `NULL OR NULL` is NULL, not true, so a season the source tracked
+    # neither column for keeps a player off the board however much other
+    # receiving yardage the row carries. Either column on its own is enough,
+    # which is what makes the rule survive an era that tracked only one.
+    neither = db.player("Neither Tracked", position="WR")
+    db.season(
+        neither,
+        2000,
+        **full_stats(attempts=0, targets=None, receptions=None, receiving_yards=100),
+    )
+    no_targets = db.player("Receptions Only", position="WR")
+    db.season(no_targets, 2000, **full_stats(attempts=0, targets=None, receptions=40))
+    no_receptions = db.player("Targets Only", position="WR")
+    db.season(no_receptions, 2000, **full_stats(attempts=0, targets=60, receptions=None))
+    both = db.player("Both Tracked", position="WR")
+    db.season(both, 2000, **full_stats(attempts=0, targets=60, receptions=40))
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving")
+
+    assert sorted(_names(board.rows)) == ["Both Tracked", "Receptions Only", "Targets Only"]
+    assert board.total == 3
+
+
+def test_receiving_qualify_rule_is_per_season_type(db: PlayerDb) -> None:
+    p = db.player("Regular Targets", position="WR")
+    db.season(p, 2000, **full_stats(attempts=0, targets=10))
+    db.season(p, 2000, season_type="postseason", **full_stats(attempts=0, targets=0, receptions=0))
+    q = db.player("Postseason Targets", position="TE")
+    db.season(q, 2001, **full_stats(attempts=0, targets=0, receptions=0))
+    db.season(q, 2001, season_type="postseason", **full_stats(attempts=0, targets=2))
+    conn = conn_of(db)
+
+    regular = get_player_leaders(conn, sport="nfl", category="receiving")
+    post = get_player_leaders(conn, sport="nfl", category="receiving", season_type="postseason")
+
+    assert (_names(regular.rows), regular.total) == (["Regular Targets"], 1)
+    assert (_names(post.rows), post.total, post.season_type) == (
+        ["Postseason Targets"],
+        1,
+        "postseason",
+    )
+
+
+@pytest.mark.parametrize("sort", RECEIVING_SORTS)
+def test_each_receiving_sort_orders_descending_with_competition_ranks_and_the_tiebreak(
+    db: PlayerDb, sort: str
+) -> None:
+    # The sorted column is 30 / 20 / 20 / 20 / 10; the other two receiving
+    # columns run the opposite way, so only the named column gives this order.
+    values = [("Dan", 10), ("Same Name", 20), ("Bob", 20), ("Ann", 30), ("Same Name", 20)]
+    ids = []
+    for name, value in values:
+        pid = db.player(name, position="WR")
+        ids.append(pid)
+        stats = {s: 100 - value for s in RECEIVING_SORTS}
+        stats[sort] = value
+        db.season(pid, 2000, **full_stats(attempts=0, targets=100, **stats))
+    same_first, same_second = ids[1], ids[4]
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving", sort=sort)  # type: ignore[arg-type]  # parametrized over the Literal's values
+
+    assert [(r.rank, r.display_name, r.player_id) for r in board.rows] == [
+        (1, "Ann", ids[3]),
+        (2, "Bob", ids[2]),
+        (2, "Same Name", same_first),
+        (2, "Same Name", same_second),
+        (5, "Dan", ids[0]),
+    ]
+    assert (board.category, board.sort) == ("receiving", sort)
+
+
+def test_receiving_yards_and_receptions_disagree_at_the_top_of_a_real_1999_board(
+    db: PlayerDb,
+) -> None:
+    # 1999 NFL regular season, from the committed fixture: Jimmy Smith caught
+    # more passes than Marvin Harrison (116 to 115) for fewer yards (1636 to
+    # 1663), so yards and receptions genuinely give different boards.
+    harrison = db.player("Marvin Harrison", position="WR")
+    db.season(
+        harrison,
+        1999,
+        games=16,
+        **full_stats(
+            attempts=0, targets=193, receptions=115, receiving_yards=1663, receiving_tds=12
+        ),
+    )
+    smith = db.player("Jimmy Smith", position="WR")
+    db.season(
+        smith,
+        1999,
+        games=16,
+        **full_stats(
+            attempts=0, targets=177, receptions=116, receiving_yards=1636, receiving_tds=6
+        ),
+    )
+    conn = conn_of(db)
+
+    by_yards = get_player_leaders(conn, sport="nfl", category="receiving", sort="receiving_yards")
+    by_receptions = get_player_leaders(conn, sport="nfl", category="receiving", sort="receptions")
+    by_tds = get_player_leaders(conn, sport="nfl", category="receiving", sort="receiving_tds")
+
+    assert _names(by_yards.rows) == ["Marvin Harrison", "Jimmy Smith"]
+    assert _names(by_receptions.rows) == ["Jimmy Smith", "Marvin Harrison"]
+    assert _names(by_tds.rows) == ["Marvin Harrison", "Jimmy Smith"]
+    assert [r.stats.receiving_yards for r in by_yards.rows] == [1663, 1636]
+    assert [r.stats.receptions for r in by_receptions.rows] == [116, 115]
+
+
+def test_receiving_sort_none_resolves_to_receiving_yards_and_is_echoed(db: PlayerDb) -> None:
+    # Most yards and fewest catches, so the default is visible in the order.
+    big_yards = db.player("Big Yards", position="WR")
+    db.season(
+        big_yards,
+        2000,
+        **full_stats(attempts=0, targets=90, receptions=50, receiving_yards=1400),
+    )
+    many_catches = db.player("Many Catches", position="WR")
+    db.season(
+        many_catches,
+        2000,
+        **full_stats(attempts=0, targets=120, receptions=95, receiving_yards=800),
+    )
+    conn = conn_of(db)
+
+    default = get_player_leaders(conn, sport="nfl", category="receiving")
+    explicit_none = get_player_leaders(conn, sport="nfl", category="receiving", sort=None)
+
+    for board in (default, explicit_none):
+        assert (board.category, board.sort) == ("receiving", "receiving_yards")
+        assert _names(board.rows) == ["Big Yards", "Many Catches"]
+
+
+def test_the_receiving_board_ranks_every_position_and_reports_it(db: PlayerDb) -> None:
+    # Epic #311 decision 1: a category, not a position. On the committed NFL
+    # fixture, regular-season seasons with a catch are WR 364, RB 244, TE 204,
+    # FB 39 and QB 13, so backs and quarterbacks are ordinary board entries.
+    for name, position, yards in [
+        ("Wideout", "WR", 1200),
+        ("Back", "RB", 600),
+        ("Tight End", "TE", 800),
+        ("Fullback", "FB", 90),
+        ("Quarterback", "QB", 30),
+        ("No Position", None, 45),
+    ]:
+        pid = db.player(name, position=position)
+        db.season(
+            pid, 2000, **full_stats(attempts=0, targets=10, receptions=5, receiving_yards=yards)
+        )
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving")
+
+    assert [(r.display_name, r.position) for r in board.rows] == [
+        ("Wideout", "WR"),
+        ("Tight End", "TE"),
+        ("Back", "RB"),
+        ("Fullback", "FB"),
+        ("No Position", None),
+        ("Quarterback", "QB"),
+    ]
+    assert board.total == 6
+
+
+def test_a_receiving_row_is_a_career_aggregate_spanning_its_seasons(db: PlayerDb) -> None:
+    home, away = db.team("Home"), db.team("Away")
+    wr = db.player("Three Seasons", position="WR")
+    for season, targets, receptions, yards, tds in [
+        (2000, 90, 55, 700, 4),
+        (2001, 120, 80, 1100, 9),
+        (2002, 60, 40, 500, 2),
+    ]:
+        db.season(
+            wr,
+            season,
+            games=16,
+            **full_stats(
+                attempts=0,
+                targets=targets,
+                receptions=receptions,
+                receiving_yards=yards,
+                receiving_tds=tds,
+            ),
+        )
+    db.season(
+        wr,
+        2001,
+        season_type="postseason",
+        games=2,
+        **full_stats(attempts=0, targets=12, receptions=9, receiving_yards=140, receiving_tds=1),
+    )
+    partial = db.player("Partial", position="TE")
+    db.season(
+        partial,
+        2003,
+        games=None,
+        **full_stats(attempts=0, targets=20, receptions=12, receiving_yards=None),
+    )
+    db.season(
+        partial,
+        2004,
+        games=9,
+        **full_stats(attempts=0, targets=30, receptions=18, receiving_yards=210),
+    )
+    rb = db.player("Receiving Back", position="RB")
+    db.season(
+        rb,
+        2002,
+        games=15,
+        **full_stats(
+            attempts=0,
+            carries=200,
+            targets=40,
+            receptions=31,
+            receiving_yards=280,
+            receiving_tds=1,
+        ),
+    )
+    db.start(db.game(2002, home, away, 20, 10), home, rb)
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving")
+    by_name = {r.display_name: r for r in board.rows}
+
+    career = by_name["Three Seasons"]
+    assert (career.first_season, career.last_season) == (2000, 2002)
+    assert career.stats.targets == 270
+    assert career.stats.receptions == 175
+    assert career.stats.receiving_yards == 2300
+    assert career.stats.receiving_tds == 15
+    assert career.games == 48
+    # A QB starter record, 0-0-0, exactly as on the rushing board.
+    assert career.record == StarterRecord(0, 0, 0)
+    # An untracked season leaves the total None rather than a partial career.
+    assert by_name["Partial"].stats.receiving_yards is None
+    assert by_name["Partial"].stats.receptions == 30
+    assert by_name["Partial"].games is None
+    # The same aggregate the career page reads.
+    for row in board.rows:
+        totals = get_player_career(conn, sport="nfl", player_id=row.player_id).regular_season
+        assert totals is not None
+        assert row.stats == totals.stats
+        assert row.games == totals.games
+        assert row.record == totals.record
+
+
+def test_a_2003_2008_shaped_season_with_catches_but_no_targets_still_qualifies(
+    db: PlayerDb,
+) -> None:
+    # nflverse writes `targets` as a literal 0 for 2003-2008 -- 3,528 to 3,647
+    # players a year caught a pass with targets 0, and there is no blank cell
+    # anywhere in 1999-2025 to tell "not tracked" from "never thrown to".
+    # Measured on the full 1999-2025 build, a bare `targets > 0` drops 303
+    # careers with a reception (5,426 catches, 54,465 yards), the largest
+    # being Shaun McDonald's, whose whole career sits inside the gap.
+    mcdonald = db.player("Shaun McDonald", position="WR")
+    for season, receptions, yards, tds in [
+        (2003, 15, 168, 1),
+        (2007, 79, 943, 6),
+        (2008, 46, 511, 1),
+    ]:
+        db.season(
+            mcdonald,
+            season,
+            games=16,
+            **full_stats(
+                attempts=0,
+                carries=0,
+                targets=0,
+                receptions=receptions,
+                receiving_yards=yards,
+                receiving_tds=tds,
+            ),
+        )
+    tracked_era = db.player("Tracked Era", position="WR")
+    db.season(
+        tracked_era,
+        2010,
+        games=16,
+        **full_stats(attempts=0, carries=0, targets=120, receptions=80, receiving_yards=1000),
+    )
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving")
+    by_name = {r.display_name: r for r in board.rows}
+
+    assert sorted(_names(board.rows)) == ["Shaun McDonald", "Tracked Era"]
+    assert board.total == 2
+    row = by_name["Shaun McDonald"]
+    assert (row.first_season, row.last_season) == (2003, 2008)
+    assert (row.stats.receptions, row.stats.receiving_yards, row.stats.receiving_tds) == (
+        140,
+        1622,
+        8,
+    )
+    # The upstream zero is reported as it was ingested, not invented.
+    assert row.stats.targets == 0
+    assert row.rank == 1
+    # Every sort reaches him, not just the default.
+    for sort in RECEIVING_SORTS:
+        board_by_sort = get_player_leaders(
+            conn,
+            sport="nfl",
+            category="receiving",
+            sort=sort,  # type: ignore[arg-type]  # loop over the Literal's values
+        )
+        assert "Shaun McDonald" in _names(board_by_sort.rows)
+
+
+def test_a_player_never_thrown_to_is_off_the_receiving_board_whatever_else_he_did(
+    db: PlayerDb,
+) -> None:
+    # The negative side of the rule, which is what keeps `targets > 0 OR
+    # receptions > 0` from drifting into "every player": neither column
+    # positive means no board, however full the rest of the stat line is.
+    home, away = db.team("Home"), db.team("Away")
+    db.season(
+        db.player("Pure Runner", position="RB"),
+        2000,
+        **full_stats(attempts=0, carries=300, rushing_yards=1400, targets=0, receptions=0),
+    )
+    db.season(
+        db.player("Pocket Passer", position="QB"),
+        2000,
+        **full_stats(attempts=500, passing_yards=4000, carries=10, targets=0, receptions=0),
+    )
+    db.season(
+        db.player("Kicker", position="K"),
+        2000,
+        **full_stats(attempts=0, carries=0, fg_made=30, fg_att=35, targets=0, receptions=0),
+    )
+    starts_only = db.player("Starts Only", position="QB")
+    db.start(db.game(2000, home, away, 20, 10), home, starts_only)
+    receiver = db.player("One Catch", position="TE")
+    db.season(receiver, 2000, **full_stats(attempts=0, carries=0, targets=0, receptions=1))
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="receiving")
+
+    assert _names(board.rows) == ["One Catch"]
+    assert board.total == 1

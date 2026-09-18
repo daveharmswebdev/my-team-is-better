@@ -406,8 +406,8 @@ season outside that window has a single such row. There are no empty
 from "never thrown to" and the NULL-not-zero rule cannot save it here.
 
 Qualifying on targets alone would therefore drop 303 players whose whole
-receiving career falls in those six seasons -- 5,426 receptions and 54,465
-yards, including Shaun McDonald (225 for 2,565). Outside 2003-2008 every
+receiving career falls in those six seasons -- 5,426 receptions and 54,503
+yards, including Shaun McDonald (225 for 2,558). Outside 2003-2008 every
 player with a reception also has a target, so the `or` changes nothing
 there: it is the same rule, written so an upstream gap cannot erase real
 careers (founder call, 2026-09-17). The gap itself is tracked as #345;
