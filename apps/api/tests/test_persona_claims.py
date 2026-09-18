@@ -779,6 +779,11 @@ def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
         assert worst is None or worst["opponent_name"] not in ("Texas", "Colorado")
 
     home = _game("v", "where", "Texas", "Colorado", "W", week=7)
+    # Week 14 is the 2005 Big 12 Championship, played at Reliant Stadium in
+    # Houston -- so "at home" below is what the FACT BLOCK says, not what is
+    # true. `games.neutral_site` is 0 for it (issue #343): this asserts the
+    # renderer is faithful to the block, and the block is wrong. When #343
+    # lands, this expectation becomes "at a neutral site".
     away = _game("v", "where", "Colorado", "Texas", "L", week=14, season_type="regular")
     assert rendered("{v}", [home], texas_colorado_2005, catalog) == "at home"
     assert rendered("{v}", [away], texas_colorado_2005, catalog) == "at home"

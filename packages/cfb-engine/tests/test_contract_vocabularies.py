@@ -28,7 +28,14 @@ from typing import Any
 import pytest
 
 from cfb_strength import cli
-from cfb_strength.contracts import ComparisonResult, GameRow, Method, Sport, TeamRow
+from cfb_strength.contracts import (
+    ComparisonResult,
+    GameRow,
+    Method,
+    OpponentResult,
+    Sport,
+    TeamRow,
+)
 from cfb_strength.evidence import proof
 from cfb_strength.mcp_server import server
 from cfb_strength.ratings import compute_ratings
@@ -226,3 +233,62 @@ def test_row_contracts_reject_a_sport_outside_the_alias(build: Any) -> None:
     assert "curling" in message
     for sport in SPORTS:
         assert sport in message
+
+
+# ---------------------------------------------------------------------------
+# OpponentResult.venue / neutral_site (issue #294)
+# ---------------------------------------------------------------------------
+#
+# `venue` and `neutral_site` say the same thing two ways, and four downstream
+# artifacts cite the guard below as their reason for trusting the pair:
+# apps/api/src/api/models.py, apps/web/src/lib/api/types.ts,
+# apps/web/src/test/gameRowVenue.ts and its fixtureGameRows.test.ts. Nothing
+# else covers the raise: there is exactly one construction site
+# (evidence/proof.py::_opponent_result) and it derives both from one
+# expression, so deleting `__post_init__` left the whole engine suite green
+# when the #294 reviewer tried it. These two tests are that missing coverage.
+
+
+def _opponent_result(*, venue: str, neutral_site: bool) -> OpponentResult:
+    return OpponentResult(
+        game_id=1,
+        opponent_team_id=2,
+        opponent_name="Bravo Tech",
+        opponent_rank=None,
+        opponent_rating=None,
+        result="W",
+        team_score=30,
+        opponent_score=10,
+        week=1,
+        season_type="regular",
+        venue=typing.cast(Any, venue),
+        neutral_site=neutral_site,
+    )
+
+
+@pytest.mark.parametrize(
+    ("venue", "neutral_site"),
+    [("home", False), ("away", False), ("neutral", True)],
+)
+def test_opponent_result_accepts_an_agreeing_venue_pair(venue: str, neutral_site: bool) -> None:
+    row = _opponent_result(venue=venue, neutral_site=neutral_site)
+    assert row.venue == venue
+    assert row.neutral_site == neutral_site
+
+
+@pytest.mark.parametrize(
+    ("venue", "neutral_site"),
+    [
+        ("home", True),
+        ("away", True),
+        # The costly direction: a neutral-site game reported as a definite
+        # side is a claim about where a game was played that is simply false.
+        ("neutral", False),
+    ],
+)
+def test_opponent_result_rejects_a_disagreeing_venue_pair(venue: str, neutral_site: bool) -> None:
+    with pytest.raises(ValueError) as excinfo:
+        _opponent_result(venue=venue, neutral_site=neutral_site)
+    message = str(excinfo.value)
+    assert venue in message
+    assert str(neutral_site) in message

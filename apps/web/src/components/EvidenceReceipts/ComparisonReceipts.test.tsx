@@ -255,12 +255,14 @@ describe('ComparisonReceipts', () => {
    * fixtures are covered by `fixtureGameRows.test.ts`.
    */
   it('builds only game rows the API could send', () => {
-    const problems = venueProblems(
-      collectGameRows(
-        { evidence, GREEN_BAY_TWICE, vikingsVsBears },
-        'ComparisonReceipts.test.tsx',
-      ),
+    const rows = collectGameRows(
+      { evidence, GREEN_BAY_TWICE, vikingsVsBears },
+      'ComparisonReceipts.test.tsx',
     )
+    // `venueProblems([])` is `[]`, so without this the check passes while
+    // inspecting nothing if a fixture is renamed or restructured.
+    expect(rows.length).toBeGreaterThan(0)
+    const problems = venueProblems(rows)
     expect(problems, problems.join('\n')).toEqual([])
   })
 
@@ -1086,9 +1088,9 @@ describe('ComparisonReceipts', () => {
     })
 
     it('builds only game rows the API could send (issue #294)', () => {
-      const problems = venueProblems(
-        collectGameRows({ vikingsVsBearsTwice }, 'rematch fixtures'),
-      )
+      const rows = collectGameRows({ vikingsVsBearsTwice }, 'rematch fixtures')
+      expect(rows.length).toBeGreaterThan(0)
+      const problems = venueProblems(rows)
       expect(problems, problems.join('\n')).toEqual([])
     })
 

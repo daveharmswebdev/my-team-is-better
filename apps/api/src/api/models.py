@@ -185,8 +185,12 @@ class OpponentResultOut(BaseModel):
     week: int | None
     season_type: str
     # This team's side of the game (issue #294), team-relative like `result`
-    # and the score pair; not a stadium. `neutral_site` is kept beside it --
-    # `apps/web` reads it -- and always equals `venue == "neutral"`.
+    # and the score pair; not a stadium. `neutral_site` is kept beside it and
+    # always equals `venue == "neutral"`. It is kept for the reason
+    # `contracts.py` gives -- `mcp_server/server.py` serialises with
+    # `dataclasses.asdict`, which skips properties -- NOT because apps/web
+    # reads it: no component does (see the note on it in
+    # `apps/web/src/lib/api/types.ts`).
     venue: Literal["home", "away", "neutral"]
     neutral_site: bool
 
