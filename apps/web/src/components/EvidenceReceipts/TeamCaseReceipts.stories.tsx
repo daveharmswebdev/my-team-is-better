@@ -17,6 +17,7 @@ const qualityWin = {
   opponent_score: 14,
   week: 5,
   season_type: 'regular',
+  venue: 'home' as const,
   neutral_site: false,
 }
 
@@ -31,6 +32,7 @@ const openerWin = {
   opponent_score: 17,
   week: 1,
   season_type: 'regular',
+  venue: 'away' as const,
   neutral_site: false,
 }
 
@@ -45,6 +47,7 @@ const midseasonWin = {
   opponent_score: 10,
   week: 10,
   season_type: 'regular',
+  venue: 'home' as const,
   neutral_site: false,
 }
 
@@ -59,6 +62,7 @@ const lateSeasonWin = {
   opponent_score: 13,
   week: 12,
   season_type: 'regular',
+  venue: 'neutral' as const,
   neutral_site: true,
 }
 
@@ -75,6 +79,7 @@ const bowlWin = {
   // so this can carry the same raw `week` as an early regular-season game.
   week: 1,
   season_type: 'postseason',
+  venue: 'neutral' as const,
   neutral_site: true,
 }
 
@@ -141,6 +146,7 @@ const worstLoss = {
   opponent_score: 27,
   week: 8,
   season_type: 'regular',
+  venue: 'away' as const,
   neutral_site: false,
 }
 
@@ -170,6 +176,7 @@ const tiedGame = {
   opponent_score: 26,
   week: 7,
   season_type: 'regular',
+  venue: 'away' as const,
   neutral_site: false,
 }
 
@@ -201,6 +208,7 @@ const coloradoWeek7 = {
   opponent_score: 17,
   week: 7,
   season_type: 'regular',
+  venue: 'home' as const,
   neutral_site: false,
 }
 
@@ -210,6 +218,9 @@ const coloradoTitleGame = {
   team_score: 70,
   opponent_score: 3,
   week: 14,
+  // The title game was at a neutral site, so the venue moves with the flag:
+  // the API cannot send one without the other (issue #294).
+  venue: 'neutral' as const,
   neutral_site: true,
 }
 

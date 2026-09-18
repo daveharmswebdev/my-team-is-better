@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TeamCaseOut } from '../../lib/api/types'
+import { collectGameRows, venueProblems } from '../../test/gameRowVenue'
 import { TeamCaseReceipts } from './TeamCaseReceipts'
 import { TEXAS_ELO } from './eloLedgerFixture'
 
@@ -18,6 +19,7 @@ const baseOpponent = {
   opponent_score: 14,
   week: 5,
   season_type: 'regular',
+  venue: 'home' as const,
   neutral_site: false,
 }
 
@@ -32,6 +34,8 @@ const lsuGame = {
   opponent_score: 17,
   week: 1,
   season_type: 'regular',
+  // A mix of sides across the fixture: all-'home' rows could not catch a swap.
+  venue: 'away' as const,
 }
 
 const tennesseeGame = {
@@ -61,6 +65,7 @@ const bowlGame = {
   // week number alone would interleave it into the regular season.
   week: 1,
   season_type: 'postseason',
+  venue: 'away' as const,
 }
 
 const evidence: TeamCaseOut = {
@@ -125,6 +130,7 @@ const tiedGame = {
   opponent_score: 26,
   week: 7,
   season_type: 'regular',
+  venue: 'away' as const,
 }
 
 const tiedSeason: TeamCaseOut = {
@@ -136,6 +142,21 @@ const tiedSeason: TeamCaseOut = {
 }
 
 describe('TeamCaseReceipts', () => {
+  /**
+   * Issue #294: `venue` is this team's own side, and on an `OpponentResultOut`
+   * it always agrees with `neutral_site` -- the engine will not build a pair
+   * that disagrees, so the API cannot send one. TypeScript makes the field
+   * required but cannot see a fixture that lies about it, which would let a
+   * real bug pass, so the fixtures in this file are checked here beside them.
+   * Story fixtures are covered by `fixtureGameRows.test.ts`.
+   */
+  it('builds only game rows the API could send', () => {
+    const problems = venueProblems(
+      collectGameRows({ evidence, tiedSeason }, 'TeamCaseReceipts.test.tsx'),
+    )
+    expect(problems, problems.join('\n')).toEqual([])
+  })
+
   it('renders the win-loss record', () => {
     render(<TeamCaseReceipts evidence={evidence} />)
 
@@ -539,6 +560,8 @@ describe('TeamCaseReceipts', () => {
       team_score: 70,
       opponent_score: 3,
       week: 14,
+      // Neutral site, so the venue moves with the flag (issue #294).
+      venue: 'neutral' as const,
       neutral_site: true,
     }
     const rematchSeason: TeamCaseOut = {
@@ -549,6 +572,13 @@ describe('TeamCaseReceipts', () => {
 
     afterEach(() => {
       vi.restoreAllMocks()
+    })
+
+    it('builds only game rows the API could send (issue #294)', () => {
+      const problems = venueProblems(
+        collectGameRows({ rematchSeason }, 'rematch fixtures'),
+      )
+      expect(problems, problems.join('\n')).toEqual([])
     })
 
     it('lists both quality wins against the same opponent, with no duplicate-key warning', () => {
