@@ -394,11 +394,24 @@ back's catches count on the receiving one.
 Qualifying (decision 2), per season type, with no minimum:
   * passing: at least one pass attempt, or one QB start (#296);
   * rushing: at least one carry (#312);
-  * receiving: at least one target (#314).
+  * receiving: at least one target **or** at least one reception (#314).
 
-Receiving qualifies on `targets`, not `receptions`, so a player who was
-thrown to and caught nothing is still on the board with 0 catches rather
-than missing from it."""
+Receiving counts a target, so a player who was thrown to and caught nothing
+is on the board with 0 catches rather than missing from it. It counts a
+reception as well because nflverse publishes `targets` as a literal 0 for
+every one of the 2003-2008 seasons -- measured on the raw weekly files:
+3,579 of the 3,582 players with a catch in 2003 have `targets = 0`, and no
+season outside that window has a single such row. There are no empty
+`targets` cells anywhere in the range, so the stored 0 is indistinguishable
+from "never thrown to" and the NULL-not-zero rule cannot save it here.
+
+Qualifying on targets alone would therefore drop 303 players whose whole
+receiving career falls in those six seasons -- 5,426 receptions and 54,465
+yards, including Shaun McDonald (225 for 2,565). Outside 2003-2008 every
+player with a reception also has a target, so the `or` changes nothing
+there: it is the same rule, written so an upstream gap cannot erase real
+careers (founder call, 2026-09-17). The gap itself is tracked as #345;
+we disclose or work around it, and never correct nflverse's numbers."""
 
 PlayerLeaderSort = Literal[
     "passing_yards",
