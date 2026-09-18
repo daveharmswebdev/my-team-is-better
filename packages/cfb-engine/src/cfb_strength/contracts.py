@@ -385,17 +385,31 @@ class PlayerSeasonStatRow:
 #     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
 # ---------------------------------------------------------------------------
 
-PlayerLeaderCategory = Literal["passing", "rushing"]
+PlayerLeaderCategory = Literal["passing", "rushing", "receiving"]
 """What a leaderboard ranks (epic #311, decision 1): a stat category, not a
 position. A board ranks every player with the category's base stat, whatever
-their position, so a QB's carries count on the rushing board.
+their position, so a QB's carries count on the rushing board and a running
+back's catches count on the receiving one.
 
 Qualifying (decision 2), per season type, with no minimum:
   * passing: at least one pass attempt, or one QB start (#296);
-  * rushing: at least one carry (#312)."""
+  * rushing: at least one carry (#312);
+  * receiving: at least one target (#314).
+
+Receiving qualifies on `targets`, not `receptions`, so a player who was
+thrown to and caught nothing is still on the board with 0 catches rather
+than missing from it."""
 
 PlayerLeaderSort = Literal[
-    "passing_yards", "passing_tds", "wins", "rushing_yards", "rushing_tds", "carries"
+    "passing_yards",
+    "passing_tds",
+    "wins",
+    "rushing_yards",
+    "rushing_tds",
+    "carries",
+    "receiving_yards",
+    "receiving_tds",
+    "receptions",
 ]
 """Every leaderboard sort. With `PlayerSeasonType` the passing ones cover
 passing yards, passing TDs, regular-season starter wins and playoff starter
@@ -406,11 +420,18 @@ PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeade
         {
             "passing": ("passing_yards", "passing_tds", "wins"),
             "rushing": ("rushing_yards", "rushing_tds", "carries"),
+            "receiving": ("receiving_yards", "receiving_tds", "receptions"),
         }
     )
 )
 """The sorts each category accepts, its default first. Every
-`PlayerLeaderSort` belongs to exactly one category."""
+`PlayerLeaderSort` belongs to exactly one category.
+
+Receiving mirrors rushing's yards/TDs/volume shape (#314, founder call
+2026-09-17). `targets` is deliberately not a sort: it is the column
+qualifying is measured on, and no other category exposes its qualifying
+column as a sort. Adding it later is a pure append to `PlayerLeaderSort`
+and to this tuple."""
 
 PLAYER_LEADERS_MAX_LIMIT = 100
 
