@@ -191,4 +191,50 @@ describe('PlayerCareerTable (issue #296)', () => {
     expect(screen.queryByText('-176')).not.toBeInTheDocument()
     expect(screen.queryByText('26')).not.toBeInTheDocument()
   })
+
+  /**
+   * Issue #314: the API now publishes six receiving stats on every line, and
+   * the leaders page has a receiving board. Non-QB career pages are out of
+   * epic #311's scope, so this table's columns are exactly what they were.
+   */
+  it('keeps its columns exactly as they were, with no receiving stat, when a line carries receiving numbers', () => {
+    const line = {
+      ...WARNER_1999_REGULAR,
+      stats: {
+        ...WARNER_1999_REGULAR.stats,
+        receptions: 7771,
+        targets: 7772,
+        receiving_yards: 7773,
+        receiving_tds: 7774,
+        receiving_first_downs: 7775,
+        receiving_fumbles_lost: 7776,
+      },
+    }
+    render(
+      <PlayerCareerTable
+        caption="Kurt Warner, regular season"
+        lines={[line]}
+        totals={{ ...KURT_WARNER_CAREER.regular_season!, stats: line.stats }}
+      />,
+    )
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Season',
+      'Teams',
+      'Games',
+      'Starter record',
+      'Starts',
+      'Completions',
+      'Attempts',
+      'Passing yards',
+      'Passing TDs',
+      'Interceptions',
+      'Carries',
+      'Rushing yards',
+      'Rushing TDs',
+    ])
+    expect(screen.getByRole('table')).not.toHaveTextContent(/777\d|7,77\d/)
+  })
 })

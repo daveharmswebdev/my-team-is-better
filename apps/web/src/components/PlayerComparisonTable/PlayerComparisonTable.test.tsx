@@ -146,6 +146,56 @@ describe('PlayerComparisonTable (issue #301)', () => {
     expect(table).not.toHaveTextContent(MARK_SCREEN_READER_TEXT)
   })
 
+  /**
+   * Issue #314: the API now publishes six receiving stats, and the leaders
+   * page has a receiving board. Non-QB compare pages are out of epic #311's
+   * scope, so this table's rows are exactly what they were.
+   */
+  it('keeps its rows exactly as they were, with no receiving stat, when the totals carry receiving numbers', () => {
+    const withReceiving = (
+      totals: PlayerCareerTotalsOut,
+    ): PlayerCareerTotalsOut => ({
+      ...totals,
+      stats: {
+        ...totals.stats,
+        receptions: 7771,
+        targets: 7772,
+        receiving_yards: 7773,
+        receiving_tds: 7774,
+        receiving_first_downs: 7775,
+        receiving_fumbles_lost: 7776,
+      },
+    })
+    const table = renderTable(
+      withReceiving(WARNER_REGULAR),
+      withReceiving(MCNAIR_REGULAR),
+    )
+
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent),
+    ).toEqual(['Total', 'Kurt Warner', 'Steve McNair'])
+    expect(
+      within(table)
+        .getAllByRole('rowheader')
+        .map((header) => header.textContent),
+    ).toEqual([
+      'Seasons',
+      'Games',
+      'Starter record',
+      'Completions',
+      'Attempts',
+      'Passing yards',
+      'Passing TDs',
+      'Interceptions',
+      'Carries',
+      'Rushing yards',
+      'Rushing TDs',
+    ])
+    expect(table).not.toHaveTextContent(/recei|target|777\d|7,77\d/i)
+  })
+
   it('sits in its own focusable scroll region', () => {
     renderTable()
 

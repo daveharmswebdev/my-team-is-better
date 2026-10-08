@@ -27,6 +27,17 @@ export const Passing: Story = {
   },
 }
 
+/** The receiving board (issue #314), chosen. */
+export const Receiving: Story = {
+  args: { value: 'receiving' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+    ).toHaveValue('receiving')
+  },
+}
+
 /** The rushing board, chosen. */
 export const Rushing: Story = {
   args: { value: 'rushing' },

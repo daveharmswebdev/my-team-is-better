@@ -53,12 +53,16 @@ export const SORT_LABEL: Record<PlayerLeaderSort, string> = {
   rushing_yards: 'rushing yards',
   rushing_tds: 'rushing TDs',
   carries: 'carries',
+  receiving_yards: 'receiving yards',
+  receiving_tds: 'receiving TDs',
+  receptions: 'receptions',
 }
 
-/** How the category dropdown names each board (issue #312). */
+/** How the category dropdown names each board (issues #312, #314). */
 export const CATEGORY_LABEL: Record<PlayerLeaderCategory, string> = {
   passing: 'Passing',
   rushing: 'Rushing',
+  receiving: 'Receiving',
 }
 
 /** The stat keys the rushing board shows; their labels and order come from `STAT_COLUMNS`. */
@@ -68,11 +72,27 @@ const RUSHING_STAT_KEYS: readonly (keyof PlayerStatsOut)[] = [
   'rushing_tds',
 ]
 
+/**
+ * The receiving board's columns (issue #314), the rushing board's shape.
+ * Deliberately its own list and not part of `STAT_COLUMNS`: the career and
+ * compare tables read `STAT_COLUMNS`, and non-QB career and compare pages are
+ * outside epic #311, so those tables show exactly what they did. `targets` is
+ * left out everywhere: the source publishes it as 0 for 2003-2008 (#345), so
+ * a career total spanning those years undercounts. First downs and fumbles
+ * lost are mirrored in the type but not shown in v1.
+ */
+const RECEIVING_COLUMNS: readonly StatColumn[] = [
+  { key: 'receptions', label: 'Receptions' },
+  { key: 'receiving_yards', label: 'Receiving yards' },
+  { key: 'receiving_tds', label: 'Receiving TDs' },
+]
+
 export interface LeaderBoardColumns {
   /**
    * Whether this board shows the starter record and starts -- and so whether
    * `STARTER_RECORD_NOTE` has anything to explain on it. Only the passing
-   * board does: a rushing board's rows are mostly 0-0-0 non-quarterbacks.
+   * board does: a rushing or receiving board's rows are mostly 0-0-0
+   * non-quarterbacks.
    */
   showsRecord: boolean
   /** The stat columns, in order. */
@@ -95,6 +115,7 @@ export const LEADER_BOARD_COLUMNS: Record<
       RUSHING_STAT_KEYS.includes(column.key),
     ),
   },
+  receiving: { showsRecord: false, stats: RECEIVING_COLUMNS },
 }
 
 /**

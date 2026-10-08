@@ -13,10 +13,11 @@ export interface LeaderCategorySelectProps {
 }
 
 /**
- * Which leaderboard to show (issue #312): Passing or Rushing. Founder
- * decision (epic #311): this picks a stat *category*, not a position -- the
- * rushing board ranks every player with a carry, and shows each one's
- * position in a column.
+ * Which leaderboard to show (issues #312, #314): Passing, Rushing or
+ * Receiving. Founder decision (epic #311): this picks a stat *category*, not
+ * a position -- the rushing board ranks every player with a carry, the
+ * receiving board every player with a target or a reception, and each shows
+ * the player's position in a column.
  *
  * A native `select` with a real `label`, so it is named, reachable and
  * operable from the keyboard with no ARIA of its own. The options come from

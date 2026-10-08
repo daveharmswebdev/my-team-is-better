@@ -4,12 +4,16 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlayerLeadersOut } from '../../lib/api/types'
 import {
+  LEADERS_BY_RECEIVING_TDS,
+  LEADERS_BY_RECEIVING_YARDS,
+  LEADERS_BY_RECEPTIONS_TAIL,
   LEADERS_BY_RUSHING_TDS,
   LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
   LEADERS_WITH_NULL_STATS,
   TUA_TAGOVAILOA,
+  TYREEK_HILL,
 } from '../../lib/playerFixtures'
 import { PlayerLeadersTable } from './PlayerLeadersTable'
 
@@ -359,5 +363,155 @@ describe('PlayerLeadersTable, the rushing board (issue #312)', () => {
     expect(
       cellUnder(bodyRows()[0] as HTMLElement, 'Carries'),
     ).toHaveTextContent(/^369$/)
+  })
+})
+
+/**
+ * Issue #314: the receiving board. It ranks everyone with a target or a
+ * reception -- a quarterback with one target included -- so, like the rushing
+ * board, it shows its own three columns and no starter record. Targets are
+ * published but never shown (#345: the source has them as 0 for 2003-2008).
+ */
+describe('PlayerLeadersTable, the receiving board (issue #314)', () => {
+  it('names itself by the receiving sort in its caption', () => {
+    renderTable(LEADERS_BY_RECEIVING_YARDS)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by receiving yards',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the receiving columns only, in order, with no record, passing, rushing or targets columns', () => {
+    renderTable(LEADERS_BY_RECEIVING_YARDS)
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Rank',
+      'Player',
+      'Position',
+      'Seasons',
+      'Games',
+      'Receptions',
+      'Receiving yards',
+      'Receiving TDs',
+    ])
+    for (const header of screen.getAllByRole('columnheader')) {
+      expect(header.textContent).not.toMatch(/target|first down|fumble/i)
+    }
+  })
+
+  it('renders the rows the API sent, receiving numbers grouped', () => {
+    renderTable(LEADERS_BY_RECEIVING_YARDS)
+
+    const rows = bodyRows()
+    expect(rows.map((row) => cellUnder(row, 'Player').textContent)).toEqual([
+      'Tyreek Hill',
+      'CeeDee Lamb',
+      'Marvin Harrison',
+    ])
+    const hill = rows[0] as HTMLElement
+    expect(cellUnder(hill, 'Rank')).toHaveTextContent(/^1$/)
+    expect(cellUnder(hill, 'Position')).toHaveTextContent(/^WR$/)
+    expect(cellUnder(hill, 'Receiving yards')).toHaveTextContent(/^1,799$/)
+    expect(cellUnder(hill, 'Receptions')).toHaveTextContent(/^119$/)
+    expect(cellUnder(hill, 'Receiving TDs')).toHaveTextContent(/^13$/)
+    // Hill's 171 targets are in the payload, and nowhere on the board.
+    expect(hill).not.toHaveTextContent('171')
+  })
+
+  it('makes all three receiving columns sortable, with aria-sort on the active one', () => {
+    renderTable(LEADERS_BY_RECEIVING_YARDS)
+
+    const expected: Record<string, string> = {
+      Receptions: 'none',
+      'Receiving yards': 'descending',
+      'Receiving TDs': 'none',
+    }
+    for (const [name, sort] of Object.entries(expected)) {
+      const header = screen.getByRole('columnheader', { name })
+      expect(header).toHaveAttribute('aria-sort', sort)
+      expect(within(header).getByRole('button', { name })).toBeInTheDocument()
+    }
+    for (const name of ['Rank', 'Player', 'Position', 'Seasons', 'Games']) {
+      const header = screen.getByRole('columnheader', { name })
+      expect(header).not.toHaveAttribute('aria-sort')
+      expect(within(header).queryByRole('button')).not.toBeInTheDocument()
+    }
+  })
+
+  it('asks for each receiving column its own sort when clicked', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_RECEIVING_YARDS)
+
+    await user.click(screen.getByRole('button', { name: 'Receiving TDs' }))
+    await user.click(screen.getByRole('button', { name: 'Receptions' }))
+    await user.click(screen.getByRole('button', { name: 'Receiving yards' }))
+
+    expect(onSort.mock.calls).toEqual([
+      ['receiving_tds'],
+      ['receptions'],
+      ['receiving_yards'],
+    ])
+  })
+
+  it('shows the three-way tie at rank 1 by receiving TDs exactly as sent', () => {
+    renderTable(LEADERS_BY_RECEIVING_TDS)
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Receiving TDs' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    const rows = bodyRows()
+    expect(rows.map((row) => cellUnder(row, 'Rank').textContent)).toEqual([
+      '1',
+      '1',
+      '1',
+      '4',
+      '4',
+    ])
+    expect(
+      rows.map((row) => cellUnder(row, 'Receiving TDs').textContent),
+    ).toEqual(['13', '13', '13', '12', '12'])
+  })
+
+  it('shows a recorded 0 receptions as 0, not "not recorded", for a quarterback with a target', () => {
+    renderTable(LEADERS_BY_RECEPTIONS_TAIL)
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Receptions' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    const [tannehill, mckeon] = bodyRows() as [HTMLElement, HTMLElement]
+    expect(cellUnder(tannehill, 'Rank')).toHaveTextContent(/^885$/)
+    expect(cellUnder(tannehill, 'Position')).toHaveTextContent(/^QB$/)
+    expect(cellUnder(mckeon, 'Rank')).toHaveTextContent(/^885$/)
+    expect(cellUnder(mckeon, 'Position')).toHaveTextContent(/^TE$/)
+    for (const row of [tannehill, mckeon]) {
+      for (const column of ['Receptions', 'Receiving yards', 'Receiving TDs']) {
+        expect(cellUnder(row, column)).toHaveTextContent(/^0$/)
+      }
+    }
+    // A quarterback's starter record stays off a board with no record column.
+    expect(
+      screen.queryByRole('columnheader', { name: 'Starter record' }),
+    ).not.toBeInTheDocument()
+    expect(tannehill).not.toHaveTextContent('3-5')
+  })
+
+  it('shows a null receiving stat as "not recorded"', () => {
+    renderTable({
+      ...LEADERS_BY_RECEIVING_YARDS,
+      rows: [
+        {
+          ...TYREEK_HILL,
+          stats: { ...TYREEK_HILL.stats, receptions: null },
+        },
+      ],
+    })
+
+    expect(
+      cellUnder(bodyRows()[0] as HTMLElement, 'Receptions'),
+    ).toHaveTextContent(/^not recorded$/)
   })
 })

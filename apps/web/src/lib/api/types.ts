@@ -291,10 +291,15 @@ export type PlayerSeasonType = (typeof PLAYER_SEASON_TYPES)[number]
 /**
  * The engine's `PlayerLeaderCategory` literal, in its order (issue #312):
  * what a board ranks. A stat category, never a position -- the rushing board
- * ranks everyone with a carry, quarterbacks included. Same caveat as
+ * ranks everyone with a carry, quarterbacks included, and the receiving board
+ * (issue #314) everyone with a target or a reception. Same caveat as
  * `PLAYER_SEASON_TYPES`.
  */
-export const PLAYER_LEADER_CATEGORIES = ['passing', 'rushing'] as const
+export const PLAYER_LEADER_CATEGORIES = [
+  'passing',
+  'rushing',
+  'receiving',
+] as const
 
 export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
 
@@ -308,6 +313,7 @@ export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
 export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
   passing: ['passing_yards', 'passing_tds', 'wins'],
   rushing: ['rushing_yards', 'rushing_tds', 'carries'],
+  receiving: ['receiving_yards', 'receiving_tds', 'receptions'],
 } as const satisfies Record<PlayerLeaderCategory, readonly string[]>
 
 /**
@@ -317,6 +323,7 @@ export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
 export const PLAYER_LEADER_SORTS = [
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.passing,
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.rushing,
+  ...PLAYER_LEADER_SORTS_BY_CATEGORY.receiving,
 ] as const
 
 export type PlayerLeaderSort = (typeof PLAYER_LEADER_SORTS)[number]
@@ -333,6 +340,13 @@ export interface StarterRecordOut {
  * Every stat is `null` when the source did not record it -- never 0. Sack
  * stats are mirrored faithfully but not shown in v1: the stored sack yards
  * are negative against the column's name (#298).
+ *
+ * The receiving stats (issue #314) are mirrored in full, but only
+ * `receptions`, `receiving_yards` and `receiving_tds` are shown, and only on
+ * the receiving board. `targets` is never shown: the source publishes it as
+ * a literal 0 for every 2003-2008 season (#345), so a career total spanning
+ * those years would be a false undercount. First downs and fumbles lost are
+ * not shown in v1 either.
  */
 export interface PlayerStatsOut {
   completions: number | null
@@ -345,6 +359,12 @@ export interface PlayerStatsOut {
   carries: number | null
   rushing_yards: number | null
   rushing_tds: number | null
+  receptions: number | null
+  targets: number | null
+  receiving_yards: number | null
+  receiving_tds: number | null
+  receiving_first_downs: number | null
+  receiving_fumbles_lost: number | null
 }
 
 export interface PlayerLeaderRowOut {
