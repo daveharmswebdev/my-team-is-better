@@ -385,7 +385,7 @@ class PlayerSeasonStatRow:
 #     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
 # ---------------------------------------------------------------------------
 
-PlayerLeaderCategory = Literal["passing", "rushing", "receiving"]
+PlayerLeaderCategory = Literal["passing", "rushing", "receiving", "kicking", "punting"]
 """What a leaderboard ranks (epic #311, decision 1): a stat category, not a
 position. A board ranks every player with the category's base stat, whatever
 their position, so a QB's carries count on the rushing board and a running
@@ -394,7 +394,15 @@ back's catches count on the receiving one.
 Qualifying (decision 2), per season type, with no minimum:
   * passing: at least one pass attempt, or one QB start (#296);
   * rushing: at least one carry (#312);
-  * receiving: at least one target **or** at least one reception (#314).
+  * receiving: at least one target **or** at least one reception (#314);
+  * kicking: at least one field-goal attempt **or** one PAT attempt (#315);
+  * punting: at least one punt (#315).
+
+Kicking and punting need no `targets`-style workaround: measured per season
+on the raw weekly files for all of 1999-2025 (#315, 2026-10-08), every season
+has 424-488 player-games with an FG attempt and 487-541 with a punt, and no
+row has a make without an attempt or punt yards without a punt. Their zeros
+are real.
 
 Receiving counts a target, so a player who was thrown to and caught nothing
 is on the board with 0 catches rather than missing from it. It counts a
@@ -424,10 +432,29 @@ PlayerLeaderSort = Literal[
     "receiving_yards",
     "receiving_tds",
     "receptions",
+    "fg_made",
+    "fg_pct",
+    "fg_made_50_plus",
+    "fg_long",
+    "fg_att",
+    "pat_made",
+    "pt_yards",
+    "pt_net_yards",
+    "pt_att",
+    "pt_inside_20",
 ]
 """Every leaderboard sort. With `PlayerSeasonType` the passing ones cover
 passing yards, passing TDs, regular-season starter wins and playoff starter
-wins. Always descending; ties break by `display_name`, then `player_id`."""
+wins. Always descending; ties break by `display_name`, then `player_id`.
+
+Two kicking sorts are computed at read time from the career totals and are
+not `PlayerStats` fields (#315):
+  * `fg_pct` is `fg_made / fg_att` as an exact ratio (not rounded before
+    ranking). Its board is gated by `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`.
+  * `fg_made_50_plus` is `fg_made_50_59 + fg_made_60_`.
+Every other sort is the `PlayerStats` column of the same name. `fg_long` is a
+career MAX (`PLAYER_STAT_MAX_FIELDS`, #334), NULL for a kicker who never made
+one, so such a kicker is unranked and sorts last on that board."""
 
 PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeaderSort, ...]] = (
     MappingProxyType(
@@ -435,6 +462,8 @@ PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeade
             "passing": ("passing_yards", "passing_tds", "wins"),
             "rushing": ("rushing_yards", "rushing_tds", "carries"),
             "receiving": ("receiving_yards", "receiving_tds", "receptions"),
+            "kicking": ("fg_made", "fg_pct", "fg_made_50_plus", "fg_long", "fg_att", "pat_made"),
+            "punting": ("pt_yards", "pt_net_yards", "pt_att", "pt_inside_20"),
         }
     )
 )
@@ -448,6 +477,18 @@ column as a sort. Adding it later is a pure append to `PlayerLeaderSort`
 and to this tuple."""
 
 PLAYER_LEADERS_MAX_LIMIT = 100
+
+PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS: Mapping[PlayerSeasonType, int] = MappingProxyType(
+    {"regular": 100, "postseason": 15}
+)
+"""Career field-goal attempts a kicker needs, in that season type, to appear
+on the `fg_pct` sort (founder call on #315, 2026-10-08). It is the epic's one
+rate sort, so it is the one sort with a minimum: 100 is Pro Football
+Reference's career FG% qualifier. Below it a kicker is left off the `fg_pct`
+board entirely (not listed unranked), and `PlayerLeaders.total` counts only
+the kickers who meet it. Every other kicking sort keeps the
+one-attempt rule. Measured on 1999-2025: 86 of 202 kickers qualify for the
+regular-season board, 31 of 100 for the postseason one."""
 
 
 @dataclass(frozen=True)
@@ -469,7 +510,9 @@ class StarterRecord:
 class PlayerLeaderRow:
     """One qualifying player on a leaderboard for one category and season
     type. Qualifying is per category (`PlayerLeaderCategory`), with no
-    minimum: every board is a counting stat (#296, #312). `record` is the
+    minimum, except the `fg_pct` sort (`PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`).
+    The computed sorts' values are not carried on the row; a client derives
+    them from `stats` exactly as `PlayerLeaderSort` defines them. `record` is the
     player's QB starter record whatever the category (0-0-0 for most
     rushers)."""
 
@@ -499,7 +542,8 @@ class PlayerLeaders:
     sort: PlayerLeaderSort
     limit: int
     offset: int
-    # Size of the whole qualifying population, so a client can page.
+    # Size of the whole qualifying population, so a client can page. For the
+    # `fg_pct` sort, only the kickers who meet the attempts minimum.
     total: int
     rows: list[PlayerLeaderRow]
 
