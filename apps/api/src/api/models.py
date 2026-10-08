@@ -729,6 +729,16 @@ class PlayerStatsOut(BaseModel):
     carries: int | None
     rushing_yards: int | None
     rushing_tds: int | None
+    # Receiving (#314). `targets` qualifies a player for the receiving board
+    # but is not one of its sorts; nflverse publishes it as 0 for 2003-2008
+    # (#345), which is why the engine qualifies on a target *or* a reception.
+    # Kicking and punting are not published yet (#315).
+    receptions: int | None
+    targets: int | None
+    receiving_yards: int | None
+    receiving_tds: int | None
+    receiving_first_downs: int | None
+    receiving_fumbles_lost: int | None
 
     @classmethod
     def from_dataclass(cls, stats: PlayerStats) -> PlayerStatsOut:
@@ -743,6 +753,12 @@ class PlayerStatsOut(BaseModel):
             carries=stats.carries,
             rushing_yards=stats.rushing_yards,
             rushing_tds=stats.rushing_tds,
+            receptions=stats.receptions,
+            targets=stats.targets,
+            receiving_yards=stats.receiving_yards,
+            receiving_tds=stats.receiving_tds,
+            receiving_first_downs=stats.receiving_first_downs,
+            receiving_fumbles_lost=stats.receiving_fumbles_lost,
         )
 
 

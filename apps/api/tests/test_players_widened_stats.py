@@ -3,8 +3,9 @@
 `contracts.PlayerStats` went from 10 stat columns to 34, and the committed
 fixture was rebuilt through the widened nflverse ingest. This module pins the
 two behavioural changes that came with the widening, so that neither can
-regress silently while the API still publishes only the original ten fields
-(`PlayerStatsOut`; receiving/kicking/punting are #314 and #315).
+regress silently while the API publishes only part of the contract
+(`PlayerStatsOut`: the original ten fields plus #314's six receiving stats;
+kicking and punting are #315).
 
 1. Sign convention (#298). `sack_yards_lost` is stored and published
    POSITIVE. It used to be negative, and every consumer -- the career page,
@@ -158,6 +159,13 @@ def test_stats_body_rejects_a_name_that_is_not_a_stat() -> None:
 
 
 def test_stats_body_rejects_a_stat_the_api_does_not_publish_yet() -> None:
-    assert "receptions" in STAT_NAMES and "receptions" not in PUBLISHED_STAT_NAMES
+    # Kicking is #315; receiving became publishable in #314.
+    assert "fg_made" in STAT_NAMES and "fg_made" not in PUBLISHED_STAT_NAMES
     with pytest.raises(ValueError, match="does not publish yet"):
-        stats_body(receptions=4)
+        stats_body(fg_made=4)
+
+
+def test_stats_body_accepts_the_receiving_stats() -> None:
+    body = stats_body(receptions=4, targets=6)
+
+    assert (body["receptions"], body["targets"], body["receiving_yards"]) == (4, 6, None)
