@@ -17,10 +17,12 @@ import pytest
 
 from cfb_strength.config import RAW_DIR
 from cfb_strength.contracts import (
+    PLAYER_LEADERS_MAX_LIMIT,
     PlayerCareer,
     PlayerComparison,
     PlayerHeadToHead,
     PlayerHeadToHeadGame,
+    PlayerLeaders,
     PlayerSeasonLine,
     StarterRecord,
 )
@@ -457,3 +459,208 @@ def test_search_real_names(conn: sqlite3.Connection) -> None:
         1999,
         2015,
     )
+
+
+# --- kicking and punting boards (#315) ----------------------------------------
+
+VINATIERI = 2360915944
+SAM_KOCH = 2205446436
+_KICKING_AND_PUNTING_COLUMNS = (
+    "fg_made",
+    "fg_att",
+    "fg_long",
+    "fg_made_0_19",
+    "fg_made_20_29",
+    "fg_made_30_39",
+    "fg_made_40_49",
+    "fg_made_50_59",
+    "fg_made_60_",
+    "pat_made",
+    "pat_att",
+    "pt_att",
+    "pt_yards",
+    "pt_net_yards",
+    "pt_long",
+    "pt_inside_20",
+)
+
+
+def _board(
+    conn: sqlite3.Connection,
+    category: str,
+    sort: str | None = None,
+    season_type: str = "regular",
+    limit: int = 3,
+) -> PlayerLeaders:
+    return get_player_leaders(
+        conn,
+        sport="nfl",
+        category=category,  # type: ignore[arg-type]  # the Literal's values
+        season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
+        sort=sort,  # type: ignore[arg-type]  # the Literal's values
+        limit=limit,
+    )
+
+
+def _top(board: PlayerLeaders, column: str) -> list[tuple[int | None, str, int | None]]:
+    return [(r.rank, r.display_name, getattr(r.stats, column)) for r in board.rows]
+
+
+def test_kicking_and_punting_qualifying_populations(conn: sqlite3.Connection) -> None:
+    assert _board(conn, "kicking").total == 218
+    assert _board(conn, "kicking", season_type="postseason").total == 102
+    # 246 and 117, not the 247 and 118 counted per raw gsis id: the raw 2001
+    # weekly file has four punting rows with a blank player_id (three regular,
+    # one postseason), which ingest skips as `no_player_identity` and a
+    # per-id count groups into one phantom punter.
+    assert _board(conn, "punting").total == 246
+    assert _board(conn, "punting", season_type="postseason").total == 117
+
+
+def test_regular_season_fg_pct_board(conn: sqlite3.Connection) -> None:
+    board = _board(conn, "kicking", "fg_pct", limit=PLAYER_LEADERS_MAX_LIMIT)
+    assert board.total == 86 == len(board.rows)
+    assert [(r.rank, r.display_name, r.stats.fg_made, r.stats.fg_att) for r in board.rows[:3]] == [
+        (1, "Cameron Dicker", 129, 138),
+        (2, "Eddy Pineiro", 139, 155),
+        (3, "Justin Tucker", 417, 468),
+    ]
+    attempts = [r.stats.fg_att for r in board.rows]
+    assert all(a is not None and a >= 100 for a in attempts)
+    ratios = [
+        r.stats.fg_made / r.stats.fg_att
+        for r in board.rows
+        if r.stats.fg_made is not None and r.stats.fg_att
+    ]
+    assert len(ratios) == 86 and ratios == sorted(ratios, reverse=True)
+
+
+def test_postseason_fg_pct_board_three_way_tie_at_the_top(conn: sqlite3.Connection) -> None:
+    board = _board(conn, "kicking", "fg_pct", season_type="postseason", limit=4)
+    assert board.total == 31
+    assert [(r.rank, r.display_name, r.stats.fg_made, r.stats.fg_att) for r in board.rows] == [
+        (1, "Chris Boswell", 19, 19),
+        (1, "Evan McPherson", 19, 19),
+        (1, "Robbie Gould", 29, 29),
+        (4, "Jake Elliott", 28, 29),
+    ]
+
+
+def test_regular_season_kicking_boards(conn: sqlite3.Connection) -> None:
+    assert _top(_board(conn, "kicking"), "fg_made") == [
+        (1, "Adam Vinatieri", 516),
+        (2, "Robbie Gould", 447),
+        (3, "Phil Dawson", 441),
+    ]
+    fifty_plus = _board(conn, "kicking", "fg_made_50_plus")
+    assert [
+        (r.rank, r.display_name, r.stats.fg_made_50_59, r.stats.fg_made_60_)
+        for r in fifty_plus.rows
+    ] == [
+        (1, "Matt Prater", 79, 3),
+        (2, "Justin Tucker", 62, 2),
+        (3, "Sebastian Janikowski", 56, 2),
+    ]
+    # Chase McLaughlin's 65 ties Brandon Aubrey's for third; the name breaks it.
+    assert _top(_board(conn, "kicking", "fg_long", limit=4), "fg_long") == [
+        (1, "Cam Little", 68),
+        (2, "Justin Tucker", 66),
+        (3, "Brandon Aubrey", 65),
+        (3, "Chase McLaughlin", 65),
+    ]
+    assert _top(_board(conn, "kicking", "pat_made"), "pat_made") == [
+        (1, "Adam Vinatieri", 763),
+        (2, "Mason Crosby", 739),
+        (3, "Stephen Gostkowski", 699),
+    ]
+    assert _top(_board(conn, "kicking", "fg_att"), "fg_att") == [
+        (1, "Adam Vinatieri", 612),
+        (2, "Sebastian Janikowski", 542),
+        (3, "Phil Dawson", 526),
+    ]
+
+
+def test_regular_season_kickers_with_no_make_have_no_long(conn: sqlite3.Connection) -> None:
+    rows = _board(conn, "kicking", "fg_long", limit=PLAYER_LEADERS_MAX_LIMIT).rows
+    rows += get_player_leaders(
+        conn, sport="nfl", category="kicking", sort="fg_long", limit=100, offset=100
+    ).rows
+    rows += get_player_leaders(
+        conn, sport="nfl", category="kicking", sort="fg_long", limit=100, offset=200
+    ).rows
+    assert len(rows) == 218
+    unranked = [r for r in rows if r.rank is None]
+    assert len(unranked) == 24
+    assert all(r.stats.fg_long is None and r.stats.fg_made == 0 for r in unranked)
+    # Every unranked row is after every ranked one.
+    assert rows[-24:] == unranked
+
+
+def test_regular_season_punting_boards(conn: sqlite3.Connection) -> None:
+    assert _top(_board(conn, "punting"), "pt_yards") == [
+        (1, "Shane Lechler", 68411),
+        (2, "Andy Lee", 68405),
+        (3, "Dustin Colquitt", 53694),
+    ]
+    assert _top(_board(conn, "punting", "pt_net_yards"), "pt_net_yards") == [
+        (1, "Andy Lee", 58789),
+        (2, "Shane Lechler", 56429),
+        (3, "Dustin Colquitt", 47764),
+    ]
+    assert _top(_board(conn, "punting", "pt_inside_20"), "pt_inside_20") == [
+        (1, "Dustin Colquitt", 484),
+        (2, "Andy Lee", 476),
+        (3, "Shane Lechler", 469),
+    ]
+    assert _top(_board(conn, "punting", "pt_att"), "pt_att") == [
+        (1, "Andy Lee", 1466),
+        (2, "Shane Lechler", 1444),
+        (3, "Dustin Colquitt", 1199),
+    ]
+
+
+def test_postseason_kicking_and_punting_boards(conn: sqlite3.Connection) -> None:
+    assert _top(_board(conn, "kicking", season_type="postseason"), "fg_made") == [
+        (1, "Adam Vinatieri", 50),
+        (2, "Stephen Gostkowski", 41),
+        (3, "David Akers", 39),
+    ]
+    # Four kickers share 57, not two: Butker (2023) and Nugent (2014) as well
+    # as Lutz and Zuerlein.
+    assert _top(_board(conn, "kicking", "fg_long", "postseason", limit=5), "fg_long") == [
+        (1, "Graham Gano", 58),
+        (2, "Greg Zuerlein", 57),
+        (2, "Harrison Butker", 57),
+        (2, "Mike Nugent", 57),
+        (2, "Wil Lutz", 57),
+    ]
+    assert _top(_board(conn, "punting", season_type="postseason", limit=1), "pt_yards") == [
+        (1, "Sam Koch", 4144)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("player_id", "category", "season_type"),
+    [(VINATIERI, "kicking", "regular"), (SAM_KOCH, "punting", "postseason")],
+)
+def test_a_kicking_or_punting_row_equals_the_career_totals(
+    conn: sqlite3.Connection, player_id: int, category: str, season_type: str
+) -> None:
+    rows = [
+        r
+        for r in _board(
+            conn, category, season_type=season_type, limit=PLAYER_LEADERS_MAX_LIMIT
+        ).rows
+        if r.player_id == player_id
+    ]
+    (row,) = rows
+    career = get_player_career(conn, sport="nfl", player_id=player_id)
+    totals = career.regular_season if season_type == "regular" else career.postseason
+    assert totals is not None
+    for column in _KICKING_AND_PUNTING_COLUMNS:
+        assert getattr(row.stats, column) == getattr(totals.stats, column), column
+    assert row.games == totals.games
+    if player_id == VINATIERI:
+        assert (row.stats.fg_made, row.stats.fg_att, row.stats.pat_made) == (516, 612, 763)
+    else:
+        assert row.stats.pt_yards == 4144

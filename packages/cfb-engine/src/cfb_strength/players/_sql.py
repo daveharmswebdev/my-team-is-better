@@ -51,6 +51,13 @@ QUALIFYING: Mapping[PlayerLeaderCategory, str] = MappingProxyType(
         # A NULL in both columns still never qualifies: NULL OR NULL is
         # NULL, not true.
         "receiving": "targets > 0 OR receptions > 0",
+        # A field-goal try or a PAT try (#315), so a PAT-only kicker and a
+        # kicker who never made a field goal are both on the board. No
+        # `receiving`-style workaround: over the raw 1999-2025 cache no row
+        # has a make without an attempt, so the zeros are real.
+        "kicking": "fg_att > 0 OR pat_att > 0",
+        # A punt (#315).
+        "punting": "pt_att > 0",
     }
 )
 
