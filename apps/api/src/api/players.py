@@ -172,7 +172,10 @@ def leaders(
     `sort`, with `total` the size of that category's whole qualifying
     population so a client can page. `rank` is the engine's competition rank
     over that population (ties share it), null when the sort value is null.
-    Omitting `sort` gives the category's default, echoed in the response."""
+    Omitting `sort` gives the category's default, echoed in the response.
+    The one board narrower than its category is the engine's `fg_pct`
+    (#315): only kickers at `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS` qualify, and
+    `total` counts only them -- possibly 0, which is an answer, not an error."""
     category, sort = board
     return PlayerLeadersOut.from_dataclass(
         get_player_leaders(

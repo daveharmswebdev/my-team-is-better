@@ -11,7 +11,8 @@ What is pinned, and why each matters to the leaders page apps/web builds:
   regenerated fixture, so a faithful copy of a wrong engine answer still
   fails here.
 - **Every category, every sort.** `category` ('passing' | 'rushing' |
-  'receiving', #312, #314) picks the board, and omitting `sort` echoes that category's default. The
+  'receiving' | 'kicking' | 'punting', #312, #314, #315) picks the board, and
+  omitting `sort` echoes that category's default. The
   (category, sort) pairs are read from the engine's own
   `PLAYER_LEADER_SORTS_BY_CATEGORY`, never a list copied into apps/api. A
   sort from another category is a 422 at `sort` naming that category's
@@ -22,8 +23,16 @@ What is pinned, and why each matters to the leaders page apps/web builds:
 - **Qualifying is the engine's.** The receiving board takes anyone with a
   target *or* a reception (#345), so a targeted player with no catch is on
   it, ranked, with `receptions` 0 -- apps/api filters nothing out.
-- **The published stat keys are a literal.** Sixteen names, in order, so
-  dropping or adding a `PlayerStatsOut` field goes red.
+- **The published stat keys are a literal.** Twenty-eight names, in order,
+  so dropping or adding a `PlayerStatsOut` field goes red.
+- **Computed sorts stay computed.** `fg_pct` and `fg_made_50_plus` rank the
+  kicking board (#315) but are not published; a client derives them from
+  `fg_made`/`fg_att` and `fg_made_50_59`/`fg_made_60_`. The `fg_pct` board is
+  gated by the engine's attempts minimum, which no fixture kicker reaches, so
+  on the fixture it is a 200 with `total` 0 and no rows -- the right answer.
+- **A maximum with nothing to maximise is null.** `fg_long`/`pt_long` are
+  career maxima, JSON `null` for a player who never made a field goal or
+  punted, never 0.
 - **Ranks are the engine's.** Competition ranking over the whole qualifying
   population (1, 2, 2, 4), including across a page boundary.
 - **Null stays null.** A stat the source did not record is JSON `null`,
@@ -69,14 +78,19 @@ CATEGORY_SORTS: tuple[tuple[PlayerLeaderCategory, PlayerLeaderSort], ...] = tupl
 )
 
 # Measured on the committed fixture (NFL 1999 + 2023): passing #296, rushing
-# #312, receiving #314. Qualifying is per (category, season_type), with no
-# minimum.
+# #312, receiving #314, kicking and punting #315. Qualifying is per
+# (category, season_type), with no minimum -- except on the `fg_pct` sort
+# (`_total` below).
 REGULAR_QUALIFYING = 204
 POSTSEASON_QUALIFYING = 30
 REGULAR_RUSHING_QUALIFYING = 653
 POSTSEASON_RUSHING_QUALIFYING = 114
 REGULAR_RECEIVING_QUALIFYING = 926
 POSTSEASON_RECEIVING_QUALIFYING = 224
+REGULAR_KICKING_QUALIFYING = 81
+POSTSEASON_KICKING_QUALIFYING = 27
+REGULAR_PUNTING_QUALIFYING = 83
+POSTSEASON_PUNTING_QUALIFYING = 26
 QUALIFYING: dict[tuple[str, str], int] = {
     ("passing", "regular"): REGULAR_QUALIFYING,
     ("passing", "postseason"): POSTSEASON_QUALIFYING,
@@ -84,13 +98,34 @@ QUALIFYING: dict[tuple[str, str], int] = {
     ("rushing", "postseason"): POSTSEASON_RUSHING_QUALIFYING,
     ("receiving", "regular"): REGULAR_RECEIVING_QUALIFYING,
     ("receiving", "postseason"): POSTSEASON_RECEIVING_QUALIFYING,
+    ("kicking", "regular"): REGULAR_KICKING_QUALIFYING,
+    ("kicking", "postseason"): POSTSEASON_KICKING_QUALIFYING,
+    ("punting", "regular"): REGULAR_PUNTING_QUALIFYING,
+    ("punting", "postseason"): POSTSEASON_PUNTING_QUALIFYING,
 }
+
+
+def _total(category: str, season_type: str, sort: str) -> int:
+    """The board's `total`: the category's qualifying count for every sort
+    except `fg_pct`. Below `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS` (100 regular,
+    15 postseason) a kicker is off that board, and the fixture's busiest
+    kickers have 46 regular and 11 postseason attempts, so it is 0 here."""
+    return 0 if sort == "fg_pct" else QUALIFYING[(category, season_type)]
+
 
 TUA_TAGOVAILOA = 2186969283
 KURT_WARNER = 2044124519
 PATRICK_MAHOMES = 2319407936
 TRAVIS_HOMER = 2053081896
 MARVIN_HARRISON = 2009851825
+OLINDO_MARE = 2147978801
+BRANDON_AUBREY = 2050278267
+CAIRO_SANTOS = 2164193587
+THOMAS_MORSTEAD = 2219362247
+CHRIS_GARDOCKI = 2250235710
+MATTHEW_WRIGHT = 2176014404
+MORRIS_UNUTOA = 2386441999
+TOBY_GOWIN = 2279601441
 
 RECEIVING_STATS = (
     "receptions",
@@ -100,6 +135,17 @@ RECEIVING_STATS = (
     "receiving_first_downs",
     "receiving_fumbles_lost",
 )
+
+KICKING_STATS = (
+    "fg_made",
+    "fg_att",
+    "fg_long",
+    "fg_made_50_59",
+    "fg_made_60_",
+    "pat_made",
+    "pat_att",
+)
+PUNTING_STATS = ("pt_att", "pt_yards", "pt_net_yards", "pt_long", "pt_inside_20")
 
 ROW_KEYS = {
     "rank",
@@ -136,11 +182,14 @@ def _get_career(client: TestClient, player_id: int) -> Any:
 # ---------------------------------------------------------------------------
 
 
-# The sixteen stats the API publishes, written out rather than derived: the
-# original ten plus #314's six receiving stats, in `PlayerStatsOut`'s order.
-# `contracts.PlayerStats` has carried 34 columns since #313; kicking and
-# punting are #315. Deriving this list from the response model would make
-# every assertion on it tautological -- see `test_published_stat_keys_are_pinned`.
+# The twenty-eight stats the API publishes, written out rather than derived:
+# the original ten, #314's six receiving stats and #315's twelve kicking and
+# punting stats, in `PlayerStatsOut`'s order. `contracts.PlayerStats` has
+# carried 34 columns since #313; the six it carries and the API does not
+# publish are `rushing_first_downs`, `rushing_fumbles_lost` and the
+# `fg_made_0_19` .. `fg_made_40_49` distance buckets. Deriving
+# this list from the response model would make every assertion on it
+# tautological -- see `test_published_stat_keys_are_pinned`.
 PUBLISHED_STATS: tuple[str, ...] = (
     "completions",
     "attempts",
@@ -158,6 +207,18 @@ PUBLISHED_STATS: tuple[str, ...] = (
     "receiving_tds",
     "receiving_first_downs",
     "receiving_fumbles_lost",
+    "fg_made",
+    "fg_att",
+    "fg_long",
+    "fg_made_50_59",
+    "fg_made_60_",
+    "pat_made",
+    "pat_att",
+    "pt_att",
+    "pt_yards",
+    "pt_net_yards",
+    "pt_long",
+    "pt_inside_20",
 )
 
 
@@ -210,7 +271,8 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
 
 # (season_type, sort) -> the literal top rows measured on the fixture. The
 # passing entries are #296's, unchanged; the rushing ones are #312's; the
-# receiving ones are #314's.
+# receiving ones are #314's; kicking and punting are #315's. The `fg_pct`
+# boards are empty on the fixture (see `_total`).
 TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("regular", "passing_yards"): [(1, "Tua Tagovailoa"), (2, "Jared Goff")],
     ("regular", "passing_tds"): [(1, "Kurt Warner"), (2, "Dak Prescott")],
@@ -230,12 +292,32 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("postseason", "receiving_yards"): [(1, "Travis Kelce"), (2, "Isaac Bruce")],
     ("postseason", "receiving_tds"): [(1, "Jake Ferguson"), (1, "Randy Moss")],
     ("postseason", "receptions"): [(1, "Travis Kelce"), (2, "Rashee Rice")],
+    ("regular", "fg_made"): [(1, "Olindo Mare"), (2, "Brandon Aubrey")],
+    ("regular", "fg_pct"): [],
+    ("regular", "fg_made_50_plus"): [(1, "Brandon Aubrey"), (2, "Matt Prater")],
+    ("regular", "fg_long"): [(1, "Matt Prater"), (2, "Jake Elliott")],
+    ("regular", "fg_att"): [(1, "Olindo Mare"), (2, "Jason Myers")],
+    ("regular", "pat_made"): [(1, "Jeff Wilkins"), (2, "Jake Moody")],
+    ("postseason", "fg_made"): [(1, "Harrison Butker"), (2, "Al Del Greco")],
+    ("postseason", "fg_pct"): [],
+    ("postseason", "fg_made_50_plus"): [(1, "Jake Moody"), (2, "Harrison Butker")],
+    ("postseason", "fg_long"): [(1, "Harrison Butker"), (2, "Jake Moody")],
+    ("postseason", "fg_att"): [(1, "Al Del Greco"), (1, "Harrison Butker")],
+    ("postseason", "pat_made"): [(1, "Mike Badgley"), (2, "Mike Hollis")],
+    ("regular", "pt_yards"): [(1, "Thomas Morstead"), (2, "Chris Gardocki")],
+    ("regular", "pt_net_yards"): [(1, "Thomas Morstead"), (2, "Jamie Gillan")],
+    ("regular", "pt_att"): [(1, "Sean Landeta"), (2, "Chris Gardocki")],
+    ("regular", "pt_inside_20"): [(1, "Bryce Baringer"), (2, "Thomas Morstead")],
+    ("postseason", "pt_yards"): [(1, "Craig Hentrich"), (2, "Tommy Townsend")],
+    ("postseason", "pt_net_yards"): [(1, "Craig Hentrich"), (2, "Tommy Townsend")],
+    ("postseason", "pt_att"): [(1, "Craig Hentrich"), (2, "Tom Hutton")],
+    ("postseason", "pt_inside_20"): [(1, "Tom Hutton"), (2, "Craig Hentrich")],
 }
 
 
 def test_published_stat_keys_are_pinned(client: TestClient) -> None:
-    """Every stats object a player endpoint serves has exactly these sixteen
-    keys, in this order: on a leaders row of every board, and on a career
+    """Every stats object a player endpoint serves has exactly these
+    twenty-eight keys, in this order: on a leaders row of every board, and on a career
     season line and its totals.
 
     The expectation is the literal `PUBLISHED_STATS`, never
@@ -244,7 +326,7 @@ def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     together by construction and a comparison between them could never fail
     (#313 and #338 reviews). Dropping or adding a field must go red here.
     """
-    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 16
+    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 28
     stats_objects: list[Any] = []
     for category in CATEGORIES:
         stats_objects += [r["stats"] for r in _get(client, category=category, limit=3)["rows"]]
@@ -268,7 +350,7 @@ def test_every_category_sort_and_season_type_is_the_engines_board(
     body = _get(client, category=category, season_type=season_type, sort=sort)
 
     assert (body["category"], body["season_type"], body["sort"]) == (category, season_type, sort)
-    assert body["total"] == QUALIFYING[(category, season_type)]
+    assert body["total"] == _total(category, season_type, sort)
     assert [(r["rank"], r["display_name"]) for r in body["rows"][:2]] == TOP_ROWS[
         (season_type, sort)
     ]
@@ -480,6 +562,163 @@ def test_a_targeted_player_with_no_catch_is_ranked_with_zero_receptions(
     assert row["rank"] == 885
     assert body["rows"][-1]["rank"] == 885
     assert body == _expected(category="receiving", sort="receptions", limit=100, offset=880)
+
+
+# ---------------------------------------------------------------------------
+# the kicking and punting boards (#315)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("category,default_sort", [("kicking", "fg_made"), ("punting", "pt_yards")])
+@pytest.mark.parametrize("season_type", SEASON_TYPES)
+def test_kicking_and_punting_with_no_sort_echo_the_categorys_default(
+    client: TestClient, season_type: PlayerSeasonType, category: str, default_sort: str
+) -> None:
+    body = _get(client, category=category, season_type=season_type)
+
+    assert (body["category"], body["sort"], body["season_type"]) == (
+        category,
+        default_sort,
+        season_type,
+    )
+    assert body["total"] == QUALIFYING[(category, season_type)]
+    assert body["rows"]
+    assert body == _get(client, category=category, season_type=season_type, sort=default_sort)
+
+
+def test_the_kicking_and_punting_qualifier_counts_are_the_measured_ones() -> None:
+    """The literal totals measured on the fixture, pinned here as numbers so
+    a regenerated fixture or a changed qualifying rule shows up as such."""
+    assert {key: n for key, n in QUALIFYING.items() if key[0] in ("kicking", "punting")} == {
+        ("kicking", "regular"): 81,
+        ("kicking", "postseason"): 27,
+        ("punting", "regular"): 83,
+        ("punting", "postseason"): 26,
+    }
+
+
+def test_the_regular_kicking_board_shows_the_measured_leaders(client: TestClient) -> None:
+    """Measured on the fixture through `get_player_leaders`: Olindo Mare's
+    1999 (39 of 46, long 54, three from 50+) leads; Brandon Aubrey's 2023
+    (36 of 38, long 60, nine from 50-59 and one from 60+) is second. Aubrey
+    never punted, so his `pt_long` is null while his punting counts are 0."""
+    body = _get(client, category="kicking", limit=3)
+
+    assert body["total"] == REGULAR_KICKING_QUALIFYING
+    assert [
+        (r["rank"], r["player_id"], r["display_name"], r["position"]) for r in body["rows"]
+    ] == [
+        (1, OLINDO_MARE, "Olindo Mare", "K"),
+        (2, BRANDON_AUBREY, "Brandon Aubrey", "K"),
+        (3, CAIRO_SANTOS, "Cairo Santos", "K"),
+    ]
+    assert [{name: r["stats"][name] for name in KICKING_STATS} for r in body["rows"]] == [
+        {
+            "fg_made": 39,
+            "fg_att": 46,
+            "fg_long": 54,
+            "fg_made_50_59": 3,
+            "fg_made_60_": 0,
+            "pat_made": 27,
+            "pat_att": 27,
+        },
+        {
+            "fg_made": 36,
+            "fg_att": 38,
+            "fg_long": 60,
+            "fg_made_50_59": 9,
+            "fg_made_60_": 1,
+            "pat_made": 49,
+            "pat_att": 52,
+        },
+        {
+            "fg_made": 35,
+            "fg_att": 38,
+            "fg_long": 55,
+            "fg_made_50_59": 7,
+            "fg_made_60_": 0,
+            "pat_made": 31,
+            "pat_att": 33,
+        },
+    ]
+    aubrey = body["rows"][1]["stats"]
+    assert {name: aubrey[name] for name in PUNTING_STATS} == {
+        "pt_att": 0,
+        "pt_yards": 0,
+        "pt_net_yards": 0,
+        "pt_long": None,
+        "pt_inside_20": 0,
+    }
+    # Mare punted once in 1999; the board publishes it rather than hiding it.
+    mare = body["rows"][0]["stats"]
+    assert (mare["pt_att"], mare["pt_yards"], mare["pt_net_yards"], mare["pt_long"]) == (
+        1,
+        36,
+        30,
+        36,
+    )
+
+
+def test_the_regular_punting_board_shows_the_measured_leaders(client: TestClient) -> None:
+    body = _get(client, category="punting", limit=2)
+
+    assert body["total"] == REGULAR_PUNTING_QUALIFYING
+    assert [
+        (r["rank"], r["player_id"], r["display_name"], r["position"]) for r in body["rows"]
+    ] == [
+        (1, THOMAS_MORSTEAD, "Thomas Morstead", "P"),
+        (2, CHRIS_GARDOCKI, "Chris Gardocki", "P"),
+    ]
+    assert [{name: r["stats"][name] for name in PUNTING_STATS} for r in body["rows"]] == [
+        {"pt_att": 99, "pt_yards": 4831, "pt_net_yards": 4136, "pt_long": 62, "pt_inside_20": 36},
+        {"pt_att": 106, "pt_yards": 4645, "pt_net_yards": 3663, "pt_long": 61, "pt_inside_20": 20},
+    ]
+    morstead = body["rows"][0]["stats"]
+    assert (morstead["fg_att"], morstead["fg_long"]) == (0, None)
+
+
+@pytest.mark.parametrize("season_type", SEASON_TYPES)
+def test_the_fg_pct_board_answers_with_its_gated_total(
+    client: TestClient, season_type: PlayerSeasonType
+) -> None:
+    """No fixture kicker reaches the engine's attempts minimum (100 regular,
+    15 postseason), so the board is a 200 with `total` 0 and no rows: the
+    correct answer, not an error and not the ungated population."""
+    body = _get(client, category="kicking", season_type=season_type, sort="fg_pct")
+
+    assert (body["category"], body["sort"], body["season_type"]) == (
+        "kicking",
+        "fg_pct",
+        season_type,
+    )
+    assert (body["total"], body["rows"]) == (0, [])
+    assert body == _expected(category="kicking", season_type=season_type, sort="fg_pct")
+
+
+def test_a_kicker_with_no_made_field_goal_publishes_a_null_fg_long(client: TestClient) -> None:
+    """`fg_long` is a career maximum. Three regular-season kicking qualifiers
+    never made a field goal (Matthew Wright and Toby Gowin each missed one,
+    Morris Unutoa only kicked a PAT), so theirs is JSON `null` -- never 0,
+    which would read as a zero-yard make. They share the board's last rank.
+
+    Asserted on the raw body, so a `null` cannot be confused with a missing
+    key filled in by a parsed default."""
+    response = client.get(LEADERS, params={"category": "kicking", "limit": 3, "offset": 78})
+    assert response.status_code == 200, response.text
+
+    raw = response.text
+    assert raw.count('"fg_long":null') == 3, raw
+    assert '"fg_long":0' not in raw
+    rows = response.json()["rows"]
+    assert [(r["rank"], r["player_id"], r["display_name"]) for r in rows] == [
+        (79, MATTHEW_WRIGHT, "Matthew Wright"),
+        (79, MORRIS_UNUTOA, "Morris Unutoa"),
+        (79, TOBY_GOWIN, "Toby Gowin"),
+    ]
+    assert [(r["stats"]["fg_made"], r["stats"]["fg_att"]) for r in rows] == [(0, 1), (0, 0), (0, 1)]
+    # Gowin is a punter who also kicked: his punting maximum is a real number.
+    assert rows[2]["stats"]["pt_long"] == 64
+    assert response.json() == _expected(category="kicking", limit=3, offset=78)
 
 
 def test_postseason_starts_are_published(client: TestClient) -> None:
@@ -702,7 +941,13 @@ def _assert_422_at(response_status: int, body: Any, field: str) -> None:
         ({"category": "passing", "sort": "receiving_yards"}, "sort"),
         # `targets` qualifies a receiver but is deliberately not a sort.
         ({"category": "receiving", "sort": "targets"}, "sort"),
-        ({"category": "kicking"}, "category"),
+        # #315: kicking and punting are boards now, each with its own sorts.
+        ({"category": "kicking", "sort": "pt_yards"}, "sort"),
+        ({"category": "punting", "sort": "fg_made"}, "sort"),
+        ({"category": "kicking", "sort": "carries"}, "sort"),
+        # The 0-49 distance buckets are neither published nor sorts.
+        ({"category": "kicking", "sort": "fg_made_40_49"}, "sort"),
+        ({"category": "returning"}, "category"),
         ({"season_type": "combined"}, "season_type"),
     ],
     ids=lambda v: str(v),
@@ -734,6 +979,13 @@ CROSS_CATEGORY_SORTS: list[tuple[PlayerLeaderCategory, str]] = [
     ("receiving", "wins"),
     ("rushing", "receptions"),
     ("passing", "receiving_tds"),
+    # #315
+    ("kicking", "pt_yards"),
+    ("kicking", "pt_net_yards"),
+    ("punting", "fg_made"),
+    ("punting", "fg_pct"),
+    ("passing", "fg_made"),
+    ("receiving", "pt_inside_20"),
 ]
 
 

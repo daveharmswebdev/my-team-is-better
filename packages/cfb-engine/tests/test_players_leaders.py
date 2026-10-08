@@ -9,9 +9,12 @@ from pathlib import Path
 import pytest
 
 from cfb_strength.contracts import (
+    PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
+    PLAYER_LEADER_SORTS_BY_CATEGORY,
     PLAYER_LEADERS_MAX_LIMIT,
     PLAYER_STAT_MAX_FIELDS,
     PlayerLeaderRow,
+    PlayerLeaders,
     PlayerStats,
     StarterRecord,
 )
@@ -506,9 +509,18 @@ def test_sort_none_resolves_to_the_categorys_first_sort_and_is_echoed(db: Player
         ("receiving", "passing_yards"),
         ("receiving", "carries"),
         ("rushing", "yards_per_carry"),
-        # An unknown category, which `receiving` used to stand for here
-        # before #314 made it real.
-        ("kicking", None),
+        # Kicking and punting sorts stay on their own boards (#315).
+        ("kicking", "pt_yards"),
+        ("kicking", "receptions"),
+        ("punting", "fg_made"),
+        ("punting", "fg_pct"),
+        ("passing", "fg_pct"),
+        ("receiving", "fg_made_50_plus"),
+        ("rushing", "pt_net_yards"),
+        ("kicking", "pat_pct"),
+        # An unknown category, which `receiving` (#314) and then `kicking`
+        # (#315) used to stand for here before each was made real.
+        ("defense", None),
     ],
 )
 def test_a_sort_outside_the_category_or_an_unknown_category_raises(
@@ -1014,3 +1026,375 @@ def test_a_player_never_thrown_to_is_off_the_receiving_board_whatever_else_he_di
 
     assert _names(board.rows) == ["One Catch"]
     assert board.total == 1
+
+
+# --- the kicking and punting categories (#315) --------------------------------
+
+KICKING_SORTS = ("fg_made", "fg_pct", "fg_made_50_plus", "fg_long", "fg_att", "pat_made")
+PUNTING_SORTS = ("pt_yards", "pt_net_yards", "pt_att", "pt_inside_20")
+# The kicking sorts that are the `PlayerStats` column of the same name.
+_KICKING_COLUMN_SORTS = ("fg_made", "fg_long", "fg_att", "pat_made")
+
+
+def _no_kicks(**overrides: int | None) -> dict[str, int | None]:
+    """`full_stats` with every kicking and punting column a real zero (and the
+    longs blank, as nflverse leaves them with nothing made), so a line is on
+    the kicking or punting board only when a test puts it there."""
+    stats = full_stats(
+        fg_made=0,
+        fg_att=0,
+        fg_long=None,
+        fg_made_0_19=0,
+        fg_made_20_29=0,
+        fg_made_30_39=0,
+        fg_made_40_49=0,
+        fg_made_50_59=0,
+        fg_made_60_=0,
+        pat_made=0,
+        pat_att=0,
+        pt_att=0,
+        pt_yards=0,
+        pt_net_yards=0,
+        pt_long=None,
+        pt_inside_20=0,
+    )
+    stats.update(overrides)
+    return stats
+
+
+def _kicker(db: PlayerDb, name: str, made: int, att: int, *, season_type: str = "regular") -> int:
+    pid = db.player(name, position="K")
+    db.season(
+        pid,
+        2000,
+        season_type=season_type,
+        **_no_kicks(fg_made=made, fg_att=att, fg_made_30_39=made, fg_long=40 if made else None),
+    )
+    return pid
+
+
+def test_kicking_qualifies_a_pat_only_and_a_fg_only_kicker_punting_one_punt(
+    db: PlayerDb,
+) -> None:
+    pat_only = db.player("PAT Only", position="K")
+    db.season(pat_only, 2000, **_no_kicks(pat_made=3, pat_att=3))
+    fg_only = db.player("FG Only", position="K")
+    db.season(fg_only, 2000, **_no_kicks(fg_made=0, fg_att=2))
+    # A make-less PAT try still qualifies: the attempt is the rule.
+    missed_pat = db.player("Missed PAT", position="P")
+    db.season(missed_pat, 2000, **_no_kicks(pat_made=0, pat_att=1))
+    punter = db.player("One Punt", position="P")
+    db.season(punter, 2000, **_no_kicks(pt_att=1, pt_yards=40, pt_net_yards=35))
+    neither = db.player("Neither", position="RB")
+    db.season(neither, 2000, **_no_kicks(carries=200, rushing_yards=900))
+    untracked = db.player("Untracked", position="K")
+    db.season(untracked, 2000, **_no_kicks(fg_att=None, pat_att=None, pt_att=None))
+    conn = conn_of(db)
+
+    kicking = get_player_leaders(conn, sport="nfl", category="kicking")
+    punting = get_player_leaders(conn, sport="nfl", category="punting")
+
+    assert sorted(_names(kicking.rows)) == ["FG Only", "Missed PAT", "PAT Only"]
+    assert kicking.total == 3
+    assert (_names(punting.rows), punting.total) == (["One Punt"], 1)
+
+
+def test_kicking_and_punting_qualify_per_season_type(db: PlayerDb) -> None:
+    k = db.player("Regular Kicker", position="K")
+    db.season(k, 2000, **_no_kicks(fg_made=1, fg_att=1))
+    db.season(k, 2000, season_type="postseason", **_no_kicks())
+    p = db.player("Playoff Punter", position="P")
+    db.season(p, 2000, **_no_kicks())
+    db.season(p, 2000, season_type="postseason", **_no_kicks(pt_att=4, pt_yards=170))
+    conn = conn_of(db)
+
+    def board(category: str, season_type: str) -> list[str]:
+        return _names(
+            get_player_leaders(
+                conn,
+                sport="nfl",
+                category=category,  # type: ignore[arg-type]  # the Literal's values
+                season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
+            ).rows
+        )
+
+    assert board("kicking", "regular") == ["Regular Kicker"]
+    assert board("kicking", "postseason") == []
+    assert board("punting", "regular") == []
+    assert board("punting", "postseason") == ["Playoff Punter"]
+
+
+def test_fg_pct_ranks_by_the_exact_ratio(db: PlayerDb) -> None:
+    # 90/100 and 180/200 are the same ratio (the issue's 9/10 at a qualifying
+    # volume), so they tie; 178/198 is 89/99, just below it.
+    _kicker(db, "Ninety Of Hundred", 90, 100)
+    _kicker(db, "Double", 180, 200)
+    _kicker(db, "Eighty Nine Of Ninety Nine", 178, 198)
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_pct")
+
+    assert [(r.rank, r.display_name) for r in board.rows] == [
+        (1, "Double"),
+        (1, "Ninety Of Hundred"),
+        (3, "Eighty Nine Of Ninety Nine"),
+    ]
+    assert board.sort == "fg_pct"
+
+
+def test_fg_pct_is_not_rounded_before_ranking(db: PlayerDb) -> None:
+    # 200/201 = 0.99502... and 199/200 = 0.995 are both 0.995 at three
+    # decimals; only the exact ratio puts Zed above Abe.
+    _kicker(db, "Zed", 200, 201)
+    _kicker(db, "Abe", 199, 200)
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_pct")
+
+    assert [(r.rank, r.display_name) for r in board.rows] == [(1, "Zed"), (2, "Abe")]
+
+
+@pytest.mark.parametrize(("season_type", "minimum"), [("regular", 100), ("postseason", 15)])
+def test_fg_pct_board_needs_the_attempts_minimum_inclusive(
+    db: PlayerDb, season_type: str, minimum: int
+) -> None:
+    assert PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS[season_type] == minimum  # type: ignore[index]  # the Literal's values
+    # Perfect but one attempt short: it would top the board if it were on it.
+    _kicker(db, "Just Short", minimum - 1, minimum - 1, season_type=season_type)
+    _kicker(db, "Exactly Enough", minimum // 2, minimum, season_type=season_type)
+    _kicker(db, "Volume", minimum // 4, minimum + 50, season_type=season_type)
+    pat_only = db.player("PAT Only", position="K")
+    db.season(pat_only, 2000, season_type=season_type, **_no_kicks(pat_made=40, pat_att=40))
+    conn = conn_of(db)
+
+    def board(sort: str, offset: int = 0) -> PlayerLeaders:
+        return get_player_leaders(
+            conn,
+            sport="nfl",
+            category="kicking",
+            season_type=season_type,  # type: ignore[arg-type]  # parametrized over the Literal
+            sort=sort,  # type: ignore[arg-type]  # the Literal's values
+            offset=offset,
+        )
+
+    pct = board("fg_pct")
+    assert [(r.rank, r.display_name) for r in pct.rows] == [(1, "Exactly Enough"), (2, "Volume")]
+    assert pct.total == 2
+    # A page past the end still counts only the kickers who meet it.
+    past_end = board("fg_pct", offset=10)
+    assert (past_end.rows, past_end.total) == ([], 2)
+    # Every other kicking sort keeps the one-attempt rule.
+    for sort in KICKING_SORTS:
+        if sort != "fg_pct":
+            assert board(sort).total == 4, sort
+
+
+def test_the_fg_pct_minimum_counts_career_attempts_across_seasons(db: PlayerDb) -> None:
+    pid = db.player("Two Seasons", position="K")
+    db.season(pid, 2000, **_no_kicks(fg_made=50, fg_att=60))
+    db.season(pid, 2001, **_no_kicks(fg_made=35, fg_att=40))
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_pct")
+
+    assert [(r.rank, r.display_name, r.stats.fg_made, r.stats.fg_att) for r in board.rows] == [
+        (1, "Two Seasons", 85, 100)
+    ]
+
+
+def test_fg_made_50_plus_sums_both_long_buckets(db: PlayerDb) -> None:
+    sixty_only = db.player("Sixty Only", position="K")
+    db.season(sixty_only, 2000, **_no_kicks(fg_made=1, fg_att=1, fg_made_60_=1, fg_long=61))
+    fifties = db.player("Fifties", position="K")
+    db.season(fifties, 2000, **_no_kicks(fg_made=1, fg_att=1, fg_made_50_59=1, fg_long=52))
+    db.season(fifties, 2001, **_no_kicks(fg_made=1, fg_att=1, fg_made_50_59=1, fg_long=55))
+    both = db.player("Both", position="K")
+    db.season(both, 2000, **_no_kicks(fg_made=1, fg_att=1, fg_made_50_59=1, fg_long=50))
+    db.season(both, 2001, **_no_kicks(fg_made=1, fg_att=1, fg_made_60_=1, fg_long=63))
+    short = db.player("Short", position="K")
+    db.season(short, 2000, **_no_kicks(fg_made=5, fg_att=5, fg_made_40_49=5, fg_long=49))
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_made_50_plus")
+
+    assert [(r.rank, r.display_name) for r in board.rows] == [
+        (1, "Both"),
+        (1, "Fifties"),
+        (3, "Sixty Only"),
+        (4, "Short"),
+    ]
+    both_stats = board.rows[0].stats
+    assert (both_stats.fg_made_50_59, both_stats.fg_made_60_) == (1, 1)
+
+
+def test_a_null_long_bucket_makes_fg_made_50_plus_unranked(db: PlayerDb) -> None:
+    known = db.player("Known", position="K")
+    db.season(known, 2000, **_no_kicks(fg_made=1, fg_att=1, fg_made_50_59=1, fg_long=51))
+    blank = db.player("Blank Sixty", position="K")
+    db.season(blank, 2000, **_no_kicks(fg_made=3, fg_att=3, fg_made_50_59=3, fg_made_60_=None))
+    conn = conn_of(db)
+
+    rows = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_made_50_plus").rows
+
+    assert [(r.rank, r.display_name) for r in rows] == [(1, "Known"), (None, "Blank Sixty")]
+    assert rows[1].stats.fg_made_60_ is None
+
+
+def test_a_kicker_with_no_make_has_no_long_is_unranked_and_sorts_last(db: PlayerDb) -> None:
+    missed = db.player("Aaron Missed", position="K")
+    db.season(missed, 2000, **_no_kicks(fg_made=0, fg_att=3))
+    pat_only = db.player("Abe PAT Only", position="K")
+    db.season(pat_only, 2000, **_no_kicks(pat_made=2, pat_att=2))
+    long = db.player("Zed Long", position="K")
+    db.season(long, 2000, **_no_kicks(fg_made=2, fg_att=2, fg_long=47))
+    db.season(long, 2001, **_no_kicks(fg_made=0, fg_att=1))
+    db.season(long, 2002, **_no_kicks(fg_made=1, fg_att=1, fg_long=52))
+    conn = conn_of(db)
+
+    rows = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_long").rows
+
+    assert [(r.rank, r.display_name, r.stats.fg_long) for r in rows] == [
+        (1, "Zed Long", 52),
+        (None, "Aaron Missed", None),
+        (None, "Abe PAT Only", None),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("category", "sort"),
+    [("kicking", s) for s in _KICKING_COLUMN_SORTS] + [("punting", s) for s in PUNTING_SORTS],
+)
+def test_each_kicking_and_punting_column_sort_orders_descending_with_the_tiebreak(
+    db: PlayerDb, category: str, sort: str
+) -> None:
+    # The sorted column is 30 / 20 / 20 / 20 / 10; every other column sort of
+    # the category runs the opposite way, so only the named one gives this order.
+    columns = _KICKING_COLUMN_SORTS if category == "kicking" else PUNTING_SORTS
+    values = [("Dan", 10), ("Same Name", 20), ("Bob", 20), ("Ann", 30), ("Same Name", 20)]
+    ids = []
+    for name, value in values:
+        pid = db.player(name, position="K")
+        ids.append(pid)
+        stats: dict[str, int | None] = {c: 100 - value for c in columns}
+        stats[sort] = value
+        db.season(pid, 2000, **_no_kicks(**stats))
+    conn = conn_of(db)
+
+    board = get_player_leaders(conn, sport="nfl", category=category, sort=sort)  # type: ignore[arg-type]  # parametrized over the Literal's values
+
+    assert [(r.rank, r.display_name, r.player_id) for r in board.rows] == [
+        (1, "Ann", ids[3]),
+        (2, "Bob", ids[2]),
+        (2, "Same Name", ids[1]),
+        (2, "Same Name", ids[4]),
+        (5, "Dan", ids[0]),
+    ]
+    assert (board.category, board.sort, board.total) == (category, sort, 5)
+
+
+def test_every_kicking_and_punting_sort_resolves(db: PlayerDb) -> None:
+    _kicker(db, "Kicker", 90, 100)
+    punter = db.player("Punter", position="P")
+    db.season(punter, 2000, **_no_kicks(pt_att=5, pt_yards=200, pt_net_yards=180))
+    conn = conn_of(db)
+
+    for category, sorts in (("kicking", KICKING_SORTS), ("punting", PUNTING_SORTS)):
+        assert PLAYER_LEADER_SORTS_BY_CATEGORY[category] == sorts  # type: ignore[index]  # the Literal's values
+        for sort in sorts:
+            board = get_player_leaders(
+                conn,
+                sport="nfl",
+                category=category,  # type: ignore[arg-type]  # the Literal's values
+                sort=sort,  # type: ignore[arg-type]  # the Literal's values
+            )
+            assert (board.category, board.sort, board.total) == (category, sort, 1)
+            assert board.rows[0].rank == 1
+
+
+def test_kicking_and_punting_default_sorts_are_fg_made_and_pt_yards(db: PlayerDb) -> None:
+    # Most makes but fewest attempts; most yards but fewest punts.
+    _kicker(db, "Accurate", 30, 30)
+    _kicker(db, "Busy", 20, 40)
+    db.season(db.player("Long Leg", position="P"), 2000, **_no_kicks(pt_att=10, pt_yards=600))
+    db.season(db.player("Many Punts", position="P"), 2000, **_no_kicks(pt_att=20, pt_yards=500))
+    conn = conn_of(db)
+
+    kicking = get_player_leaders(conn, sport="nfl", category="kicking")
+    punting = get_player_leaders(conn, sport="nfl", category="punting", sort=None)
+
+    assert (kicking.sort, _names(kicking.rows)) == ("fg_made", ["Accurate", "Busy"])
+    assert (punting.sort, _names(punting.rows)) == ("pt_yards", ["Long Leg", "Many Punts"])
+
+
+def test_every_kicking_and_punting_leaders_row_equals_that_players_career_totals(
+    db: PlayerDb,
+) -> None:
+    kicker = db.player("Kicker", position="K")
+    db.season(
+        kicker,
+        2000,
+        games=16,
+        **_no_kicks(fg_made=25, fg_att=30, fg_long=51, fg_made_50_59=1, pat_made=30, pat_att=31),
+    )
+    db.season(
+        kicker,
+        2001,
+        games=16,
+        **_no_kicks(fg_made=80, fg_att=90, fg_long=62, fg_made_60_=1, pat_made=40, pat_att=40),
+    )
+    db.season(
+        kicker,
+        2001,
+        season_type="postseason",
+        games=2,
+        **_no_kicks(fg_made=15, fg_att=15, fg_long=44, pat_made=4, pat_att=4),
+    )
+    punter = db.player("Punter", position="P")
+    db.season(
+        punter,
+        2000,
+        games=16,
+        **_no_kicks(pt_att=70, pt_yards=3100, pt_net_yards=2700, pt_long=66),
+    )
+    db.season(
+        punter,
+        2001,
+        games=None,
+        **_no_kicks(pt_att=60, pt_yards=2600, pt_net_yards=None, pt_long=58, pt_inside_20=20),
+    )
+    db.season(
+        punter,
+        2001,
+        season_type="postseason",
+        games=1,
+        **_no_kicks(pt_att=4, pt_yards=170, pt_net_yards=150, pt_long=50, pt_inside_20=2),
+    )
+    conn = conn_of(db)
+
+    checked = 0
+    for season_type in ("regular", "postseason"):
+        for category, sorts in (("kicking", KICKING_SORTS), ("punting", PUNTING_SORTS)):
+            for sort in (None, *sorts):
+                board = get_player_leaders(
+                    conn,
+                    sport="nfl",
+                    category=category,  # type: ignore[arg-type]  # the Literal's values
+                    season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
+                    sort=sort,  # type: ignore[arg-type]  # the Literal's values
+                )
+                for row in board.rows:
+                    career = get_player_career(conn, sport="nfl", player_id=row.player_id)
+                    totals = (
+                        career.regular_season if season_type == "regular" else career.postseason
+                    )
+                    assert totals is not None
+                    assert row.games == totals.games
+                    assert row.stats == totals.stats
+                    checked += 1
+    assert checked == 2 * (len(KICKING_SORTS) + 1 + len(PUNTING_SORTS) + 1)
+    (kick,) = get_player_leaders(conn, sport="nfl", category="kicking", sort="fg_pct").rows
+    assert (kick.stats.fg_made, kick.stats.fg_att, kick.stats.fg_long) == (105, 120, 62)
+    (punt,) = get_player_leaders(conn, sport="nfl", category="punting").rows
+    # A NULL season stays NULL in the total; the long is a MAX, not a sum.
+    assert (punt.stats.pt_yards, punt.stats.pt_net_yards, punt.stats.pt_long) == (5700, None, 66)
+    assert punt.games is None

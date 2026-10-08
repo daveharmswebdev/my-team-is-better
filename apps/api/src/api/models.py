@@ -732,13 +732,34 @@ class PlayerStatsOut(BaseModel):
     # Receiving (#314). `targets` qualifies a player for the receiving board
     # but is not one of its sorts; nflverse publishes it as 0 for 2003-2008
     # (#345), which is why the engine qualifies on a target *or* a reception.
-    # Kicking and punting are not published yet (#315).
     receptions: int | None
     targets: int | None
     receiving_yards: int | None
     receiving_tds: int | None
     receiving_first_downs: int | None
     receiving_fumbles_lost: int | None
+    # Kicking and punting (#315): what the two boards rank and render, the
+    # inputs of the computed sorts included. `fg_pct` (fg_made / fg_att) and
+    # `fg_made_50_plus` (fg_made_50_59 + fg_made_60_) rank the kicking board
+    # but are not published; a client derives them from these counts.
+    # `fg_long` and `pt_long` are career MAXima, not sums, and are null for a
+    # player who never made a field goal or never punted -- 0 would read as a
+    # zero-yard kick. Every other kicking/punting 0 is a real recorded zero
+    # (measured per season 1999-2025 on #315). The 0-49 yard `fg_made_*`
+    # buckets are deliberately not published. `fg_made_60_` keeps nflverse's
+    # trailing underscore, as the contract does.
+    fg_made: int | None
+    fg_att: int | None
+    fg_long: int | None
+    fg_made_50_59: int | None
+    fg_made_60_: int | None
+    pat_made: int | None
+    pat_att: int | None
+    pt_att: int | None
+    pt_yards: int | None
+    pt_net_yards: int | None
+    pt_long: int | None
+    pt_inside_20: int | None
 
     @classmethod
     def from_dataclass(cls, stats: PlayerStats) -> PlayerStatsOut:
@@ -759,6 +780,18 @@ class PlayerStatsOut(BaseModel):
             receiving_tds=stats.receiving_tds,
             receiving_first_downs=stats.receiving_first_downs,
             receiving_fumbles_lost=stats.receiving_fumbles_lost,
+            fg_made=stats.fg_made,
+            fg_att=stats.fg_att,
+            fg_long=stats.fg_long,
+            fg_made_50_59=stats.fg_made_50_59,
+            fg_made_60_=stats.fg_made_60_,
+            pat_made=stats.pat_made,
+            pat_att=stats.pat_att,
+            pt_att=stats.pt_att,
+            pt_yards=stats.pt_yards,
+            pt_net_yards=stats.pt_net_yards,
+            pt_long=stats.pt_long,
+            pt_inside_20=stats.pt_inside_20,
         )
 
 
@@ -801,7 +834,9 @@ class PlayerLeadersOut(BaseModel):
     sort: PlayerLeaderSort
     limit: int
     offset: int
-    # The whole qualifying population's size, so a client can page.
+    # The whole qualifying population's size, so a client can page. On the
+    # `fg_pct` board (#315) that is only the kickers at the engine's attempts
+    # minimum, and may be 0.
     total: int
     rows: list[PlayerLeaderRowOut]
 

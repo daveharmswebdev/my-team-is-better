@@ -29,10 +29,12 @@ describe('LeaderCategorySelect (issue #312)', () => {
       'Passing',
       'Rushing',
       'Receiving',
+      'Kicking',
+      'Punting',
     ])
     expect(
       options.map((option) => (option as HTMLOptionElement).value),
-    ).toEqual(['passing', 'rushing', 'receiving'])
+    ).toEqual(['passing', 'rushing', 'receiving', 'kicking', 'punting'])
   })
 
   it('shows the category it was given', () => {
@@ -57,6 +59,27 @@ describe('LeaderCategorySelect (issue #312)', () => {
     const { select } = renderSelect('receiving')
 
     expect(select).toHaveValue('receiving')
+  })
+
+  it('offers Kicking and Punting, and reports each when chosen (issue #315)', async () => {
+    const user = userEvent.setup()
+    const { select, onChange } = renderSelect('receiving')
+
+    expect(within(select).getByRole('option', { name: 'Kicking' })).toHaveValue(
+      'kicking',
+    )
+    expect(within(select).getByRole('option', { name: 'Punting' })).toHaveValue(
+      'punting',
+    )
+    await user.selectOptions(select, 'Kicking')
+    await user.selectOptions(select, 'Punting')
+
+    expect(onChange.mock.calls).toEqual([['kicking'], ['punting']])
+  })
+
+  it('shows the kicking category when given it', () => {
+    const { select } = renderSelect('kicking')
+    expect(select).toHaveValue('kicking')
   })
 
   it('reports the category chosen, once', async () => {

@@ -46,6 +46,44 @@ const NO_RECEIVING: ReceivingStats = {
   receiving_fumbles_lost: 0,
 }
 
+/** The twelve kicking and punting stats (issue #315), in the API's order. */
+type KickingStats = Pick<
+  PlayerStatsOut,
+  | 'fg_made'
+  | 'fg_att'
+  | 'fg_long'
+  | 'fg_made_50_59'
+  | 'fg_made_60_'
+  | 'pat_made'
+  | 'pat_att'
+  | 'pt_att'
+  | 'pt_yards'
+  | 'pt_net_yards'
+  | 'pt_long'
+  | 'pt_inside_20'
+>
+
+/**
+ * The kicking and punting stats of everyone below who never kicked or
+ * punted, exactly as the committed fixture sends them: a recorded 0 for each
+ * count, and `null` for the two longest-kick maxima, since there is no
+ * longest of nothing.
+ */
+const NO_KICKING: KickingStats = {
+  fg_made: 0,
+  fg_att: 0,
+  fg_long: null,
+  fg_made_50_59: 0,
+  fg_made_60_: 0,
+  pat_made: 0,
+  pat_att: 0,
+  pt_att: 0,
+  pt_yards: 0,
+  pt_net_yards: 0,
+  pt_long: null,
+  pt_inside_20: 0,
+}
+
 /** Receiving stats in the API's order: receptions, targets, yards, TDs, first downs, fumbles lost. */
 function receiving(
   receptions: number,
@@ -86,6 +124,7 @@ export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
     rushing_yards: 74,
     rushing_tds: 0,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -110,6 +149,7 @@ export const JARED_GOFF: PlayerLeaderRowOut = {
     rushing_yards: 21,
     rushing_tds: 2,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -134,6 +174,7 @@ export const DAK_PRESCOTT: PlayerLeaderRowOut = {
     rushing_yards: 242,
     rushing_tds: 2,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -158,6 +199,7 @@ export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
     rushing_yards: 124,
     rushing_tds: 2,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -182,6 +224,7 @@ export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
     rushing_yards: 93,
     rushing_tds: 1,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -206,6 +249,7 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
     rushing_yards: 247,
     rushing_tds: 4,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -256,6 +300,18 @@ export const UNRECORDED_STATS: PlayerStatsOut = {
   receiving_tds: null,
   receiving_first_downs: null,
   receiving_fumbles_lost: null,
+  fg_made: null,
+  fg_att: null,
+  fg_long: null,
+  fg_made_50_59: null,
+  fg_made_60_: null,
+  pat_made: null,
+  pat_att: null,
+  pt_att: null,
+  pt_yards: null,
+  pt_net_yards: null,
+  pt_long: null,
+  pt_inside_20: null,
 }
 
 /**
@@ -320,6 +376,7 @@ function nonPasserStats(
     rushing_yards: rushingYards,
     rushing_tds: rushingTds,
     ...catches,
+    ...NO_KICKING,
   }
 }
 
@@ -407,6 +464,7 @@ export const JALEN_HURTS: PlayerLeaderRowOut = {
     rushing_yards: 605,
     rushing_tds: 15,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -431,6 +489,7 @@ export const JOSH_ALLEN: PlayerLeaderRowOut = {
     rushing_yards: 524,
     rushing_tds: 15,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
 }
 
@@ -605,6 +664,7 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
         rushing_yards: 74,
         rushing_tds: 1,
         ...receiving(0, 1, 0, 0, 0, 0),
+        ...NO_KICKING,
       },
     },
     receiverRow(
@@ -637,6 +697,7 @@ export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_yards: 93,
     rushing_tds: 1,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
   games_without_stat_lines: 1,
 }
@@ -659,6 +720,7 @@ export const WARNER_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_yards: 3,
     rushing_tds: 0,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
   games_without_stat_lines: 0,
 }
@@ -762,6 +824,7 @@ const MCNAIR_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_yards: 337,
     rushing_tds: 8,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
   games_without_stat_lines: 0,
 }
@@ -784,6 +847,7 @@ const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_yards: 209,
     rushing_tds: 3,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
   games_without_stat_lines: 0,
 }
@@ -842,6 +906,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_yards: 22,
           rushing_tds: 0,
           ...NO_RECEIVING,
+          ...NO_KICKING,
         },
         b_stats: {
           completions: 13,
@@ -855,6 +920,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_yards: 36,
           rushing_tds: 1,
           ...NO_RECEIVING,
+          ...NO_KICKING,
         },
       },
     ],
@@ -885,6 +951,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_yards: 1,
           rushing_tds: 0,
           ...NO_RECEIVING,
+          ...NO_KICKING,
         },
         b_stats: {
           completions: 22,
@@ -898,6 +965,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_yards: 64,
           rushing_tds: 0,
           ...NO_RECEIVING,
+          ...NO_KICKING,
         },
       },
     ],
@@ -1046,6 +1114,7 @@ const MANNING_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_yards: 73,
     rushing_tds: 2,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
   games_without_stat_lines: 0,
 }
@@ -1068,6 +1137,7 @@ const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_yards: 22,
     rushing_tds: 1,
     ...NO_RECEIVING,
+    ...NO_KICKING,
   },
   games_without_stat_lines: 0,
 }
@@ -1196,6 +1266,7 @@ export const TOM_BRADY_CAREER: PlayerCareerOut = inventedCareer(
       rushing_yards: 43,
       rushing_tds: 0,
       ...NO_RECEIVING,
+      ...NO_KICKING,
     },
     games_without_stat_lines: 0,
   },
@@ -1223,6 +1294,7 @@ export const BRADY_QUINN_CAREER: PlayerCareerOut = inventedCareer(
       rushing_yards: 97,
       rushing_tds: 0,
       ...NO_RECEIVING,
+      ...NO_KICKING,
     },
     games_without_stat_lines: 0,
   },
@@ -1250,4 +1322,338 @@ export const BRADY_VS_MANNING: PlayerComparisonOut = {
   a: TOM_BRADY_CAREER,
   b: PEYTON_MANNING_CAREER,
   ...NEVER_MET_HEAD_TO_HEADS,
+}
+
+// ---------------------------------------------------------------------------
+// The kicking and punting categories (issue #315). Copied from the same
+// fixture db: the kicking board ranks everyone with a field-goal or
+// extra-point attempt, the punting board everyone with a punt, whatever their
+// position. FG% and 50+ are not in the payload: the board derives them.
+// ---------------------------------------------------------------------------
+
+/**
+ * A specialist's stats as sent: every other stat a recorded 0, and the two
+ * longest-kick maxima `null` unless given (he never made one).
+ */
+function specialistStats(stats: Partial<PlayerStatsOut>): PlayerStatsOut {
+  return {
+    ...nonPasserStats(0, 0, 0, NO_RECEIVING),
+    ...stats,
+  }
+}
+
+export const OLINDO_MARE: PlayerLeaderRowOut = {
+  rank: 1,
+  player_id: 2147978801,
+  display_name: 'Olindo Mare',
+  position: 'K',
+  first_season: 1999,
+  last_season: 1999,
+  games: 16,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 39,
+    fg_att: 46,
+    fg_long: 54,
+    fg_made_50_59: 3,
+    fg_made_60_: 0,
+    pat_made: 27,
+    pat_att: 27,
+    pt_att: 1,
+    pt_yards: 36,
+    pt_net_yards: 30,
+    pt_long: 36,
+    pt_inside_20: 0,
+  }),
+}
+
+export const BRANDON_AUBREY: PlayerLeaderRowOut = {
+  rank: 2,
+  player_id: 2050278267,
+  display_name: 'Brandon Aubrey',
+  position: 'K',
+  first_season: 2023,
+  last_season: 2023,
+  games: 17,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 36,
+    fg_att: 38,
+    fg_long: 60,
+    fg_made_50_59: 9,
+    fg_made_60_: 1,
+    pat_made: 49,
+    pat_att: 52,
+    pt_att: 0,
+    pt_yards: 0,
+    pt_net_yards: 0,
+    pt_long: null,
+    pt_inside_20: 0,
+  }),
+}
+
+export const CAIRO_SANTOS: PlayerLeaderRowOut = {
+  rank: 3,
+  player_id: 2164193587,
+  display_name: 'Cairo Santos',
+  position: 'K',
+  first_season: 2023,
+  last_season: 2023,
+  games: 17,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 35,
+    fg_att: 38,
+    fg_long: 55,
+    fg_made_50_59: 7,
+    fg_made_60_: 0,
+    pat_made: 31,
+    pat_att: 33,
+    pt_att: 0,
+    pt_yards: 0,
+    pt_net_yards: 0,
+    pt_long: null,
+    pt_inside_20: 0,
+  }),
+}
+
+export const GREG_ZUERLEIN: PlayerLeaderRowOut = {
+  rank: 3,
+  player_id: 2445462571,
+  display_name: 'Greg Zuerlein',
+  position: 'K',
+  first_season: 2023,
+  last_season: 2023,
+  games: 14,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 35,
+    fg_att: 38,
+    fg_long: 55,
+    fg_made_50_59: 5,
+    fg_made_60_: 0,
+    pat_made: 15,
+    pat_att: 16,
+    pt_att: 0,
+    pt_yards: 0,
+    pt_net_yards: 0,
+    pt_long: null,
+    pt_inside_20: 0,
+  }),
+}
+
+export const MATTHEW_WRIGHT: PlayerLeaderRowOut = {
+  rank: 79,
+  player_id: 2176014404,
+  display_name: 'Matthew Wright',
+  position: 'K',
+  first_season: 2023,
+  last_season: 2023,
+  games: 1,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 0,
+    fg_att: 1,
+    fg_long: null,
+    fg_made_50_59: 0,
+    fg_made_60_: 0,
+    pat_made: 0,
+    pat_att: 0,
+    pt_att: 0,
+    pt_yards: 0,
+    pt_net_yards: 0,
+    pt_long: null,
+    pt_inside_20: 0,
+  }),
+}
+
+export const MORRIS_UNUTOA: PlayerLeaderRowOut = {
+  rank: 79,
+  player_id: 2386441999,
+  display_name: 'Morris Unutoa',
+  position: 'C',
+  first_season: 1999,
+  last_season: 1999,
+  games: 1,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 0,
+    fg_att: 0,
+    fg_long: null,
+    fg_made_50_59: 0,
+    fg_made_60_: 0,
+    pat_made: 1,
+    pat_att: 1,
+    pt_att: 0,
+    pt_yards: 0,
+    pt_net_yards: 0,
+    pt_long: null,
+    pt_inside_20: 0,
+  }),
+}
+
+export const TOBY_GOWIN: PlayerLeaderRowOut = {
+  rank: 79,
+  player_id: 2279601441,
+  display_name: 'Toby Gowin',
+  position: 'P',
+  first_season: 1999,
+  last_season: 1999,
+  games: 16,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 0,
+    fg_att: 1,
+    fg_long: null,
+    fg_made_50_59: 0,
+    fg_made_60_: 0,
+    pat_made: 8,
+    pat_att: 8,
+    pt_att: 81,
+    pt_yards: 3500,
+    pt_net_yards: 2841,
+    pt_long: 64,
+    pt_inside_20: 24,
+  }),
+}
+
+export const THOMAS_MORSTEAD: PlayerLeaderRowOut = {
+  rank: 1,
+  player_id: 2219362247,
+  display_name: 'Thomas Morstead',
+  position: 'P',
+  first_season: 2023,
+  last_season: 2023,
+  games: 17,
+  record: NO_RECORD,
+  stats: specialistStats({
+    completions: 1,
+    attempts: 1,
+    passing_yards: 18,
+    fg_made: 0,
+    fg_att: 0,
+    fg_long: null,
+    fg_made_50_59: 0,
+    fg_made_60_: 0,
+    pat_made: 0,
+    pat_att: 0,
+    pt_att: 99,
+    pt_yards: 4831,
+    pt_net_yards: 4136,
+    pt_long: 62,
+    pt_inside_20: 36,
+  }),
+}
+
+export const CHRIS_GARDOCKI: PlayerLeaderRowOut = {
+  rank: 2,
+  player_id: 2250235710,
+  display_name: 'Chris Gardocki',
+  position: 'P',
+  first_season: 1999,
+  last_season: 1999,
+  games: 16,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 0,
+    fg_att: 0,
+    fg_long: null,
+    fg_made_50_59: 0,
+    fg_made_60_: 0,
+    pat_made: 0,
+    pat_att: 0,
+    pt_att: 106,
+    pt_yards: 4645,
+    pt_net_yards: 3663,
+    pt_long: 61,
+    pt_inside_20: 20,
+  }),
+}
+
+export const BRYCE_BARINGER: PlayerLeaderRowOut = {
+  rank: 3,
+  player_id: 2233457388,
+  display_name: 'Bryce Baringer',
+  position: 'P',
+  first_season: 2023,
+  last_season: 2023,
+  games: 17,
+  record: NO_RECORD,
+  stats: specialistStats({
+    fg_made: 0,
+    fg_att: 0,
+    fg_long: null,
+    fg_made_50_59: 0,
+    fg_made_60_: 0,
+    pat_made: 0,
+    pat_att: 0,
+    pt_att: 98,
+    pt_yards: 4598,
+    pt_net_yards: 3999,
+    pt_long: 79,
+    pt_inside_20: 38,
+  }),
+}
+
+/** The committed fixture's regular-season top four by field goals made (81 qualify). */
+export const LEADERS_BY_FG_MADE: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'kicking',
+  season_type: 'regular',
+  sort: 'fg_made',
+  limit: 50,
+  offset: 0,
+  total: 81,
+  rows: [OLINDO_MARE, BRANDON_AUBREY, CAIRO_SANTOS, GREG_ZUERLEIN],
+}
+
+/**
+ * The foot of the same board (`offset=78`): three players tied at 79 with no
+ * field goal made, so no longest one. Morris Unutoa, a center, is here on one
+ * extra point, with no field-goal attempt to take a percentage of.
+ */
+export const LEADERS_BY_FG_MADE_TAIL: PlayerLeadersOut = {
+  ...LEADERS_BY_FG_MADE,
+  offset: 78,
+  rows: [MATTHEW_WRIGHT, MORRIS_UNUTOA, TOBY_GOWIN],
+}
+
+/**
+ * The FG% board on the committed fixture, in either season type: two seasons
+ * leave no kicker at the attempts minimum, so the API sends nobody.
+ */
+export const LEADERS_BY_FG_PCT_EMPTY: PlayerLeadersOut = {
+  ...LEADERS_BY_FG_MADE,
+  sort: 'fg_pct',
+  total: 0,
+  rows: [],
+}
+
+/**
+ * An FG% board with rows, which the committed fixture cannot produce (see
+ * above): the same kickers, ranked by percentage as the engine would.
+ * Invented for the stories and tests.
+ */
+export const LEADERS_BY_FG_PCT: PlayerLeadersOut = {
+  ...LEADERS_BY_FG_MADE,
+  sort: 'fg_pct',
+  total: 86,
+  rows: [
+    { ...BRANDON_AUBREY, rank: 1 },
+    { ...CAIRO_SANTOS, rank: 2 },
+    { ...GREG_ZUERLEIN, rank: 2 },
+    { ...OLINDO_MARE, rank: 4 },
+  ],
+}
+
+/** The committed fixture's regular-season top three by punting yards (83 qualify). */
+export const LEADERS_BY_PT_YARDS: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'punting',
+  season_type: 'regular',
+  sort: 'pt_yards',
+  limit: 50,
+  offset: 0,
+  total: 83,
+  rows: [THOMAS_MORSTEAD, CHRIS_GARDOCKI, BRYCE_BARINGER],
 }

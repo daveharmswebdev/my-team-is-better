@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   PLAYER_LEADER_CATEGORIES,
+  PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
   PLAYER_LEADER_SORTS,
   PLAYER_LEADER_SORTS_BY_CATEGORY,
   defaultSortFor,
@@ -60,6 +61,26 @@ describe('player vocabularies', () => {
     expect(isPlayerLeaderSort('receptions')).toBe(true)
     expect(isPlayerLeaderSort('targets')).toBe(false)
     expect(isPlayerLeaderSort('receiving_first_downs')).toBe(false)
+    // Kicking and punting sorts joined with their boards (#315). fg_pct and
+    // fg_made_50_plus are sorts the engine computes, not stats it sends;
+    // pat_att and pt_long are sent but never sorts.
+    for (const sort of [
+      'fg_made',
+      'fg_pct',
+      'fg_made_50_plus',
+      'fg_long',
+      'fg_att',
+      'pat_made',
+      'pt_yards',
+      'pt_net_yards',
+      'pt_att',
+      'pt_inside_20',
+    ]) {
+      expect(isPlayerLeaderSort(sort)).toBe(true)
+    }
+    expect(isPlayerLeaderSort('pat_att')).toBe(false)
+    expect(isPlayerLeaderSort('pt_long')).toBe(false)
+    expect(isPlayerLeaderSort('fg_made_50_59')).toBe(false)
     expect(isPlayerLeaderSort(undefined)).toBe(false)
   })
 })
@@ -74,13 +95,18 @@ describe('leaderboard categories', () => {
     expect(isPlayerLeaderCategory('passing')).toBe(true)
     expect(isPlayerLeaderCategory('rushing')).toBe(true)
     expect(isPlayerLeaderCategory('receiving')).toBe(true)
+    expect(isPlayerLeaderCategory('kicking')).toBe(true)
+    expect(isPlayerLeaderCategory('punting')).toBe(true)
     expect(isPlayerLeaderCategory('Rushing')).toBe(false)
-    expect(isPlayerLeaderCategory('kicking')).toBe(false)
+    expect(isPlayerLeaderCategory('Kicking')).toBe(false)
+    expect(isPlayerLeaderCategory('returning')).toBe(false)
     expect(isPlayerLeaderCategory(null)).toBe(false)
     expect(PLAYER_LEADER_CATEGORIES).toEqual([
       'passing',
       'rushing',
       'receiving',
+      'kicking',
+      'punting',
     ])
   })
 
@@ -89,10 +115,21 @@ describe('leaderboard categories', () => {
       passing: ['passing_yards', 'passing_tds', 'wins'],
       rushing: ['rushing_yards', 'rushing_tds', 'carries'],
       receiving: ['receiving_yards', 'receiving_tds', 'receptions'],
+      kicking: [
+        'fg_made',
+        'fg_pct',
+        'fg_made_50_plus',
+        'fg_long',
+        'fg_att',
+        'pat_made',
+      ],
+      punting: ['pt_yards', 'pt_net_yards', 'pt_att', 'pt_inside_20'],
     })
     expect(defaultSortFor('passing')).toBe('passing_yards')
     expect(defaultSortFor('rushing')).toBe('rushing_yards')
     expect(defaultSortFor('receiving')).toBe('receiving_yards')
+    expect(defaultSortFor('kicking')).toBe('fg_made')
+    expect(defaultSortFor('punting')).toBe('pt_yards')
   })
 
   it('gives every sort exactly one category, and covers them all', () => {
@@ -102,7 +139,7 @@ describe('leaderboard categories', () => {
       )
       expect(owners).toHaveLength(1)
     }
-    expect(PLAYER_LEADER_SORTS).toHaveLength(9)
+    expect(PLAYER_LEADER_SORTS).toHaveLength(19)
   })
 
   it('refuses a sort from another category', () => {
@@ -115,5 +152,18 @@ describe('leaderboard categories', () => {
     expect(isSortInCategory('passing', 'rushing_tds')).toBe(false)
     expect(isSortInCategory('passing', 'nonsense')).toBe(false)
     expect(isSortInCategory('rushing', 'carries')).toBe(true)
+    // #315: a punting sort is not a kicking one, nor the other way round.
+    expect(isSortInCategory('kicking', 'pt_yards')).toBe(false)
+    expect(isSortInCategory('punting', 'fg_made')).toBe(false)
+    expect(isSortInCategory('kicking', 'pat_att')).toBe(false)
+    expect(isSortInCategory('kicking', 'fg_pct')).toBe(true)
+    expect(isSortInCategory('punting', 'pt_inside_20')).toBe(true)
+  })
+
+  it("mirrors the engine's FG% attempts minimum per season type (#315)", () => {
+    expect(PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS).toEqual({
+      regular: 100,
+      postseason: 15,
+    })
   })
 })

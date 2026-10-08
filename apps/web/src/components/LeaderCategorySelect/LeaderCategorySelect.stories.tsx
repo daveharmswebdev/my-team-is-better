@@ -48,3 +48,26 @@ export const Rushing: Story = {
     ).toHaveValue('rushing')
   },
 }
+
+/** The kicking board (issue #315), chosen. */
+export const Kicking: Story = {
+  args: { value: 'kicking' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const select = canvas.getByRole('combobox', { name: 'Stat category' })
+    await expect(select).toHaveValue('kicking')
+    await userEvent.selectOptions(select, 'punting')
+    await expect(args.onChange).toHaveBeenCalledWith('punting')
+  },
+}
+
+/** The punting board (issue #315), chosen. */
+export const Punting: Story = {
+  args: { value: 'punting' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+    ).toHaveValue('punting')
+  },
+}

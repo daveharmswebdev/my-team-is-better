@@ -305,6 +305,164 @@ test('Receiving TDs shows the three-way tie at rank 1, and a reload shows the sa
   await expect(page.getByLabel('Stat category')).toHaveValue('receiving')
 })
 
+/** The cell of `row` under the column whose header reads `name`. */
+async function cellUnder(
+  table: Locator,
+  row: Locator,
+  name: string,
+): Promise<Locator> {
+  const headers = await table.locator('thead th').allTextContents()
+  const index = headers.indexOf(name)
+  expect(index, `no column named ${name}`).toBeGreaterThanOrEqual(0)
+  return row.locator('th, td').nth(index)
+}
+
+// Issue #315: kicking and punting. FG% and 50+ are not in the API's payload:
+// the board derives them from the counts it was sent, and these numbers are
+// the fixture's (Aubrey 2023: 36 of 38, 9 from 50-59 and 1 from 60+).
+test('choosing Kicking ranks Olindo Mare first on 39 field goals, with its own columns and derived FG% and 50+', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+
+  await page.getByLabel('Stat category').selectOption('Kicking')
+
+  const table = leadersTable(page, 'regular season, by field goals made')
+  await expectRow(table, 0, '1', 'Olindo Mare')
+  await expect(table.locator('thead th')).toHaveText([
+    'Rank',
+    'Player',
+    'Position',
+    'Seasons',
+    'Games',
+    'FG made',
+    'FG att',
+    'FG%',
+    '50+',
+    'Long',
+    'XP made',
+  ])
+  const mare = bodyRow(table, 0)
+  await expect(await cellUnder(table, mare, 'FG made')).toHaveText('39')
+  await expect(await cellUnder(table, mare, 'FG att')).toHaveText('46')
+  await expect(await cellUnder(table, mare, 'Long')).toHaveText('54')
+  await expect(await cellUnder(table, mare, '50+')).toHaveText('3')
+  await expect(await cellUnder(table, mare, 'XP made')).toHaveText('27')
+
+  await expectRow(table, 1, '2', 'Brandon Aubrey')
+  const aubrey = bodyRow(table, 1)
+  await expect(await cellUnder(table, aubrey, 'FG%')).toHaveText('94.7%')
+  await expect(await cellUnder(table, aubrey, 'Long')).toHaveText('60')
+  await expect(await cellUnder(table, aubrey, '50+')).toHaveText('10')
+
+  await expect(
+    table.getByRole('columnheader', { name: 'FG made' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  await expect(
+    table.getByRole('columnheader', { name: 'Starter record' }),
+  ).toHaveCount(0)
+  await expect(page.getByText('1–50 of 81')).toBeVisible()
+  await expect(page).toHaveURL(
+    /category=kicking&season_type=regular&sort=fg_made&offset=0/,
+  )
+})
+
+test('choosing Punting ranks Thomas Morstead first on 4,831 yards', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+
+  await page.getByLabel('Stat category').selectOption('Punting')
+
+  const table = leadersTable(page, 'regular season, by punting yards')
+  await expectRow(table, 0, '1', 'Thomas Morstead')
+  await expectRow(table, 1, '2', 'Chris Gardocki')
+  await expect(table.locator('thead th')).toHaveText([
+    'Rank',
+    'Player',
+    'Position',
+    'Seasons',
+    'Games',
+    'Punts',
+    'Yards',
+    'Net yards',
+    'Inside 20',
+  ])
+  const morstead = bodyRow(table, 0)
+  await expect(await cellUnder(table, morstead, 'Yards')).toHaveText('4,831')
+  await expect(await cellUnder(table, morstead, 'Punts')).toHaveText('99')
+  await expect(page.getByText('1–50 of 83')).toBeVisible()
+})
+
+test('sorting Kicking by FG% says no kicker has reached 100 attempts, and offers the default sort back', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=kicking')
+  await expect(
+    leadersTable(page, 'regular season, by field goals made'),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'FG%' }).click()
+
+  await expect(page).toHaveURL(
+    /category=kicking&season_type=regular&sort=fg_pct&offset=0/,
+  )
+  await expect(
+    page.getByText(
+      'No kicker has reached 100 career field-goal attempts in the regular season, so nobody qualifies for the field-goal percentage board.',
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText('No NFL player stats are loaded yet.'),
+  ).toHaveCount(0)
+  await expect(
+    page.getByText(/ranks only kickers with at least 100 career field-goal/),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Rank by field goals made' }).click()
+  await expectRow(
+    leadersTable(page, 'regular season, by field goals made'),
+    0,
+    '1',
+    'Olindo Mare',
+  )
+})
+
+test('a kicking deep link shows the same board after a reload, a never-made Long a dash named none', async ({
+  page,
+}) => {
+  await page.goto(
+    '/nfl/leaders?category=kicking&season_type=regular&sort=fg_made&offset=50',
+  )
+
+  const check = async () => {
+    const table = leadersTable(page, 'regular season, by field goals made')
+    await expect(page.getByLabel('Stat category')).toHaveValue('kicking')
+    await expect(
+      table.getByRole('columnheader', { name: 'FG made' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(page.getByText('51–81 of 81')).toBeVisible()
+    const wright = table.locator('tbody tr').filter({
+      has: page.getByRole('rowheader', { name: 'Matthew Wright' }),
+    })
+    await expect(wright.locator('td').first()).toHaveText('79')
+    const long = await cellUnder(table, wright, 'Long')
+    await expect(long).toHaveAccessibleName('none')
+    await expect(long).not.toContainText('0')
+    await expect(await cellUnder(table, wright, 'FG%')).toHaveText('0.0%')
+  }
+
+  await check()
+  await page.reload()
+  await check()
+})
+
 test("Kurt Warner's name opens his career: 1999 St. Louis Rams, 4,044 yards, and the one-game disclosure", async ({
   page,
 }) => {

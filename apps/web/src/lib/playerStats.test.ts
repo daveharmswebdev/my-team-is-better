@@ -1,14 +1,22 @@
 import { describe, expect, it } from 'vitest'
+import type { PlayerStatsOut } from './api/types'
+import { UNRECORDED_STATS } from './playerFixtures'
 import {
   CATEGORY_LABEL,
+  DASH,
   LEADER_BOARD_COLUMNS,
+  NONE_LABEL,
   NOT_RECORDED,
   PLAYER_STATS_SOURCE_ID,
   SEASON_TYPE_LABEL,
   SORT_LABEL,
   STAT_COLUMNS,
+  deriveKickingStats,
+  fgPctEmptyCopy,
+  fgPctNote,
   formatSeasonSpan,
   formatStat,
+  leaderStatCell,
   sortForStat,
   undercountNote,
 } from './playerStats'
@@ -88,6 +96,16 @@ describe('labels', () => {
       receiving_yards: 'receiving yards',
       receiving_tds: 'receiving TDs',
       receptions: 'receptions',
+      fg_made: 'field goals made',
+      fg_pct: 'field-goal percentage',
+      fg_made_50_plus: 'field goals from 50+',
+      fg_long: 'longest field goal',
+      fg_att: 'field-goal attempts',
+      pat_made: 'extra points made',
+      pt_yards: 'punting yards',
+      pt_net_yards: 'net punting yards',
+      pt_att: 'punts',
+      pt_inside_20: 'punts inside the 20',
     })
   })
 
@@ -100,6 +118,8 @@ describe('labels', () => {
       passing: 'Passing',
       rushing: 'Rushing',
       receiving: 'Receiving',
+      kicking: 'Kicking',
+      punting: 'Punting',
     })
   })
 })
@@ -203,5 +223,222 @@ describe('the receiving board (issue #314)', () => {
         ]).not.toContain(column.key)
       }
     }
+  })
+})
+
+/** A kicker's stats as the API sends them: every other stat a recorded 0. */
+function kicker(kicking: Partial<PlayerStatsOut>): PlayerStatsOut {
+  const zeros = Object.fromEntries(
+    Object.keys(UNRECORDED_STATS).map((key) => [key, 0]),
+  ) as unknown as PlayerStatsOut
+  return { ...zeros, fg_long: null, pt_long: null, ...kicking }
+}
+
+/**
+ * Issue #315: the two kicking sorts the engine computes and does not send.
+ * They are the one place apps/web derives anything, so both live in one
+ * function and are pinned here.
+ */
+describe('deriveKickingStats (issue #315)', () => {
+  it('derives FG% as made over attempted, unrounded', () => {
+    expect(
+      deriveKickingStats(kicker({ fg_made: 36, fg_att: 38 })).fg_pct,
+    ).toBeCloseTo(36 / 38, 12)
+  })
+
+  it('has no FG% for a kicker with no attempts, or a null count', () => {
+    expect(deriveKickingStats(kicker({ fg_made: 0, fg_att: 0 })).fg_pct).toBe(
+      null,
+    )
+    expect(
+      deriveKickingStats(kicker({ fg_made: null, fg_att: 10 })).fg_pct,
+    ).toBe(null)
+    expect(
+      deriveKickingStats(kicker({ fg_made: 5, fg_att: null })).fg_pct,
+    ).toBe(null)
+  })
+
+  it('counts 50+ as both distance buckets, so a 60+-only kicker counts', () => {
+    // Brandon Aubrey 2023: 9 from 50-59 and 1 from 60+.
+    expect(
+      deriveKickingStats(kicker({ fg_made_50_59: 9, fg_made_60_: 1 }))
+        .fg_made_50_plus,
+    ).toBe(10)
+    expect(
+      deriveKickingStats(kicker({ fg_made_50_59: 0, fg_made_60_: 1 }))
+        .fg_made_50_plus,
+    ).toBe(1)
+    expect(
+      deriveKickingStats(kicker({ fg_made_50_59: 0, fg_made_60_: 0 }))
+        .fg_made_50_plus,
+    ).toBe(0)
+  })
+
+  it('has no 50+ when either bucket is null', () => {
+    expect(
+      deriveKickingStats(kicker({ fg_made_50_59: null, fg_made_60_: 1 }))
+        .fg_made_50_plus,
+    ).toBe(null)
+    expect(
+      deriveKickingStats(kicker({ fg_made_50_59: 3, fg_made_60_: null }))
+        .fg_made_50_plus,
+    ).toBe(null)
+  })
+})
+
+describe('leaderStatCell (issue #315)', () => {
+  it('shows FG% to one decimal with a percent sign', () => {
+    expect(
+      leaderStatCell(kicker({ fg_made: 43, fg_att: 46 }), 'fg_pct'),
+    ).toEqual({ kind: 'value', text: '93.5%' })
+    expect(
+      leaderStatCell(kicker({ fg_made: 36, fg_att: 38 }), 'fg_pct'),
+    ).toEqual({ kind: 'value', text: '94.7%' })
+    expect(
+      leaderStatCell(kicker({ fg_made: 11, fg_att: 11 }), 'fg_pct'),
+    ).toEqual({ kind: 'value', text: '100.0%' })
+    expect(leaderStatCell(kicker({ fg_made: 0, fg_att: 1 }), 'fg_pct')).toEqual(
+      { kind: 'value', text: '0.0%' },
+    )
+  })
+
+  it('shows a dash, never 0 or "not recorded", for an FG% with no attempts or a null count', () => {
+    expect(DASH).toBe('–')
+    expect(NONE_LABEL).toBe('none')
+    for (const stats of [
+      kicker({ fg_made: 0, fg_att: 0 }),
+      kicker({ fg_made: null, fg_att: 3 }),
+      kicker({ fg_made: 3, fg_att: null }),
+    ]) {
+      expect(leaderStatCell(stats, 'fg_pct')).toEqual({ kind: 'none' })
+    }
+  })
+
+  it('shows 50+ as the sum of both buckets, and "not recorded" when one is null', () => {
+    expect(
+      leaderStatCell(
+        kicker({ fg_made_50_59: 9, fg_made_60_: 1 }),
+        'fg_made_50_plus',
+      ),
+    ).toEqual({ kind: 'value', text: '10' })
+    expect(
+      leaderStatCell(
+        kicker({ fg_made_50_59: null, fg_made_60_: 1 }),
+        'fg_made_50_plus',
+      ),
+    ).toEqual({ kind: 'not-recorded' })
+  })
+
+  it('shows a null longest kick or punt as a dash: he never made one, not an unrecorded stat', () => {
+    expect(leaderStatCell(kicker({ fg_long: null }), 'fg_long')).toEqual({
+      kind: 'none',
+    })
+    expect(leaderStatCell(kicker({ pt_long: null }), 'pt_long')).toEqual({
+      kind: 'none',
+    })
+    expect(leaderStatCell(kicker({ fg_long: 60 }), 'fg_long')).toEqual({
+      kind: 'value',
+      text: '60',
+    })
+  })
+
+  it('keeps a recorded kicking or punting 0 as 0, groups thousands, and leaves other nulls "not recorded"', () => {
+    expect(leaderStatCell(kicker({ pat_made: 0 }), 'pat_made')).toEqual({
+      kind: 'value',
+      text: '0',
+    })
+    expect(leaderStatCell(kicker({ pt_yards: 4831 }), 'pt_yards')).toEqual({
+      kind: 'value',
+      text: '4,831',
+    })
+    expect(leaderStatCell(kicker({ pt_att: null }), 'pt_att')).toEqual({
+      kind: 'not-recorded',
+    })
+    expect(leaderStatCell(UNRECORDED_STATS, 'receiving_yards')).toEqual({
+      kind: 'not-recorded',
+    })
+  })
+})
+
+describe('the kicking and punting boards (issue #315)', () => {
+  it('gives the kicking board its six columns, derived ones included, and no record', () => {
+    expect(LEADER_BOARD_COLUMNS.kicking.showsRecord).toBe(false)
+    expect(LEADER_BOARD_COLUMNS.kicking.stats).toEqual([
+      { key: 'fg_made', label: 'FG made' },
+      { key: 'fg_att', label: 'FG att' },
+      { key: 'fg_pct', label: 'FG%' },
+      { key: 'fg_made_50_plus', label: '50+' },
+      { key: 'fg_long', label: 'Long' },
+      { key: 'pat_made', label: 'XP made' },
+    ])
+  })
+
+  it('gives the punting board its four columns and no record', () => {
+    expect(LEADER_BOARD_COLUMNS.punting.showsRecord).toBe(false)
+    expect(LEADER_BOARD_COLUMNS.punting.stats).toEqual([
+      { key: 'pt_att', label: 'Punts' },
+      { key: 'pt_yards', label: 'Yards' },
+      { key: 'pt_net_yards', label: 'Net yards' },
+      { key: 'pt_inside_20', label: 'Inside 20' },
+    ])
+  })
+
+  it('makes every kicking and punting column sort by its own sort, the derived ones included', () => {
+    expect(sortForStat('kicking', 'fg_pct')).toBe('fg_pct')
+    expect(sortForStat('kicking', 'fg_made_50_plus')).toBe('fg_made_50_plus')
+    for (const category of ['kicking', 'punting'] as const) {
+      for (const column of LEADER_BOARD_COLUMNS[category].stats) {
+        expect(sortForStat(category, column.key)).toBe(column.key)
+      }
+    }
+  })
+
+  it('never sorts a board by another category, the derived sorts included', () => {
+    expect(sortForStat('passing', 'fg_pct')).toBeUndefined()
+    expect(sortForStat('punting', 'fg_made_50_plus')).toBeUndefined()
+    expect(sortForStat('punting', 'fg_made')).toBeUndefined()
+    expect(sortForStat('kicking', 'pt_yards')).toBeUndefined()
+    expect(sortForStat('kicking', 'pat_att')).toBeUndefined()
+    expect(sortForStat('kicking', 'fg_made_50_59')).toBeUndefined()
+  })
+
+  it('shows pat_att, pt_long and the raw distance buckets on no board', () => {
+    for (const board of Object.values(LEADER_BOARD_COLUMNS)) {
+      for (const column of board.stats) {
+        expect([
+          'pat_att',
+          'pt_long',
+          'fg_made_50_59',
+          'fg_made_60_',
+          'targets',
+        ]).not.toContain(column.key)
+      }
+    }
+  })
+
+  it('adds no kicking or punting stat to the career and compare columns', () => {
+    for (const column of STAT_COLUMNS) {
+      expect(column.key).not.toMatch(/^(fg|pat|pt)_/)
+    }
+  })
+})
+
+describe('the FG% minimum, in words (issue #315)', () => {
+  it('names the attempts minimum of each season type, from the mirrored constant', () => {
+    expect(fgPctNote('regular')).toBe(
+      'Field-goal percentage ranks only kickers with at least 100 career field-goal attempts in the regular season. Every other kicking column ranks every player with a field-goal or extra-point attempt.',
+    )
+    expect(fgPctNote('postseason')).toBe(
+      'Field-goal percentage ranks only kickers with at least 15 career field-goal attempts in the playoffs. Every other kicking column ranks every player with a field-goal or extra-point attempt.',
+    )
+  })
+
+  it('says why the FG% board is empty, not that no stats are loaded', () => {
+    expect(fgPctEmptyCopy('regular')).toBe(
+      'No kicker has reached 100 career field-goal attempts in the regular season, so nobody qualifies for the field-goal percentage board.',
+    )
+    expect(fgPctEmptyCopy('postseason')).toBe(
+      'No kicker has reached 15 career field-goal attempts in the playoffs, so nobody qualifies for the field-goal percentage board.',
+    )
   })
 })

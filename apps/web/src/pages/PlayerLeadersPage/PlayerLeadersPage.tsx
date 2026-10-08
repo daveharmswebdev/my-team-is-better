@@ -17,11 +17,15 @@ import type {
   PlayerLeadersOut,
   PlayerSeasonType,
 } from '../../lib/api/types'
+import { defaultSortFor } from '../../lib/api/types'
 import {
   LEADER_BOARD_COLUMNS,
   NOT_RECORDED_DISCLOSURE,
+  SORT_LABEL,
   STARTER_RECORD_NOTE,
   UNDERCOUNT_DISCLOSURE,
+  fgPctEmptyCopy,
+  fgPctNote,
 } from '../../lib/playerStats'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
 import type { LeadersView } from './leadersSearch'
@@ -49,11 +53,12 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * NFL career leaders (issues #296, #312, #314): who threw for the most, threw
- * the most touchdowns, won the most as a starter; on the rushing board, who
- * ran for the most yards, the most touchdowns or carried it most often; on
- * the receiving board, who had the most receiving yards, receiving
- * touchdowns or receptions. The
+ * NFL career leaders (issues #296, #312, #314, #315): who threw for the most,
+ * threw the most touchdowns, won the most as a starter; on the rushing
+ * board, who ran for the most yards, the most touchdowns or carried it most
+ * often; on the receiving board, who had the most receiving yards, receiving
+ * touchdowns or receptions; on the kicking and punting boards, who made the
+ * most field goals, kicked the longest or punted the most yards. The
  * API sorts, ranks and pages; this page renders what it sends and keeps the
  * stat category, season type, sort and offset in the URL, so a shared link, a
  * reload and the Back button all show the same table.
@@ -143,14 +148,28 @@ export function PlayerLeadersPage() {
   // it follows the board rather than the requested category.
   const showsRecord =
     LEADER_BOARD_COLUMNS[leaders?.category ?? category].showsRecord
+  // The FG% minimum (#315) follows the board on screen the same way, and
+  // names the minimum of that board's season type.
+  const fgPctSeasonType =
+    (leaders?.sort ?? sort) === 'fg_pct'
+      ? (leaders?.season_type ?? seasonType)
+      : null
+  const describedBy =
+    leaders === null
+      ? undefined
+      : LEADER_BOARD_COLUMNS[leaders.category].showsRecord
+        ? noteId
+        : leaders.sort === 'fg_pct'
+          ? `${noteId}-fg-pct`
+          : undefined
 
   return (
     <main className={styles.wrap}>
       <h1 className={styles.title}>NFL Leaders</h1>
       <p className={styles.lede}>
-        Career passing, rushing and receiving totals for every NFL player with
-        stat lines in the source. Pick a stat category, then a column to rank
-        by.
+        Career passing, rushing, receiving, kicking and punting totals for every
+        NFL player with stat lines in the source. Pick a stat category, then a
+        column to rank by.
       </p>
 
       <div className={styles.controls}>
@@ -163,6 +182,9 @@ export function PlayerLeadersPage() {
           About these numbers
         </h2>
         {showsRecord && <p id={noteId}>{STARTER_RECORD_NOTE}</p>}
+        {fgPctSeasonType !== null && (
+          <p id={`${noteId}-fg-pct`}>{fgPctNote(fgPctSeasonType)}</p>
+        )}
         <p>{UNDERCOUNT_DISCLOSURE}</p>
         <p>{NOT_RECORDED_DISCLOSURE}</p>
       </section>
@@ -180,11 +202,7 @@ export function PlayerLeadersPage() {
           <LeadersBoard
             leaders={leaders}
             busy={pending}
-            describedBy={
-              LEADER_BOARD_COLUMNS[leaders.category].showsRecord
-                ? noteId
-                : undefined
-            }
+            describedBy={describedBy}
             onSort={handleSort}
             onPage={handlePage}
           />
@@ -205,12 +223,31 @@ function LeadersBoard({
 }: {
   leaders: PlayerLeadersOut
   busy: boolean
-  /** The starter-record note, on the boards that show records. */
+  /** The starter-record note on the boards that show records, or the FG% minimum on the FG% board. */
   describedBy: string | undefined
   onSort: (sort: PlayerLeaderSort) => void
   onPage: (offset: number) => void
 }) {
   if (leaders.rows.length === 0) {
+    if (leaders.total === 0 && leaders.sort === 'fg_pct') {
+      // Nobody reached the FG% attempts minimum (#315): the stats are
+      // loaded, so say why the board is empty and offer the default sort.
+      const fallback = defaultSortFor(leaders.category)
+      return (
+        <div className={styles.empty}>
+          <p>{fgPctEmptyCopy(leaders.season_type)}</p>
+          <button
+            type="button"
+            className={styles.topButton}
+            onClick={() => {
+              onSort(fallback)
+            }}
+          >
+            Rank by {SORT_LABEL[fallback]}
+          </button>
+        </div>
+      )
+    }
     return leaders.total === 0 ? (
       <p className={styles.empty}>No NFL player stats are loaded yet.</p>
     ) : (

@@ -10,13 +10,14 @@ engine modules apps/api is permitted (`cfb_strength.players`, `db`,
   `StarterRecord.starts` (a property, so absent from `dataclasses.asdict`)
   added as the one derived field the API publishes. Comparing a response
   body to it checks names, nesting, order of rows and every number at once.
-  Its one narrowing is `PlayerStats`, which since #313 carries 34 stats, 18
-  of which (kicking and punting) the API does not publish yet
-  (`published_stats` below).
+  Its one narrowing is `PlayerStats`, which since #313 carries 34 stats, 6
+  of which the API does not publish (`published_stats` below):
+  `rushing_first_downs`, `rushing_fumbles_lost`, and the four 0-49 yard
+  field-goal buckets, left out on purpose by #315.
 - `PUBLISHED_STAT_NAMES` / `published_stats` / `stats_body` are the seam
-  between the 34-field engine contract and the 16 fields `PlayerStatsOut`
-  publishes (the original ten plus #314's six receiving stats; #315 closes
-  the rest of the gap). All three read the published set off the response
+  between the 34-field engine contract and the 28 fields `PlayerStatsOut`
+  publishes (the original ten, #314's six receiving stats and #315's twelve
+  kicking and punting stats). All three read the published set off the response
   model, so widening the API widens them with it and no expectation has to
   be rewritten by hand. The flip side: a field *dropped* from the model
   drops out of these too, so the helpers alone cannot catch it. That is
@@ -53,9 +54,9 @@ FIXTURE_DB = Path(__file__).resolve().parent / "cfb_verdict_fixture.sqlite3"
 
 # Every stat the engine contract carries (34 since issue #313)...
 STAT_NAMES: tuple[str, ...] = tuple(field.name for field in dataclasses.fields(PlayerStats))
-# ...and the subset the API publishes (16 since #314), read off the response
-# model rather than repeated here, so that widening `PlayerStatsOut` (#315
-# next) widens these helpers with it and no call site has to be edited.
+# ...and the subset the API publishes (28 since #315), read off the response
+# model rather than repeated here, so that widening `PlayerStatsOut` widens
+# these helpers with it and no call site has to be edited.
 PUBLISHED_STAT_NAMES: tuple[str, ...] = tuple(PlayerStatsOut.model_fields)
 
 _UNPUBLISHED = set(PUBLISHED_STAT_NAMES) - set(STAT_NAMES)
@@ -67,8 +68,8 @@ def published_stats(stats: PlayerStats) -> dict[str, int | None]:
     """The engine's stats projected onto what the API publishes today.
 
     `PlayerStats` has carried receiving, kicking and punting since #313;
-    `PlayerStatsOut` publishes the original ten fields plus the six
-    receiving ones (#314), and kicking and punting are #315. So "faithful to
+    `PlayerStatsOut` publishes the original ten fields, the six receiving
+    ones (#314) and twelve kicking and punting ones (#315). So "faithful to
     the engine, field for field" means: every *published* field equals the
     engine's value under its own name. The projection is derived from the
     response model, so a field added there is checked against the engine
@@ -84,25 +85,25 @@ def stats_body(**values: int) -> dict[str, int | None]:
 
     Every published stat not named is `None` -- *not applicable*, never 0.
     The four head-to-head games this is used for are quarterback starts.
-    Their receiving stats are recorded zeros (nflverse writes 0 there), so
-    the caller names them; every kicking and punting column is genuinely
-    None rather than a zero that would read as "he attempted a field goal
-    and missed".
+    Their receiving, kicking and punting counts are recorded zeros (nflverse
+    writes 0 there), so the caller names them. `fg_long` and `pt_long` are
+    maxima of nothing for a quarterback, so they stay unnamed and None --
+    a 0 would read as "his longest field goal was zero yards".
 
     Naming rather than positioning is what makes this survive the next
     widening: `PlayerStats` is append-only, so a positional helper silently
     re-binds every value when a field is inserted, and needs a new argument
     at every call site when one is appended.
 
-    A name that is not a stat at all, or one the API does not publish yet,
-    is a `ValueError` -- an expectation for a field no response carries can
+    A name that is not a stat at all, or one the API does not publish, is a
+    `ValueError` -- an expectation for a field no response carries can
     only ever be dead weight.
     """
     for name in values:
         if name not in STAT_NAMES:
             raise ValueError(f"{name!r} is not a PlayerStats field")
         if name not in PUBLISHED_STAT_NAMES:
-            raise ValueError(f"{name!r} is a PlayerStats field the API does not publish yet (#315)")
+            raise ValueError(f"{name!r} is a PlayerStats field the API does not publish")
     return {name: values.get(name) for name in PUBLISHED_STAT_NAMES}
 
 

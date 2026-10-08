@@ -71,6 +71,21 @@ _NO_RECEIVING: dict[str, int] = {
     "receiving_first_downs": 0,
     "receiving_fumbles_lost": 0,
 }
+# Kicking and punting (#315), measured the same way: the counts are recorded
+# zeros, while `fg_long` and `pt_long` -- maxima of nothing -- are left
+# unnamed and so expected as None, never 0.
+_NO_KICKING_OR_PUNTING: dict[str, int] = {
+    "fg_made": 0,
+    "fg_att": 0,
+    "fg_made_50_59": 0,
+    "fg_made_60_": 0,
+    "pat_made": 0,
+    "pat_att": 0,
+    "pt_att": 0,
+    "pt_yards": 0,
+    "pt_net_yards": 0,
+    "pt_inside_20": 0,
+}
 _WARNER_REGULAR = (
     "St. Louis Rams",
     21,
@@ -86,6 +101,7 @@ _WARNER_REGULAR = (
         rushing_yards=22,
         rushing_tds=0,
         **_NO_RECEIVING,
+        **_NO_KICKING_OR_PUNTING,
     ),
 )
 _MCNAIR_REGULAR = (
@@ -103,6 +119,7 @@ _MCNAIR_REGULAR = (
         rushing_yards=36,
         rushing_tds=1,
         **_NO_RECEIVING,
+        **_NO_KICKING_OR_PUNTING,
     ),
 )
 _WARNER_POSTSEASON = (
@@ -120,6 +137,7 @@ _WARNER_POSTSEASON = (
         rushing_yards=1,
         rushing_tds=0,
         **_NO_RECEIVING,
+        **_NO_KICKING_OR_PUNTING,
     ),
 )
 _MCNAIR_POSTSEASON = (
@@ -137,6 +155,7 @@ _MCNAIR_POSTSEASON = (
         rushing_yards=64,
         rushing_tds=0,
         **_NO_RECEIVING,
+        **_NO_KICKING_OR_PUNTING,
     ),
 )
 

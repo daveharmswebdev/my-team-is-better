@@ -2,8 +2,13 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { expect, userEvent, within } from 'storybook/test'
 import type { PlayerLeadersOut } from '../../lib/api/types'
+import { fgPctEmptyCopy, fgPctNote } from '../../lib/playerStats'
 import {
   DATA_SOURCES,
+  LEADERS_BY_FG_MADE,
+  LEADERS_BY_FG_PCT,
+  LEADERS_BY_FG_PCT_EMPTY,
+  LEADERS_BY_PT_YARDS,
   LEADERS_BY_RECEIVING_TDS,
   LEADERS_BY_RECEIVING_YARDS,
   LEADERS_BY_RUSHING_TDS,
@@ -73,6 +78,16 @@ function answeringByCategory(url: URL) {
         ? LEADERS_BY_RECEIVING_TDS
         : LEADERS_BY_RECEIVING_YARDS
     return answering(board)(url)
+  }
+  if (url.searchParams.get('category') === 'kicking') {
+    const board =
+      url.searchParams.get('sort') === 'fg_pct'
+        ? LEADERS_BY_FG_PCT
+        : LEADERS_BY_FG_MADE
+    return answering(board)(url)
+  }
+  if (url.searchParams.get('category') === 'punting') {
+    return answering(LEADERS_BY_PT_YARDS)(url)
   }
   return answering(LEADERS_BY_YARDS)(url)
 }
@@ -262,6 +277,91 @@ export const CategorySwitch: Story = {
       name: 'NFL career leaders: regular season, by rushing yards',
     })
     await canvas.findByRole('link', { name: 'Edgerrin James' })
+  },
+}
+
+/** The kicking board, reached by its own URL (issue #315). */
+export const Kicking: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute('?category=kicking&season_type=regular&sort=fg_made&offset=0'),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Olindo Mare' })
+    await expect(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+    ).toHaveValue('kicking')
+    await expect(
+      canvas.getByRole('columnheader', { name: 'FG made' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(canvas.queryByText(fgPctNote('regular'))).toBeNull()
+  },
+}
+
+/**
+ * Sorting the kicking board by FG% (issue #315): the one sort with an attempts
+ * minimum, so the page states it and describes the table with it.
+ */
+export const KickingByFieldGoalPercentage: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute('?category=kicking&season_type=regular&sort=fg_made&offset=0'),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Olindo Mare' })
+    await userEvent.click(canvas.getByRole('button', { name: 'FG%' }))
+    const table = await canvas.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field-goal percentage',
+    })
+    await expect(table).toHaveAccessibleDescription(fgPctNote('regular'))
+  },
+}
+
+/**
+ * The FG% board when no kicker has reached the attempts minimum, as on the
+ * committed two-season fixture: it says so, and offers the default sort.
+ */
+export const KickingFieldGoalPercentageEmpty: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answering(LEADERS_BY_FG_PCT_EMPTY))
+      return <Story />
+    },
+    atRoute('?category=kicking&season_type=postseason&sort=fg_pct&offset=0'),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByText(fgPctEmptyCopy('postseason'))
+    await expect(
+      canvas.getByRole('button', { name: 'Rank by field goals made' }),
+    ).toBeInTheDocument()
+    await expect(canvas.getByText(fgPctNote('postseason'))).toBeInTheDocument()
+  },
+}
+
+/** The punting board, reached by its own URL (issue #315). */
+export const Punting: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute('?category=punting&season_type=regular&sort=pt_yards&offset=0'),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Thomas Morstead' })
+    await expect(
+      canvas.getByRole('columnheader', { name: 'Yards' }),
+    ).toHaveAttribute('aria-sort', 'descending')
   },
 }
 
