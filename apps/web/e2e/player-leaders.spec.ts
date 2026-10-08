@@ -221,6 +221,90 @@ test('Back from the rushing board returns to the passing one', async ({
   await expect(page.getByLabel('Stat category')).toHaveValue('passing')
 })
 
+// Issue #314: the receiving board. Measured on the same fixture db: 926
+// regular-season qualifiers (every player with a target or a reception,
+// whatever his position), Tyreek Hill first on 1,799 yards, 119 catches and
+// 13 TDs, and a three-way tie at rank 1 by receiving TDs (Cris Carter, Mike
+// Evans and Hill, 13 each), CeeDee Lamb next at rank 4.
+
+test('choosing Receiving ranks Tyreek Hill first on 1,799 yards, with its own columns', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+
+  await page.getByLabel('Stat category').selectOption('Receiving')
+
+  const table = leadersTable(page, 'regular season, by receiving yards')
+  await expectRow(table, 0, '1', 'Tyreek Hill')
+  await expect(bodyRow(table, 0)).toContainText('WR')
+  await expect(bodyRow(table, 0)).toContainText('1,799')
+  await expect(bodyRow(table, 0)).toContainText('119')
+  await expect(bodyRow(table, 0)).toContainText('13')
+  await expect(table.locator('thead th')).toHaveText([
+    'Rank',
+    'Player',
+    'Position',
+    'Seasons',
+    'Games',
+    'Receptions',
+    'Receiving yards',
+    'Receiving TDs',
+  ])
+  await expect(
+    table.getByRole('columnheader', { name: 'Receiving yards' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  for (const gone of [
+    'Passing yards',
+    'Rushing yards',
+    'Carries',
+    'Starter record',
+  ]) {
+    await expect(table.getByRole('columnheader', { name: gone })).toHaveCount(0)
+  }
+  await expect(page.getByText('1–50 of 926')).toBeVisible()
+  await expect(page).toHaveURL(
+    /category=receiving&season_type=regular&sort=receiving_yards&offset=0/,
+  )
+})
+
+test('Receiving TDs shows the three-way tie at rank 1, and a reload shows the same board', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=receiving')
+  await expect(
+    leadersTable(page, 'regular season, by receiving yards'),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'Receiving TDs' }).click()
+
+  const table = leadersTable(page, 'regular season, by receiving TDs')
+  await expectRow(table, 0, '1', 'Cris Carter')
+  await expectRow(table, 1, '1', 'Mike Evans')
+  await expectRow(table, 2, '1', 'Tyreek Hill')
+  await expectRow(table, 3, '4', 'CeeDee Lamb')
+  await expect(
+    table.getByRole('columnheader', { name: 'Receiving TDs' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  await expect(
+    table.getByRole('columnheader', { name: 'Receiving yards' }),
+  ).toHaveAttribute('aria-sort', 'none')
+  await expect(page).toHaveURL(
+    /category=receiving&season_type=regular&sort=receiving_tds&offset=0/,
+  )
+
+  await page.reload()
+  const reloaded = leadersTable(page, 'regular season, by receiving TDs')
+  await expectRow(reloaded, 0, '1', 'Cris Carter')
+  await expectRow(reloaded, 2, '1', 'Tyreek Hill')
+  await expect(
+    reloaded.getByRole('columnheader', { name: 'Receiving TDs' }),
+  ).toHaveAttribute('aria-sort', 'descending')
+  await expect(page.getByLabel('Stat category')).toHaveValue('receiving')
+})
+
 test("Kurt Warner's name opens his career: 1999 St. Louis Rams, 4,044 yards, and the one-game disclosure", async ({
   page,
 }) => {

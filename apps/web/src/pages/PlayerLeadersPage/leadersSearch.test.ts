@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { parseLeadersSearch, toLeadersSearch } from './leadersSearch'
+import {
+  parseLeadersSearch,
+  toLeadersSearch,
+  withCategory,
+} from './leadersSearch'
 
 describe('leaders URL state (issue #296)', () => {
   it('defaults to passing, the regular season, by passing yards, from the top', () => {
@@ -100,7 +104,7 @@ describe('the stat category in the URL (issue #312)', () => {
     })
   })
 
-  it.each(['receiving', 'Rushing', 'passing,rushing', ''])(
+  it.each(['kicking', 'Rushing', 'Receiving', 'passing,rushing', ''])(
     'falls back to passing for category=%j',
     (value) => {
       const view = parseLeadersSearch(new URLSearchParams({ category: value }))
@@ -144,5 +148,87 @@ describe('the stat category in the URL (issue #312)', () => {
       'category=rushing&season_type=postseason&sort=rushing_tds&offset=0',
     )
     expect(parseLeadersSearch(search)).toEqual(view)
+  })
+})
+
+/** Issue #314: the receiving board's URL, by the same rules as rushing. */
+describe('the receiving category in the URL (issue #314)', () => {
+  it('reads the receiving category with one of its own sorts', () => {
+    expect(
+      parseLeadersSearch(
+        new URLSearchParams('category=receiving&sort=receptions&offset=50'),
+      ),
+    ).toEqual({
+      category: 'receiving',
+      season_type: 'regular',
+      sort: 'receptions',
+      offset: 50,
+    })
+  })
+
+  it('round-trips category=receiving&sort=receptions', () => {
+    const view = {
+      category: 'receiving',
+      season_type: 'regular',
+      sort: 'receptions',
+      offset: 0,
+    } as const
+    const search = toLeadersSearch(view)
+    expect(search.toString()).toBe(
+      'category=receiving&season_type=regular&sort=receptions&offset=0',
+    )
+    expect(parseLeadersSearch(search)).toEqual(view)
+  })
+
+  it('defaults a receiving URL without a sort to receiving yards', () => {
+    expect(
+      parseLeadersSearch(new URLSearchParams('category=receiving')).sort,
+    ).toBe('receiving_yards')
+  })
+
+  it.each(['carries', 'rushing_yards', 'wins', 'passing_tds', 'targets'])(
+    'falls back to receiving yards for category=receiving&sort=%s',
+    (sort) => {
+      expect(
+        parseLeadersSearch(
+          new URLSearchParams({ category: 'receiving', sort }),
+        ),
+      ).toEqual({
+        category: 'receiving',
+        season_type: 'regular',
+        sort: 'receiving_yards',
+        offset: 0,
+      })
+    },
+  )
+
+  it('falls back to the other categories defaults for a receiving sort', () => {
+    expect(
+      parseLeadersSearch(
+        new URLSearchParams('category=rushing&sort=receptions'),
+      ).sort,
+    ).toBe('rushing_yards')
+    expect(
+      parseLeadersSearch(new URLSearchParams('sort=receiving_tds')).sort,
+    ).toBe('passing_yards')
+  })
+
+  it('lands a switch to receiving on its default sort, at the top, keeping the season type', () => {
+    expect(
+      withCategory(
+        {
+          category: 'rushing',
+          season_type: 'postseason',
+          sort: 'carries',
+          offset: 100,
+        },
+        'receiving',
+      ),
+    ).toEqual({
+      category: 'receiving',
+      season_type: 'postseason',
+      sort: 'receiving_yards',
+      offset: 0,
+    })
   })
 })

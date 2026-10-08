@@ -1,9 +1,10 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import type { PlayerLeaderCategory } from '../../lib/api/types'
 import { LeaderCategorySelect } from './LeaderCategorySelect'
 
-function renderSelect(value: 'passing' | 'rushing' = 'passing') {
+function renderSelect(value: PlayerLeaderCategory = 'passing') {
   const onChange = vi.fn()
   render(<LeaderCategorySelect value={value} onChange={onChange} />)
   return {
@@ -20,23 +21,42 @@ describe('LeaderCategorySelect (issue #312)', () => {
     expect(select).toHaveAccessibleName('Stat category')
   })
 
-  it('offers both categories, in the engine order, labelled for a reader', () => {
+  it('offers every category, in the engine order, labelled for a reader', () => {
     const { select } = renderSelect()
     const options = within(select).getAllByRole('option')
 
     expect(options.map((option) => option.textContent)).toEqual([
       'Passing',
       'Rushing',
+      'Receiving',
     ])
     expect(
       options.map((option) => (option as HTMLOptionElement).value),
-    ).toEqual(['passing', 'rushing'])
+    ).toEqual(['passing', 'rushing', 'receiving'])
   })
 
   it('shows the category it was given', () => {
     const { select } = renderSelect('rushing')
 
     expect(select).toHaveValue('rushing')
+  })
+
+  it('offers Receiving, and reports it when chosen (issue #314)', async () => {
+    const user = userEvent.setup()
+    const { select, onChange } = renderSelect('rushing')
+
+    expect(
+      within(select).getByRole('option', { name: 'Receiving' }),
+    ).toHaveValue('receiving')
+    await user.selectOptions(select, 'Receiving')
+
+    expect(onChange.mock.calls).toEqual([['receiving']])
+  })
+
+  it('shows the receiving category when given it', () => {
+    const { select } = renderSelect('receiving')
+
+    expect(select).toHaveValue('receiving')
   })
 
   it('reports the category chosen, once', async () => {

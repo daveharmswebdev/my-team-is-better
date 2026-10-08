@@ -19,6 +19,8 @@ import type { PlayerLeadersQuery } from '../../lib/api/client'
 import type { PlayerLeaderRowOut, PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
+  LEADERS_BY_RECEIVING_TDS,
+  LEADERS_BY_RECEIVING_YARDS,
   LEADERS_BY_RUSHING_TDS,
   LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
@@ -168,7 +170,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
     mockedFetchPlayerLeaders.mockResolvedValue(LEADERS_BY_YARDS)
 
     renderPage(
-      '/nfl/leaders?category=receiving&season_type=playoffs&sort=sacks&offset=-3',
+      '/nfl/leaders?category=kicking&season_type=playoffs&sort=sacks&offset=-3',
     )
 
     await screen.findByRole('table')
@@ -520,7 +522,11 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
         ? query.sort === 'rushing_tds'
           ? LEADERS_BY_RUSHING_TDS
           : LEADERS_BY_RUSHING_YARDS
-        : LEADERS_BY_YARDS
+        : query.category === 'receiving'
+          ? query.sort === 'receiving_tds'
+            ? LEADERS_BY_RECEIVING_TDS
+            : LEADERS_BY_RECEIVING_YARDS
+          : LEADERS_BY_YARDS
     return {
       ...base,
       category: query.category,
@@ -546,7 +552,7 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
     )
   })
 
-  it('offers a labelled dropdown of both categories, set from the URL', async () => {
+  it('offers a labelled dropdown of every category, set from the URL', async () => {
     renderPage('/nfl/leaders?category=rushing')
 
     await screen.findByRole('table')
@@ -556,7 +562,7 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
       within(select)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['Passing', 'Rushing'])
+    ).toEqual(['Passing', 'Rushing', 'Receiving'])
   })
 
   it('starts on passing, and is the first control the keyboard reaches', async () => {
@@ -683,5 +689,98 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
 
     const table = await screen.findByRole('table')
     expect(table).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
+  })
+
+  it('names all three categories in the lede (issue #314)', async () => {
+    renderPage()
+
+    await screen.findByRole('table')
+    expect(
+      screen.getByText(/career passing, rushing and receiving totals/i),
+    ).toBeInTheDocument()
+  })
+
+  it('switches to receiving, keeping the season type and resetting the sort and the page (issue #314)', async () => {
+    const user = userEvent.setup()
+    renderPage(
+      '/nfl/leaders?category=rushing&season_type=postseason&sort=carries&offset=50',
+    )
+    await screen.findByRole('table')
+
+    await user.selectOptions(categorySelect(), 'Receiving')
+
+    expect(lastQuery()).toEqual({
+      category: 'receiving',
+      season_type: 'postseason',
+      sort: 'receiving_yards',
+      limit: 50,
+      offset: 0,
+    })
+    expect(search()).toBe(
+      '?category=receiving&season_type=postseason&sort=receiving_yards&offset=0',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by receiving yards',
+    })
+    expect(categorySelect()).toHaveValue('receiving')
+  })
+
+  it('shows the receiving board the API sent, with no passing, rushing or record columns (issue #314)', async () => {
+    renderPage('/nfl/leaders?category=receiving')
+
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by receiving yards',
+    })
+    const first = within(table).getAllByRole('row')[1] as HTMLElement
+    expect(within(first).getByRole('link')).toHaveTextContent('Tyreek Hill')
+    expect(within(first).getByText('1,799')).toBeInTheDocument()
+    for (const gone of [
+      'Passing yards',
+      'Carries',
+      'Rushing yards',
+      'Starter record',
+    ]) {
+      expect(
+        within(table).queryByRole('columnheader', { name: gone }),
+      ).not.toBeInTheDocument()
+    }
+    expect(table).not.toHaveAccessibleDescription()
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+    expect(screen.getByText('1–3 of 926')).toBeInTheDocument()
+  })
+
+  it('keeps the category when a receiving column is sorted (issue #314)', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=receiving')
+    await screen.findByRole('table')
+
+    await user.click(screen.getByRole('button', { name: 'Receiving TDs' }))
+
+    expect(lastQuery()).toEqual({
+      category: 'receiving',
+      season_type: 'regular',
+      sort: 'receiving_tds',
+      limit: 50,
+      offset: 0,
+    })
+    expect(search()).toBe(
+      '?category=receiving&season_type=regular&sort=receiving_tds&offset=0',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by receiving TDs',
+    })
+  })
+
+  it('never asks the receiving board for a rushing sort (issue #314)', async () => {
+    renderPage('/nfl/leaders?category=receiving&sort=carries')
+
+    await screen.findByRole('table')
+    expect(lastQuery()).toEqual({
+      category: 'receiving',
+      season_type: 'regular',
+      sort: 'receiving_yards',
+      limit: 50,
+      offset: 0,
+    })
   })
 })

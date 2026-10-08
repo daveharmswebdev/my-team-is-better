@@ -10,14 +10,20 @@ What is pinned, and why each matters to the leaders page apps/web builds:
 - **Real numbers.** Top rows are also pinned literally, measured on the
   regenerated fixture, so a faithful copy of a wrong engine answer still
   fails here.
-- **Every category, every sort.** `category` ('passing' | 'rushing', #312)
-  picks the board, and omitting `sort` echoes that category's default. The
+- **Every category, every sort.** `category` ('passing' | 'rushing' |
+  'receiving', #312, #314) picks the board, and omitting `sort` echoes that category's default. The
   (category, sort) pairs are read from the engine's own
   `PLAYER_LEADER_SORTS_BY_CATEGORY`, never a list copied into apps/api. A
   sort from another category is a 422 at `sort` naming that category's
   sorts, never the engine's `ValueError` surfacing as a 500.
 - **A board ranks a stat, not a position.** QBs appear on the rushing board
-  on merit, sharing ranks with running backs.
+  on merit, sharing ranks with running backs; a tight end leads the
+  postseason receiving board.
+- **Qualifying is the engine's.** The receiving board takes anyone with a
+  target *or* a reception (#345), so a targeted player with no catch is on
+  it, ranked, with `receptions` 0 -- apps/api filters nothing out.
+- **The published stat keys are a literal.** Sixteen names, in order, so
+  dropping or adding a `PlayerStatsOut` field goes red.
 - **Ranks are the engine's.** Competition ranking over the whole qualifying
   population (1, 2, 2, 4), including across a page boundary.
 - **Null stays null.** A stat the source did not record is JSON `null`,
@@ -63,21 +69,37 @@ CATEGORY_SORTS: tuple[tuple[PlayerLeaderCategory, PlayerLeaderSort], ...] = tupl
 )
 
 # Measured on the committed fixture (NFL 1999 + 2023): passing #296, rushing
-# #312. Qualifying is per (category, season_type), with no minimum.
+# #312, receiving #314. Qualifying is per (category, season_type), with no
+# minimum.
 REGULAR_QUALIFYING = 204
 POSTSEASON_QUALIFYING = 30
 REGULAR_RUSHING_QUALIFYING = 653
 POSTSEASON_RUSHING_QUALIFYING = 114
+REGULAR_RECEIVING_QUALIFYING = 926
+POSTSEASON_RECEIVING_QUALIFYING = 224
 QUALIFYING: dict[tuple[str, str], int] = {
     ("passing", "regular"): REGULAR_QUALIFYING,
     ("passing", "postseason"): POSTSEASON_QUALIFYING,
     ("rushing", "regular"): REGULAR_RUSHING_QUALIFYING,
     ("rushing", "postseason"): POSTSEASON_RUSHING_QUALIFYING,
+    ("receiving", "regular"): REGULAR_RECEIVING_QUALIFYING,
+    ("receiving", "postseason"): POSTSEASON_RECEIVING_QUALIFYING,
 }
 
 TUA_TAGOVAILOA = 2186969283
 KURT_WARNER = 2044124519
 PATRICK_MAHOMES = 2319407936
+TRAVIS_HOMER = 2053081896
+MARVIN_HARRISON = 2009851825
+
+RECEIVING_STATS = (
+    "receptions",
+    "targets",
+    "receiving_yards",
+    "receiving_tds",
+    "receiving_first_downs",
+    "receiving_fumbles_lost",
+)
 
 ROW_KEYS = {
     "rank",
@@ -103,17 +125,23 @@ def _get(client: TestClient, **params: str | int) -> Any:
     return response.json()
 
 
+def _get_career(client: TestClient, player_id: int) -> Any:
+    response = client.get(f"/api/players/{player_id}")
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 # ---------------------------------------------------------------------------
 # shape and order
 # ---------------------------------------------------------------------------
 
 
-# The ten stats the API publishes today, written out rather than derived.
-# `contracts.PlayerStats` has carried 34 columns since #313; `PlayerStatsOut`
-# still exposes only these, and widening it is #314 (receiving) and #315
-# (kicking and punting). Deriving this list from the response model would
-# make the assertion below tautological -- see the comment there.
-PUBLISHED_STATS_TODAY: tuple[str, ...] = (
+# The sixteen stats the API publishes, written out rather than derived: the
+# original ten plus #314's six receiving stats, in `PlayerStatsOut`'s order.
+# `contracts.PlayerStats` has carried 34 columns since #313; kicking and
+# punting are #315. Deriving this list from the response model would make
+# every assertion on it tautological -- see `test_published_stat_keys_are_pinned`.
+PUBLISHED_STATS: tuple[str, ...] = (
     "completions",
     "attempts",
     "passing_yards",
@@ -124,6 +152,12 @@ PUBLISHED_STATS_TODAY: tuple[str, ...] = (
     "carries",
     "rushing_yards",
     "rushing_tds",
+    "receptions",
+    "targets",
+    "receiving_yards",
+    "receiving_tds",
+    "receiving_first_downs",
+    "receiving_fumbles_lost",
 )
 
 
@@ -146,13 +180,9 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
     for row in body["rows"]:
         assert set(row) == ROW_KEYS
         assert set(row["record"]) == {"wins", "losses", "ties", "starts"}
-        # Pinned literally rather than compared to `PUBLISHED_STAT_NAMES`.
-        # That constant is `tuple(PlayerStatsOut.model_fields)`, and this body
-        # is serialized by FastAPI from that same model, so the two move
-        # together by construction and the assertion could never fail
-        # (#313 review). A literal is the only version of this check that can.
-        # It is meant to go red when #314/#315 widen what the API publishes.
-        assert set(row["stats"]) == set(PUBLISHED_STATS_TODAY)
+        # Pinned literally (and in order), never compared to
+        # `PUBLISHED_STAT_NAMES`: see `test_published_stat_keys_are_pinned`.
+        assert list(row["stats"]) == list(PUBLISHED_STATS)
 
     top = [
         (r["rank"], r["display_name"], r["stats"]["passing_yards"], r["stats"]["passing_tds"])
@@ -179,7 +209,8 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
 
 
 # (season_type, sort) -> the literal top rows measured on the fixture. The
-# passing entries are #296's, unchanged; the rushing ones are #312's.
+# passing entries are #296's, unchanged; the rushing ones are #312's; the
+# receiving ones are #314's.
 TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("regular", "passing_yards"): [(1, "Tua Tagovailoa"), (2, "Jared Goff")],
     ("regular", "passing_tds"): [(1, "Kurt Warner"), (2, "Dak Prescott")],
@@ -193,13 +224,46 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("postseason", "rushing_yards"): [(1, "Eddie George"), (2, "Isiah Pacheco")],
     ("postseason", "rushing_tds"): [(1, "Christian McCaffrey"), (2, "Aaron Jones")],
     ("postseason", "carries"): [(1, "Eddie George"), (2, "Isiah Pacheco")],
+    ("regular", "receiving_yards"): [(1, "Tyreek Hill"), (2, "CeeDee Lamb")],
+    ("regular", "receiving_tds"): [(1, "Cris Carter"), (1, "Mike Evans")],
+    ("regular", "receptions"): [(1, "CeeDee Lamb"), (2, "Amon-Ra St. Brown")],
+    ("postseason", "receiving_yards"): [(1, "Travis Kelce"), (2, "Isaac Bruce")],
+    ("postseason", "receiving_tds"): [(1, "Jake Ferguson"), (1, "Randy Moss")],
+    ("postseason", "receptions"): [(1, "Travis Kelce"), (2, "Rashee Rice")],
 }
+
+
+def test_published_stat_keys_are_pinned(client: TestClient) -> None:
+    """Every stats object a player endpoint serves has exactly these sixteen
+    keys, in this order: on a leaders row of every board, and on a career
+    season line and its totals.
+
+    The expectation is the literal `PUBLISHED_STATS`, never
+    `PUBLISHED_STAT_NAMES`: that constant is `tuple(PlayerStatsOut.model_fields)`
+    and these bodies are serialized from that same model, so the two move
+    together by construction and a comparison between them could never fail
+    (#313 and #338 reviews). Dropping or adding a field must go red here.
+    """
+    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 16
+    stats_objects: list[Any] = []
+    for category in CATEGORIES:
+        stats_objects += [r["stats"] for r in _get(client, category=category, limit=3)["rows"]]
+    career = _get_career(client, KURT_WARNER)
+    stats_objects += [line["stats"] for line in career["seasons"]]
+    stats_objects += [career["regular_season"]["stats"], career["postseason"]["stats"]]
+
+    assert len(stats_objects) == 3 * len(CATEGORIES) + 4
+    for stats in stats_objects:
+        assert list(stats) == list(PUBLISHED_STATS)
 
 
 @pytest.mark.parametrize("category,sort", CATEGORY_SORTS)
 @pytest.mark.parametrize("season_type", SEASON_TYPES)
 def test_every_category_sort_and_season_type_is_the_engines_board(
-    client: TestClient, season_type: str, category: str, sort: str
+    client: TestClient,
+    season_type: PlayerSeasonType,
+    category: PlayerLeaderCategory,
+    sort: PlayerLeaderSort,
 ) -> None:
     body = _get(client, category=category, season_type=season_type, sort=sort)
 
@@ -209,6 +273,17 @@ def test_every_category_sort_and_season_type_is_the_engines_board(
         (season_type, sort)
     ]
     assert body == _expected(category=category, season_type=season_type, sort=sort)
+
+    # `_expected` projects the engine's stats onto what `PlayerStatsOut`
+    # publishes, so on its own it would follow a dropped field silently.
+    # Every literal published stat must also equal the engine's, row by row.
+    with fixture_conn() as conn:
+        engine = get_player_leaders(
+            conn, sport="nfl", category=category, season_type=season_type, sort=sort
+        )
+    assert len(engine.rows) == len(body["rows"])
+    for row, engine_row in zip(body["rows"], engine.rows, strict=True):
+        assert row["stats"] == {name: getattr(engine_row.stats, name) for name in PUBLISHED_STATS}
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +369,117 @@ def test_rushing_ranks_a_stat_not_a_position_ties_included(client: TestClient) -
         (3, "Josh Allen", "QB", 15),
         (5, "Christian McCaffrey", "RB", 14),
     ]
+
+
+# ---------------------------------------------------------------------------
+# the receiving board (#314)
+# ---------------------------------------------------------------------------
+
+# Measured on the committed fixture through `get_player_leaders`: rank, name,
+# position and the sort value, tied runs in full. Ranked by stat, not
+# position: tight ends lead the postseason boards.
+RECEIVING_TOP: dict[tuple[str, str], list[tuple[int, str, str, int]]] = {
+    ("regular", "receiving_yards"): [
+        (1, "Tyreek Hill", "WR", 1799),
+        (2, "CeeDee Lamb", "WR", 1749),
+        (3, "Marvin Harrison", "WR", 1663),
+    ],
+    ("regular", "receiving_tds"): [
+        (1, "Cris Carter", "WR", 13),
+        (1, "Mike Evans", "WR", 13),
+        (1, "Tyreek Hill", "WR", 13),
+        (4, "CeeDee Lamb", "WR", 12),
+    ],
+    ("regular", "receptions"): [
+        (1, "CeeDee Lamb", "WR", 135),
+        (2, "Amon-Ra St. Brown", "WR", 119),
+        (2, "Tyreek Hill", "WR", 119),
+        (4, "Jimmy Smith", "WR", 116),
+    ],
+    ("postseason", "receiving_yards"): [
+        (1, "Travis Kelce", "TE", 355),
+        (2, "Isaac Bruce", "WR", 317),
+        (3, "Randy Moss", "WR", 315),
+    ],
+    ("postseason", "receiving_tds"): [
+        (1, "Jake Ferguson", "TE", 3),
+        (1, "Randy Moss", "WR", 3),
+        (1, "Travis Kelce", "TE", 3),
+        (4, "Cris Carter", "WR", 2),
+    ],
+    ("postseason", "receptions"): [
+        (1, "Travis Kelce", "TE", 32),
+        (2, "Rashee Rice", "WR", 26),
+        (3, "Amon-Ra St. Brown", "WR", 22),
+    ],
+}
+
+
+@pytest.mark.parametrize("season_type,sort", sorted(RECEIVING_TOP))
+def test_receiving_boards_show_the_measured_leaders(
+    client: TestClient, season_type: str, sort: str
+) -> None:
+    expected = RECEIVING_TOP[(season_type, sort)]
+    body = _get(
+        client, category="receiving", season_type=season_type, sort=sort, limit=len(expected)
+    )
+
+    assert body["total"] == QUALIFYING[("receiving", season_type)]
+    assert [
+        (r["rank"], r["display_name"], r["position"], r["stats"][sort]) for r in body["rows"]
+    ] == expected
+
+
+def test_receiving_with_no_sort_echoes_the_categorys_default(client: TestClient) -> None:
+    body = _get(client, category="receiving")
+
+    assert (body["category"], body["sort"], body["season_type"]) == (
+        "receiving",
+        "receiving_yards",
+        "regular",
+    )
+    assert body["total"] == REGULAR_RECEIVING_QUALIFYING
+    assert body == _expected(category="receiving")
+    assert body == _get(client, category="receiving", sort="receiving_yards")
+
+
+def test_a_receiving_row_publishes_the_whole_receiving_line(client: TestClient) -> None:
+    """Marvin Harrison's 1999 (193 targets, 115 catches, 1663 yards, 12 TD),
+    third on the regular-season yards board, with every receiving stat."""
+    third = _get(client, category="receiving", limit=1, offset=2)["rows"][0]
+
+    assert (third["rank"], third["player_id"], third["display_name"]) == (
+        3,
+        MARVIN_HARRISON,
+        "Marvin Harrison",
+    )
+    assert {name: third["stats"][name] for name in RECEIVING_STATS} == {
+        "receptions": 115,
+        "targets": 193,
+        "receiving_yards": 1663,
+        "receiving_tds": 12,
+        "receiving_first_downs": 79,
+        "receiving_fumbles_lost": 1,
+    }
+
+
+def test_a_targeted_player_with_no_catch_is_ranked_with_zero_receptions(
+    client: TestClient,
+) -> None:
+    """Qualifying is `targets > 0 OR receptions > 0`, the engine's rule
+    (#345): Travis Homer's 2023 (1 target, 0 catches) is on the board, sharing
+    last place on receptions, with `receptions` 0 -- not null, not unranked,
+    not filtered out."""
+    body = _get(client, category="receiving", sort="receptions", limit=100, offset=880)
+    homer = [r for r in body["rows"] if r["player_id"] == TRAVIS_HOMER]
+
+    assert len(homer) == 1
+    row = homer[0]
+    assert (row["display_name"], row["position"]) == ("Travis Homer", "RB")
+    assert (row["stats"]["receptions"], row["stats"]["targets"]) == (0, 1)
+    assert row["rank"] == 885
+    assert body["rows"][-1]["rank"] == 885
+    assert body == _expected(category="receiving", sort="receptions", limit=100, offset=880)
 
 
 def test_postseason_starts_are_published(client: TestClient) -> None:
@@ -411,6 +597,46 @@ def test_a_null_stat_stays_null_and_unranked_on_both_endpoints(tmp_path: Path) -
         )
 
 
+def test_a_null_receiving_stat_stays_null_and_unranked(tmp_path: Path) -> None:
+    """No fixture season row has a NULL receiving stat, so the copy NULLs
+    Marvin Harrison's 1999 receiving yards: he drops from third to the end
+    of the yards board, unranked, `null` and never 0; ranked as usual on
+    receptions; and his career line says `null` too."""
+    db = make_player_db_with_null_stat(
+        tmp_path,
+        player_id=MARVIN_HARRISON,
+        season=1999,
+        season_type="regular",
+        stat="receiving_yards",
+    )
+    last_offset = REGULAR_RECEIVING_QUALIFYING - 1
+
+    with client_for_db(db) as nulled:
+        by_yards = nulled.get(
+            LEADERS, params={"category": "receiving", "limit": 1, "offset": last_offset}
+        )
+        by_catches = nulled.get(
+            LEADERS, params={"category": "receiving", "sort": "receptions", "limit": 5}
+        )
+        career = nulled.get(f"/api/players/{MARVIN_HARRISON}")
+
+    assert by_yards.status_code == by_catches.status_code == career.status_code == 200
+    last = by_yards.json()["rows"][0]
+    assert (last["player_id"], last["rank"]) == (MARVIN_HARRISON, None)
+    assert "receiving_yards" in last["stats"] and last["stats"]["receiving_yards"] is None
+    assert last["stats"]["receptions"] == 115
+
+    harrison = [r for r in by_catches.json()["rows"] if r["player_id"] == MARVIN_HARRISON]
+    assert [(r["rank"], r["stats"]["receiving_yards"]) for r in harrison] == [(5, None)]
+
+    assert career.json()["regular_season"]["stats"]["receiving_yards"] is None
+
+    with fixture_conn(db) as conn:
+        assert by_yards.json() == engine_json(
+            get_player_leaders(conn, sport="nfl", category="receiving", limit=1, offset=last_offset)
+        )
+
+
 # ---------------------------------------------------------------------------
 # the seam: a leaders row is that player's career totals
 # ---------------------------------------------------------------------------
@@ -469,7 +695,14 @@ def _assert_422_at(response_status: int, body: Any, field: str) -> None:
         ({"category": "rushing", "sort": "wins"}, "sort"),
         ({"category": "rushing", "sort": "passing_yards"}, "sort"),
         ({"category": "passing", "sort": "carries"}, "sort"),
-        ({"category": "receiving"}, "category"),
+        # #314: receiving is a board now, and its sorts are its own.
+        ({"category": "receiving", "sort": "carries"}, "sort"),
+        ({"category": "receiving", "sort": "passing_yards"}, "sort"),
+        ({"category": "rushing", "sort": "receptions"}, "sort"),
+        ({"category": "passing", "sort": "receiving_yards"}, "sort"),
+        # `targets` qualifies a receiver but is deliberately not a sort.
+        ({"category": "receiving", "sort": "targets"}, "sort"),
+        ({"category": "kicking"}, "category"),
         ({"season_type": "combined"}, "season_type"),
     ],
     ids=lambda v: str(v),
@@ -497,6 +730,10 @@ CROSS_CATEGORY_SORTS: list[tuple[PlayerLeaderCategory, str]] = [
     ("rushing", "passing_yards"),
     ("passing", "carries"),
     ("passing", "rushing_yards"),
+    ("receiving", "carries"),
+    ("receiving", "wins"),
+    ("rushing", "receptions"),
+    ("passing", "receiving_tds"),
 ]
 
 

@@ -385,17 +385,45 @@ class PlayerSeasonStatRow:
 #     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
 # ---------------------------------------------------------------------------
 
-PlayerLeaderCategory = Literal["passing", "rushing"]
+PlayerLeaderCategory = Literal["passing", "rushing", "receiving"]
 """What a leaderboard ranks (epic #311, decision 1): a stat category, not a
 position. A board ranks every player with the category's base stat, whatever
-their position, so a QB's carries count on the rushing board.
+their position, so a QB's carries count on the rushing board and a running
+back's catches count on the receiving one.
 
 Qualifying (decision 2), per season type, with no minimum:
   * passing: at least one pass attempt, or one QB start (#296);
-  * rushing: at least one carry (#312)."""
+  * rushing: at least one carry (#312);
+  * receiving: at least one target **or** at least one reception (#314).
+
+Receiving counts a target, so a player who was thrown to and caught nothing
+is on the board with 0 catches rather than missing from it. It counts a
+reception as well because nflverse publishes `targets` as a literal 0 for
+every one of the 2003-2008 seasons -- measured on the raw weekly files:
+3,579 of the 3,582 players with a catch in 2003 have `targets = 0`, and no
+season outside that window has a single such row. There are no empty
+`targets` cells anywhere in the range, so the stored 0 is indistinguishable
+from "never thrown to" and the NULL-not-zero rule cannot save it here.
+
+Qualifying on targets alone would therefore drop 303 players whose whole
+receiving career falls in those six seasons -- 5,426 receptions and 54,503
+yards, regular season and playoffs together, including Shaun McDonald (225
+for 2,558 combined; his regular-season board line is 220 for 2,490).
+Outside 2003-2008 every player with a reception also has a target, so the
+`or` changes nothing there: it is the same rule, written so an upstream gap cannot erase real
+careers (founder call, 2026-09-17). The gap itself is tracked as #345;
+we disclose or work around it, and never correct nflverse's numbers."""
 
 PlayerLeaderSort = Literal[
-    "passing_yards", "passing_tds", "wins", "rushing_yards", "rushing_tds", "carries"
+    "passing_yards",
+    "passing_tds",
+    "wins",
+    "rushing_yards",
+    "rushing_tds",
+    "carries",
+    "receiving_yards",
+    "receiving_tds",
+    "receptions",
 ]
 """Every leaderboard sort. With `PlayerSeasonType` the passing ones cover
 passing yards, passing TDs, regular-season starter wins and playoff starter
@@ -406,11 +434,18 @@ PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeade
         {
             "passing": ("passing_yards", "passing_tds", "wins"),
             "rushing": ("rushing_yards", "rushing_tds", "carries"),
+            "receiving": ("receiving_yards", "receiving_tds", "receptions"),
         }
     )
 )
 """The sorts each category accepts, its default first. Every
-`PlayerLeaderSort` belongs to exactly one category."""
+`PlayerLeaderSort` belongs to exactly one category.
+
+Receiving mirrors rushing's yards/TDs/volume shape (#314, founder call
+2026-09-17). `targets` is deliberately not a sort: it is the column
+qualifying is measured on, and no other category exposes its qualifying
+column as a sort. Adding it later is a pure append to `PlayerLeaderSort`
+and to this tuple."""
 
 PLAYER_LEADERS_MAX_LIMIT = 100
 

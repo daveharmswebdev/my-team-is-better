@@ -22,6 +22,49 @@ import type {
   PlayerStatsOut,
 } from './api/types'
 
+/** The six receiving stats (issue #314), in the API's order. */
+type ReceivingStats = Pick<
+  PlayerStatsOut,
+  | 'receptions'
+  | 'targets'
+  | 'receiving_yards'
+  | 'receiving_tds'
+  | 'receiving_first_downs'
+  | 'receiving_fumbles_lost'
+>
+
+/**
+ * The receiving stats of every quarterback below: the committed fixture
+ * records a 0 for each, not a null.
+ */
+const NO_RECEIVING: ReceivingStats = {
+  receptions: 0,
+  targets: 0,
+  receiving_yards: 0,
+  receiving_tds: 0,
+  receiving_first_downs: 0,
+  receiving_fumbles_lost: 0,
+}
+
+/** Receiving stats in the API's order: receptions, targets, yards, TDs, first downs, fumbles lost. */
+function receiving(
+  receptions: number,
+  targets: number,
+  yards: number,
+  tds: number,
+  firstDowns: number,
+  fumblesLost: number,
+): ReceivingStats {
+  return {
+    receptions,
+    targets,
+    receiving_yards: yards,
+    receiving_tds: tds,
+    receiving_first_downs: firstDowns,
+    receiving_fumbles_lost: fumblesLost,
+  }
+}
+
 export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
   rank: 1,
   player_id: 2186969283,
@@ -42,6 +85,7 @@ export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
     carries: 35,
     rushing_yards: 74,
     rushing_tds: 0,
+    ...NO_RECEIVING,
   },
 }
 
@@ -65,6 +109,7 @@ export const JARED_GOFF: PlayerLeaderRowOut = {
     carries: 32,
     rushing_yards: 21,
     rushing_tds: 2,
+    ...NO_RECEIVING,
   },
 }
 
@@ -88,6 +133,7 @@ export const DAK_PRESCOTT: PlayerLeaderRowOut = {
     carries: 55,
     rushing_yards: 242,
     rushing_tds: 2,
+    ...NO_RECEIVING,
   },
 }
 
@@ -111,6 +157,7 @@ export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
     carries: 27,
     rushing_yards: 124,
     rushing_tds: 2,
+    ...NO_RECEIVING,
   },
 }
 
@@ -134,6 +181,7 @@ export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
     carries: 22,
     rushing_yards: 93,
     rushing_tds: 1,
+    ...NO_RECEIVING,
   },
 }
 
@@ -157,6 +205,7 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
     carries: 50,
     rushing_yards: 247,
     rushing_tds: 4,
+    ...NO_RECEIVING,
   },
 }
 
@@ -201,6 +250,12 @@ export const UNRECORDED_STATS: PlayerStatsOut = {
   carries: null,
   rushing_yards: null,
   rushing_tds: null,
+  receptions: null,
+  targets: null,
+  receiving_yards: null,
+  receiving_tds: null,
+  receiving_first_downs: null,
+  receiving_fumbles_lost: null,
 }
 
 /**
@@ -243,11 +298,15 @@ export const LEADERS_WITH_NULL_STATS: PlayerLeadersOut = {
 // quarterback carries a 0-0-0 `record` -- the rushing board doesn't show it.
 // ---------------------------------------------------------------------------
 
-/** Rushing stats only: the fixture records a 0, not a null, for a rusher's passing. */
-function rushingOnly(
+/**
+ * A back's stats: the fixture records a 0, not a null, for a rusher's
+ * passing. His receiving (issue #314) is copied as the API sent it.
+ */
+function nonPasserStats(
   carries: number,
   rushingYards: number,
   rushingTds: number,
+  catches: ReceivingStats,
 ): PlayerStatsOut {
   return {
     completions: 0,
@@ -260,6 +319,7 @@ function rushingOnly(
     carries,
     rushing_yards: rushingYards,
     rushing_tds: rushingTds,
+    ...catches,
   }
 }
 
@@ -274,7 +334,7 @@ export const EDGERRIN_JAMES: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 16,
   record: NO_RECORD,
-  stats: rushingOnly(369, 1553, 13),
+  stats: nonPasserStats(369, 1553, 13, receiving(62, 86, 586, 4, 23, 1)),
 }
 
 export const CURTIS_MARTIN: PlayerLeaderRowOut = {
@@ -286,7 +346,7 @@ export const CURTIS_MARTIN: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 16,
   record: NO_RECORD,
-  stats: rushingOnly(367, 1464, 5),
+  stats: nonPasserStats(367, 1464, 5, receiving(45, 61, 259, 0, 9, 0)),
 }
 
 export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
@@ -298,7 +358,7 @@ export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
   last_season: 2023,
   games: 16,
   record: NO_RECORD,
-  stats: rushingOnly(272, 1459, 14),
+  stats: nonPasserStats(272, 1459, 14, receiving(67, 83, 564, 7, 31, 0)),
 }
 
 export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
@@ -310,7 +370,7 @@ export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
   last_season: 2023,
   games: 15,
   record: NO_RECORD,
-  stats: rushingOnly(209, 1012, 18),
+  stats: nonPasserStats(209, 1012, 18, receiving(25, 32, 175, 3, 6, 0)),
 }
 
 export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
@@ -322,7 +382,7 @@ export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 14,
   record: NO_RECORD,
-  stats: rushingOnly(290, 1405, 17),
+  stats: nonPasserStats(290, 1405, 17, receiving(23, 28, 111, 0, 5, 0)),
 }
 
 /** A quarterback on the rushing board, tied at rank 3: he keeps his starter record. */
@@ -346,6 +406,7 @@ export const JALEN_HURTS: PlayerLeaderRowOut = {
     carries: 157,
     rushing_yards: 605,
     rushing_tds: 15,
+    ...NO_RECEIVING,
   },
 }
 
@@ -369,6 +430,7 @@ export const JOSH_ALLEN: PlayerLeaderRowOut = {
     carries: 111,
     rushing_yards: 524,
     rushing_tds: 15,
+    ...NO_RECEIVING,
   },
 }
 
@@ -396,6 +458,167 @@ export const LEADERS_BY_RUSHING_TDS: PlayerLeadersOut = {
   rows: [RAHEEM_MOSTERT, STEPHEN_DAVIS, JALEN_HURTS, JOSH_ALLEN],
 }
 
+// ---------------------------------------------------------------------------
+// The receiving category (issue #314). Copied from the same fixture db: every
+// player with a target or a reception qualifies, whatever their position, so
+// a quarterback with one target sits on the same board as the receivers. A
+// receiver who never started at quarterback carries a 0-0-0 `record` -- the
+// receiving board doesn't show it. `targets` is mirrored but never shown
+// (#345: the source publishes it as 0 for 2003-2008).
+// ---------------------------------------------------------------------------
+
+/** A one-season receiver with no starts at quarterback. */
+function receiverRow(
+  rank: number,
+  playerId: number,
+  displayName: string,
+  position: string,
+  season: number,
+  games: number,
+  stats: PlayerStatsOut,
+): PlayerLeaderRowOut {
+  return {
+    rank,
+    player_id: playerId,
+    display_name: displayName,
+    position,
+    first_season: season,
+    last_season: season,
+    games,
+    record: NO_RECORD,
+    stats,
+  }
+}
+
+export const TYREEK_HILL: PlayerLeaderRowOut = receiverRow(
+  1,
+  2052934910,
+  'Tyreek Hill',
+  'WR',
+  2023,
+  16,
+  nonPasserStats(6, 15, 0, receiving(119, 171, 1799, 13, 83, 1)),
+)
+
+export const CEEDEE_LAMB: PlayerLeaderRowOut = receiverRow(
+  2,
+  2170634393,
+  'CeeDee Lamb',
+  'WR',
+  2023,
+  17,
+  nonPasserStats(14, 113, 2, receiving(135, 181, 1749, 12, 80, 2)),
+)
+
+export const MARVIN_HARRISON: PlayerLeaderRowOut = receiverRow(
+  3,
+  2009851825,
+  'Marvin Harrison',
+  'WR',
+  1999,
+  16,
+  nonPasserStats(1, 4, 0, receiving(115, 193, 1663, 12, 79, 1)),
+)
+
+export const CRIS_CARTER: PlayerLeaderRowOut = receiverRow(
+  1,
+  2487905167,
+  'Cris Carter',
+  'WR',
+  1999,
+  15,
+  nonPasserStats(0, 0, 0, receiving(90, 136, 1241, 13, 65, 0)),
+)
+
+export const MIKE_EVANS: PlayerLeaderRowOut = receiverRow(
+  1,
+  2416985922,
+  'Mike Evans',
+  'WR',
+  2023,
+  17,
+  nonPasserStats(0, 0, 0, receiving(79, 136, 1255, 13, 54, 0)),
+)
+
+/** `?category=receiving`, regular season: the top three of 926, the default sort. */
+export const LEADERS_BY_RECEIVING_YARDS: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'receiving',
+  season_type: 'regular',
+  sort: 'receiving_yards',
+  limit: 50,
+  offset: 0,
+  total: 926,
+  rows: [TYREEK_HILL, CEEDEE_LAMB, MARVIN_HARRISON],
+}
+
+/** `?category=receiving&sort=receiving_tds`: a three-way tie at rank 1, then two at 4. */
+export const LEADERS_BY_RECEIVING_TDS: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'receiving',
+  season_type: 'regular',
+  sort: 'receiving_tds',
+  limit: 50,
+  offset: 0,
+  total: 926,
+  rows: [
+    CRIS_CARTER,
+    MIKE_EVANS,
+    TYREEK_HILL,
+    { ...CEEDEE_LAMB, rank: 4 },
+    { ...MARVIN_HARRISON, rank: 4 },
+  ],
+}
+
+/**
+ * `?category=receiving&sort=receptions&offset=920&limit=2`: the tail, where a
+ * player qualified on a target he never caught. Both share rank 885 on 0
+ * receptions, and one is a quarterback who keeps his starter record.
+ */
+export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'receiving',
+  season_type: 'regular',
+  sort: 'receptions',
+  limit: 2,
+  offset: 920,
+  total: 926,
+  rows: [
+    {
+      rank: 885,
+      player_id: 2156385060,
+      display_name: 'Ryan Tannehill',
+      position: 'QB',
+      first_season: 2023,
+      last_season: 2023,
+      games: 9,
+      record: { wins: 3, losses: 5, ties: 0, starts: 8 },
+      stats: {
+        completions: 149,
+        attempts: 230,
+        passing_yards: 1616,
+        passing_tds: 4,
+        passing_interceptions: 7,
+        sacks_suffered: 32,
+        sack_yards_lost: 230,
+        carries: 17,
+        rushing_yards: 74,
+        rushing_tds: 1,
+        ...receiving(0, 1, 0, 0, 0, 0),
+      },
+    },
+    receiverRow(
+      885,
+      2282260720,
+      'Sean McKeon',
+      'TE',
+      2023,
+      2,
+      nonPasserStats(0, 0, 0, receiving(0, 2, 0, 0, 0, 0)),
+    ),
+  ],
+}
+
 export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {
   season: 1999,
   season_type: 'regular',
@@ -413,6 +636,7 @@ export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {
     carries: 22,
     rushing_yards: 93,
     rushing_tds: 1,
+    ...NO_RECEIVING,
   },
   games_without_stat_lines: 1,
 }
@@ -434,6 +658,7 @@ export const WARNER_1999_POSTSEASON: PlayerSeasonLineOut = {
     carries: 6,
     rushing_yards: 3,
     rushing_tds: 0,
+    ...NO_RECEIVING,
   },
   games_without_stat_lines: 0,
 }
@@ -536,6 +761,7 @@ const MCNAIR_1999_REGULAR: PlayerSeasonLineOut = {
     carries: 72,
     rushing_yards: 337,
     rushing_tds: 8,
+    ...NO_RECEIVING,
   },
   games_without_stat_lines: 0,
 }
@@ -557,6 +783,7 @@ const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
     carries: 30,
     rushing_yards: 209,
     rushing_tds: 3,
+    ...NO_RECEIVING,
   },
   games_without_stat_lines: 0,
 }
@@ -614,6 +841,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 2,
           rushing_yards: 22,
           rushing_tds: 0,
+          ...NO_RECEIVING,
         },
         b_stats: {
           completions: 13,
@@ -626,6 +854,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 12,
           rushing_yards: 36,
           rushing_tds: 1,
+          ...NO_RECEIVING,
         },
       },
     ],
@@ -655,6 +884,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 1,
           rushing_yards: 1,
           rushing_tds: 0,
+          ...NO_RECEIVING,
         },
         b_stats: {
           completions: 22,
@@ -667,6 +897,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 8,
           rushing_yards: 64,
           rushing_tds: 0,
+          ...NO_RECEIVING,
         },
       },
     ],
@@ -814,6 +1045,7 @@ const MANNING_1999_REGULAR: PlayerSeasonLineOut = {
     carries: 35,
     rushing_yards: 73,
     rushing_tds: 2,
+    ...NO_RECEIVING,
   },
   games_without_stat_lines: 0,
 }
@@ -835,6 +1067,7 @@ const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
     carries: 3,
     rushing_yards: 22,
     rushing_tds: 1,
+    ...NO_RECEIVING,
   },
   games_without_stat_lines: 0,
 }
@@ -962,6 +1195,7 @@ export const TOM_BRADY_CAREER: PlayerCareerOut = inventedCareer(
       carries: 36,
       rushing_yards: 43,
       rushing_tds: 0,
+      ...NO_RECEIVING,
     },
     games_without_stat_lines: 0,
   },
@@ -988,6 +1222,7 @@ export const BRADY_QUINN_CAREER: PlayerCareerOut = inventedCareer(
       carries: 23,
       rushing_yards: 97,
       rushing_tds: 0,
+      ...NO_RECEIVING,
     },
     games_without_stat_lines: 0,
   },

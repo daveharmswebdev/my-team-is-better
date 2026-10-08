@@ -2,6 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter } from 'react-router-dom'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import {
+  LEADERS_BY_RECEIVING_TDS,
+  LEADERS_BY_RECEIVING_YARDS,
+  LEADERS_BY_RECEPTIONS_TAIL,
   LEADERS_BY_RUSHING_TDS,
   LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
@@ -79,4 +82,40 @@ export const ByRushingYards: Story = {
 /** Two quarterbacks tied at rank 3 on the rushing board, each with a position. */
 export const ByRushingTds: Story = {
   args: { leaders: LEADERS_BY_RUSHING_TDS },
+}
+
+/**
+ * The receiving board (issue #314): receptions, receiving yards and TDs, all
+ * sortable, with no starter record, no passing or rushing stats, and no
+ * targets (#345).
+ */
+export const ByReceivingYards: Story = {
+  args: { leaders: LEADERS_BY_RECEIVING_YARDS },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'Receiving yards' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(
+      canvas.queryByRole('columnheader', { name: 'Starter record' }),
+    ).toBeNull()
+    await expect(
+      canvas.queryByRole('columnheader', { name: 'Carries' }),
+    ).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: 'Receptions' }))
+    await expect(args.onSort).toHaveBeenCalledWith('receptions')
+  },
+}
+
+/** A three-way tie at rank 1 by receiving TDs, as the API sends it. */
+export const ByReceivingTds: Story = {
+  args: { leaders: LEADERS_BY_RECEIVING_TDS },
+}
+
+/**
+ * The bottom of the receptions board: a quarterback and a tight end who each
+ * drew a target and caught nothing share rank 885, their 0s shown as 0.
+ */
+export const ReceptionsTail: Story = {
+  args: { leaders: LEADERS_BY_RECEPTIONS_TAIL },
 }

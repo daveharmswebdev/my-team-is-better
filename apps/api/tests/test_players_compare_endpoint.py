@@ -58,10 +58,19 @@ GAME_KEYS = {
 
 
 # One side of each measured game: (team, points, stats). Named, not
-# positional: `PlayerStats` is append-only (34 fields since #313) and these
-# are quarterback starts, so every stat not named here -- receiving, kicking,
-# punting -- is None rather than a zero. `sack_yards_lost` is positive since
+# positional: `PlayerStats` is append-only (34 fields since #313). These are
+# quarterback starts, and nflverse records a quarterback's receiving line as
+# zeros (#314), so the receiving stats are 0 here, not None -- measured, not
+# assumed. Every stat not named is None. `sack_yards_lost` is positive since
 # #298; it was negative in these same four games before.
+_NO_RECEIVING: dict[str, int] = {
+    "receptions": 0,
+    "targets": 0,
+    "receiving_yards": 0,
+    "receiving_tds": 0,
+    "receiving_first_downs": 0,
+    "receiving_fumbles_lost": 0,
+}
 _WARNER_REGULAR = (
     "St. Louis Rams",
     21,
@@ -76,6 +85,7 @@ _WARNER_REGULAR = (
         carries=2,
         rushing_yards=22,
         rushing_tds=0,
+        **_NO_RECEIVING,
     ),
 )
 _MCNAIR_REGULAR = (
@@ -92,6 +102,7 @@ _MCNAIR_REGULAR = (
         carries=12,
         rushing_yards=36,
         rushing_tds=1,
+        **_NO_RECEIVING,
     ),
 )
 _WARNER_POSTSEASON = (
@@ -108,6 +119,7 @@ _WARNER_POSTSEASON = (
         carries=1,
         rushing_yards=1,
         rushing_tds=0,
+        **_NO_RECEIVING,
     ),
 )
 _MCNAIR_POSTSEASON = (
@@ -124,6 +136,7 @@ _MCNAIR_POSTSEASON = (
         carries=8,
         rushing_yards=64,
         rushing_tds=0,
+        **_NO_RECEIVING,
     ),
 )
 

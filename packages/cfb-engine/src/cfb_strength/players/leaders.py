@@ -1,4 +1,4 @@
-"""Career leaderboards (#296, #312): a stat column sorted descending, no rating math."""
+"""Career leaderboards (#296, #312, #314): a stat column sorted descending, no rating math."""
 
 from __future__ import annotations
 
@@ -27,6 +27,9 @@ _SORT_COLUMN: dict[PlayerLeaderSort, str] = {
     "rushing_yards": "q.rushing_yards",
     "rushing_tds": "q.rushing_tds",
     "carries": "q.carries",
+    "receiving_yards": "q.receiving_yards",
+    "receiving_tds": "q.receiving_tds",
+    "receptions": "q.receptions",
 }
 
 
@@ -86,7 +89,10 @@ def get_player_leaders(
 
     Qualifies, per season type with no minimum and whatever the position:
     passing, a season row with a pass attempt or a QB start; rushing, a season
-    row with a carry. `sort=None` is the category's first sort in
+    row with a carry; receiving, a season row with a target or a reception --
+    so a player who was thrown to and caught nothing is on the board with 0
+    receptions, and so are the 2003-2008 seasons nflverse publishes with no
+    targets at all (`_sql.QUALIFYING`). `sort=None` is the category's first sort in
     PLAYER_LEADER_SORTS_BY_CATEGORY, and the response echoes the resolved one.
     `rank` is competition ranking over the whole qualifying population; a None
     sort value is unranked and sorts last. Raises ValueError unless

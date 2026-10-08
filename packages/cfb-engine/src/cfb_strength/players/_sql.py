@@ -30,6 +30,27 @@ QUALIFYING: Mapping[PlayerLeaderCategory, str] = MappingProxyType(
         "passing": "attempts > 0 OR start_rows > 0",
         # A carry, whatever the position (#312).
         "rushing": "carries > 0",
+        # A target or a catch, whatever the position (#314). `targets` is
+        # the rule: a player thrown to who caught nothing belongs on the
+        # board with 0 receptions rather than missing from it.
+        #
+        # The OR is there for one upstream gap, tracked as #345. nflverse
+        # publishes `targets` as a literal 0 for 2003-2008 -- 3,528 to 3,647
+        # players a year caught a pass with targets 0 -- and there is no
+        # blank cell anywhere in 1999-2025 to tell "not tracked" from "never
+        # thrown to", so the NULL-not-zero rule cannot save it.
+        #
+        # Outside those six seasons the two halves are all but the same
+        # test: over the full raw cache, 1999-2001 and 2009-2025 have no
+        # season with a reception and no target, and 2002 has exactly one.
+        # So this is not a looser rule; it is the same rule written so six
+        # seasons of missing targets cannot erase 303 careers holding 5,426
+        # receptions and 54,503 yards (Shaun McDonald, Reggie Williams,
+        # Ronald Curry and Matt Jones among them).
+        #
+        # A NULL in both columns still never qualifies: NULL OR NULL is
+        # NULL, not true.
+        "receiving": "targets > 0 OR receptions > 0",
     }
 )
 

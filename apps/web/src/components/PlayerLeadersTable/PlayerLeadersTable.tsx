@@ -89,7 +89,8 @@ function statCellClass(value: number | null): string | undefined {
  *
  * Which columns those are is the API's `category` (issue #312), not this
  * component's guesswork: the passing board carries the starter record and
- * the passing stats, the rushing board the three rushing ones. Both come
+ * the passing stats, the rushing board the three rushing ones and the
+ * receiving board (#314) receptions, receiving yards and TDs. All come
  * from `LEADER_BOARD_COLUMNS`, and a column is sortable exactly when the
  * category sorts on it (`sortForStat`), so the headers can't offer a sort
  * the API would refuse.

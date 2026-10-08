@@ -4,6 +4,8 @@ import { expect, userEvent, within } from 'storybook/test'
 import type { PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
+  LEADERS_BY_RECEIVING_TDS,
+  LEADERS_BY_RECEIVING_YARDS,
   LEADERS_BY_RUSHING_TDS,
   LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
@@ -63,6 +65,13 @@ function answeringByCategory(url: URL) {
       url.searchParams.get('sort') === 'rushing_tds'
         ? LEADERS_BY_RUSHING_TDS
         : LEADERS_BY_RUSHING_YARDS
+    return answering(board)(url)
+  }
+  if (url.searchParams.get('category') === 'receiving') {
+    const board =
+      url.searchParams.get('sort') === 'receiving_tds'
+        ? LEADERS_BY_RECEIVING_TDS
+        : LEADERS_BY_RECEIVING_YARDS
     return answering(board)(url)
   }
   return answering(LEADERS_BY_YARDS)(url)
@@ -175,6 +184,61 @@ export const Rushing: Story = {
     await expect(
       canvas.queryByRole('columnheader', { name: 'Passing yards' }),
     ).toBeNull()
+  },
+}
+
+/** The receiving board, reached by its own URL (issue #314). */
+export const Receiving: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute(
+      '?category=receiving&season_type=regular&sort=receiving_yards&offset=0',
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Tyreek Hill' })
+    await expect(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+    ).toHaveValue('receiving')
+    await expect(
+      canvas.getByRole('columnheader', { name: 'Receiving yards' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(
+      canvas.queryByRole('columnheader', { name: 'Rushing yards' }),
+    ).toBeNull()
+  },
+}
+
+/** Picking Receiving, then sorting by Receiving TDs: the three-way tie at 1. */
+export const ReceivingSwitch: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute(),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
+    await userEvent.selectOptions(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+      'receiving',
+    )
+    await canvas.findByRole('table', {
+      name: 'NFL career leaders: regular season, by receiving yards',
+    })
+    await userEvent.click(
+      await canvas.findByRole('button', { name: 'Receiving TDs' }),
+    )
+    await canvas.findByRole('table', {
+      name: 'NFL career leaders: regular season, by receiving TDs',
+    })
+    await canvas.findByRole('link', { name: 'Cris Carter' })
   },
 }
 

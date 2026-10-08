@@ -85,6 +85,9 @@ describe('labels', () => {
       rushing_yards: 'rushing yards',
       rushing_tds: 'rushing TDs',
       carries: 'carries',
+      receiving_yards: 'receiving yards',
+      receiving_tds: 'receiving TDs',
+      receptions: 'receptions',
     })
   })
 
@@ -92,8 +95,12 @@ describe('labels', () => {
     expect(PLAYER_STATS_SOURCE_ID).toBe('nflverse_player_stats')
   })
 
-  it('names both categories for the dropdown', () => {
-    expect(CATEGORY_LABEL).toEqual({ passing: 'Passing', rushing: 'Rushing' })
+  it('names every category for the dropdown', () => {
+    expect(CATEGORY_LABEL).toEqual({
+      passing: 'Passing',
+      rushing: 'Rushing',
+      receiving: 'Receiving',
+    })
   })
 })
 
@@ -141,6 +148,60 @@ describe('sortForStat', () => {
   it('makes every column of the rushing board sortable', () => {
     for (const column of LEADER_BOARD_COLUMNS.rushing.stats) {
       expect(sortForStat('rushing', column.key)).toBe(column.key)
+    }
+  })
+})
+
+/**
+ * Issue #314: the receiving board. Its columns are its own list, not a
+ * filter of `STAT_COLUMNS`: the career and compare tables read
+ * `STAT_COLUMNS`, and non-QB career pages are out of epic #311's scope, so
+ * those tables must not gain a receiving column. `targets`, first downs and
+ * fumbles lost are mirrored in the type but shown nowhere (#345).
+ */
+describe('the receiving board (issue #314)', () => {
+  it('gives the receiving board its three columns and no record', () => {
+    expect(LEADER_BOARD_COLUMNS.receiving.showsRecord).toBe(false)
+    expect(LEADER_BOARD_COLUMNS.receiving.stats).toEqual([
+      { key: 'receptions', label: 'Receptions' },
+      { key: 'receiving_yards', label: 'Receiving yards' },
+      { key: 'receiving_tds', label: 'Receiving TDs' },
+    ])
+  })
+
+  it('makes every column of the receiving board sort by its own sort', () => {
+    expect(sortForStat('receiving', 'receptions')).toBe('receptions')
+    expect(sortForStat('receiving', 'receiving_yards')).toBe('receiving_yards')
+    expect(sortForStat('receiving', 'receiving_tds')).toBe('receiving_tds')
+    for (const column of LEADER_BOARD_COLUMNS.receiving.stats) {
+      expect(sortForStat('receiving', column.key)).toBe(column.key)
+    }
+  })
+
+  it('never sorts the receiving board by another category, nor by targets', () => {
+    expect(sortForStat('receiving', 'targets')).toBeUndefined()
+    expect(sortForStat('receiving', 'rushing_yards')).toBeUndefined()
+    expect(sortForStat('receiving', 'carries')).toBeUndefined()
+    expect(sortForStat('receiving', 'passing_yards')).toBeUndefined()
+    expect(sortForStat('rushing', 'receiving_yards')).toBeUndefined()
+    expect(sortForStat('passing', 'receptions')).toBeUndefined()
+  })
+
+  it('adds no receiving stat to the career and compare columns', () => {
+    for (const column of STAT_COLUMNS) {
+      expect(column.key).not.toMatch(/recei|target/)
+    }
+  })
+
+  it('shows targets, first downs and fumbles lost on no board', () => {
+    for (const board of Object.values(LEADER_BOARD_COLUMNS)) {
+      for (const column of board.stats) {
+        expect([
+          'targets',
+          'receiving_first_downs',
+          'receiving_fumbles_lost',
+        ]).not.toContain(column.key)
+      }
     }
   })
 })
