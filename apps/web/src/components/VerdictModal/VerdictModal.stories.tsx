@@ -38,6 +38,15 @@ function game(index: number, opponent: string): OpponentResultOut {
     opponent_score: 14 + (index % 5),
     week: index + 1,
     season_type: index === OPPONENTS.length - 1 ? 'postseason' : 'regular',
+    // Venue and `neutral_site` come off the same expression: the API cannot
+    // send a row where they disagree (issue #294). The rest alternate, so a
+    // side-swap could not hide behind a uniformly home schedule.
+    venue:
+      index === OPPONENTS.length - 1
+        ? 'neutral'
+        : index % 2 === 0
+          ? 'home'
+          : 'away',
     neutral_site: index === OPPONENTS.length - 1,
   }
 }

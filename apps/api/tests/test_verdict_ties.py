@@ -126,6 +126,8 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
     assert len(common["team_a_meetings"]) == 2
     tie, rematch = common["team_a_meetings"]
     # `game_id` is the fixture's `games.id` for each meeting (#218).
+    # `venue` is this side's own, team-relative like the score pair (#294);
+    # there is deliberately no `neutral_site` companion on this shape.
     assert tie == {
         "game_id": 105,
         "result": "T",
@@ -133,6 +135,7 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
         "opponent_score": 17,
         "week": 2,
         "season_type": "regular",
+        "venue": "home",
     }
     assert rematch == {
         "game_id": 108,
@@ -141,6 +144,7 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
         "opponent_score": 14,
         "week": 4,
         "season_type": "regular",
+        "venue": "home",
     }
 
     assert len(common["team_b_meetings"]) == 1
@@ -156,6 +160,14 @@ def test_openapi_schema_carries_ties_and_the_t_result() -> None:
     assert "ties" in schemas["ComparisonTeamSummaryOut"]["required"]
     assert schemas["OpponentResultOut"]["properties"]["result"]["enum"] == ["W", "L", "T"]
     assert schemas["CommonOpponentMeetingOut"]["properties"]["result"]["enum"] == ["W", "L", "T"]
+    # `venue` (#294) is published as the same closed vocabulary on both
+    # per-game shapes, so `apps/web` can type it as a union.
+    for model in ("OpponentResultOut", "CommonOpponentMeetingOut"):
+        assert schemas[model]["properties"]["venue"]["enum"] == ["home", "away", "neutral"]
+        assert "venue" in schemas[model]["required"]
+    # and only `OpponentResultOut` keeps a `neutral_site` beside it
+    assert "neutral_site" in schemas["OpponentResultOut"]["properties"]
+    assert "neutral_site" not in schemas["CommonOpponentMeetingOut"]["properties"]
     for field in ("team_a_meetings", "team_b_meetings"):
         assert field in schemas["CommonOpponentOut"]["required"]
     published = schemas["CommonOpponentOut"]["properties"]

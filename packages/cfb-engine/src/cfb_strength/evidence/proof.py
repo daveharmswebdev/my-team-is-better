@@ -508,6 +508,18 @@ def _opponent_result(
     )
     opp_rating_row = ratings.get(int(opponent_id))
 
+    # Issue #294: where THIS TEAM played, the same vocabulary as
+    # `EloGameStep.venue` -- not `games.venue`, which is the stadium name.
+    # Neutral wins over home/away: a neutral-site game is "neutral" for both
+    # sides, which is also what keeps `OpponentResult`'s venue/neutral_site
+    # invariant true from either perspective. The derivation is total --
+    # `games.neutral_site` is NOT NULL DEFAULT 0 and both team id columns are
+    # NOT NULL (db/schema.sql) -- so there is no unknown case.
+    neutral_site = bool(game["neutral_site"])
+    venue: Literal["home", "away", "neutral"] = (
+        "neutral" if neutral_site else "home" if is_home else "away"
+    )
+
     return OpponentResult(
         game_id=int(game["id"]),
         opponent_team_id=int(opponent_id),
@@ -519,7 +531,8 @@ def _opponent_result(
         opponent_score=int(opp_score),
         week=int(game["week"]) if game["week"] is not None else None,
         season_type=game["season_type"],
-        neutral_site=bool(game["neutral_site"]),
+        venue=venue,
+        neutral_site=neutral_site,
     )
 
 
@@ -733,6 +746,7 @@ def _meetings_by_opponent(
                 opponent_score=g.opponent_score,
                 week=g.week,
                 season_type=g.season_type,
+                venue=g.venue,
             )
         )
     return by_opp

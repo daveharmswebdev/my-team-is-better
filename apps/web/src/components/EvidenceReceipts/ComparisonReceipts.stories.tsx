@@ -91,6 +91,7 @@ const evidence: ComparisonResultOut = {
           opponent_score: 35,
           week: 12,
           season_type: 'regular',
+          venue: 'home',
         },
       ],
       team_b_meetings: [
@@ -101,6 +102,7 @@ const evidence: ComparisonResultOut = {
           opponent_score: 38,
           week: 10,
           season_type: 'regular',
+          venue: 'away',
         },
       ],
     },
@@ -116,6 +118,7 @@ const evidence: ComparisonResultOut = {
           opponent_score: 12,
           week: 15,
           season_type: 'regular',
+          venue: 'away',
         },
       ],
       team_b_meetings: [
@@ -126,6 +129,7 @@ const evidence: ComparisonResultOut = {
           opponent_score: 27,
           week: 9,
           season_type: 'regular',
+          venue: 'home',
         },
       ],
     },
@@ -209,6 +213,7 @@ export const CommonOpponentTie: Story = {
               opponent_score: 26,
               week: 12,
               season_type: 'regular',
+              venue: 'home',
             },
           ],
           team_b_meetings: [
@@ -219,6 +224,7 @@ export const CommonOpponentTie: Story = {
               opponent_score: 38,
               week: 10,
               season_type: 'regular',
+              venue: 'away',
             },
           ],
         },
@@ -302,6 +308,7 @@ export const TwoMeetingsPerSide: Story = {
               opponent_score: 44,
               week: 8,
               season_type: 'regular',
+              venue: 'away',
             },
             {
               game_id: 331124009,
@@ -310,6 +317,7 @@ export const TwoMeetingsPerSide: Story = {
               opponent_score: 26,
               week: 12,
               season_type: 'regular',
+              venue: 'home',
             },
           ],
           team_b_meetings: [
@@ -320,6 +328,7 @@ export const TwoMeetingsPerSide: Story = {
               opponent_score: 20,
               week: 9,
               season_type: 'regular',
+              venue: 'away',
             },
             {
               game_id: 331229009,
@@ -328,6 +337,7 @@ export const TwoMeetingsPerSide: Story = {
               opponent_score: 33,
               week: 17,
               season_type: 'regular',
+              venue: 'home',
             },
           ],
         },

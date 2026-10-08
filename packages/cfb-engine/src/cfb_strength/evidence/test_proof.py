@@ -27,6 +27,7 @@ from cfb_strength.contracts import (
     Method,
     SameTeamComparisonError,
     Sport,
+    TeamCase,
     UnknownTeamError,
     UnknownYearError,
 )
@@ -1572,3 +1573,150 @@ def test_stale_db_error_propagates_through_build_comparison(tmp_path: Path) -> N
 
     with pytest.raises(proof.StaleDatabaseError):
         build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener", sport="cfb")
+
+
+# ---------------------------------------------------------------------------
+# (i) issue #294 -- every listed game says where THIS TEAM played it, so a
+# narrator's "at Auburn" is checkable. `venue` is this team's side, not the
+# stadium name (`GameRow.venue`), and a neutral site is "neutral" for BOTH
+# sides -- neutral takes precedence over which row column held the team.
+# ---------------------------------------------------------------------------
+
+
+def _venue_by_game_id(case: TeamCase) -> dict[int, str]:
+    return {g.game_id: g.venue for g in case.games}
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_listed_game_venue_is_home_when_the_team_is_the_home_side(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    """The base fixture's cycle gives one team both perspectives: team 1/101
+    hosts game 1/101 and visits game 3/103."""
+    name, home_game = ("Alpha State", 1) if sport == "cfb" else ("Delta Squad", 101)
+
+    case = build_team_case(conn, YEAR, name, method=METHOD, sport=sport)
+
+    assert _venue_by_game_id(case)[home_game] == "home"
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_listed_game_venue_is_away_when_the_team_is_the_away_side(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    name, away_game = ("Alpha State", 3) if sport == "cfb" else ("Delta Squad", 103)
+
+    case = build_team_case(conn, YEAR, name, method=METHOD, sport=sport)
+
+    assert _venue_by_game_id(case)[away_game] == "away"
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_neutral_site_game_is_neutral_for_both_sides(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    """The whole content of the rule: neutral beats home/away. The nominal
+    host must not read "home", and the nominal visitor must not read "away"
+    -- assert it from each side's own case, not just one."""
+    if sport == "cfb":
+        host_id, host, visitor_id, visitor, game_id = 1, "Alpha State", 2, "Bravo Tech", 9
+    else:
+        host_id, host, visitor_id, visitor, game_id = (
+            101,
+            "Delta Squad",
+            102,
+            "Echo Corp",
+            109,
+        )
+    _insert_game(
+        conn,
+        game_id,
+        YEAR,
+        host_id,
+        visitor_id,
+        host,
+        visitor,
+        21,
+        14,
+        week=12,
+        sport=sport,
+        neutral_site=True,
+    )
+    conn.commit()
+
+    host_case = build_team_case(conn, YEAR, host, method=METHOD, sport=sport)
+    visitor_case = build_team_case(conn, YEAR, visitor, method=METHOD, sport=sport)
+
+    assert _venue_by_game_id(host_case)[game_id] == "neutral"
+    assert _venue_by_game_id(visitor_case)[game_id] == "neutral"
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_every_listed_game_keeps_the_venue_neutral_site_invariant(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    """`OpponentResult.__post_init__` only fires on construction, so this
+    pins the pair the builder actually emits: a neutral row reports both,
+    and a home/away row reports neither."""
+    if sport == "cfb":
+        names, host_id, visitor_id, game_id = ("Alpha State", "Bravo Tech"), 1, 2, 9
+    else:
+        names, host_id, visitor_id, game_id = ("Delta Squad", "Echo Corp"), 101, 102, 109
+    _insert_game(
+        conn,
+        game_id,
+        YEAR,
+        host_id,
+        visitor_id,
+        names[0],
+        names[1],
+        21,
+        14,
+        week=12,
+        sport=sport,
+        neutral_site=True,
+    )
+    conn.commit()
+
+    for name in names:
+        case = build_team_case(conn, YEAR, name, method=METHOD, sport=sport)
+        assert len(case.games) == 3
+        for game in case.games:
+            assert game.neutral_site == (game.venue == "neutral"), game
+        assert {g.venue for g in case.games} == {"home", "away", "neutral"}
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_common_opponent_meeting_venue_projects_each_sides_own_result(
+    conn: sqlite3.Connection, sport: Sport
+) -> None:
+    """A meeting is a projection of that side's own `OpponentResult`, so the
+    two compared sides must report their own venues against the shared
+    opponent, not a single re-derived one. The rematch fixture gives exactly
+    that contrast: Oscar hosts Papa in week 9 and visits in weeks 2 and the
+    postseason, while Quebec visits Papa."""
+    _build_rematch_fixture(conn, sport)
+    base = 30 if sport == "cfb" else 130
+
+    comparison = build_comparison(
+        conn, REMATCH_YEAR, "Oscar Twice", "Quebec Once", method=METHOD, sport=sport
+    )
+    papa = comparison.common_opponents[0]
+
+    # Chronological: week 2 away, week 9 home, postseason away.
+    assert [(m.game_id, m.venue) for m in papa.team_a_meetings] == [
+        (base + 3, "away"),
+        (base + 1, "home"),
+        (base + 4, "away"),
+    ]
+    assert [(m.game_id, m.venue) for m in papa.team_b_meetings] == [(base + 2, "away")]
+
+    # Each meeting matches that side's OWN case, game id for game id.
+    for side, meetings in (
+        ("Oscar Twice", papa.team_a_meetings),
+        ("Quebec Once", papa.team_b_meetings),
+    ):
+        venues = _venue_by_game_id(
+            build_team_case(conn, REMATCH_YEAR, side, method=METHOD, sport=sport)
+        )
+        assert [venues[m.game_id] for m in meetings] == [m.venue for m in meetings]

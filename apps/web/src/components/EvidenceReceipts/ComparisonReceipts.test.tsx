@@ -7,6 +7,7 @@ import {
   type ComparisonResultOut,
 } from '../../lib/api/types'
 import { formatRating } from '../../lib/formatRating'
+import { collectGameRows, venueProblems } from '../../test/gameRowVenue'
 import { ComparisonReceipts } from './ComparisonReceipts'
 import { TEXAS_ELO, USC_ELO } from './eloLedgerFixture'
 
@@ -82,6 +83,7 @@ const evidence: ComparisonResultOut = {
         opponent_score: 21,
         week: 6,
         season_type: 'regular',
+        venue: 'home',
         neutral_site: false,
       },
     ],
@@ -146,6 +148,7 @@ const evidence: ComparisonResultOut = {
           opponent_score: 35,
           week: 12,
           season_type: 'regular',
+          venue: 'home',
         },
       ],
       team_b_meetings: [
@@ -156,6 +159,7 @@ const evidence: ComparisonResultOut = {
           opponent_score: 38,
           week: 10,
           season_type: 'regular',
+          venue: 'away',
         },
       ],
     },
@@ -181,6 +185,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       opponent_score: 44,
       week: 8,
       season_type: 'regular',
+      venue: 'away',
     },
     {
       game_id: 331124009,
@@ -189,6 +194,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       opponent_score: 26,
       week: 12,
       season_type: 'regular',
+      venue: 'home',
     },
   ],
   team_b_meetings: [
@@ -199,6 +205,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       opponent_score: 20,
       week: 9,
       season_type: 'regular',
+      venue: 'away',
     },
     {
       game_id: 331229009,
@@ -207,6 +214,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       opponent_score: 33,
       week: 17,
       season_type: 'regular',
+      venue: 'home',
     },
   ],
 }
@@ -237,6 +245,27 @@ function withRatings(
 }
 
 describe('ComparisonReceipts', () => {
+  /**
+   * Issue #294: `venue` is that side's own, and where a row also carries
+   * `neutral_site` the two always agree -- the engine will not build a pair
+   * that disagrees, so the API cannot send one. A head-to-head meeting names
+   * `home_team`/`away_team` instead and carries no `venue` at all.
+   * TypeScript requires the field but cannot see a fixture that lies about
+   * it, so the fixtures in this file are checked here beside them. Story
+   * fixtures are covered by `fixtureGameRows.test.ts`.
+   */
+  it('builds only game rows the API could send', () => {
+    const rows = collectGameRows(
+      { evidence, GREEN_BAY_TWICE, vikingsVsBears },
+      'ComparisonReceipts.test.tsx',
+    )
+    // `venueProblems([])` is `[]`, so without this the check passes while
+    // inspecting nothing if a fixture is renamed or restructured.
+    expect(rows.length).toBeGreaterThan(0)
+    const problems = venueProblems(rows)
+    expect(problems, problems.join('\n')).toEqual([])
+  })
+
   it('renders team_a and team_b names and formatted ratings', () => {
     render(<ComparisonReceipts evidence={evidence} />)
 
@@ -659,6 +688,7 @@ describe('ComparisonReceipts', () => {
                   opponent_score: 26,
                   week: 12,
                   season_type: 'regular',
+                  venue: 'home',
                 },
               ],
               team_b_meetings: [
@@ -669,6 +699,7 @@ describe('ComparisonReceipts', () => {
                   opponent_score: 38,
                   week: 10,
                   season_type: 'regular',
+                  venue: 'away',
                 },
               ],
             },
@@ -1054,6 +1085,13 @@ describe('ComparisonReceipts', () => {
 
     afterEach(() => {
       vi.restoreAllMocks()
+    })
+
+    it('builds only game rows the API could send (issue #294)', () => {
+      const rows = collectGameRows({ vikingsVsBearsTwice }, 'rematch fixtures')
+      expect(rows.length).toBeGreaterThan(0)
+      const problems = venueProblems(rows)
+      expect(problems, problems.join('\n')).toEqual([])
     })
 
     it('renders both head-to-head meetings and both meetings per side with a common opponent, with no duplicate-key warning', () => {

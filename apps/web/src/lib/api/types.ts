@@ -12,6 +12,15 @@
  */
 export type GameResult = 'W' | 'L' | 'T'
 
+/**
+ * Which side of a game this team played (issue #294): team-relative like
+ * `GameResult`, never a stadium name. `'neutral'` takes precedence over
+ * home/away, so wherever a row also carries `neutral_site`, that flag always
+ * equals `venue === 'neutral'` -- the engine refuses to build a pair that
+ * disagrees, so the API cannot send one.
+ */
+export type GameVenue = 'home' | 'away' | 'neutral'
+
 export interface OpponentResultOut {
   /** `games.id` (issue #218): the one per-game identity; key lists of games on it. */
   game_id: number
@@ -24,6 +33,9 @@ export interface OpponentResultOut {
   opponent_score: number
   week: number | null
   season_type: string
+  /** This team's own side; `neutral_site` below always agrees with it. */
+  venue: GameVenue
+  /** Kept because the API still publishes it; no component reads it today. */
   neutral_site: boolean
 }
 
@@ -56,7 +68,7 @@ export interface EloGameStepOut {
   start_date: string | null
   opponent_team_id: number
   opponent_name: string
-  venue: 'home' | 'away' | 'neutral'
+  venue: GameVenue
   team_points: number
   opponent_points: number
   result: GameResult
@@ -166,6 +178,11 @@ export interface CommonOpponentMeetingOut {
   opponent_score: number
   week: number | null
   season_type: string
+  /**
+   * That side's own venue. Deliberately no `neutral_site` companion, here or
+   * in the engine contract: `'neutral'` already says it, for both teams.
+   */
+  venue: GameVenue
 }
 
 /**
