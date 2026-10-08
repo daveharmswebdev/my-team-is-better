@@ -12,6 +12,10 @@ with the engine's full-build checks (4044 yds, 38 TD, 13-3-0).
 Marvin Harrison's 1999 is the receiving anchor (#314): 193 targets, 115
 catches, 1663 yards, 12 TD, his real line, published on the season line.
 
+Brandon Aubrey's and Thomas Morstead's 2023 are the kicking and punting
+anchors (#315). A specialist's line carries the other specialty's counts as
+recorded zeros and its maximum (`fg_long` / `pt_long`) as null, never 0.
+
 An unknown id is the typed `unknown_player` 404, echoing what was asked,
 including an id no SQLite INTEGER can hold (the same "echo what was sent,
 don't 500" rule #189 set for years). `sport=cfb` is a 422, not a 404: the
@@ -31,6 +35,8 @@ KURT_WARNER = 2044124519
 PATRICK_MAHOMES = 2319407936
 BROCK_PURDY = 2134524419
 MARVIN_HARRISON = 2009851825
+BRANDON_AUBREY = 2050278267
+THOMAS_MORSTEAD = 2219362247
 
 NO_RECEIVING = {
     "receptions": 0,
@@ -39,6 +45,24 @@ NO_RECEIVING = {
     "receiving_tds": 0,
     "receiving_first_downs": 0,
     "receiving_fumbles_lost": 0,
+}
+
+# A non-kicker's kicking and punting line (#315): the counts are the source's
+# recorded zeros, and the two career maxima are null -- he has no longest
+# field goal or punt, and 0 would read as a zero-yard one.
+NO_KICKING_OR_PUNTING = {
+    "fg_made": 0,
+    "fg_att": 0,
+    "fg_long": None,
+    "fg_made_50_59": 0,
+    "fg_made_60_": 0,
+    "pat_made": 0,
+    "pat_att": 0,
+    "pt_att": 0,
+    "pt_yards": 0,
+    "pt_net_yards": 0,
+    "pt_long": None,
+    "pt_inside_20": 0,
 }
 
 WARNER_1999_REGULAR_STATS = {
@@ -55,6 +79,7 @@ WARNER_1999_REGULAR_STATS = {
     # A quarterback's receiving line is the source's recorded zeros (#314),
     # not null: nflverse records 0, and the API publishes what it records.
     **NO_RECEIVING,
+    **NO_KICKING_OR_PUNTING,
 }
 WARNER_1999_POSTSEASON_STATS = {
     "completions": 77,
@@ -68,6 +93,7 @@ WARNER_1999_POSTSEASON_STATS = {
     "rushing_yards": 3,
     "rushing_tds": 0,
     **NO_RECEIVING,
+    **NO_KICKING_OR_PUNTING,
 }
 
 
@@ -191,7 +217,74 @@ def test_teams_and_postseason_starts(
     assert body["postseason"]["record"]["starts"] == postseason_starts
 
 
-@pytest.mark.parametrize("player_id", [KURT_WARNER, PATRICK_MAHOMES, BROCK_PURDY, MARVIN_HARRISON])
+def _regular_line(body: Any, season: int) -> Any:
+    lines = [
+        line
+        for line in body["seasons"]
+        if (line["season"], line["season_type"]) == (season, "regular")
+    ]
+    assert len(lines) == 1, lines
+    return lines[0]["stats"]
+
+
+def test_aubrey_2023_publishes_his_kicking_line(client: TestClient) -> None:
+    """Brandon Aubrey's real 2023 (#315): 36 of 38, long 60, nine from 50-59
+    and one from 60+, 49 of 52 PATs. He never punted: punting counts 0,
+    `pt_long` null."""
+    body = _career(client, BRANDON_AUBREY)
+
+    assert (body["display_name"], body["position"]) == ("Brandon Aubrey", "K")
+    stats = _regular_line(body, 2023)
+    assert {name: stats[name] for name in NO_KICKING_OR_PUNTING} == {
+        "fg_made": 36,
+        "fg_att": 38,
+        "fg_long": 60,
+        "fg_made_50_59": 9,
+        "fg_made_60_": 1,
+        "pat_made": 49,
+        "pat_att": 52,
+        "pt_att": 0,
+        "pt_yards": 0,
+        "pt_net_yards": 0,
+        "pt_long": None,
+        "pt_inside_20": 0,
+    }
+    totals = body["regular_season"]["stats"]
+    assert (totals["fg_made"], totals["fg_att"], totals["fg_long"], totals["pt_long"]) == (
+        36,
+        38,
+        60,
+        None,
+    )
+
+
+def test_morstead_2023_publishes_his_punting_line(client: TestClient) -> None:
+    """Thomas Morstead's real 2023 (#315): 99 punts, 4,831 yards, 4,136 net,
+    long 62, 36 inside the 20. No field goal: `fg_long` null."""
+    body = _career(client, THOMAS_MORSTEAD)
+
+    assert (body["display_name"], body["position"]) == ("Thomas Morstead", "P")
+    stats = _regular_line(body, 2023)
+    assert {name: stats[name] for name in NO_KICKING_OR_PUNTING} == {
+        "fg_made": 0,
+        "fg_att": 0,
+        "fg_long": None,
+        "fg_made_50_59": 0,
+        "fg_made_60_": 0,
+        "pat_made": 0,
+        "pat_att": 0,
+        "pt_att": 99,
+        "pt_yards": 4831,
+        "pt_net_yards": 4136,
+        "pt_long": 62,
+        "pt_inside_20": 36,
+    }
+
+
+@pytest.mark.parametrize(
+    "player_id",
+    [KURT_WARNER, PATRICK_MAHOMES, BROCK_PURDY, MARVIN_HARRISON, BRANDON_AUBREY, THOMAS_MORSTEAD],
+)
 def test_career_is_the_engines_career_field_for_field(client: TestClient, player_id: int) -> None:
     body = _career(client, player_id)
 

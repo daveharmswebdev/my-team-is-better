@@ -3,9 +3,8 @@
 `contracts.PlayerStats` went from 10 stat columns to 34, and the committed
 fixture was rebuilt through the widened nflverse ingest. This module pins the
 two behavioural changes that came with the widening, so that neither can
-regress silently while the API publishes only part of the contract
-(`PlayerStatsOut`: the original ten fields plus #314's six receiving stats;
-kicking and punting are #315).
+regress silently. Since #315 the API (`PlayerStatsOut`) publishes 28 of the
+contract's 34 stats; the six it leaves out are pinned below.
 
 1. Sign convention (#298). `sack_yards_lost` is stored and published
    POSITIVE. It used to be negative, and every consumer -- the career page,
@@ -17,9 +16,8 @@ kicking and punting are #315).
    (`contracts.PLAYER_STAT_MAX_FIELDS`) and are NULL for anyone who never
    kicked or punted -- never 0. A quarterback's row is the check: 0 would
    read as "his longest field goal was zero yards", and any renderer that
-   coerces NULL to 0 would publish that. The API does not expose these yet,
-   so they are asserted against the fixture db directly; #315 inherits a
-   checked expectation rather than discovering it.
+   coerces NULL to 0 would publish that. They are asserted against the
+   fixture db directly and, since #315 publishes them, through HTTP too.
 """
 
 from __future__ import annotations
@@ -158,11 +156,51 @@ def test_stats_body_rejects_a_name_that_is_not_a_stat() -> None:
         stats_body(passing_yardz=328)
 
 
-def test_stats_body_rejects_a_stat_the_api_does_not_publish_yet() -> None:
-    # Kicking is #315; receiving became publishable in #314.
-    assert "fg_made" in STAT_NAMES and "fg_made" not in PUBLISHED_STAT_NAMES
-    with pytest.raises(ValueError, match="does not publish yet"):
-        stats_body(fg_made=4)
+UNPUBLISHED_BUCKETS = ("fg_made_0_19", "fg_made_20_29", "fg_made_30_39", "fg_made_40_49")
+
+
+def test_the_contract_stats_the_api_leaves_out() -> None:
+    """Since #315 the API publishes every contract stat but six: the two
+    rushing columns #313 added and nothing has published yet, and the 0-49
+    yard field-goal buckets, which #315 leaves out deliberately."""
+    assert [name for name in STAT_NAMES if name not in PUBLISHED_STAT_NAMES] == [
+        "rushing_first_downs",
+        "rushing_fumbles_lost",
+        *UNPUBLISHED_BUCKETS,
+    ]
+
+
+@pytest.mark.parametrize("name", UNPUBLISHED_BUCKETS)
+def test_stats_body_rejects_a_stat_the_api_does_not_publish(name: str) -> None:
+    assert name in STAT_NAMES and name not in PUBLISHED_STAT_NAMES
+    with pytest.raises(ValueError, match="does not publish"):
+        stats_body(**{name: 4})
+
+
+def test_stats_body_accepts_the_kicking_and_punting_stats() -> None:
+    body = stats_body(fg_made=36, fg_made_60_=1, pt_att=99)
+
+    assert (body["fg_made"], body["fg_made_60_"], body["pt_att"], body["fg_long"]) == (
+        36,
+        1,
+        99,
+        None,
+    )
+
+
+@pytest.mark.parametrize("field", MAX_FIELDS)
+def test_a_quarterbacks_maximum_is_published_as_null(client: TestClient, field: str) -> None:
+    """The HTTP half of the check below (#315): Kurt Warner's 1999 line and
+    his career totals publish `fg_long`/`pt_long` as JSON null, not 0."""
+    response = client.get(f"/api/players/{KURT_WARNER}")
+    assert response.status_code == 200, response.text
+    assert f'"{field}":0' not in response.text
+    body = response.json()
+
+    season = _season_stats(client, KURT_WARNER, 1999, "regular")
+    assert field in season and season[field] is None
+    totals = body["regular_season"]["stats"]
+    assert field in totals and totals[field] is None
 
 
 def test_stats_body_accepts_the_receiving_stats() -> None:
