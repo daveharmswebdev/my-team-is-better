@@ -29,3 +29,7 @@ Run the same commands CI runs (`.github/workflows/ci.yml`), from the package dir
   that needs to cross one is a `contract-insufficient` finding, never a new import.
 - Secrets: never run `apps/api` tests from a checkout that has `apps/api/.env`
   (spoke-protocol explains why).
+- Widening `contracts.PlayerStats` fails `tests/test_player_stat_rules.py` on purpose
+  (#341): state the new columns' DDL type and aggregation in `PINNED_RULES`. Its failure
+  message lists every test that asserts over the whole field set. Re-check each one,
+  because a column-name grep can't find them, and paste the list into the brief.
