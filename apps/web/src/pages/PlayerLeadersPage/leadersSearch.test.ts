@@ -104,14 +104,18 @@ describe('the stat category in the URL (issue #312)', () => {
     })
   })
 
-  it.each(['kicking', 'Rushing', 'Receiving', 'passing,rushing', ''])(
-    'falls back to passing for category=%j',
-    (value) => {
-      const view = parseLeadersSearch(new URLSearchParams({ category: value }))
-      expect(view.category).toBe('passing')
-      expect(view.sort).toBe('passing_yards')
-    },
-  )
+  it.each([
+    'returning',
+    'Kicking',
+    'Rushing',
+    'Receiving',
+    'passing,rushing',
+    '',
+  ])('falls back to passing for category=%j', (value) => {
+    const view = parseLeadersSearch(new URLSearchParams({ category: value }))
+    expect(view.category).toBe('passing')
+    expect(view.sort).toBe('passing_yards')
+  })
 
   it('falls back to the category default for a sort from another category', () => {
     expect(
@@ -228,6 +232,111 @@ describe('the receiving category in the URL (issue #314)', () => {
       category: 'receiving',
       season_type: 'postseason',
       sort: 'receiving_yards',
+      offset: 0,
+    })
+  })
+})
+
+/** Issue #315: the kicking and punting boards' URLs, by the same rules. */
+describe('the kicking and punting categories in the URL (issue #315)', () => {
+  it('reads the kicking category with a derived sort of its own', () => {
+    expect(
+      parseLeadersSearch(
+        new URLSearchParams(
+          'category=kicking&season_type=postseason&sort=fg_pct&offset=0',
+        ),
+      ),
+    ).toEqual({
+      category: 'kicking',
+      season_type: 'postseason',
+      sort: 'fg_pct',
+      offset: 0,
+    })
+    expect(
+      parseLeadersSearch(
+        new URLSearchParams('category=kicking&sort=fg_made_50_plus'),
+      ).sort,
+    ).toBe('fg_made_50_plus')
+  })
+
+  it('round-trips category=punting&sort=pt_inside_20', () => {
+    const view = {
+      category: 'punting',
+      season_type: 'regular',
+      sort: 'pt_inside_20',
+      offset: 50,
+    } as const
+    const search = toLeadersSearch(view)
+    expect(search.toString()).toBe(
+      'category=punting&season_type=regular&sort=pt_inside_20&offset=50',
+    )
+    expect(parseLeadersSearch(search)).toEqual(view)
+  })
+
+  it('defaults kicking to field goals made and punting to punting yards', () => {
+    expect(
+      parseLeadersSearch(new URLSearchParams('category=kicking')).sort,
+    ).toBe('fg_made')
+    expect(
+      parseLeadersSearch(new URLSearchParams('category=punting')).sort,
+    ).toBe('pt_yards')
+  })
+
+  it.each(['pt_yards', 'pt_inside_20', 'pat_att', 'fg_made_50_59', 'carries'])(
+    'falls back to field goals made for category=kicking&sort=%s',
+    (sort) => {
+      expect(
+        parseLeadersSearch(new URLSearchParams({ category: 'kicking', sort })),
+      ).toEqual({
+        category: 'kicking',
+        season_type: 'regular',
+        sort: 'fg_made',
+        offset: 0,
+      })
+    },
+  )
+
+  it.each(['fg_made', 'fg_pct', 'pt_long', 'receptions'])(
+    'falls back to punting yards for category=punting&sort=%s',
+    (sort) => {
+      expect(
+        parseLeadersSearch(new URLSearchParams({ category: 'punting', sort })),
+      ).toEqual({
+        category: 'punting',
+        season_type: 'regular',
+        sort: 'pt_yards',
+        offset: 0,
+      })
+    },
+  )
+
+  it('falls back to the other categories defaults for a kicking sort', () => {
+    expect(
+      parseLeadersSearch(new URLSearchParams('category=receiving&sort=fg_pct'))
+        .sort,
+    ).toBe('receiving_yards')
+    expect(parseLeadersSearch(new URLSearchParams('sort=fg_made')).sort).toBe(
+      'passing_yards',
+    )
+  })
+
+  it('lands a switch to kicking or punting on its default sort, at the top, keeping the season type', () => {
+    const from = {
+      category: 'receiving',
+      season_type: 'postseason',
+      sort: 'receptions',
+      offset: 100,
+    } as const
+    expect(withCategory(from, 'kicking')).toEqual({
+      category: 'kicking',
+      season_type: 'postseason',
+      sort: 'fg_made',
+      offset: 0,
+    })
+    expect(withCategory(from, 'punting')).toEqual({
+      category: 'punting',
+      season_type: 'postseason',
+      sort: 'pt_yards',
       offset: 0,
     })
   })

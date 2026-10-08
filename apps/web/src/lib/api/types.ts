@@ -291,14 +291,17 @@ export type PlayerSeasonType = (typeof PLAYER_SEASON_TYPES)[number]
 /**
  * The engine's `PlayerLeaderCategory` literal, in its order (issue #312):
  * what a board ranks. A stat category, never a position -- the rushing board
- * ranks everyone with a carry, quarterbacks included, and the receiving board
- * (issue #314) everyone with a target or a reception. Same caveat as
- * `PLAYER_SEASON_TYPES`.
+ * ranks everyone with a carry, quarterbacks included, the receiving board
+ * (issue #314) everyone with a target or a reception, the kicking board
+ * (issue #315) everyone with a field-goal or extra-point attempt and the
+ * punting board everyone with a punt. Same caveat as `PLAYER_SEASON_TYPES`.
  */
 export const PLAYER_LEADER_CATEGORIES = [
   'passing',
   'rushing',
   'receiving',
+  'kicking',
+  'punting',
 ] as const
 
 export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
@@ -309,12 +312,37 @@ export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
  * one category, and the API answers a pair from two categories with a 422 at
  * `sort`, so this is the only list a caller may pick a sort from -- never a
  * string check of its own.
+ *
+ * Two kicking sorts (issue #315), `fg_pct` and `fg_made_50_plus`, are
+ * computed by the engine and are not `PlayerStatsOut` fields; every other
+ * sort is the stat of the same name.
  */
 export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
   passing: ['passing_yards', 'passing_tds', 'wins'],
   rushing: ['rushing_yards', 'rushing_tds', 'carries'],
   receiving: ['receiving_yards', 'receiving_tds', 'receptions'],
+  kicking: [
+    'fg_made',
+    'fg_pct',
+    'fg_made_50_plus',
+    'fg_long',
+    'fg_att',
+    'pat_made',
+  ],
+  punting: ['pt_yards', 'pt_net_yards', 'pt_att', 'pt_inside_20'],
 } as const satisfies Record<PlayerLeaderCategory, readonly string[]>
+
+/**
+ * The mirror of the engine's `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`
+ * (`cfb_strength.contracts`, issue #315): the career field-goal attempts a
+ * kicker needs, in that season type, to be on the `fg_pct` board at all. The
+ * API leaves everyone below it off that board, and `total` counts only those
+ * at or above it -- so the board can be short, or empty.
+ */
+export const PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS = {
+  regular: 100,
+  postseason: 15,
+} as const satisfies Record<PlayerSeasonType, number>
 
 /**
  * The engine's `PlayerLeaderSort` literal; always descending. Derived from
@@ -324,6 +352,8 @@ export const PLAYER_LEADER_SORTS = [
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.passing,
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.rushing,
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.receiving,
+  ...PLAYER_LEADER_SORTS_BY_CATEGORY.kicking,
+  ...PLAYER_LEADER_SORTS_BY_CATEGORY.punting,
 ] as const
 
 export type PlayerLeaderSort = (typeof PLAYER_LEADER_SORTS)[number]
@@ -347,6 +377,15 @@ export interface StarterRecordOut {
  * a literal 0 for every 2003-2008 season (#345), so a career total spanning
  * those years would be a false undercount. First downs and fumbles lost are
  * not shown in v1 either.
+ *
+ * The kicking and punting stats (issue #315) are shown only on their own
+ * boards. `fg_long` and `pt_long` are career maxima, not sums, and are `null`
+ * for a player who never made a field goal or never punted -- there is no
+ * longest of nothing -- so on those boards a `null` there is a dash, not
+ * "not recorded". Every other kicking or punting 0 is a recorded zero.
+ * `pat_att` and `pt_long` are mirrored but not shown; `fg_made_50_59` and
+ * `fg_made_60_` (which keeps nflverse's trailing underscore) are shown only
+ * summed, as the 50+ column.
  */
 export interface PlayerStatsOut {
   completions: number | null
@@ -365,6 +404,18 @@ export interface PlayerStatsOut {
   receiving_tds: number | null
   receiving_first_downs: number | null
   receiving_fumbles_lost: number | null
+  fg_made: number | null
+  fg_att: number | null
+  fg_long: number | null
+  fg_made_50_59: number | null
+  fg_made_60_: number | null
+  pat_made: number | null
+  pat_att: number | null
+  pt_att: number | null
+  pt_yards: number | null
+  pt_net_yards: number | null
+  pt_long: number | null
+  pt_inside_20: number | null
 }
 
 export interface PlayerLeaderRowOut {
@@ -389,7 +440,11 @@ export interface PlayerLeadersOut {
   sort: PlayerLeaderSort
   limit: number
   offset: number
-  /** The whole qualifying population's size, so a client can page. */
+  /**
+   * The whole qualifying population's size, so a client can page. On the
+   * `fg_pct` board (#315) only the kickers at `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`
+   * count, so it may be 0.
+   */
   total: number
   rows: PlayerLeaderRowOut[]
 }

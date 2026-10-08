@@ -19,6 +19,10 @@ import type { PlayerLeadersQuery } from '../../lib/api/client'
 import type { PlayerLeaderRowOut, PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
+  LEADERS_BY_FG_MADE,
+  LEADERS_BY_FG_PCT,
+  LEADERS_BY_FG_PCT_EMPTY,
+  LEADERS_BY_PT_YARDS,
   LEADERS_BY_RECEIVING_TDS,
   LEADERS_BY_RECEIVING_YARDS,
   LEADERS_BY_RUSHING_TDS,
@@ -28,7 +32,11 @@ import {
   LEADERS_WITH_NULL_STATS,
   TUA_TAGOVAILOA,
 } from '../../lib/playerFixtures'
-import { STARTER_RECORD_NOTE } from '../../lib/playerStats'
+import {
+  STARTER_RECORD_NOTE,
+  fgPctEmptyCopy,
+  fgPctNote,
+} from '../../lib/playerStats'
 import { PlayerLeadersPage } from './PlayerLeadersPage'
 
 vi.mock('../../lib/api/client', async () => {
@@ -170,7 +178,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
     mockedFetchPlayerLeaders.mockResolvedValue(LEADERS_BY_YARDS)
 
     renderPage(
-      '/nfl/leaders?category=kicking&season_type=playoffs&sort=sacks&offset=-3',
+      '/nfl/leaders?category=returning&season_type=playoffs&sort=sacks&offset=-3',
     )
 
     await screen.findByRole('table')
@@ -562,7 +570,7 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
       within(select)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['Passing', 'Rushing', 'Receiving'])
+    ).toEqual(['Passing', 'Rushing', 'Receiving', 'Kicking', 'Punting'])
   })
 
   it('starts on passing, and is the first control the keyboard reaches', async () => {
@@ -691,12 +699,14 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
     expect(table).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
   })
 
-  it('names all three categories in the lede (issue #314)', async () => {
+  it('names every category in the lede (issues #314, #315)', async () => {
     renderPage()
 
     await screen.findByRole('table')
     expect(
-      screen.getByText(/career passing, rushing and receiving totals/i),
+      screen.getByText(
+        /career passing, rushing, receiving, kicking and punting totals/i,
+      ),
     ).toBeInTheDocument()
   })
 
@@ -779,6 +789,245 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
       category: 'receiving',
       season_type: 'regular',
       sort: 'receiving_yards',
+      limit: 50,
+      offset: 0,
+    })
+  })
+})
+
+/**
+ * Issue #315: the kicking and punting boards. FG% is the one sort with an
+ * attempts minimum, so when it is the sort the page says so, and when nobody
+ * reaches the minimum it says that -- not that no stats are loaded.
+ */
+describe('PlayerLeadersPage, kicking and punting (issue #315)', () => {
+  /** Answers each request with the board its category and sort name. */
+  function boardFor(query: PlayerLeadersQuery): PlayerLeadersOut {
+    const base =
+      query.category === 'punting'
+        ? LEADERS_BY_PT_YARDS
+        : query.category === 'kicking'
+          ? query.sort === 'fg_pct'
+            ? LEADERS_BY_FG_PCT
+            : LEADERS_BY_FG_MADE
+          : LEADERS_BY_YARDS
+    return {
+      ...base,
+      category: query.category,
+      season_type: query.season_type,
+      sort: query.sort,
+      offset: query.offset,
+    }
+  }
+
+  function categorySelect(): HTMLElement {
+    return screen.getByRole('combobox', { name: 'Stat category' })
+  }
+
+  beforeEach(() => {
+    mockedFetchPlayerLeaders.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    mockedFetchPlayerLeaders.mockImplementation((query) =>
+      Promise.resolve(boardFor(query)),
+    )
+  })
+
+  it('switches to kicking, keeping the season type and resetting the sort and the page', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?season_type=postseason&sort=wins&offset=50')
+    await screen.findByRole('table')
+
+    await user.selectOptions(categorySelect(), 'Kicking')
+
+    expect(lastQuery()).toEqual({
+      category: 'kicking',
+      season_type: 'postseason',
+      sort: 'fg_made',
+      limit: 50,
+      offset: 0,
+    })
+    expect(search()).toBe(
+      '?category=kicking&season_type=postseason&sort=fg_made&offset=0',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by field goals made',
+    })
+    expect(categorySelect()).toHaveValue('kicking')
+  })
+
+  it('shows the kicking board the API sent, with no record or note on it', async () => {
+    renderPage('/nfl/leaders?category=kicking')
+
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field goals made',
+    })
+    const first = within(table).getAllByRole('row')[1] as HTMLElement
+    expect(within(first).getByRole('link')).toHaveTextContent('Olindo Mare')
+    expect(within(first).getByText('84.8%')).toBeInTheDocument()
+    expect(
+      within(table).queryByRole('columnheader', { name: 'Starter record' }),
+    ).not.toBeInTheDocument()
+    expect(table).not.toHaveAccessibleDescription()
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+    expect(screen.queryByText(fgPctNote('regular'))).not.toBeInTheDocument()
+    expect(screen.getByText('1–4 of 81')).toBeInTheDocument()
+  })
+
+  it('states the FG% minimum when FG% is the sort, and describes the table with it', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=kicking')
+    await screen.findByRole('table')
+
+    await user.click(screen.getByRole('button', { name: 'FG%' }))
+
+    expect(lastQuery()).toEqual({
+      category: 'kicking',
+      season_type: 'regular',
+      sort: 'fg_pct',
+      limit: 50,
+      offset: 0,
+    })
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field-goal percentage',
+    })
+    expect(fgPctNote('regular')).toMatch(/at least 100 career field-goal/)
+    expect(screen.getAllByText(fgPctNote('regular'))).toHaveLength(1)
+    expect(table).toHaveAccessibleDescription(fgPctNote('regular'))
+  })
+
+  it('names the playoff minimum, 15, on the playoff FG% board', async () => {
+    renderPage(
+      '/nfl/leaders?category=kicking&season_type=postseason&sort=fg_pct',
+    )
+
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by field-goal percentage',
+    })
+    expect(fgPctNote('postseason')).toMatch(/at least 15 career field-goal/)
+    expect(table).toHaveAccessibleDescription(fgPctNote('postseason'))
+    expect(screen.queryByText(fgPctNote('regular'))).not.toBeInTheDocument()
+  })
+
+  it('drops the FG% note when another kicking sort is chosen', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=kicking&sort=fg_pct')
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field-goal percentage',
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Long' }))
+
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by longest field goal',
+    })
+    expect(screen.queryByText(fgPctNote('regular'))).not.toBeInTheDocument()
+    expect(table).not.toHaveAccessibleDescription()
+  })
+
+  it('says nobody has reached the minimum on an empty FG% board, not that no stats are loaded', async () => {
+    mockedFetchPlayerLeaders.mockResolvedValue(LEADERS_BY_FG_PCT_EMPTY)
+
+    renderPage('/nfl/leaders?category=kicking&sort=fg_pct')
+
+    expect(
+      await screen.findByText(fgPctEmptyCopy('regular')),
+    ).toBeInTheDocument()
+    expect(fgPctEmptyCopy('regular')).toMatch(/100 career field-goal attempts/)
+    expect(
+      screen.queryByText('No NFL player stats are loaded yet.'),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument()
+    // The note still says what the minimum is.
+    expect(screen.getByText(fgPctNote('regular'))).toBeInTheDocument()
+  })
+
+  it('names the playoff minimum on an empty playoff FG% board', async () => {
+    mockedFetchPlayerLeaders.mockResolvedValue({
+      ...LEADERS_BY_FG_PCT_EMPTY,
+      season_type: 'postseason',
+    })
+
+    renderPage(
+      '/nfl/leaders?category=kicking&season_type=postseason&sort=fg_pct',
+    )
+
+    expect(
+      await screen.findByText(fgPctEmptyCopy('postseason')),
+    ).toBeInTheDocument()
+  })
+
+  it('offers a way back to the default kicking sort from an empty FG% board', async () => {
+    const user = userEvent.setup()
+    mockedFetchPlayerLeaders.mockImplementation((query) =>
+      Promise.resolve(
+        query.sort === 'fg_pct' ? LEADERS_BY_FG_PCT_EMPTY : boardFor(query),
+      ),
+    )
+    renderPage('/nfl/leaders?category=kicking&sort=fg_pct')
+    await screen.findByText(fgPctEmptyCopy('regular'))
+
+    await user.click(
+      screen.getByRole('button', { name: 'Rank by field goals made' }),
+    )
+
+    expect(lastQuery()).toEqual({
+      category: 'kicking',
+      season_type: 'regular',
+      sort: 'fg_made',
+      limit: 50,
+      offset: 0,
+    })
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field goals made',
+    })
+  })
+
+  it('switches to punting and shows the board the API sent', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=kicking&sort=fg_long')
+    await screen.findByRole('table')
+
+    await user.selectOptions(categorySelect(), 'Punting')
+
+    expect(lastQuery()).toEqual({
+      category: 'punting',
+      season_type: 'regular',
+      sort: 'pt_yards',
+      limit: 50,
+      offset: 0,
+    })
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by punting yards',
+    })
+    const first = within(table).getAllByRole('row')[1] as HTMLElement
+    expect(within(first).getByRole('link')).toHaveTextContent('Thomas Morstead')
+    expect(within(first).getByText('4,831')).toBeInTheDocument()
+  })
+
+  it('reads a punting deep link, and never asks punting for a kicking sort', async () => {
+    renderPage('/nfl/leaders?category=punting&sort=pt_net_yards&offset=0')
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by net punting yards',
+    })
+    expect(lastQuery()).toMatchObject({
+      category: 'punting',
+      sort: 'pt_net_yards',
+    })
+  })
+
+  it('falls back to field goals made for a punting sort under kicking', async () => {
+    renderPage('/nfl/leaders?category=kicking&sort=pt_yards')
+
+    await screen.findByRole('table')
+    expect(lastQuery()).toEqual({
+      category: 'kicking',
+      season_type: 'regular',
+      sort: 'fg_made',
       limit: 50,
       offset: 0,
     })

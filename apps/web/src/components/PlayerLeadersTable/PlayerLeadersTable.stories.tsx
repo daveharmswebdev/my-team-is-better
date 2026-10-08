@@ -2,6 +2,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter } from 'react-router-dom'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import {
+  LEADERS_BY_FG_MADE,
+  LEADERS_BY_FG_MADE_TAIL,
+  LEADERS_BY_FG_PCT,
+  LEADERS_BY_PT_YARDS,
   LEADERS_BY_RECEIVING_TDS,
   LEADERS_BY_RECEIVING_YARDS,
   LEADERS_BY_RECEPTIONS_TAIL,
@@ -118,4 +122,62 @@ export const ByReceivingTds: Story = {
  */
 export const ReceptionsTail: Story = {
   args: { leaders: LEADERS_BY_RECEPTIONS_TAIL },
+}
+
+/**
+ * The kicking board (issue #315): six sortable columns, FG% and 50+ derived
+ * from the counts the API sent, the rows and ranks exactly as sent.
+ */
+export const ByFieldGoalsMade: Story = {
+  args: { leaders: LEADERS_BY_FG_MADE },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'FG made' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(canvas.getByText('94.7%')).toBeInTheDocument()
+    await expect(
+      canvas.queryByRole('columnheader', { name: 'Starter record' }),
+    ).toBeNull()
+    await userEvent.click(canvas.getByRole('button', { name: '50+' }))
+    await expect(args.onSort).toHaveBeenCalledWith('fg_made_50_plus')
+  },
+}
+
+/** The kicking board by FG%, a sort the engine computes and does not send. */
+export const ByFieldGoalPercentage: Story = {
+  args: { leaders: LEADERS_BY_FG_PCT, describedBy: 'fg-pct-note' },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'FG%' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+  },
+}
+
+/**
+ * The foot of the kicking board: three players tied at 79 who never made a
+ * field goal. Their Long is a dash read as "none" -- never 0 -- and the
+ * center with no attempt has no FG% either.
+ */
+export const KickingTail: Story = {
+  args: { leaders: LEADERS_BY_FG_MADE_TAIL },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByRole('cell', { name: 'none' })).toHaveLength(4)
+  },
+}
+
+/** The punting board (issue #315): four sortable columns, no Long. */
+export const ByPuntingYards: Story = {
+  args: { leaders: LEADERS_BY_PT_YARDS },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'Yards' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(canvas.getByText('4,831')).toBeInTheDocument()
+    await userEvent.click(canvas.getByRole('button', { name: 'Inside 20' }))
+    await expect(args.onSort).toHaveBeenCalledWith('pt_inside_20')
+  },
 }

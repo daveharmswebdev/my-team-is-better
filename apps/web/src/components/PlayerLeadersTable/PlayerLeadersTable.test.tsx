@@ -4,6 +4,11 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlayerLeadersOut } from '../../lib/api/types'
 import {
+  BRANDON_AUBREY,
+  LEADERS_BY_FG_MADE,
+  LEADERS_BY_FG_MADE_TAIL,
+  LEADERS_BY_FG_PCT,
+  LEADERS_BY_PT_YARDS,
   LEADERS_BY_RECEIVING_TDS,
   LEADERS_BY_RECEIVING_YARDS,
   LEADERS_BY_RECEPTIONS_TAIL,
@@ -513,5 +518,260 @@ describe('PlayerLeadersTable, the receiving board (issue #314)', () => {
     expect(
       cellUnder(bodyRows()[0] as HTMLElement, 'Receptions'),
     ).toHaveTextContent(/^not recorded$/)
+  })
+})
+
+/**
+ * Issue #315: the kicking board. Like rushing and receiving it shows its own
+ * columns and no starter record. Two of them -- FG% and 50+ -- are sorts the
+ * engine computes and does not send, so the board derives their values from
+ * the counts it was sent, and both still re-sort the board.
+ */
+describe('PlayerLeadersTable, the kicking board (issue #315)', () => {
+  it('names itself by the kicking sort in its caption', () => {
+    renderTable(LEADERS_BY_FG_MADE)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by field goals made',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the six kicking columns only, in order, with no record or other category', () => {
+    renderTable(LEADERS_BY_FG_MADE)
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Rank',
+      'Player',
+      'Position',
+      'Seasons',
+      'Games',
+      'FG made',
+      'FG att',
+      'FG%',
+      '50+',
+      'Long',
+      'XP made',
+    ])
+  })
+
+  it('renders the rows the API sent, with FG% and 50+ derived from the counts sent', () => {
+    renderTable(LEADERS_BY_FG_MADE)
+
+    const rows = bodyRows()
+    expect(rows.map((row) => cellUnder(row, 'Player').textContent)).toEqual([
+      'Olindo Mare',
+      'Brandon Aubrey',
+      'Cairo Santos',
+      'Greg Zuerlein',
+    ])
+    expect(rows.map((row) => cellUnder(row, 'Rank').textContent)).toEqual([
+      '1',
+      '2',
+      '3',
+      '3',
+    ])
+    const [mare, aubrey] = rows as [HTMLElement, HTMLElement]
+    expect(cellUnder(mare, 'Position')).toHaveTextContent(/^K$/)
+    expect(cellUnder(mare, 'FG made')).toHaveTextContent(/^39$/)
+    expect(cellUnder(mare, 'FG att')).toHaveTextContent(/^46$/)
+    expect(cellUnder(mare, 'FG%')).toHaveTextContent(/^84\.8%$/)
+    expect(cellUnder(mare, '50+')).toHaveTextContent(/^3$/)
+    expect(cellUnder(mare, 'Long')).toHaveTextContent(/^54$/)
+    expect(cellUnder(mare, 'XP made')).toHaveTextContent(/^27$/)
+    // Aubrey's 50+ is 9 from 50-59 and 1 from 60+.
+    expect(cellUnder(aubrey, 'FG%')).toHaveTextContent(/^94\.7%$/)
+    expect(cellUnder(aubrey, '50+')).toHaveTextContent(/^10$/)
+    expect(cellUnder(aubrey, 'Long')).toHaveTextContent(/^60$/)
+    // His 52 extra-point attempts are in the payload, and nowhere on the board.
+    expect(aubrey).not.toHaveTextContent('52')
+  })
+
+  it('makes all six kicking columns sortable, derived ones included, with aria-sort on the active one', () => {
+    renderTable(LEADERS_BY_FG_MADE)
+
+    const expected: Record<string, string> = {
+      'FG made': 'descending',
+      'FG att': 'none',
+      'FG%': 'none',
+      '50+': 'none',
+      Long: 'none',
+      'XP made': 'none',
+    }
+    for (const [name, sort] of Object.entries(expected)) {
+      const header = screen.getByRole('columnheader', { name })
+      expect(header).toHaveAttribute('aria-sort', sort)
+      expect(within(header).getByRole('button', { name })).toBeInTheDocument()
+    }
+  })
+
+  it('asks for each kicking column its own sort when clicked', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_FG_MADE)
+
+    for (const name of ['FG%', '50+', 'Long', 'FG att', 'XP made']) {
+      await user.click(screen.getByRole('button', { name }))
+    }
+
+    expect(onSort.mock.calls).toEqual([
+      ['fg_pct'],
+      ['fg_made_50_plus'],
+      ['fg_long'],
+      ['fg_att'],
+      ['pat_made'],
+    ])
+  })
+
+  it('marks FG% descending, and names it in the caption, on the FG% board', () => {
+    renderTable(LEADERS_BY_FG_PCT)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by field-goal percentage',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'FG%' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+  })
+
+  it('shows a null Long as a dash named "none" -- never 0, never "not recorded"', () => {
+    renderTable(LEADERS_BY_FG_MADE_TAIL)
+
+    const rows = bodyRows()
+    expect(rows.map((row) => cellUnder(row, 'Rank').textContent)).toEqual([
+      '79',
+      '79',
+      '79',
+    ])
+    for (const row of rows) {
+      const long = cellUnder(row, 'Long')
+      expect(long).toHaveAccessibleName('none')
+      expect(long).toHaveTextContent(/^–none$/)
+      expect(within(long).getByText('–')).toHaveAttribute('aria-hidden', 'true')
+      expect(long).not.toHaveTextContent('0')
+      expect(long).not.toHaveTextContent('not recorded')
+    }
+  })
+
+  it('shows FG% as a dash named "none" with no attempts, and 0.0% for a miss', () => {
+    renderTable(LEADERS_BY_FG_MADE_TAIL)
+
+    const [wright, unutoa, gowin] = bodyRows() as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ]
+    // Morris Unutoa, a center, is on the board on one extra point.
+    expect(cellUnder(unutoa, 'Position')).toHaveTextContent(/^C$/)
+    expect(cellUnder(unutoa, 'FG att')).toHaveTextContent(/^0$/)
+    expect(cellUnder(unutoa, 'FG%')).toHaveAccessibleName('none')
+    expect(cellUnder(unutoa, 'XP made')).toHaveTextContent(/^1$/)
+    // Wright and Gowin each missed their one attempt: a real 0.0%.
+    expect(cellUnder(wright, 'FG%')).toHaveTextContent(/^0\.0%$/)
+    expect(cellUnder(gowin, 'FG%')).toHaveTextContent(/^0\.0%$/)
+  })
+
+  it('shows recorded kicking zeros as 0', () => {
+    renderTable(LEADERS_BY_FG_MADE_TAIL)
+
+    const wright = bodyRows()[0] as HTMLElement
+    for (const column of ['FG made', '50+', 'XP made']) {
+      expect(cellUnder(wright, column)).toHaveTextContent(/^0$/)
+    }
+  })
+
+  it('shows a null kicking count as "not recorded", and 50+ too when a bucket is null', () => {
+    renderTable({
+      ...LEADERS_BY_FG_MADE,
+      rows: [
+        {
+          ...BRANDON_AUBREY,
+          stats: { ...BRANDON_AUBREY.stats, pat_made: null, fg_made_60_: null },
+        },
+      ],
+    })
+
+    const row = bodyRows()[0] as HTMLElement
+    expect(cellUnder(row, 'XP made')).toHaveTextContent(/^not recorded$/)
+    expect(cellUnder(row, '50+')).toHaveTextContent(/^not recorded$/)
+  })
+})
+
+/** Issue #315: the punting board, the rushing board's shape. */
+describe('PlayerLeadersTable, the punting board (issue #315)', () => {
+  it('names itself by the punting sort in its caption', () => {
+    renderTable(LEADERS_BY_PT_YARDS)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by punting yards',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the four punting columns only, in order, with no Long', () => {
+    renderTable(LEADERS_BY_PT_YARDS)
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Rank',
+      'Player',
+      'Position',
+      'Seasons',
+      'Games',
+      'Punts',
+      'Yards',
+      'Net yards',
+      'Inside 20',
+    ])
+  })
+
+  it('renders the rows the API sent, yards grouped', () => {
+    renderTable(LEADERS_BY_PT_YARDS)
+
+    const rows = bodyRows()
+    expect(rows.map((row) => cellUnder(row, 'Player').textContent)).toEqual([
+      'Thomas Morstead',
+      'Chris Gardocki',
+      'Bryce Baringer',
+    ])
+    const morstead = rows[0] as HTMLElement
+    expect(cellUnder(morstead, 'Rank')).toHaveTextContent(/^1$/)
+    expect(cellUnder(morstead, 'Position')).toHaveTextContent(/^P$/)
+    expect(cellUnder(morstead, 'Punts')).toHaveTextContent(/^99$/)
+    expect(cellUnder(morstead, 'Yards')).toHaveTextContent(/^4,831$/)
+    expect(cellUnder(morstead, 'Net yards')).toHaveTextContent(/^4,136$/)
+    expect(cellUnder(morstead, 'Inside 20')).toHaveTextContent(/^36$/)
+    // His 62-yard long punt is in the payload, and nowhere on the board.
+    expect(morstead).not.toHaveTextContent('62')
+  })
+
+  it('makes all four punting columns sortable, and asks for each its own sort', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_PT_YARDS)
+
+    expect(screen.getByRole('columnheader', { name: 'Yards' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+    for (const name of ['Net yards', 'Punts', 'Inside 20']) {
+      expect(screen.getByRole('columnheader', { name })).toHaveAttribute(
+        'aria-sort',
+        'none',
+      )
+      await user.click(screen.getByRole('button', { name }))
+    }
+
+    expect(onSort.mock.calls).toEqual([
+      ['pt_net_yards'],
+      ['pt_att'],
+      ['pt_inside_20'],
+    ])
   })
 })
