@@ -66,6 +66,14 @@ PINNED_RULES: dict[str, tuple[str, str]] = {
     "pt_net_yards": ("INTEGER", "sum"),
     "pt_long": ("INTEGER", "max"),
     "pt_inside_20": ("INTEGER", "sum"),
+    "def_interceptions": ("INTEGER", "sum"),
+    "def_sacks": ("REAL", "sum"),
+    "def_fumbles_forced": ("INTEGER", "sum"),
+    "def_tackles_solo": ("INTEGER", "sum"),
+    "def_pass_defended": ("INTEGER", "sum"),
+    "passing_epa": ("REAL", "sum"),
+    "rushing_epa": ("REAL", "sum"),
+    "receiving_epa": ("REAL", "sum"),
 }
 
 # The Python annotation each DDL type pairs with.
@@ -186,7 +194,7 @@ def test_the_site_scan_finds_both_shapes() -> None:
 
 
 def test_the_drift_report_names_a_new_column_and_the_sites() -> None:
-    actual = {**PINNED_RULES, "def_sacks": ("REAL", "sum")}
+    actual = {**PINNED_RULES, "def_qb_hits": ("INTEGER", "sum")}
     report = drift_report(PINNED_RULES, actual)
-    assert "new: [\"def_sacks ('REAL', 'sum')\"]" in report
+    assert "new: [\"def_qb_hits ('INTEGER', 'sum')\"]" in report
     assert "test_players_career.py" in report

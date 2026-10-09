@@ -4,14 +4,17 @@ team resolution, REG/POST mapping and the loud failures.
 
 Fixtures, all real rows cut once from nflverse's files, never synthetic:
 
-* `tests/fixtures/raw_nfl_stats_player_week_unprojected_sample.csv`: four
+* `tests/fixtures/raw_nfl_stats_player_week_unprojected_sample.csv`: six
   rows of `2024_08_IND_HOU` in the raw file's column names (the projected
-  columns plus four it drops -- `player_name`, `position_group`,
-  `receiving_air_yards` and `def_sacks`): Anthony Richardson (32 attempts),
-  Josh Downs (rushing_yards 13 on 0 carries -- the row an attempts/carries
-  filter wrongly drops), Robert Woods (receiving only, kept since #313
-  widened the columns) and Denico Autry (all zero on offence, still
-  dropped). Recut from the raw 2024 weekly file for #313.
+  columns plus five it drops -- `player_name`, `position_group`,
+  `receiving_air_yards`, `def_tackle_assists` and `def_qb_hits`): Anthony
+  Richardson (32 attempts), Josh Downs (rushing_yards 13 on 0 carries --
+  the row an attempts/carries filter wrongly drops), Robert Woods
+  (receiving only, kept since #313), Denico Autry (all zero on offence, one
+  pass defended: dropped before #354, kept since), Jalen Pitre (an
+  interception) and Derek Barnett (one assisted tackle and nothing else --
+  `def_tackle_assists` is outside the contract, so still dropped). Recut
+  from the raw 2024 weekly file for #354.
 * `tests/fixtures/raw_nfl_player_sample/nfl/`: projected-cache-shaped cuts
   of `stats_player_week_<year>.csv` and `players.csv`. See
   test_ingest_nflverse_players_integration.py's docstring for what each
@@ -31,7 +34,7 @@ from pathlib import Path
 import pytest
 
 from cfb_strength.config import RAW_DIR
-from cfb_strength.contracts import PlayerStats
+from cfb_strength.contracts import PLAYER_STAT_REAL_FIELDS, PlayerStats
 from cfb_strength.ingest.nflverse import client as nflverse_client
 from cfb_strength.ingest.nflverse import player_normalize
 from cfb_strength.ingest.nflverse.normalize import (
@@ -112,16 +115,31 @@ def test_row_filter_keeps_a_receiving_only_row_and_drops_an_all_zero_one() -> No
     # row that the ten passing/rushing columns dropped.
     assert rows["Robert Woods"]["receptions"] == "2"
     assert has_any_stat(rows["Robert Woods"]) is True
-    # A defensive line with nothing on offence is still dropped: the def_*
-    # columns are deliberately out of the contract (#316/#317).
+    # Since #354 a defensive line is kept on any of the five contract def_*
+    # columns: Autry has nothing on offence and one pass defended.
+    assert rows["Denico Autry"]["def_pass_defended"] == "1"
     assert rows["Denico Autry"]["def_sacks"] == "0"
-    assert has_any_stat(rows["Denico Autry"]) is False
+    assert has_any_stat(rows["Denico Autry"]) is True
+    assert rows["Jalen Pitre"]["def_interceptions"] == "1"
+    assert has_any_stat(rows["Jalen Pitre"]) is True
+    # A line whose only stat is outside the contract is still dropped:
+    # Barnett's one assisted tackle is not a PlayerStats column.
+    assert rows["Derek Barnett"]["def_tackle_assists"] == "1"
+    assert has_any_stat(rows["Derek Barnett"]) is False
 
 
 def test_row_filter_treats_an_empty_cell_as_no_stat() -> None:
-    row = {**_unprojected()["Denico Autry"], "passing_yards": ""}
+    row = {**_unprojected()["Derek Barnett"], "passing_yards": "", "def_sacks": ""}
     assert has_any_stat(row) is False
     assert has_any_stat({**row, "sack_yards_lost": "-7"}) is True
+    assert has_any_stat({**row, "def_sacks": "0.5"}) is True
+
+
+def test_row_filter_keeps_a_row_whose_only_stat_is_an_epa_cell() -> None:
+    # EPA is a stat column like any other: a non-zero decimal keeps a row.
+    row = _unprojected()["Derek Barnett"]
+    assert has_any_stat({**row, "receiving_epa": "-0.448538469150662"}) is True
+    assert has_any_stat({**row, "receiving_epa": "0.0"}) is False
 
 
 def test_stats_projection_keeps_exactly_the_documented_columns_and_rows() -> None:
@@ -131,11 +149,18 @@ def test_stats_projection_keeps_exactly_the_documented_columns_and_rows() -> Non
         "Anthony Richardson",
         "Josh Downs",
         "Robert Woods",
+        "Denico Autry",
+        "Jalen Pitre",
     ]
     assert tuple(projected[0]) == nflverse_client.STATS_PLAYER_WEEK_CACHE_COLUMNS
-    # The raw file's other columns (the EPA, air-yards and def_* families)
-    # are dropped, so nothing outside the contract reaches the cache.
-    assert "def_sacks" not in projected[0] and "receiving_air_yards" not in projected[0]
+    # The raw file's other columns (air yards, the def_* columns outside the
+    # contract) are dropped, so nothing outside the contract reaches the
+    # cache; the five contract def_* and three EPA columns are kept (#354).
+    for dropped in ("receiving_air_yards", "def_tackle_assists", "def_qb_hits", "player_name"):
+        assert dropped not in projected[0]
+    assert projected[0]["passing_epa"] == "-8.09227265038685"
+    assert projected[3]["def_pass_defended"] == "1"
+    assert projected[4]["def_interceptions"] == "1"
     assert nflverse_client.STATS_PLAYER_WEEK_CACHE_COLUMNS == (
         "player_id",
         "player_display_name",
@@ -183,7 +208,7 @@ def test_client_fetches_once_writes_the_projection_and_then_reads_the_cache(
     cache = nflverse_client.stats_player_week_cache_path(2024, tmp_path)
     assert cache == tmp_path / "nfl" / "stats_player_week_2024.csv"
     assert _read_csv(cache) == rows
-    assert len(rows) == 3
+    assert len(rows) == 5
 
     again, live_again = nflverse_client.get_stats_player_week(2024, raw_dir=tmp_path)
     assert (again, live_again) == (rows, False)
@@ -217,6 +242,165 @@ def test_parse_stats_raises_naming_a_non_integer_column() -> None:
     row = {**_unprojected()["Josh Downs"], "passing_yards": "12.5"}
     with pytest.raises(ValueError, match="passing_yards"):
         parse_stats(row)
+
+
+# --- issue #354: the REAL columns parse as decimals, every other as int ------
+
+
+def _case_1999_week_15() -> dict[str, str]:
+    """Stoney Case, 1999_15_NO_BAL: a real cached row whose rushing_epa cell
+    carries 18 decimal places, the longest nflverse publishes."""
+    return next(
+        r
+        for r in _stat_rows(1999)
+        if r["game_id"] == "1999_15_NO_BAL" and r["player_id"] == "00-0002787"
+    )
+
+
+def _week_row(season: int, gsis_id: str, week: int) -> dict[str, str]:
+    return next(
+        r
+        for r in _stat_rows(season)
+        if r["player_id"] == gsis_id and r["week"] == str(week) and r["season_type"] == "REG"
+    )
+
+
+def _chris_jones_2022(week: int) -> dict[str, str]:
+    return _week_row(2022, "00-0032762", week)
+
+
+def test_the_real_fields_are_the_four_decimal_columns_of_the_contract() -> None:
+    assert PLAYER_STAT_REAL_FIELDS == {"def_sacks", "passing_epa", "rushing_epa", "receiving_epa"}
+    assert PLAYER_STAT_REAL_FIELDS < set(STAT_FIELDS)
+
+
+def test_a_real_column_parses_a_half_sack_as_a_float() -> None:
+    row = _chris_jones_2022(9)
+    assert row["def_sacks"] == "0.5"
+
+    stats = parse_stats(row)
+
+    assert stats.def_sacks == 0.5 and isinstance(stats.def_sacks, float)
+    # An integer def column beside it is still an int.
+    assert stats.def_tackles_solo == int(row["def_tackles_solo"])
+    assert isinstance(stats.def_tackles_solo, int)
+
+
+def test_a_long_epa_cell_parses_unrounded() -> None:
+    row = _case_1999_week_15()
+    # The cache holds nflverse's own text, every decimal place of it.
+    assert row["rushing_epa"] == "0.000720168085535988"
+
+    stats = parse_stats(row)
+
+    assert stats.rushing_epa == float("0.000720168085535988")
+    assert isinstance(stats.rushing_epa, float)
+    assert stats.carries == int(row["carries"]) and isinstance(stats.carries, int)
+
+
+def test_a_whole_number_in_a_real_column_is_still_a_float() -> None:
+    row = _chris_jones_2022(2)
+    assert row["def_sacks"] == "2"
+
+    stats = parse_stats(row)
+
+    assert stats.def_sacks == 2.0 and isinstance(stats.def_sacks, float)
+
+
+def test_a_blank_real_cell_is_none_never_zero() -> None:
+    # A defender with no offensive touch: nflverse leaves his EPA blank,
+    # while a def_sacks of "0" is a real zero.
+    row = _chris_jones_2022(9)
+    assert (row["passing_epa"], row["rushing_epa"], row["receiving_epa"]) == ("", "", "")
+
+    stats = parse_stats(row)
+
+    assert stats.passing_epa is None
+    assert stats.rushing_epa is None
+    assert stats.receiving_epa is None
+    assert parse_stats({**row, "def_sacks": ""}).def_sacks is None
+    assert parse_stats({**row, "def_sacks": "0"}).def_sacks == 0.0
+
+
+@pytest.mark.parametrize(
+    "column", ["def_interceptions", "def_fumbles_forced", "def_tackles_solo", "def_pass_defended"]
+)
+def test_an_integer_def_column_given_a_half_still_raises_naming_it(column: str) -> None:
+    row = {**_chris_jones_2022(2), column: "0.5"}
+    with pytest.raises(ValueError, match=column):
+        parse_stats(row)
+
+
+def test_a_real_column_that_is_not_a_number_raises_naming_it() -> None:
+    row = {**_case_1999_week_15(), "receiving_epa": "n/a"}
+    with pytest.raises(ValueError, match="receiving_epa"):
+        parse_stats(row)
+
+
+def _line(week: int, stats: PlayerStats) -> player_normalize._Line:
+    game = GameInfo(
+        id=week,
+        source_id=f"2022_{week:02d}_KC_ARI",
+        season_type="regular",
+        home_abbr="ARI",
+        away_abbr="KC",
+        home_team_id=1,
+        away_team_id=2,
+        home_points=21,
+        away_points=44,
+        home_qb_id="",
+        away_qb_id="",
+        home_qb_name="",
+        away_qb_name="",
+    )
+    return player_normalize._Line("00-0032762", game, "away", "regular", stats)
+
+
+def test_a_season_sums_half_sacks_to_a_float() -> None:
+    lines = [_line(w, PlayerStats(def_sacks=v)) for w, v in ((1, 0.5), (2, 1.0), (3, 0.5))]
+
+    totals = player_normalize._aggregate_stats(lines)
+
+    assert totals.def_sacks == 2.0 and isinstance(totals.def_sacks, float)
+    assert totals.passing_epa is None
+
+
+def test_a_real_season_of_half_sacks_sums_to_its_decimal_total(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # Chris Jones, 2022 Kansas City: 15.5 regular-season sacks, the official
+    # figure, half sacks included (0.5, 1.5 and 2.5 in single games).
+    cells = [v for v in _game_values(2022, "00-0032762", "def_sacks") if v]
+    assert {"0.5", "1.5", "2.5"} <= set(cells)
+
+    stats = _season_stats(nfl_regression_conn, 2022, "00-0032762")
+
+    assert stats.def_sacks == 15.5
+    assert stats.def_sacks == sum(float(v) for v in cells)
+
+
+def test_the_sample_reproduces_kevin_carters_1999_undercount_faithfully(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # nflverse credits Kevin Carter (1999 St. Louis) with 15 sacks; the
+    # official figure is 17. The db reproduces the source, never a correction.
+    stats = _season_stats(nfl_regression_conn, 1999, "00-0002742")
+
+    assert stats.def_sacks == 15.0
+
+
+def test_a_season_epa_total_is_the_sum_of_its_game_floats(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # Patrick Mahomes, 2022 Kansas City: 17 regular-season games. The season
+    # total is the plain sum of the game floats, in game order, unrounded.
+    cells = _game_values(2022, "00-0033873", "passing_epa")
+    assert len(cells) == 17 and all(cells)
+
+    stats = _season_stats(nfl_regression_conn, 2022, "00-0033873")
+
+    assert stats.passing_epa == sum(float(v) for v in cells)
+    assert stats.passing_epa == pytest.approx(193.131204776799, abs=1e-9)
 
 
 # --- rule 2: player ids -----------------------------------------------------
@@ -607,7 +791,7 @@ def test_a_column_empty_on_every_game_row_stays_none_while_an_all_zero_one_stays
     assert stats.fg_att == 0
 
 
-def test_every_cached_season_publishes_all_thirty_four_stat_columns() -> None:
+def test_every_cached_season_publishes_all_forty_two_stat_columns() -> None:
     # A season nflverse publishes differently must fail here, naming the
     # column, not at a random KeyError deep in _parse_stat.
     missing = {}
@@ -621,12 +805,12 @@ def test_every_cached_season_publishes_all_thirty_four_stat_columns() -> None:
             missing[year] = absent
 
     assert missing == {}
-    assert len(STAT_FIELDS) == 34
+    assert len(STAT_FIELDS) == 42
 
 
 def test_parse_stats_raises_on_a_row_missing_a_stat_column() -> None:
     # The parse must not tolerate a missing column (no `row.get(name, "")`):
-    # a season nflverse stopped publishing one of the 34 would otherwise
+    # a season nflverse stopped publishing one of the 42 would otherwise
     # read as an era that didn't track it.
     row = {k: v for k, v in _stat_rows(1999)[0].items() if k != "receiving_first_downs"}
 
@@ -658,3 +842,68 @@ def test_the_sixty_yard_bucket_is_a_real_zero_in_1999_and_non_zero_in_2023() -> 
 
     assert made[1999] == 0
     assert made[2023] > 0
+
+
+# --- issue #354: the refetched cache reproduces the official leaders --------
+
+
+def _regular_season_leader(year: int, column: str) -> tuple[str, float]:
+    """The committed cache's regular-season leader in `column`, parsed the
+    way the ingest parses it, and the total."""
+    totals: dict[str, float] = {}
+    names: dict[str, str] = {}
+    for row in _read_csv(RAW_DIR / "nfl" / f"stats_player_week_{year}.csv"):
+        if row["season_type"] != "REG":
+            continue
+        value = getattr(parse_stats(row), column)
+        if value is not None:
+            totals[row["player_id"]] = totals.get(row["player_id"], 0) + value
+            names[row["player_id"]] = row["player_display_name"]
+    leader = max(totals, key=lambda gsis_id: totals[gsis_id])
+    return names[leader], totals[leader]
+
+
+@pytest.mark.parametrize(
+    ("year", "column", "leader", "total"),
+    [
+        (2021, "def_sacks", "T.J. Watt", 22.5),
+        (2012, "def_sacks", "J.J. Watt", 20.5),
+        (2021, "def_interceptions", "Trevon Diggs", 11),
+        (2012, "def_fumbles_forced", "Charles Tillman", 10),
+    ],
+)
+def test_the_committed_cache_reproduces_the_official_defensive_leader(
+    year: int, column: str, leader: str, total: float
+) -> None:
+    assert _regular_season_leader(year, column) == (leader, total)
+
+
+def test_the_committed_cache_keeps_nflverses_sack_undercounts_uncorrected() -> None:
+    # Officially 17 and 17; nflverse credits 15 and 16.5, and the cache (so
+    # the db) reproduces the source rather than correcting it.
+    def sacks(year: int, gsis_id: str) -> float:
+        return sum(
+            parse_stats(r).def_sacks or 0.0
+            for r in _read_csv(RAW_DIR / "nfl" / f"stats_player_week_{year}.csv")
+            if r["player_id"] == gsis_id and r["season_type"] == "REG"
+        )
+
+    assert sacks(1999, "00-0002742") == 15.0  # Kevin Carter
+    assert sacks(2006, "00-0023446") == 16.5  # Shawne Merriman
+
+
+def test_every_def_cell_is_filled_and_only_def_sacks_is_ever_fractional() -> None:
+    # Measured over 1999-2025: no def_* cell is ever empty, and only
+    # def_sacks takes half values. Checked here on two seasons a decade apart.
+    for year in (2012, 2023):
+        rows = _read_csv(RAW_DIR / "nfl" / f"stats_player_week_{year}.csv")
+        stats = [parse_stats(r) for r in rows]
+        assert all(s.def_sacks is not None for s in stats), year
+        assert any((s.def_sacks or 0) % 1 == 0.5 for s in stats), year
+        for column in (
+            "def_interceptions",
+            "def_fumbles_forced",
+            "def_tackles_solo",
+            "def_pass_defended",
+        ):
+            assert all(isinstance(getattr(s, column), int) for s in stats), (year, column)

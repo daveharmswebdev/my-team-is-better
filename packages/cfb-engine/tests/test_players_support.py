@@ -102,7 +102,7 @@ class PlayerDb:
         )
 
     def game_line(
-        self, player: int, game: int, team: int, *, sport: str | None = None, **stats: int | None
+        self, player: int, game: int, team: int, *, sport: str | None = None, **stats: float | None
     ) -> None:
         values = [stats.get(c) for c in STAT_COLUMNS]
         self.conn.execute(
@@ -120,7 +120,7 @@ class PlayerDb:
         team: int | None = None,
         games: int | None = 1,
         sport: str | None = None,
-        **stats: int | None,
+        **stats: float | None,
     ) -> None:
         values = [stats.get(c) for c in STAT_COLUMNS]
         self.conn.execute(
@@ -131,10 +131,10 @@ class PlayerDb:
         )
 
 
-def full_stats(**overrides: int | None) -> dict[str, int | None]:
+def full_stats(**overrides: float | None) -> dict[str, float | None]:
     """Every stat column set (to 1 unless overridden), so a total is only None
     when a test means it to be."""
-    stats: dict[str, int | None] = dict.fromkeys(STAT_COLUMNS, 1)
+    stats: dict[str, float | None] = dict.fromkeys(STAT_COLUMNS, 1)
     stats.update(overrides)
     return stats
 

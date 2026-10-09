@@ -15,7 +15,10 @@ The rules, in the order a stat line meets them:
    Josh Downs: 13 rushing yards on 0 carries), and since issue #313 widened
    the columns to 34 the filter also keeps receiving, kicking and punting
    lines -- which is why refetching with `--force` roughly quadrupled the
-   cached rows a season.
+   cached rows a season. Issue #354's widening to 42 (five `def_*`
+   columns, three EPA columns) keeps defenders' lines as well, about
+   2.3 times as many rows again; a line whose only stats are outside the
+   contract (an assisted tackle, a QB hit) is still dropped.
 2. Game: the stat `game_id` must be a `games.source_id` of the season, and
    its REG/POST must agree with that game's `season_type`. Either failing
    raises, naming the game_id and player_id.
@@ -40,7 +43,14 @@ The rules, in the order a stat line meets them:
    except `contracts.PLAYER_STAT_MAX_FIELDS` (`fg_long`, `pt_long`), which
    take the MAX of the game rows, because a "long" doesn't add up (#313).
    games = the line count; team_id = the one team, else None; a stat is None
-   only if it is None on every line.
+   only if it is None on every line. The `contracts.PLAYER_STAT_REAL_FIELDS`
+   columns sum as floats, unrounded; a blank EPA cell (no play of that
+   kind) adds nothing rather than erasing the season.
+9. Parsing (#354): `contracts.PLAYER_STAT_REAL_FIELDS` (`def_sacks`, in
+   half-sack steps, and the three EPA columns) parse with `float()`; every
+   other column with `int()`, so a fraction in a count column raises,
+   naming the column, instead of being truncated. An empty cell is None,
+   never 0.
 7. Starters: for each completed game and side, the schedule's listed QB if
    the side has no lines at all or the listed QB has a line for that side
    (`nflverse_schedule`); otherwise that side's player with the most
@@ -65,6 +75,7 @@ from typing import Any, Literal
 
 from cfb_strength.contracts import (
     PLAYER_STAT_MAX_FIELDS,
+    PLAYER_STAT_REAL_FIELDS,
     GameStarterRow,
     PlayerGameStatRow,
     PlayerRow,
@@ -78,7 +89,8 @@ from cfb_strength.ingest.nflverse.normalize import mint_surrogate_id
 STAT_FIELDS: tuple[str, ...] = tuple(f.name for f in dataclasses.fields(PlayerStats))
 """Every `PlayerStats` column, in contract order (34 since issue #313
 widened them from the ten passing/rushing ones to receiving, kicking and
-punting). nflverse's weekly file uses exactly these names, so widening the
+punting; 42 since #354 added five `def_*` and three EPA columns).
+nflverse's weekly file uses exactly these names, so widening the
 contract widens the cache projection and this parse together."""
 
 SOURCE_NEGATED_FIELDS: frozenset[str] = frozenset({"sack_yards_lost"})
@@ -136,15 +148,23 @@ def has_any_stat(row: Mapping[str, str]) -> bool:
     return any(_is_nonzero(row.get(name, "")) for name in STAT_FIELDS)
 
 
-def _parse_stat(row: Mapping[str, str], name: str) -> int | None:
+def _parse_stat(row: Mapping[str, str], name: str) -> int | float | None:
+    """One cell in the stored convention. `contracts.PLAYER_STAT_REAL_FIELDS`
+    (`def_sacks` in half-sack steps, and the three EPA columns) parse with
+    `float()`, unrounded; every other column with `int()`, so a fractional
+    value in a count column still raises rather than being truncated (#354).
+    An empty cell is None, never 0."""
     value = row[name].strip()
     if value in _EMPTY_CELLS:
         return None
+    real = name in PLAYER_STAT_REAL_FIELDS
+    parsed: int | float
     try:
-        parsed = int(value)
+        parsed = float(value) if real else int(value)
     except ValueError as e:
+        kind = "a number" if real else "a whole number"
         raise ValueError(
-            f"stat column {name!r} holds {value!r}, not a whole number "
+            f"stat column {name!r} holds {value!r}, not {kind} "
             f"(game_id={row.get('game_id')!r} player_id={row.get('player_id')!r})"
         ) from e
     return -parsed if name in SOURCE_NEGATED_FIELDS else parsed
@@ -155,7 +175,10 @@ def parse_stats(row: Mapping[str, str]) -> PlayerStats:
     empty cell is None, never 0. A column the row doesn't have raises
     `KeyError`, which is the point: a season nflverse publishes without one
     must fail loudly, not read as an era that didn't track the stat."""
-    return PlayerStats(**{name: _parse_stat(row, name) for name in STAT_FIELDS})
+    # `Any`: the cells are `int | None` or `float | None` by column, which a
+    # `**` dict can't express per key; `_parse_stat` is what keeps them apart.
+    cells: dict[str, Any] = {name: _parse_stat(row, name) for name in STAT_FIELDS}
+    return PlayerStats(**cells)
 
 
 def player_season_type(value: str) -> PlayerSeasonType:
@@ -407,8 +430,9 @@ def _aggregate_stats(lines: Sequence[_Line]) -> PlayerStats:
     """Rule 6's season aggregate: the sum of the game rows, except for
     `contracts.PLAYER_STAT_MAX_FIELDS` (`fg_long`, `pt_long`), which take
     the MAX -- summing a kicker's 16 game-longs would report a season long
-    of several hundred yards. A stat None on every line stays None."""
-    totals: dict[str, int | None] = {}
+    of several hundred yards. A stat None on every line stays None. The
+    `contracts.PLAYER_STAT_REAL_FIELDS` columns sum as floats (#354)."""
+    totals: dict[str, Any] = {}  # int or float per column, as in `parse_stats`
     for name in STAT_FIELDS:
         present = [v for v in (getattr(line.stats, name) for line in lines) if v is not None]
         if not present:

@@ -13,6 +13,7 @@ from cfb_strength.contracts import (
     PLAYER_LEADER_SORTS_BY_CATEGORY,
     PLAYER_LEADERS_MAX_LIMIT,
     PLAYER_STAT_MAX_FIELDS,
+    PLAYER_STAT_REAL_FIELDS,
     PlayerLeaderRow,
     PlayerLeaders,
     PlayerStats,
@@ -380,10 +381,16 @@ def test_every_leaders_row_equals_that_players_career_totals(db: PlayerDb) -> No
 
 def test_player_leader_row_stats_are_a_full_player_stats(db: PlayerDb) -> None:
     p = db.player("All Columns")
-    values = {f.name: i + 1 for i, f in enumerate(fields(PlayerStats))}
+    # The REAL columns (#354) get a fraction, so a read that truncated them
+    # to an int would show here; 1.0 == 1 would hide it.
+    values = {
+        f.name: i + 1.5 if f.name in PLAYER_STAT_REAL_FIELDS else i + 1
+        for i, f in enumerate(fields(PlayerStats))
+    }
     db.season(p, 2000, **values)
     row = get_player_leaders(conn_of(db), sport="nfl").rows[0]
     assert row.stats == PlayerStats(**values)
+    assert row.stats.def_sacks is not None and row.stats.def_sacks % 1 == 0.5
 
 
 # --- the rushing category (#312) ----------------------------------------------

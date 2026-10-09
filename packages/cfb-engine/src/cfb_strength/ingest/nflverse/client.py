@@ -31,11 +31,16 @@ carry some 150 columns this project doesn't use:
   `STATS_PLAYER_WEEK_CACHE_COLUMNS` (ids, week, season type, game, teams and
   every `contracts.PlayerStats` column), and only rows where at least one of
   those stat columns is non-empty and non-zero
-  (`player_normalize.has_any_stat`). Since issue #313 widened the stats from
-  ten (passing and rushing) to 34 (adding receiving, kicking and punting),
-  that keeps about 5,700-6,800 of 17,000-19,500 rows a season, ~700-900 KB:
-  roughly 21 MB for 1999-2025, against 5 MB before the widening, measured on
-  the refetched cache.
+  (`player_normalize.has_any_stat`). Issue #313 widened the stats from ten
+  (passing and rushing) to 34 (adding receiving, kicking and punting), and
+  issue #354 to 42 (five `def_*` columns and three EPA columns), so
+  defenders' lines are cached too. That keeps about 14,300-15,800 of
+  17,000-19,500 rows a season (1999: 14,411; 2023: 15,293; 2025: 15,769),
+  ~2.1-2.4 MB each: 60.3 MB for 1999-2025, against 21.9 MB at 34 columns
+  and 5 MB at ten, measured on the refetched cache. A line whose only
+  stats are outside the contract (an assisted tackle, a QB hit) is still
+  dropped. EPA cells are cached as nflverse publishes them, up to 18
+  decimal places, never rounded.
 * `data/raw/nfl/players.csv` keeps only `PLAYERS_CACHE_COLUMNS`.
 
 The cache is a faithful projection of the source: it holds nflverse's own

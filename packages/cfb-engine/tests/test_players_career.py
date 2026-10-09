@@ -311,15 +311,32 @@ def test_career_totals_combine_the_season_lines_by_the_contracts_rule(db: Player
     rather than silently re-entering the sum loop."""
     home, away = db.team("Home"), db.team("Away")
     p = db.player("P")
-    db.season(p, 2000, games=16, **full_stats(passing_yards=4000, carries=30, fg_long=53))
-    db.season(p, 2001, games=15, **full_stats(passing_yards=3500, carries=None, fg_long=47))
-    db.season(p, 2002, games=None, **full_stats(passing_yards=0, fg_long=52, pt_long=None))
+    # The REAL columns (#354) carry fractions (exact in binary, so the sum
+    # is order-independent): half sacks and decimal EPA.
+    db.season(
+        p,
+        2000,
+        games=16,
+        **full_stats(passing_yards=4000, carries=30, fg_long=53, def_sacks=0.5, passing_epa=12.25),
+    )
+    db.season(
+        p,
+        2001,
+        games=15,
+        **full_stats(passing_yards=3500, carries=None, fg_long=47, def_sacks=1.5, passing_epa=-3.5),
+    )
+    db.season(
+        p,
+        2002,
+        games=None,
+        **full_stats(passing_yards=0, fg_long=52, pt_long=None, def_sacks=2.5, passing_epa=0.75),
+    )
     db.season(
         p,
         2001,
         season_type="postseason",
         games=2,
-        **full_stats(passing_yards=500, fg_long=44, pt_long=None),
+        **full_stats(passing_yards=500, fg_long=44, pt_long=None, def_sacks=0.5),
     )
     for week, (hp, ap) in enumerate([(20, 10), (10, 10), (3, 9)], 1):
         db.start(db.game(2001, home, away, hp, ap, week=week), home, p)
@@ -352,6 +369,24 @@ def test_career_totals_combine_the_season_lines_by_the_contracts_rule(db: Player
     # give None and a plain SUM 152.
     assert career.regular_season is not None
     assert career.regular_season.stats.fg_long == 53
+    # The REAL columns' season lines keep their fractions (#354).
+    regular = [s for s in career.seasons if s.season_type == "regular"]
+    assert [s.stats.def_sacks for s in regular] == [0.5, 1.5, 2.5, None]
+    assert career.postseason is not None and career.postseason.stats.def_sacks == 0.5
+
+
+def test_a_career_sums_half_sacks_and_decimal_epa_without_truncating(db: PlayerDb) -> None:
+    # Three tracked seasons and no gap, so the null-aware sum has a value.
+    p = db.player("Edge")
+    for season, sacks, epa in ((2000, 0.5, 12.25), (2001, 1.5, -3.5), (2002, 2.5, 0.75)):
+        db.season(p, season, **full_stats(def_sacks=sacks, passing_epa=epa))
+
+    career = get_player_career(conn_of(db), sport="nfl", player_id=p)
+
+    assert career.regular_season is not None
+    assert career.regular_season.stats.def_sacks == 4.5
+    assert career.regular_season.stats.passing_epa == 9.5
+    assert career.regular_season.stats.def_interceptions == 3
 
 
 # --- the MAX columns (#334) -------------------------------------------------
