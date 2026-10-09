@@ -15,6 +15,7 @@ from types import MappingProxyType
 
 from cfb_strength.contracts import (
     PLAYER_STAT_MAX_FIELDS,
+    PLAYER_STAT_SPARSE_FIELDS,
     PlayerLeaderCategory,
     PlayerStats,
 )
@@ -74,10 +75,22 @@ def null_aware_sum(column: str) -> str:
     return f"CASE WHEN COUNT({column}) = COUNT(*) THEN SUM({column}) END"
 
 
+def sparse_sum(column: str) -> str:
+    """SUM skipping a NULL on a line that has a season row, but None when any
+    line has no season row at all (`has_season_row = 0`, a start-only line),
+    and None when every value is NULL (SQL's SUM over no values).
+
+    The rule `contracts.PLAYER_STAT_SPARSE_FIELDS` states for EPA (#354): a
+    blank on a stat line means "no play of that kind", but a season with no
+    stat line was never tracked, so it still makes the total partial."""
+    return f"CASE WHEN MIN(has_season_row) = 1 THEN SUM({column}) END"
+
+
 def stat_total(column: str) -> str:
     """How a stat column combines several season lines into one total: the
     null-aware SUM, except plain MAX for `contracts.PLAYER_STAT_MAX_FIELDS`
-    (issue #334). A "long" does not add up -- a kicker whose three season
+    (issue #334) and `sparse_sum` for `contracts.PLAYER_STAT_SPARSE_FIELDS`
+    (issue #354). A "long" does not add up -- a kicker whose three season
     longs are 53, 47 and 52 has a career long of 53, not 152.
 
     The MAX is deliberately *not* null-aware. SQL's MAX skips NULLs and is
@@ -86,11 +99,13 @@ def stat_total(column: str) -> str:
     seasons he never kicked in. A total that adds up can't do that, because
     an untracked season would read as a partial career.
 
-    The column set comes from the contract, never a list here, so a third
-    MAX column is handled without touching this module.
+    The column sets come from the contract, never a list here, so a third
+    MAX or sparse column is handled without touching this module.
     """
     if column in PLAYER_STAT_MAX_FIELDS:
         return f"MAX({column})"
+    if column in PLAYER_STAT_SPARSE_FIELDS:
+        return sparse_sum(column)
     return null_aware_sum(column)
 
 
@@ -98,7 +113,8 @@ def lines_cte(*, by_player: bool, by_season_type: bool) -> str:
     """`WITH ... lines AS (...)`: one row per (player, season, season_type)
     with a season row or a QB start, scoped to `:sport` and optionally to
     `:player_id` and `:season_type`. A line with no season row carries NULL
-    for `games` and every stat."""
+    for `games` and every stat, and `has_season_row` 0 (1 otherwise), which
+    tells it apart from a season row of NULL stats (`sparse_sum`)."""
     starter_filters = ["s.sport = :sport", "g.sport = :sport", "s.position = 'QB'"]
     row_filters = ["sport = :sport"]
     if by_player:
@@ -133,6 +149,7 @@ def lines_cte(*, by_player: bool, by_season_type: bool) -> str:
     lines AS (
         SELECT k.player_id, k.season, k.season_type,
                r.team_id, r.games, {stats},
+               CASE WHEN r.player_id IS NULL THEN 0 ELSE 1 END AS has_season_row,
                COALESCE(st.start_rows, 0) AS start_rows,
                COALESCE(st.wins, 0) AS wins,
                COALESCE(st.losses, 0) AS losses,
@@ -151,8 +168,8 @@ def totals_select(category: PlayerLeaderCategory = "passing") -> str:
     """The per-(player, season_type) aggregate over `lines`. `qualifies` is
     `category`'s leaderboard rule (`QUALIFYING`) holding on any line; the
     totals themselves are the same whatever the category. Each stat column
-    combines by `stat_total`, so a career "long" is a MAX and everything
-    else a null-aware SUM."""
+    combines by `stat_total`, so a career "long" is a MAX, an EPA column a
+    `sparse_sum` and everything else a null-aware SUM."""
     stats = ", ".join(f"{stat_total(c)} AS {c}" for c in STAT_COLUMNS)
     return f"""
     SELECT player_id, season_type,

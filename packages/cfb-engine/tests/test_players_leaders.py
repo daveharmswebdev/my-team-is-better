@@ -269,6 +269,27 @@ def test_a_start_only_season_makes_the_career_total_none(db: PlayerDb) -> None:
     assert (row.first_season, row.last_season) == (2000, 2001)
 
 
+def test_a_leaders_row_skips_a_null_epa_season_row_but_not_a_start_only_season(
+    db: PlayerDb,
+) -> None:
+    # `totals_select` is shared, so a leaders row combines the
+    # `PLAYER_STAT_SPARSE_FIELDS` columns the same way a career page does
+    # (#354): a NULL on a season row is skipped, a start-only season is not.
+    home, away = db.team("Home"), db.team("Away")
+    p = db.player("Receiver", position="WR")
+    for season, epa in ((2000, 1.5), (2001, None), (2002, 2.0)):
+        db.season(p, season, **full_stats(attempts=1, rushing_epa=epa))
+    q = db.player("Gap Year")
+    db.season(q, 2000, **full_stats(attempts=1, rushing_epa=4.0))
+    db.start(db.game(2001, home, away, 10, 3), home, q)
+    conn = conn_of(db)
+
+    rows = {r.display_name: r for r in get_player_leaders(conn, sport="nfl").rows}
+
+    assert rows["Receiver"].stats.rushing_epa == 3.5
+    assert rows["Gap Year"].stats.rushing_epa is None
+
+
 # --- the MAX columns (#334) -------------------------------------------------
 
 

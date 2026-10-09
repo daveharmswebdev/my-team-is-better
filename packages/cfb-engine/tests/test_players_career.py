@@ -10,6 +10,7 @@ import pytest
 
 from cfb_strength.contracts import (
     PLAYER_STAT_MAX_FIELDS,
+    PLAYER_STAT_SPARSE_FIELDS,
     PlayerCareer,
     PlayerCareerTotals,
     PlayerSeasonLine,
@@ -304,11 +305,21 @@ def _max_skipping_nulls(values: list[int | None]) -> int | None:
     return max(present) if present else None
 
 
+def _sparse_sum(values: list[float | None], has_row: list[bool]) -> float | None:
+    """`PLAYER_STAT_SPARSE_FIELDS` (#354): NULLs on season rows are skipped,
+    a start-only line (no season row) makes it None, and so does all-NULL."""
+    present = [v for v in values if v is not None]
+    if not all(has_row) or not present:
+        return None
+    return sum(present)
+
+
 def test_career_totals_combine_the_season_lines_by_the_contracts_rule(db: PlayerDb) -> None:
     """Every stat column is the null-aware sum of its season lines, except
-    `PLAYER_STAT_MAX_FIELDS`, which are the max (#334). The split is read
-    from the contract, so a MAX column added there later is checked here
-    rather than silently re-entering the sum loop."""
+    `PLAYER_STAT_MAX_FIELDS`, which are the max (#334), and
+    `PLAYER_STAT_SPARSE_FIELDS`, which skip a NULL season row (#354). The
+    split is read from the contract, so a column added to either set later is
+    checked here rather than silently re-entering the sum loop."""
     home, away = db.team("Home"), db.team("Away")
     p = db.player("P")
     # The REAL columns (#354) carry fractions (exact in binary, so the sum
@@ -360,10 +371,18 @@ def test_career_totals_combine_the_season_lines_by_the_contracts_rule(db: Player
             sum(s.record.losses for s in lines),
             sum(s.record.ties for s in lines),
         )
+        # In this fixture a line has a season row exactly when it has a
+        # stat or a games count; the start-only lines have neither.
+        has_row = [s.games is not None or s.stats != PlayerStats() for s in lines]
         for f in fields(PlayerStats):
             values = [getattr(s.stats, f.name) for s in lines]
-            combine = _max_skipping_nulls if f.name in PLAYER_STAT_MAX_FIELDS else _null_aware_sum
-            assert getattr(totals.stats, f.name) == combine(values), (season_type, f.name)
+            if f.name in PLAYER_STAT_MAX_FIELDS:
+                expected = _max_skipping_nulls(values)
+            elif f.name in PLAYER_STAT_SPARSE_FIELDS:
+                expected = _sparse_sum(values, has_row)
+            else:
+                expected = _null_aware_sum(values)
+            assert getattr(totals.stats, f.name) == expected, (season_type, f.name)
     # The rule actually differs on this fixture: the regular-season longs are
     # 53, 47 and 52 plus a start-only line with none, so the sum rule would
     # give None and a plain SUM 152.
@@ -443,3 +462,89 @@ def test_a_long_null_in_every_season_stays_none(db: PlayerDb) -> None:
     assert totals is not None
     assert totals.stats.fg_long is None
     assert totals.stats.pt_long is None
+
+
+# --- the sparse columns (#354) ----------------------------------------------
+#
+# `contracts.PLAYER_STAT_SPARSE_FIELDS` (the EPA columns) treat a blank as "no
+# play of that kind", so a career skips a NULL on a season that *has* a stat
+# row. A start-only season has no stat row -- nothing was tracked -- so it
+# still makes the total NULL, as it does for every other column.
+
+
+def test_a_null_epa_season_row_is_skipped_not_a_gap(db: PlayerDb) -> None:
+    p = db.player("Slot Receiver", position="WR")
+    db.season(p, 2000, **full_stats(rushing_epa=1.5, receiving_epa=4.25))
+    db.season(p, 2001, **full_stats(rushing_epa=None, receiving_epa=-1.0))
+    db.season(p, 2002, **full_stats(rushing_epa=2.0, receiving_epa=0.5))
+    db.season(p, 2003, **full_stats(rushing_epa=None, receiving_epa=None))
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.rushing_epa == 3.5
+    assert totals.stats.receiving_epa == 3.75
+    # The default 1 in every season row, untouched by any NULL.
+    assert totals.stats.passing_epa == 4
+
+
+def test_epa_is_none_for_a_start_only_career(db: PlayerDb) -> None:
+    home, away = db.team("Home"), db.team("Away")
+    p = db.player("Starts Only")
+    db.start(db.game(2000, home, away, 10, 3), home, p)
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.passing_epa is None
+    assert totals.stats.rushing_epa is None
+    assert totals.stats.receiving_epa is None
+
+
+def test_a_start_only_season_still_makes_the_epa_total_none(db: PlayerDb) -> None:
+    # One season row with EPA and one start-only season: the start-only
+    # season was never tracked, so it wins over the sparse skip.
+    home, away = db.team("Home"), db.team("Away")
+    p = db.player("Gap Year")
+    db.season(p, 2000, **full_stats(passing_epa=12.25, rushing_epa=None))
+    db.start(db.game(2001, home, away, 10, 3), home, p)
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.passing_epa is None
+    assert totals.stats.rushing_epa is None
+    assert totals.stats.receiving_epa is None
+
+
+def test_epa_null_in_every_season_row_stays_none(db: PlayerDb) -> None:
+    p = db.player("Never Threw", position="RB")
+    db.season(p, 2000, **full_stats(passing_epa=None))
+    db.season(p, 2001, **full_stats(passing_epa=None))
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.passing_epa is None
+    assert totals.stats.rushing_epa == 2
+
+
+def test_the_sparse_rule_leaves_the_other_columns_alone(db: PlayerDb) -> None:
+    # One NULL season row still erases an ordinary total (NULL-not-zero),
+    # REAL or not, and a long is still the MAX.
+    p = db.player("Mixed")
+    db.season(p, 2000, **full_stats(carries=5, def_sacks=1.5, fg_long=44, rushing_epa=None))
+    db.season(p, 2001, **full_stats(carries=None, def_sacks=None, fg_long=51, rushing_epa=0.5))
+    conn = conn_of(db)
+
+    totals = get_player_career(conn, sport="nfl", player_id=p).regular_season
+
+    assert totals is not None
+    assert totals.stats.carries is None
+    assert totals.stats.def_sacks is None
+    assert totals.stats.fg_long == 51
+    assert totals.stats.rushing_epa == 0.5
