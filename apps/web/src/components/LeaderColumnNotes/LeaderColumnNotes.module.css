@@ -1,0 +1,5 @@
+/* The marker pairing a note with the table headers it covers (issue #317). */
+.marker {
+  font-weight: 700;
+  color: var(--leather);
+}

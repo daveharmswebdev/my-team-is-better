@@ -389,6 +389,18 @@ export function leaderColumnNotes(
 }
 
 /**
+ * The element id of a column note (issue #317). The page renders the notes
+ * and the table describes its headers by them, so both build the id here
+ * from the one prefix the page hands each.
+ */
+export function leaderColumnNoteId(
+  prefix: string,
+  note: LeaderColumnNote,
+): string {
+  return `${prefix}-${note}`
+}
+
+/**
  * The sort a stat column re-sorts the board by, or `undefined` when this
  * category doesn't sort on it. Read straight off the category's sort list,
  * so a category gaining a sort makes its column sortable with no change

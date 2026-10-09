@@ -22,6 +22,7 @@ import {
   DEFENSE_EARLY_ERA_NOTE,
   DEFENSE_UNOFFICIAL_NOTE,
 } from '../../lib/playerStats'
+import { LeaderColumnNotes } from '../LeaderColumnNotes/LeaderColumnNotes'
 import { PlayerLeadersTable } from './PlayerLeadersTable'
 
 const meta = {
@@ -190,12 +191,26 @@ export const ByPuntingYards: Story = {
 }
 
 /**
+ * The page renders the defense notes (#316) above the table; these stories
+ * do the same, with the prefix the table's headers point at.
+ */
+function withDefenseNotes(Story: () => React.JSX.Element) {
+  return (
+    <>
+      <LeaderColumnNotes category="defense" idPrefix="story-notes" />
+      <Story />
+    </>
+  )
+}
+
+/**
  * The defense board (issue #317): T.J. Watt's 19.0, then a real tie at 17.5
- * -- a half sack shown, never rounded -- with the founder's two notes (#316)
- * under the table, each marked on and describing the headers it covers.
+ * -- a half sack shown, never rounded. Each header a founder's note (#316)
+ * covers carries its marker and is described by the note above the table.
  */
 export const BySacks: Story = {
-  args: { leaders: LEADERS_BY_DEF_SACKS },
+  args: { leaders: LEADERS_BY_DEF_SACKS, columnNoteIdPrefix: 'story-notes' },
+  decorators: [withDefenseNotes],
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement)
     await expect(
@@ -219,13 +234,18 @@ export const BySacks: Story = {
  * "not recorded", never 0 or 0.0. Invented, since the fixture has no nulls.
  */
 export const DefenseWithNullStats: Story = {
-  args: { leaders: DEFENSE_WITH_NULL_STATS },
+  args: {
+    leaders: DEFENSE_WITH_NULL_STATS,
+    columnNoteIdPrefix: 'story-notes',
+  },
+  decorators: [withDefenseNotes],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('0.5')).toBeInTheDocument()
     await expect(canvas.getAllByText('not recorded')).toHaveLength(6)
-    await expect(canvas.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
-    await expect(canvas.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: 'Forced fumbles' }),
+    ).toHaveAccessibleDescription(DEFENSE_EARLY_ERA_NOTE)
   },
 }
 

@@ -19,6 +19,7 @@ import {
   fgPctNote,
   formatSeasonSpan,
   formatStat,
+  leaderColumnNoteId,
   leaderColumnNotes,
   leaderStatCell,
   sortForStat,
@@ -598,6 +599,11 @@ describe('the defense board (issue #317)', () => {
     ] as const) {
       expect(leaderColumnNotes(category)).toEqual([])
     }
+  })
+
+  it('builds each note id from the one prefix, distinct per note', () => {
+    expect(leaderColumnNoteId('p', 'early-era')).toBe('p-early-era')
+    expect(leaderColumnNoteId('p', 'unofficial')).toBe('p-unofficial')
   })
 
   it('adds no defense stat to the career and compare columns (#352)', () => {

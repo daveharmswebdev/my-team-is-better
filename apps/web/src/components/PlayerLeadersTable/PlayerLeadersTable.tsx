@@ -6,11 +6,7 @@ import type {
   PlayerStatsOut,
 } from '../../lib/api/types'
 import { formatRecord } from '../../lib/formatRecord'
-import type {
-  LeaderColumnNote,
-  LeaderStatColumn,
-  LeaderStatKey,
-} from '../../lib/playerStats'
+import type { LeaderStatColumn, LeaderStatKey } from '../../lib/playerStats'
 import {
   DASH,
   LEADER_COLUMN_NOTES,
@@ -21,7 +17,7 @@ import {
   formatSeasonSpan,
   formatStat,
   leaderBoardColumns,
-  leaderColumnNotes,
+  leaderColumnNoteId,
   leaderStatCell,
   sortForStat,
 } from '../../lib/playerStats'
@@ -36,6 +32,12 @@ export interface PlayerLeadersTableProps {
   busy?: boolean
   /** The id of the note that explains this board: the pulled-early starter note, or the FG% minimum. */
   describedBy?: string
+  /**
+   * The prefix the page built its column-note ids from (issue #317). A
+   * header a note covers is described by that note's id
+   * (`leaderColumnNoteId`); without a prefix no header is, so no id dangles.
+   */
+  columnNoteIdPrefix?: string
 }
 
 function SortArrow({ active }: { active: boolean }) {
@@ -197,181 +199,166 @@ function StatCell({
  * sending them, so `deriveKickingStats` computes each row's value -- never
  * its rank or its place.
  *
- * The defense board (#317) shows sacks to one decimal, and under the table
- * the founder's notes (#316) for the columns that need one: each note is
- * read off the columns (`leaderColumnNotes`), marked on the headers it
- * covers and tied to them with `aria-describedby`, so no board can show
- * those numbers without it.
+ * The defense board (#317) shows sacks to one decimal. The founder's notes
+ * (#316) for the columns that need one are rendered by the page, in its
+ * "About these numbers" box (`LeaderColumnNotes`); here each covered header
+ * carries the note's marker and, given the page's `columnNoteIdPrefix`, an
+ * `aria-describedby` to that note.
  */
 export function PlayerLeadersTable({
   leaders,
   onSort,
   busy = false,
   describedBy,
+  columnNoteIdPrefix,
 }: PlayerLeadersTableProps) {
   const captionId = useId()
-  const noteIdPrefix = useId()
   const caption = `NFL career leaders: ${SEASON_TYPE_LABEL[leaders.season_type].toLowerCase()}, by ${SORT_LABEL[leaders.sort]}`
   const { showsRecord, stats: statColumns } = leaderBoardColumns(
     leaders.category,
   )
-  const notes = leaderColumnNotes(leaders.category)
-  const noteId = (note: LeaderColumnNote) => `${noteIdPrefix}-${note}`
 
   function headerText(column: LeaderStatColumn): HeaderText {
+    const { note } = column
     return {
       label: column.label,
       fullLabel: column.fullLabel,
-      marker:
-        column.note === undefined
+      marker: note === undefined ? undefined : LEADER_COLUMN_NOTES[note].marker,
+      describedBy:
+        note === undefined || columnNoteIdPrefix === undefined
           ? undefined
-          : LEADER_COLUMN_NOTES[column.note].marker,
-      describedBy: column.note === undefined ? undefined : noteId(column.note),
+          : leaderColumnNoteId(columnNoteIdPrefix, note),
     }
   }
 
   return (
-    <>
-      <div
-        className={styles.scroll}
-        role="region"
-        aria-labelledby={captionId}
-        // Focusable, so a keyboard user can scroll a table wider than the screen.
-        tabIndex={0}
+    <div
+      className={styles.scroll}
+      role="region"
+      aria-labelledby={captionId}
+      // Focusable, so a keyboard user can scroll a table wider than the screen.
+      tabIndex={0}
+    >
+      <table
+        className={styles.table}
+        aria-describedby={describedBy}
+        aria-busy={busy}
       >
-        <table
-          className={styles.table}
-          aria-describedby={describedBy}
-          aria-busy={busy}
-        >
-          <caption id={captionId} className={styles.caption}>
-            {caption}
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col" className={styles.numeric}>
-                Rank
+        <caption id={captionId} className={styles.caption}>
+          {caption}
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col" className={styles.numeric}>
+              Rank
+            </th>
+            <th scope="col">Player</th>
+            <th scope="col">Position</th>
+            <th scope="col">Seasons</th>
+            <th scope="col" className={styles.numeric}>
+              Games
+            </th>
+            {showsRecord && (
+              <>
+                <SortHeader
+                  text={{
+                    label: 'Starter record',
+                    fullLabel: undefined,
+                    marker: undefined,
+                    describedBy: undefined,
+                  }}
+                  sort="wins"
+                  current={leaders.sort}
+                  onSort={onSort}
+                />
+                <th scope="col" className={styles.numeric}>
+                  Starts
+                </th>
+              </>
+            )}
+            {statColumns.map((column) => {
+              const sort = sortForStat(leaders.category, column.key)
+              const text = headerText(column)
+              return sort === undefined ? (
+                <th
+                  scope="col"
+                  className={styles.numeric}
+                  key={column.key}
+                  aria-describedby={text.describedBy}
+                >
+                  <HeaderLabel
+                    label={text.label}
+                    fullLabel={text.fullLabel}
+                    marker={text.marker}
+                  />
+                </th>
+              ) : (
+                <SortHeader
+                  key={column.key}
+                  text={text}
+                  sort={sort}
+                  current={leaders.sort}
+                  onSort={onSort}
+                />
+              )
+            })}
+          </tr>
+        </thead>
+        <tbody>
+          {leaders.rows.map((row) => (
+            <tr key={row.player_id}>
+              <td
+                className={
+                  row.rank === null
+                    ? `${styles.numeric} ${styles.notRecorded}`
+                    : `${styles.numeric} ${styles.rank}`
+                }
+              >
+                {row.rank === null ? 'not ranked' : row.rank}
+              </td>
+              <th scope="row" className={styles.player}>
+                <Link to={`/nfl/players/${row.player_id}`}>
+                  {row.display_name}
+                </Link>
               </th>
-              <th scope="col">Player</th>
-              <th scope="col">Position</th>
-              <th scope="col">Seasons</th>
-              <th scope="col" className={styles.numeric}>
-                Games
-              </th>
+              <td
+                className={
+                  row.position === null ? styles.notRecorded : undefined
+                }
+              >
+                {row.position ?? NOT_RECORDED}
+              </td>
+              <td className={styles.numeric}>
+                {formatSeasonSpan(row.first_season, row.last_season)}
+              </td>
+              <td className={statCellClass(row.games)}>
+                {formatStat(row.games)}
+              </td>
               {showsRecord && (
                 <>
-                  <SortHeader
-                    text={{
-                      label: 'Starter record',
-                      fullLabel: undefined,
-                      marker: undefined,
-                      describedBy: undefined,
-                    }}
-                    sort="wins"
-                    current={leaders.sort}
-                    onSort={onSort}
-                  />
-                  <th scope="col" className={styles.numeric}>
-                    Starts
-                  </th>
+                  <td className={styles.numeric}>
+                    {formatRecord(
+                      row.record.wins,
+                      row.record.losses,
+                      row.record.ties,
+                    )}
+                  </td>
+                  <td className={styles.numeric}>
+                    {formatStat(row.record.starts)}
+                  </td>
                 </>
               )}
-              {statColumns.map((column) => {
-                const sort = sortForStat(leaders.category, column.key)
-                const text = headerText(column)
-                return sort === undefined ? (
-                  <th
-                    scope="col"
-                    className={styles.numeric}
-                    key={column.key}
-                    aria-describedby={text.describedBy}
-                  >
-                    <HeaderLabel
-                      label={text.label}
-                      fullLabel={text.fullLabel}
-                      marker={text.marker}
-                    />
-                  </th>
-                ) : (
-                  <SortHeader
-                    key={column.key}
-                    text={text}
-                    sort={sort}
-                    current={leaders.sort}
-                    onSort={onSort}
-                  />
-                )
-              })}
+              {statColumns.map((column) => (
+                <StatCell
+                  key={column.key}
+                  stats={row.stats}
+                  statKey={column.key}
+                />
+              ))}
             </tr>
-          </thead>
-          <tbody>
-            {leaders.rows.map((row) => (
-              <tr key={row.player_id}>
-                <td
-                  className={
-                    row.rank === null
-                      ? `${styles.numeric} ${styles.notRecorded}`
-                      : `${styles.numeric} ${styles.rank}`
-                  }
-                >
-                  {row.rank === null ? 'not ranked' : row.rank}
-                </td>
-                <th scope="row" className={styles.player}>
-                  <Link to={`/nfl/players/${row.player_id}`}>
-                    {row.display_name}
-                  </Link>
-                </th>
-                <td
-                  className={
-                    row.position === null ? styles.notRecorded : undefined
-                  }
-                >
-                  {row.position ?? NOT_RECORDED}
-                </td>
-                <td className={styles.numeric}>
-                  {formatSeasonSpan(row.first_season, row.last_season)}
-                </td>
-                <td className={statCellClass(row.games)}>
-                  {formatStat(row.games)}
-                </td>
-                {showsRecord && (
-                  <>
-                    <td className={styles.numeric}>
-                      {formatRecord(
-                        row.record.wins,
-                        row.record.losses,
-                        row.record.ties,
-                      )}
-                    </td>
-                    <td className={styles.numeric}>
-                      {formatStat(row.record.starts)}
-                    </td>
-                  </>
-                )}
-                {statColumns.map((column) => (
-                  <StatCell
-                    key={column.key}
-                    stats={row.stats}
-                    statKey={column.key}
-                  />
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {notes.length > 0 && (
-        <div className={styles.notes}>
-          {notes.map((note) => (
-            <p key={note}>
-              <span className={styles.marker} aria-hidden="true">
-                {LEADER_COLUMN_NOTES[note].marker}
-              </span>{' '}
-              <span id={noteId(note)}>{LEADER_COLUMN_NOTES[note].text}</span>
-            </p>
           ))}
-        </div>
-      )}
-    </>
+        </tbody>
+      </table>
+    </div>
   )
 }

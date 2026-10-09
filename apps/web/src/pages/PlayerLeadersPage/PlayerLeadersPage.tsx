@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { LeaderCategorySelect } from '../../components/LeaderCategorySelect/LeaderCategorySelect'
+import { LeaderColumnNotes } from '../../components/LeaderColumnNotes/LeaderColumnNotes'
 import { Pager } from '../../components/Pager/Pager'
 import { PlayerLeadersTable } from '../../components/PlayerLeadersTable/PlayerLeadersTable'
 import { PlayerStatsCredit } from '../../components/PlayerStatsCredit/PlayerStatsCredit'
@@ -157,6 +158,10 @@ export function PlayerLeadersPage() {
     (leaders?.sort ?? sort) === 'fg_pct'
       ? (leaders?.season_type ?? seasonType)
       : null
+  // The defense board's column notes (#317) follow the board on screen too,
+  // and live in the box above the table; the table's covered headers point
+  // at them by ids built from this prefix.
+  const columnNoteIdPrefix = `${noteId}-column`
   const describedBy =
     leaders === null
       ? undefined
@@ -188,6 +193,10 @@ export function PlayerLeadersPage() {
         {fgPctSeasonType !== null && (
           <p id={`${noteId}-fg-pct`}>{fgPctNote(fgPctSeasonType)}</p>
         )}
+        <LeaderColumnNotes
+          category={leaders?.category ?? category}
+          idPrefix={columnNoteIdPrefix}
+        />
         <p>{UNDERCOUNT_DISCLOSURE}</p>
         <p>{NOT_RECORDED_DISCLOSURE}</p>
       </section>
@@ -206,6 +215,7 @@ export function PlayerLeadersPage() {
             leaders={leaders}
             busy={pending}
             describedBy={describedBy}
+            columnNoteIdPrefix={columnNoteIdPrefix}
             onSort={handleSort}
             onPage={handlePage}
           />
@@ -221,6 +231,7 @@ function LeadersBoard({
   leaders,
   busy,
   describedBy,
+  columnNoteIdPrefix,
   onSort,
   onPage,
 }: {
@@ -228,6 +239,8 @@ function LeadersBoard({
   busy: boolean
   /** The starter-record note on the boards that show records, or the FG% minimum on the FG% board. */
   describedBy: string | undefined
+  /** The prefix of the column-note ids the page renders above the table (#317). */
+  columnNoteIdPrefix: string
   onSort: (sort: PlayerLeaderSort) => void
   onPage: (offset: number) => void
 }) {
@@ -275,6 +288,7 @@ function LeadersBoard({
         onSort={onSort}
         busy={busy}
         describedBy={describedBy}
+        columnNoteIdPrefix={columnNoteIdPrefix}
       />
       <Pager
         label="Leaders pages"

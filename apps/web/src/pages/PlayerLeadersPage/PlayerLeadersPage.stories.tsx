@@ -377,7 +377,8 @@ export const Punting: Story = {
 
 /**
  * The defense board (issue #317), with a half sack and stats the source
- * didn't track, and the founder's two notes (#316) under the table.
+ * didn't track, and the founder's two notes (#316) in the box above the
+ * table, each describing the headers it covers.
  */
 export const Defense: Story = {
   decorators: [
@@ -395,8 +396,12 @@ export const Defense: Story = {
     ).toHaveValue('defense')
     await expect(canvas.getByText('19.0')).toBeInTheDocument()
     await expect(canvas.getByText('0.5')).toBeInTheDocument()
-    await expect(canvas.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
-    await expect(canvas.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+    const about = canvas.getByRole('region', { name: 'About these numbers' })
+    await expect(within(about).getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
+    await expect(within(about).getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: 'Passes defended' }),
+    ).toHaveAccessibleDescription(DEFENSE_UNOFFICIAL_NOTE)
   },
 }
 

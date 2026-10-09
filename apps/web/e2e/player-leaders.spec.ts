@@ -402,7 +402,8 @@ test('choosing Punting ranks Thomas Morstead first on 4,831 yards', async ({
 
 // Issue #317: the defense board. Sacks keep their half (the fixture's 2023
 // has Josh Hines-Allen and Trey Hendrickson tied at 17.5, Hines-Allen first
-// by name), and the founder's two notes (#316) are on the page with it.
+// by name), and the founder's two notes (#316) are in "About these numbers",
+// above the table.
 // 2,619 players qualify in the regular season, 508 in the playoffs.
 const EARLY_ERA_NOTE =
   "Sacks and forced fumbles are counted from play-by-play. For 1999-2009, that can leave a player's season 0.5 to 2 short of the official total, and we show the source's number as is."
@@ -449,8 +450,13 @@ test('choosing Defense ranks T.J. Watt first on 19.0 sacks, keeps the 17.5 tie, 
   for (const [index, name] of DEFENSE_COLUMNS.entries()) {
     await expect(headers.nth(5 + index)).toHaveAccessibleName(name)
   }
-  await expect(page.getByText(EARLY_ERA_NOTE)).toBeVisible()
-  await expect(page.getByText(UNOFFICIAL_NOTE)).toBeVisible()
+  // Both notes sit in "About these numbers", above the table.
+  const about = page.getByRole('region', { name: 'About these numbers' })
+  await expect(about.getByText(EARLY_ERA_NOTE)).toBeVisible()
+  await expect(about.getByText(UNOFFICIAL_NOTE)).toBeVisible()
+  const aboutBox = await about.boundingBox()
+  const tableBox = await table.boundingBox()
+  expect(aboutBox!.y + aboutBox!.height).toBeLessThanOrEqual(tableBox!.y)
   await expect(
     page.getByRole('button', { name: 'Sacks', exact: true }),
   ).toHaveAccessibleDescription(EARLY_ERA_NOTE)
@@ -458,6 +464,14 @@ test('choosing Defense ranks T.J. Watt first on 19.0 sacks, keeps the 17.5 tie, 
     page.getByRole('button', { name: 'Passes defended', exact: true }),
   ).toHaveAccessibleDescription(UNOFFICIAL_NOTE)
   await expect(page.getByText('1–50 of 2,619')).toBeVisible()
+
+  // Leaving defense takes both notes with it.
+  await page.getByLabel('Stat category').selectOption('Kicking')
+  await expect(
+    leadersTable(page, 'regular season, by field goals made'),
+  ).toBeVisible()
+  await expect(page.getByText(EARLY_ERA_NOTE)).toHaveCount(0)
+  await expect(page.getByText(UNOFFICIAL_NOTE)).toHaveCount(0)
 })
 
 test('re-sorting Defense by INT puts DaRon Bland first on 9', async ({

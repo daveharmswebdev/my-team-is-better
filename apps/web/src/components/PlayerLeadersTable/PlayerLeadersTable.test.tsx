@@ -28,11 +28,16 @@ import {
   DEFENSE_UNOFFICIAL_NOTE,
   LEADER_COLUMN_NOTES,
 } from '../../lib/playerStats'
+import { LeaderColumnNotes } from '../LeaderColumnNotes/LeaderColumnNotes'
 import { PlayerLeadersTable } from './PlayerLeadersTable'
 
 function renderTable(
   leaders: PlayerLeadersOut,
-  extra: { busy?: boolean; describedBy?: string } = {},
+  extra: {
+    busy?: boolean
+    describedBy?: string
+    columnNoteIdPrefix?: string
+  } = {},
 ) {
   const onSort = vi.fn()
   render(
@@ -943,22 +948,52 @@ describe('PlayerLeadersTable, the defense board (issue #317)', () => {
     ])
   })
 
-  it('shows both notes under the table, exactly as written', () => {
-    renderTable(LEADERS_BY_DEF_SACKS)
+  it('renders neither note itself: the page shows them above the table', () => {
+    renderTable(LEADERS_BY_DEF_SACKS, { columnNoteIdPrefix: 'notes' })
 
-    expect(screen.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
-    expect(screen.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+    expect(screen.queryByText(DEFENSE_EARLY_ERA_NOTE)).not.toBeInTheDocument()
+    expect(screen.queryByText(DEFENSE_UNOFFICIAL_NOTE)).not.toBeInTheDocument()
   })
 
-  it('shows both notes on the playoff defense board too', () => {
-    renderTable({ ...LEADERS_BY_DEF_SACKS, season_type: 'postseason' })
+  it('points each covered header at its note by the id built from the prefix', () => {
+    renderTable(LEADERS_BY_DEF_SACKS, { columnNoteIdPrefix: 'notes' })
 
-    expect(screen.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeInTheDocument()
-    expect(screen.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeInTheDocument()
+    for (const name of ['Sacks', 'Forced fumbles']) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute(
+        'aria-describedby',
+        'notes-early-era',
+      )
+    }
+    for (const name of ['Solo tackles', 'Passes defended']) {
+      expect(screen.getByRole('button', { name })).toHaveAttribute(
+        'aria-describedby',
+        'notes-unofficial',
+      )
+    }
+    expect(
+      screen.getByRole('button', { name: 'Interceptions' }),
+    ).not.toHaveAttribute('aria-describedby')
   })
 
-  it('ties each note to the headers it covers, and INT to neither', () => {
+  it('describes no header when no note prefix is given, so no id dangles', () => {
     renderTable(LEADERS_BY_DEF_SACKS)
+
+    for (const button of screen.getAllByRole('button')) {
+      expect(button).not.toHaveAttribute('aria-describedby')
+    }
+  })
+
+  it('ties each note the page renders to the headers it covers, and INT to neither', () => {
+    render(
+      <MemoryRouter>
+        <LeaderColumnNotes category="defense" idPrefix="notes" />
+        <PlayerLeadersTable
+          leaders={LEADERS_BY_DEF_SACKS}
+          onSort={() => {}}
+          columnNoteIdPrefix="notes"
+        />
+      </MemoryRouter>,
+    )
 
     for (const name of ['Sacks', 'Forced fumbles']) {
       expect(screen.getByRole('button', { name })).toHaveAccessibleDescription(
@@ -976,7 +1011,16 @@ describe('PlayerLeadersTable, the defense board (issue #317)', () => {
   })
 
   it("marks each covered header with its note's marker, and the note with the same one", () => {
-    renderTable(LEADERS_BY_DEF_SACKS)
+    render(
+      <MemoryRouter>
+        <LeaderColumnNotes category="defense" idPrefix="notes" />
+        <PlayerLeadersTable
+          leaders={LEADERS_BY_DEF_SACKS}
+          onSort={() => {}}
+          columnNoteIdPrefix="notes"
+        />
+      </MemoryRouter>,
+    )
 
     const early = LEADER_COLUMN_NOTES['early-era'].marker
     const unofficial = LEADER_COLUMN_NOTES.unofficial.marker
@@ -1003,10 +1047,17 @@ describe('PlayerLeadersTable, the defense board (issue #317)', () => {
     ['kicking', LEADERS_BY_FG_MADE],
     ['kicking, by FG%', LEADERS_BY_FG_PCT],
     ['punting', LEADERS_BY_PT_YARDS],
-  ])('shows neither defense note on the %s board', (_name, leaders) => {
-    renderTable(leaders)
+  ])(
+    'marks and describes no header by a note on the %s board',
+    (_name, leaders) => {
+      renderTable(leaders, { columnNoteIdPrefix: 'notes' })
 
-    expect(screen.queryByText(DEFENSE_EARLY_ERA_NOTE)).not.toBeInTheDocument()
-    expect(screen.queryByText(DEFENSE_UNOFFICIAL_NOTE)).not.toBeInTheDocument()
-  })
+      for (const button of screen.getAllByRole('button')) {
+        expect(button).not.toHaveAttribute('aria-describedby')
+        for (const { marker } of Object.values(LEADER_COLUMN_NOTES)) {
+          expect(button.textContent).not.toContain(marker)
+        }
+      }
+    },
+  )
 })
