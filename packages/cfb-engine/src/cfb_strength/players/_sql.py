@@ -59,6 +59,15 @@ QUALIFYING: Mapping[PlayerLeaderCategory, str] = MappingProxyType(
         "kicking": "fg_att > 0 OR pat_att > 0",
         # A punt (#315).
         "punting": "pt_att > 0",
+        # More than zero in any of the five defense columns, whatever the
+        # position (#317): half a sack, one pass defended or one solo tackle
+        # on a wide receiver's kick-coverage snap all count. A line of five
+        # real 0s doesn't qualify, and neither does a NULL: `NULL > 0` is
+        # NULL, and an OR of NULLs and falses is never true.
+        "defense": (
+            "def_sacks > 0 OR def_interceptions > 0 OR def_tackles_solo > 0"
+            " OR def_fumbles_forced > 0 OR def_pass_defended > 0"
+        ),
     }
 )
 

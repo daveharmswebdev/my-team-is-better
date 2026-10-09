@@ -1,4 +1,5 @@
-"""Career leaderboards (#296, #312, #314, #315): a stat column sorted descending, no rating math."""
+"""Career leaderboards (#296, #312, #314, #315, #317): a stat column sorted
+descending, no rating math."""
 
 from __future__ import annotations
 
@@ -48,6 +49,13 @@ _SORT_COLUMN: dict[PlayerLeaderSort, str] = {
     "pt_net_yards": "q.pt_net_yards",
     "pt_att": "q.pt_att",
     "pt_inside_20": "q.pt_inside_20",
+    # `def_sacks` is REAL, so a half sack ranks exactly (10.5 above 10.0);
+    # sums of halves are exact in a double, so equal totals tie (#317).
+    "def_sacks": "q.def_sacks",
+    "def_interceptions": "q.def_interceptions",
+    "def_tackles_solo": "q.def_tackles_solo",
+    "def_fumbles_forced": "q.def_fumbles_forced",
+    "def_pass_defended": "q.def_pass_defended",
 }
 
 # A sort's extra condition on who is on its board, over the career-totals row
@@ -123,7 +131,9 @@ def get_player_leaders(
     so a player who was thrown to and caught nothing is on the board with 0
     receptions, and so are the 2003-2008 seasons nflverse publishes with no
     targets at all; kicking, a season row with a field-goal or PAT attempt;
-    punting, a season row with a punt (`_sql.QUALIFYING`). The one exception
+    punting, a season row with a punt; defense, a season row with more than
+    zero in any of def_sacks, def_interceptions, def_tackles_solo,
+    def_fumbles_forced and def_pass_defended (`_sql.QUALIFYING`). The one exception
     is the `fg_pct` sort, whose board holds only kickers with at least
     PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS[season_type] career attempts, and whose
     `total` counts only them. `sort=None` is the category's first sort in
