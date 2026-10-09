@@ -445,7 +445,7 @@ class PlayerSeasonStatRow:
 #     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
 # ---------------------------------------------------------------------------
 
-PlayerLeaderCategory = Literal["passing", "rushing", "receiving", "kicking", "punting"]
+PlayerLeaderCategory = Literal["passing", "rushing", "receiving", "kicking", "punting", "defense"]
 """What a leaderboard ranks (epic #311, decision 1): a stat category, not a
 position. A board ranks every player with the category's base stat, whatever
 their position, so a QB's carries count on the rushing board and a running
@@ -456,7 +456,22 @@ Qualifying (decision 2), per season type, with no minimum:
   * rushing: at least one carry (#312);
   * receiving: at least one target **or** at least one reception (#314);
   * kicking: at least one field-goal attempt **or** one PAT attempt (#315);
-  * punting: at least one punt (#315).
+  * punting: at least one punt (#315);
+  * defense: more than zero in at least one of the five defense columns,
+    `def_sacks`, `def_interceptions`, `def_tackles_solo`,
+    `def_fumbles_forced` and `def_pass_defended` (#317).
+
+Defense has no single base stat, so a solo tackle, a half sack, an
+interception, a forced fumble or a pass defended each qualifies a player.
+As on the other boards, it qualifies everyone with the stat, whatever
+their position: a wide receiver's tackle after an interception, or a
+special-teamer's tackle on a return, counts. Measured on the full
+1999-2025 build (#317, 2026-10-09): 9,676 players qualify for the
+regular-season board and 3,443 for the postseason one. About 4,100 of the
+regular-season players are offensive or special-teams players, and they
+sit at the bottom of every sort. A further 964 regular-season players have
+defense cells that are all 0, and they don't qualify. These columns' zeros
+are real: #316 found no zero-filled era for any of the five.
 
 Kicking and punting need no `targets`-style workaround: measured per season
 on the raw weekly files for all of 1999-2025 (#315, 2026-10-08), every season
@@ -502,6 +517,11 @@ PlayerLeaderSort = Literal[
     "pt_net_yards",
     "pt_att",
     "pt_inside_20",
+    "def_sacks",
+    "def_interceptions",
+    "def_tackles_solo",
+    "def_fumbles_forced",
+    "def_pass_defended",
 ]
 """Every leaderboard sort. With `PlayerSeasonType` the passing ones cover
 passing yards, passing TDs, regular-season starter wins and playoff starter
@@ -514,7 +534,20 @@ not `PlayerStats` fields (#315):
   * `fg_made_50_plus` is `fg_made_50_59 + fg_made_60_`.
 Every other sort is the `PlayerStats` column of the same name. `fg_long` is a
 career MAX (`PLAYER_STAT_MAX_FIELDS`, #334), NULL for a kicker who never made
-one, so such a kicker is unranked and sorts last on that board."""
+one, so such a kicker is unranked and sorts last on that board.
+
+`def_sacks` is REAL (`PLAYER_STAT_REAL_FIELDS`): half sacks are real, and a
+career is ranked on the exact sum (Julius Peppers 159.0, Von Miller 138.5),
+ties included. The defense sorts carry the founder's disclosure calls from
+#316, which a client must show next to the numbers they cover:
+  * `def_sacks` and `def_fumbles_forced`: nflverse counts them from
+    play-by-play, and for 1999-2009 that can undercount a player's season
+    by 0.5-2 against the official total (Kevin Carter 1999: 15 sacks,
+    official 17). They are shown as published, never corrected;
+  * `def_tackles_solo` and `def_pass_defended`: unofficial stats that team
+    scorers chart;
+  * `def_interceptions`: matched every official season leader for 1999-2025
+    (50/50), so it gets no note."""
 
 PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeaderSort, ...]] = (
     MappingProxyType(
@@ -524,6 +557,13 @@ PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeade
             "receiving": ("receiving_yards", "receiving_tds", "receptions"),
             "kicking": ("fg_made", "fg_pct", "fg_made_50_plus", "fg_long", "fg_att", "pat_made"),
             "punting": ("pt_yards", "pt_net_yards", "pt_att", "pt_inside_20"),
+            "defense": (
+                "def_sacks",
+                "def_interceptions",
+                "def_tackles_solo",
+                "def_fumbles_forced",
+                "def_pass_defended",
+            ),
         }
     )
 )
