@@ -57,6 +57,7 @@ from cfb_strength.contracts import (
 from cfb_strength.players import get_player_career, get_player_leaders
 from fastapi.testclient import TestClient
 from fixtures.player_api_fixture import (
+    PUBLISHED_STATS,
     client_for_db,
     engine_json,
     fixture_conn,
@@ -180,46 +181,6 @@ def _get_career(client: TestClient, player_id: int) -> Any:
 # ---------------------------------------------------------------------------
 # shape and order
 # ---------------------------------------------------------------------------
-
-
-# The twenty-eight stats the API publishes, written out rather than derived:
-# the original ten, #314's six receiving stats and #315's twelve kicking and
-# punting stats, in `PlayerStatsOut`'s order. `contracts.PlayerStats` has
-# carried 34 columns since #313; the six it carries and the API does not
-# publish are `rushing_first_downs`, `rushing_fumbles_lost` and the
-# `fg_made_0_19` .. `fg_made_40_49` distance buckets. Deriving
-# this list from the response model would make every assertion on it
-# tautological -- see `test_published_stat_keys_are_pinned`.
-PUBLISHED_STATS: tuple[str, ...] = (
-    "completions",
-    "attempts",
-    "passing_yards",
-    "passing_tds",
-    "passing_interceptions",
-    "sacks_suffered",
-    "sack_yards_lost",
-    "carries",
-    "rushing_yards",
-    "rushing_tds",
-    "receptions",
-    "targets",
-    "receiving_yards",
-    "receiving_tds",
-    "receiving_first_downs",
-    "receiving_fumbles_lost",
-    "fg_made",
-    "fg_att",
-    "fg_long",
-    "fg_made_50_59",
-    "fg_made_60_",
-    "pat_made",
-    "pat_att",
-    "pt_att",
-    "pt_yards",
-    "pt_net_yards",
-    "pt_long",
-    "pt_inside_20",
-)
 
 
 def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestClient) -> None:
