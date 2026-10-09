@@ -42,15 +42,13 @@ The rules, in the order a stat line meets them:
 6. Season rows: per (player, season_type), the sum of the game rows --
    except `contracts.PLAYER_STAT_MAX_FIELDS` (`fg_long`, `pt_long`), which
    take the MAX of the game rows, because a "long" doesn't add up (#313).
-   games = the line count; team_id = the one team, else None; a stat is None
+   games = the line count (since #354 a defense-only line counts, so a
+   game in which a running back only made a special-teams tackle is a
+   game; 208 season rows in the API fixture rose, e.g. Rabih Abdullah 1999
+   4 -> 12); team_id = the one team, else None; a stat is None
    only if it is None on every line. The `contracts.PLAYER_STAT_REAL_FIELDS`
    columns sum as floats, unrounded; a blank EPA cell (no play of that
    kind) adds nothing rather than erasing the season.
-9. Parsing (#354): `contracts.PLAYER_STAT_REAL_FIELDS` (`def_sacks`, in
-   half-sack steps, and the three EPA columns) parse with `float()`; every
-   other column with `int()`, so a fraction in a count column raises,
-   naming the column, instead of being truncated. An empty cell is None,
-   never 0.
 7. Starters: for each completed game and side, the schedule's listed QB if
    the side has no lines at all or the listed QB has a line for that side
    (`nflverse_schedule`); otherwise that side's player with the most
@@ -62,6 +60,11 @@ The rules, in the order a stat line meets them:
    an official stat line reads; net yardage that is genuinely negative
    (`rushing_yards`, `receiving_yards`, `pt_net_yards`) is stored as
    published.
+9. Parsing (#354): `contracts.PLAYER_STAT_REAL_FIELDS` (`def_sacks`, in
+   half-sack steps, and the three EPA columns) parse with `float()`; every
+   other column with `int()`, so a fraction in a count column raises,
+   naming the column, instead of being truncated. An empty cell is None,
+   never 0.
 """
 
 from __future__ import annotations
