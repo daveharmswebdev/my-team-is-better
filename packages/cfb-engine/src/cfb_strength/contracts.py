@@ -265,6 +265,30 @@ tests/test_player_stat_rules.py. All four sum over a season and a career.
 """
 
 
+PLAYER_STAT_SPARSE_FIELDS: frozenset[str] = frozenset(
+    {"passing_epa", "rushing_epa", "receiving_epa"}
+)
+"""The `PlayerStats` columns where a blank in the source means "no play of
+that kind" -- a zero contribution -- not "not tracked" (issue #354).
+
+Every other column follows the NULL-not-zero rule: a NULL season means the
+source did not track the stat, so a career total over it is unknown and the
+null-aware career SUM is NULL. EPA is different. nflverse leaves it blank on
+a player's game line when he had no dropback, carry or target, and measured
+over 1999-2025 a blank with plays recorded happens 37 times in ~460,000
+player-week rows (single trick plays), so the blank is an absence, not a
+gap. A wide receiver with no carries one season must not lose his career
+rushing EPA.
+
+So a blank is skipped where the player *has* a stat line: the ingest's
+season aggregate already sums only the non-blank game values, and a career
+total sums only the non-NULL season rows. A season with no stat row at all
+(a start-only line) is different -- nothing was tracked for it -- so it
+still makes the career total NULL, as it does for every other column. A
+career whose season rows are all NULL for the column stays NULL.
+"""
+
+
 PLAYER_STAT_MAX_FIELDS: frozenset[str] = frozenset({"fg_long", "pt_long"})
 """The `PlayerStats` columns whose season total is the MAX of the game
 rows, not the sum (issue #313).
