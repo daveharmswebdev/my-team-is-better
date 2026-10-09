@@ -11,7 +11,8 @@ What is pinned, and why each matters to the leaders page apps/web builds:
   regenerated fixture, so a faithful copy of a wrong engine answer still
   fails here.
 - **Every category, every sort.** `category` ('passing' | 'rushing' |
-  'receiving' | 'kicking' | 'punting', #312, #314, #315) picks the board, and
+  'receiving' | 'kicking' | 'punting' | 'defense', #312, #314, #315, #317)
+  picks the board, and
   omitting `sort` echoes that category's default. The
   (category, sort) pairs are read from the engine's own
   `PLAYER_LEADER_SORTS_BY_CATEGORY`, never a list copied into apps/api. A
@@ -23,8 +24,10 @@ What is pinned, and why each matters to the leaders page apps/web builds:
 - **Qualifying is the engine's.** The receiving board takes anyone with a
   target *or* a reception (#345), so a targeted player with no catch is on
   it, ranked, with `receptions` 0 -- apps/api filters nothing out.
-- **The published stat keys are a literal.** Twenty-eight names, in order,
+- **The published stat keys are a literal.** Thirty-three names, in order,
   so dropping or adding a `PlayerStatsOut` field goes red.
+- **A half sack is a half sack.** `def_sacks` is REAL (#354, #317): the
+  defense board publishes 17.5 as the JSON number 17.5, never an integer.
 - **Computed sorts stay computed.** `fg_pct` and `fg_made_50_plus` rank the
   kicking board (#315) but are not published; a client derives them from
   `fg_made`/`fg_att` and `fg_made_50_59`/`fg_made_60_`. The `fg_pct` board is
@@ -79,7 +82,8 @@ CATEGORY_SORTS: tuple[tuple[PlayerLeaderCategory, PlayerLeaderSort], ...] = tupl
 )
 
 # Measured on the committed fixture (NFL 1999 + 2023): passing #296, rushing
-# #312, receiving #314, kicking and punting #315. Qualifying is per
+# #312, receiving #314, kicking and punting #315, defense #317 (anyone above
+# zero in at least one of the five defense stats, whatever the position). Qualifying is per
 # (category, season_type), with no minimum -- except on the `fg_pct` sort
 # (`_total` below).
 REGULAR_QUALIFYING = 204
@@ -92,6 +96,8 @@ REGULAR_KICKING_QUALIFYING = 81
 POSTSEASON_KICKING_QUALIFYING = 27
 REGULAR_PUNTING_QUALIFYING = 83
 POSTSEASON_PUNTING_QUALIFYING = 26
+REGULAR_DEFENSE_QUALIFYING = 2619
+POSTSEASON_DEFENSE_QUALIFYING = 508
 QUALIFYING: dict[tuple[str, str], int] = {
     ("passing", "regular"): REGULAR_QUALIFYING,
     ("passing", "postseason"): POSTSEASON_QUALIFYING,
@@ -103,6 +109,8 @@ QUALIFYING: dict[tuple[str, str], int] = {
     ("kicking", "postseason"): POSTSEASON_KICKING_QUALIFYING,
     ("punting", "regular"): REGULAR_PUNTING_QUALIFYING,
     ("punting", "postseason"): POSTSEASON_PUNTING_QUALIFYING,
+    ("defense", "regular"): REGULAR_DEFENSE_QUALIFYING,
+    ("defense", "postseason"): POSTSEASON_DEFENSE_QUALIFYING,
 }
 
 
@@ -127,6 +135,9 @@ CHRIS_GARDOCKI = 2250235710
 MATTHEW_WRIGHT = 2176014404
 MORRIS_UNUTOA = 2386441999
 TOBY_GOWIN = 2279601441
+T_J_WATT = 2459036925
+JOSH_HINES_ALLEN = 2031400630
+TREY_HENDRICKSON = 2125290444
 
 RECEIVING_STATS = (
     "receptions",
@@ -147,6 +158,13 @@ KICKING_STATS = (
     "pat_att",
 )
 PUNTING_STATS = ("pt_att", "pt_yards", "pt_net_yards", "pt_long", "pt_inside_20")
+DEFENSE_STATS = (
+    "def_interceptions",
+    "def_sacks",
+    "def_fumbles_forced",
+    "def_tackles_solo",
+    "def_pass_defended",
+)
 
 ROW_KEYS = {
     "rank",
@@ -232,8 +250,9 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
 
 # (season_type, sort) -> the literal top rows measured on the fixture. The
 # passing entries are #296's, unchanged; the rushing ones are #312's; the
-# receiving ones are #314's; kicking and punting are #315's. The `fg_pct`
-# boards are empty on the fixture (see `_total`).
+# receiving ones are #314's; kicking and punting are #315's; defense is
+# #317's (full tie runs in `DEFENSE_TOP`). The `fg_pct` boards are empty on
+# the fixture (see `_total`).
 TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("regular", "passing_yards"): [(1, "Tua Tagovailoa"), (2, "Jared Goff")],
     ("regular", "passing_tds"): [(1, "Kurt Warner"), (2, "Dak Prescott")],
@@ -273,12 +292,22 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("postseason", "pt_net_yards"): [(1, "Craig Hentrich"), (2, "Tommy Townsend")],
     ("postseason", "pt_att"): [(1, "Craig Hentrich"), (2, "Tom Hutton")],
     ("postseason", "pt_inside_20"): [(1, "Tom Hutton"), (2, "Craig Hentrich")],
+    ("regular", "def_sacks"): [(1, "T.J. Watt"), (2, "Josh Hines-Allen")],
+    ("regular", "def_interceptions"): [(1, "DaRon Bland"), (2, "Donnie Abraham")],
+    ("regular", "def_tackles_solo"): [(1, "Ray Lewis"), (2, "Foye Oluokun")],
+    ("regular", "def_fumbles_forced"): [(1, "Tony Brackens"), (2, "Jevon Kearse")],
+    ("regular", "def_pass_defended"): [(1, "Donnie Abraham"), (2, "Brian Dawkins")],
+    ("postseason", "def_sacks"): [(1, "Aidan Hutchinson"), (1, "George Karlaftis")],
+    ("postseason", "def_interceptions"): [(1, "Aaron Beasley"), (1, "Dre Greenlaw")],
+    ("postseason", "def_tackles_solo"): [(1, "Derrick Brooks"), (2, "Fred Warner")],
+    ("postseason", "def_fumbles_forced"): [(1, "Eddie Robinson"), (1, "Jevon Kearse")],
+    ("postseason", "def_pass_defended"): [(1, "Trent McDuffie"), (2, "Darrell Green")],
 }
 
 
 def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     """Every stats object a player endpoint serves has exactly these
-    twenty-eight keys, in this order: on a leaders row of every board, and on a career
+    thirty-three keys, in this order: on a leaders row of every board, and on a career
     season line and its totals.
 
     The expectation is the literal `PUBLISHED_STATS`, never
@@ -287,7 +316,7 @@ def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     together by construction and a comparison between them could never fail
     (#313 and #338 reviews). Dropping or adding a field must go red here.
     """
-    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 28
+    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 33
     stats_objects: list[Any] = []
     for category in CATEGORIES:
         stats_objects += [r["stats"] for r in _get(client, category=category, limit=3)["rows"]]
@@ -696,6 +725,194 @@ def test_postseason_starts_are_published(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# the defense board (#317)
+# ---------------------------------------------------------------------------
+
+# Measured on the committed fixture through `get_player_leaders`: rank, name,
+# position and the sort value, each tied run in full (ties break by
+# `display_name`). `def_sacks` values are floats -- a shared sack is 0.5 --
+# and the other four are ints.
+DEFENSE_TOP: dict[tuple[str, str], list[tuple[int, str, str, int | float]]] = {
+    ("regular", "def_sacks"): [
+        (1, "T.J. Watt", "OLB", 19.0),
+        (2, "Josh Hines-Allen", "DE", 17.5),
+        (2, "Trey Hendrickson", "LB", 17.5),
+        (4, "Khalil Mack", "OLB", 17.0),
+        (5, "Danielle Hunter", "DE", 16.5),
+        (5, "Simeon Rice", "DE", 16.5),
+    ],
+    ("regular", "def_interceptions"): [
+        (1, "DaRon Bland", "CB", 9),
+        (2, "Donnie Abraham", "CB", 7),
+        (2, "Geno Stone", "SAF", 7),
+        (2, "James Hasty", "DB", 7),
+        (2, "Rod Woodson", "FS", 7),
+        (2, "Sam Madison", "CB", 7),
+        (2, "Troy Vincent", "S", 7),
+    ],
+    ("regular", "def_tackles_solo"): [
+        (1, "Ray Lewis", "ILB", 95),
+        (2, "Foye Oluokun", "LB", 91),
+        (3, "Donnie Edwards", "OLB", 87),
+        (3, "Wali Rainer", "LB", 87),
+        (3, "Zaire Franklin", "OLB", 87),
+    ],
+    ("regular", "def_fumbles_forced"): [
+        (1, "Tony Brackens", "DE", 8),
+        (2, "Jevon Kearse", "DE", 7),
+        (2, "Simeon Rice", "DE", 7),
+    ],
+    ("regular", "def_pass_defended"): [
+        (1, "Donnie Abraham", "CB", 25),
+        (2, "Brian Dawkins", "S", 24),
+        (2, "Eric Davis", "FS", 24),
+    ],
+    ("postseason", "def_sacks"): [
+        (1, "Aidan Hutchinson", "DE", 3.0),
+        (1, "George Karlaftis", "DE", 3.0),
+        (1, "Jevon Kearse", "DE", 3.0),
+        (1, "Kevin Carter", "DE", 3.0),
+        (1, "Trace Armstrong", "DE", 3.0),
+        (6, "Bruce Smith", "DE", 2.5),
+        (6, "Jason Fisk", "NT", 2.5),
+    ],
+    ("postseason", "def_interceptions"): [
+        (1, "Aaron Beasley", "CB", 2),
+        (1, "Dre Greenlaw", "LB", 2),
+    ],
+    ("postseason", "def_tackles_solo"): [
+        (1, "Derrick Brooks", "OLB", 19),
+        (2, "Fred Warner", "MLB", 18),
+        (3, "London Fletcher", "ILB", 17),
+        (3, "Nick Bolton", "LB", 17),
+    ],
+    ("postseason", "def_fumbles_forced"): [
+        (1, "Eddie Robinson", "OLB", 2),
+        (1, "Jevon Kearse", "DE", 2),
+        (1, "Tony Brackens", "DE", 2),
+    ],
+    ("postseason", "def_pass_defended"): [
+        (1, "Trent McDuffie", "CB", 7),
+        (2, "Darrell Green", "CB", 6),
+        (3, "Jevon Kearse", "DE", 5),
+        (3, "Samari Rolle", "CB", 5),
+    ],
+}
+
+
+def test_the_defense_qualifier_counts_are_the_measured_ones() -> None:
+    """Anyone above zero in at least one of the five defense stats: 2,619
+    regular-season and 508 postseason players on the fixture. About 576
+    regular-season players carry only recorded zeros and are off the board."""
+    assert {key: n for key, n in QUALIFYING.items() if key[0] == "defense"} == {
+        ("defense", "regular"): 2619,
+        ("defense", "postseason"): 508,
+    }
+
+
+@pytest.mark.parametrize("season_type,sort", sorted(DEFENSE_TOP))
+def test_defense_boards_show_the_measured_leaders(
+    client: TestClient, season_type: str, sort: str
+) -> None:
+    """Each of the five sorts orders by its own stat, with the engine's
+    competition ranks and the measured tie order."""
+    expected = DEFENSE_TOP[(season_type, sort)]
+    body = _get(client, category="defense", season_type=season_type, sort=sort, limit=len(expected))
+
+    assert (body["category"], body["sort"]) == ("defense", sort)
+    assert body["total"] == QUALIFYING[("defense", season_type)]
+    assert [
+        (r["rank"], r["display_name"], r["position"], r["stats"][sort]) for r in body["rows"]
+    ] == expected
+    # `19.0 == 19` is True in Python, so equality alone cannot tell a float
+    # from an int: `def_sacks` must be a float on every row, the rest ints.
+    assert [type(r["stats"][sort]) for r in body["rows"]] == [type(e[3]) for e in expected]
+
+
+@pytest.mark.parametrize("season_type", SEASON_TYPES)
+def test_defense_with_no_sort_echoes_def_sacks(
+    client: TestClient, season_type: PlayerSeasonType
+) -> None:
+    body = _get(client, category="defense", season_type=season_type)
+
+    assert (body["category"], body["sort"], body["season_type"]) == (
+        "defense",
+        "def_sacks",
+        season_type,
+    )
+    assert body["total"] == QUALIFYING[("defense", season_type)]
+    assert body["rows"]
+    assert body == _expected(category="defense", season_type=season_type)
+    assert body == _get(client, category="defense", season_type=season_type, sort="def_sacks")
+
+
+def test_a_half_sack_reaches_json_as_seventeen_and_a_half(client: TestClient) -> None:
+    """The regular `def_sacks` top three, read off the raw body: T.J. Watt's
+    19.0, then Josh Hines-Allen and Trey Hendrickson tied at 17.5 (name
+    order). 17.5 is written as the JSON number 17.5 -- not 17, not 18, not
+    the string "17.5" -- and Watt's whole-number total is still a float."""
+    response = client.get(LEADERS, params={"category": "defense", "limit": 3})
+    assert response.status_code == 200, response.text
+
+    raw = response.text
+    assert raw.count('"def_sacks":17.5') == 2, raw
+    assert '"def_sacks":19.0' in raw
+    rows = response.json()["rows"]
+    assert [
+        (r["rank"], r["player_id"], r["display_name"], r["stats"]["def_sacks"]) for r in rows
+    ] == [
+        (1, T_J_WATT, "T.J. Watt", 19.0),
+        (2, JOSH_HINES_ALLEN, "Josh Hines-Allen", 17.5),
+        (2, TREY_HENDRICKSON, "Trey Hendrickson", 17.5),
+    ]
+    assert all(isinstance(r["stats"]["def_sacks"], float) for r in rows)
+
+
+def test_a_defense_row_publishes_the_whole_defense_line(client: TestClient) -> None:
+    """T.J. Watt's 2023, first on the default board, with all five stats."""
+    first = _get(client, category="defense", limit=1)["rows"][0]
+
+    assert (first["player_id"], first["position"]) == (T_J_WATT, "OLB")
+    assert {name: first["stats"][name] for name in DEFENSE_STATS} == {
+        "def_interceptions": 1,
+        "def_sacks": 19.0,
+        "def_fumbles_forced": 4,
+        "def_tackles_solo": 38,
+        "def_pass_defended": 8,
+    }
+
+
+def test_a_null_defense_stat_stays_null_and_unranked(tmp_path: Path) -> None:
+    """No fixture row has a NULL defense stat, so the copy NULLs T.J. Watt's
+    2023 `def_sacks`: he drops from first to the end of the sacks board,
+    unranked, `null` and never 0, while still on the board on his other four
+    stats; his career line says `null` too."""
+    db = make_player_db_with_null_stat(
+        tmp_path, player_id=T_J_WATT, season=2023, season_type="regular", stat="def_sacks"
+    )
+    last_offset = REGULAR_DEFENSE_QUALIFYING - 1
+
+    with client_for_db(db) as nulled:
+        by_sacks = nulled.get(
+            LEADERS, params={"category": "defense", "limit": 1, "offset": last_offset}
+        )
+        career = nulled.get(f"/api/players/{T_J_WATT}")
+
+    assert by_sacks.status_code == career.status_code == 200
+    assert '"def_sacks":0' not in by_sacks.text
+    last = by_sacks.json()["rows"][0]
+    assert (last["player_id"], last["rank"]) == (T_J_WATT, None)
+    assert "def_sacks" in last["stats"] and last["stats"]["def_sacks"] is None
+    assert last["stats"]["def_tackles_solo"] == 38
+    assert career.json()["regular_season"]["stats"]["def_sacks"] is None
+
+    with fixture_conn(db) as conn:
+        assert by_sacks.json() == engine_json(
+            get_player_leaders(conn, sport="nfl", category="defense", limit=1, offset=last_offset)
+        )
+
+
+# ---------------------------------------------------------------------------
 # paging
 # ---------------------------------------------------------------------------
 
@@ -908,6 +1125,12 @@ def _assert_422_at(response_status: int, body: Any, field: str) -> None:
         ({"category": "kicking", "sort": "carries"}, "sort"),
         # The 0-49 distance buckets are neither published nor sorts.
         ({"category": "kicking", "sort": "fg_made_40_49"}, "sort"),
+        # #317: defense is a board, its five sorts its own; EPA is no sort.
+        ({"category": "defense", "sort": "passing_yards"}, "sort"),
+        ({"category": "defense", "sort": "sacks_suffered"}, "sort"),
+        ({"category": "defense", "sort": "passing_epa"}, "sort"),
+        ({"category": "passing", "sort": "def_sacks"}, "sort"),
+        ({"category": "kicking", "sort": "def_interceptions"}, "sort"),
         ({"category": "returning"}, "category"),
         ({"season_type": "combined"}, "season_type"),
     ],
@@ -947,6 +1170,18 @@ CROSS_CATEGORY_SORTS: list[tuple[PlayerLeaderCategory, str]] = [
     ("punting", "fg_pct"),
     ("passing", "fg_made"),
     ("receiving", "pt_inside_20"),
+    # #317: a sort from every other category on the defense board, and a
+    # defense sort on each of the others.
+    ("defense", "wins"),
+    ("defense", "rushing_yards"),
+    ("defense", "receptions"),
+    ("defense", "fg_made"),
+    ("defense", "pt_yards"),
+    ("passing", "def_sacks"),
+    ("rushing", "def_tackles_solo"),
+    ("receiving", "def_interceptions"),
+    ("kicking", "def_fumbles_forced"),
+    ("punting", "def_pass_defended"),
 ]
 
 
