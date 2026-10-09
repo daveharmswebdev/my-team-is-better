@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Iterator
 from dataclasses import fields
 from pathlib import Path
@@ -546,9 +547,18 @@ def test_sort_none_resolves_to_the_categorys_first_sort_and_is_echoed(db: Player
         ("receiving", "fg_made_50_plus"),
         ("rushing", "pt_net_yards"),
         ("kicking", "pat_pct"),
-        # An unknown category, which `receiving` (#314) and then `kicking`
-        # (#315) used to stand for here before each was made real.
-        ("defense", None),
+        # Defense sorts stay on their own board, and other boards' sorts off
+        # it (#317).
+        ("defense", "passing_yards"),
+        ("defense", "fg_made"),
+        ("defense", "def_qb_hits"),
+        ("passing", "def_sacks"),
+        ("rushing", "def_tackles_solo"),
+        ("kicking", "def_interceptions"),
+        # An unknown category, which `receiving` (#314), `kicking` (#315)
+        # and then `defense` (#317) used to stand for here before each was
+        # made real.
+        ("special_teams", None),
     ],
 )
 def test_a_sort_outside_the_category_or_an_unknown_category_raises(
@@ -1426,3 +1436,236 @@ def test_every_kicking_and_punting_leaders_row_equals_that_players_career_totals
     # A NULL season stays NULL in the total; the long is a MAX, not a sum.
     assert (punt.stats.pt_yards, punt.stats.pt_net_yards, punt.stats.pt_long) == (5700, None, 66)
     assert punt.games is None
+
+
+# --- defense board (#317) -----------------------------------------------------
+
+DEFENSE_SORTS = (
+    "def_sacks",
+    "def_interceptions",
+    "def_tackles_solo",
+    "def_fumbles_forced",
+    "def_pass_defended",
+)
+
+
+def _no_defense(**overrides: float | None) -> dict[str, float | None]:
+    """`full_stats` with every defense column a real zero, so a line is on
+    the defense board only when a test puts it there."""
+    stats = full_stats(**dict.fromkeys(DEFENSE_SORTS, 0))
+    stats.update(overrides)
+    return stats
+
+
+def _defense_board(
+    conn: sqlite3.Connection, sort: str | None = None, season_type: str = "regular"
+) -> PlayerLeaders:
+    return get_player_leaders(
+        conn,
+        sport="nfl",
+        category="defense",
+        season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
+        sort=sort,  # type: ignore[arg-type]  # the Literal's values
+    )
+
+
+def test_defense_sorts_are_the_contracts_and_def_sacks_is_real() -> None:
+    assert PLAYER_LEADER_SORTS_BY_CATEGORY["defense"] == DEFENSE_SORTS
+    assert "def_sacks" in PLAYER_STAT_REAL_FIELDS
+
+
+@pytest.mark.parametrize("season_type", ["regular", "postseason"])
+def test_defense_qualifies_more_than_zero_in_any_column_whatever_the_position(
+    db: PlayerDb, season_type: str
+) -> None:
+    de = db.player("Half Sack DE", position="DE")
+    db.season(de, 2000, season_type=season_type, **_no_defense(def_sacks=0.5))
+    cb = db.player("One PD CB", position="CB")
+    db.season(cb, 2000, season_type=season_type, **_no_defense(def_pass_defended=1))
+    wr = db.player("One Tackle WR", position="WR")
+    db.season(wr, 2000, season_type=season_type, **_no_defense(def_tackles_solo=1))
+    lb = db.player("One Pick LB", position="LB")
+    db.season(lb, 2000, season_type=season_type, **_no_defense(def_interceptions=1))
+    s = db.player("One FF S", position="S")
+    db.season(s, 2000, season_type=season_type, **_no_defense(def_fumbles_forced=1))
+    dt = db.player("All Zero DT", position="DT")
+    db.season(dt, 2000, season_type=season_type, **_no_defense())
+    blank = db.player("All Null LB", position="LB")
+    db.season(blank, 2000, season_type=season_type, **_no_defense(**dict.fromkeys(DEFENSE_SORTS)))
+    conn = conn_of(db)
+
+    board = _defense_board(conn, season_type=season_type)
+
+    assert sorted(_names(board.rows)) == [
+        "Half Sack DE",
+        "One FF S",
+        "One PD CB",
+        "One Pick LB",
+        "One Tackle WR",
+    ]
+    assert board.total == 5
+    assert (board.category, board.season_type) == ("defense", season_type)
+    assert {r.display_name: r.position for r in board.rows}["One Tackle WR"] == "WR"
+
+
+def test_defense_qualifies_on_any_season_line_not_the_career_total(db: PlayerDb) -> None:
+    # A 0 season and a 3 season: the 3 season qualifies the career.
+    p = db.player("Late Bloomer", position="LB")
+    db.season(p, 2000, **_no_defense())
+    db.season(p, 2001, **_no_defense(def_tackles_solo=3))
+    # A NULL season next to a 0 season: neither qualifies.
+    q = db.player("Never Counted", position="LB")
+    db.season(q, 2000, **_no_defense())
+    db.season(q, 2001, **_no_defense(**dict.fromkeys(DEFENSE_SORTS)))
+    conn = conn_of(db)
+
+    board = _defense_board(conn)
+
+    assert (_names(board.rows), board.total) == (["Late Bloomer"], 1)
+
+
+def test_defense_qualifies_per_season_type(db: PlayerDb) -> None:
+    reg = db.player("Regular Rusher", position="DE")
+    db.season(reg, 2000, **_no_defense(def_sacks=4.0))
+    db.season(reg, 2000, season_type="postseason", **_no_defense())
+    playoff = db.player("Playoff Only", position="CB")
+    db.season(playoff, 2000, season_type="postseason", **_no_defense(def_interceptions=2))
+    conn = conn_of(db)
+
+    assert _names(_defense_board(conn).rows) == ["Regular Rusher"]
+    assert _names(_defense_board(conn, season_type="postseason").rows) == ["Playoff Only"]
+
+
+def test_def_sacks_ranks_half_sacks_exactly_with_the_tiebreak(db: PlayerDb) -> None:
+    for name, sacks in [
+        ("Ten", 10.0),
+        ("Zed Seven Half", 7.5),
+        ("Ten Half", 10.5),
+        ("Abe Seven Half", 7.5),
+        ("Seven", 7.0),
+    ]:
+        db.season(db.player(name, position="DE"), 2000, **_no_defense(def_sacks=sacks))
+    conn = conn_of(db)
+
+    board = _defense_board(conn, "def_sacks")
+
+    assert [(r.rank, r.display_name, r.stats.def_sacks) for r in board.rows] == [
+        (1, "Ten Half", 10.5),
+        (2, "Ten", 10.0),
+        (3, "Abe Seven Half", 7.5),
+        (3, "Zed Seven Half", 7.5),
+        (5, "Seven", 7.0),
+    ]
+
+
+def test_def_sacks_career_total_adds_half_sacks_across_seasons(db: PlayerDb) -> None:
+    p = db.player("Two Halves", position="DE")
+    db.season(p, 2000, **_no_defense(def_sacks=3.5))
+    db.season(p, 2001, **_no_defense(def_sacks=4.5))
+    q = db.player("Seven Half", position="DE")
+    db.season(q, 2000, **_no_defense(def_sacks=7.5))
+    conn = conn_of(db)
+
+    rows = _defense_board(conn).rows
+
+    assert [(r.rank, r.display_name, r.stats.def_sacks) for r in rows] == [
+        (1, "Two Halves", 8.0),
+        (2, "Seven Half", 7.5),
+    ]
+
+
+@pytest.mark.parametrize("sort", DEFENSE_SORTS)
+def test_each_defense_sort_reads_its_own_column_with_the_tiebreak(db: PlayerDb, sort: str) -> None:
+    # The sorted column is 30 / 20 / 20 / 20 / 10; every other defense column
+    # runs the opposite way, so only the named one gives this order.
+    values = [("Dan", 10), ("Same Name", 20), ("Bob", 20), ("Ann", 30), ("Same Name", 20)]
+    ids = []
+    for name, value in values:
+        pid = db.player(name, position="LB")
+        ids.append(pid)
+        stats: dict[str, float | None] = {c: 100 - value for c in DEFENSE_SORTS}
+        stats[sort] = value
+        db.season(pid, 2000, **_no_defense(**stats))
+    conn = conn_of(db)
+
+    board = _defense_board(conn, sort)
+
+    assert [(r.rank, r.display_name, r.player_id) for r in board.rows] == [
+        (1, "Ann", ids[3]),
+        (2, "Bob", ids[2]),
+        (2, "Same Name", ids[1]),
+        (2, "Same Name", ids[4]),
+        (5, "Dan", ids[0]),
+    ]
+    assert [getattr(r.stats, sort) for r in board.rows] == [30, 20, 20, 20, 10]
+    assert (board.category, board.sort, board.total) == ("defense", sort, 5)
+
+
+def test_defense_default_sort_is_def_sacks(db: PlayerDb) -> None:
+    # Most sacks but least of everything else.
+    rusher = db.player("Rusher", position="DE")
+    db.season(rusher, 2000, **_no_defense(def_sacks=12.0, def_tackles_solo=20))
+    tackler = db.player("Tackler", position="LB")
+    db.season(
+        tackler,
+        2000,
+        **_no_defense(
+            def_sacks=1.0,
+            def_interceptions=3,
+            def_tackles_solo=120,
+            def_fumbles_forced=4,
+            def_pass_defended=9,
+        ),
+    )
+    conn = conn_of(db)
+
+    for board in (get_player_leaders(conn, sport="nfl", category="defense"), _defense_board(conn)):
+        assert (board.category, board.sort) == ("defense", "def_sacks")
+        assert _names(board.rows) == ["Rusher", "Tackler"]
+
+
+def test_a_null_defense_season_makes_that_total_none_and_unranked(db: PlayerDb) -> None:
+    known = db.player("Zed Known", position="LB")
+    db.season(known, 2000, **_no_defense(def_sacks=1.0, def_tackles_solo=5))
+    gap = db.player("Abe Gap", position="LB")
+    db.season(gap, 2000, **_no_defense(def_sacks=9.0, def_tackles_solo=50))
+    db.season(gap, 2001, **_no_defense(def_sacks=None, def_tackles_solo=40))
+    conn = conn_of(db)
+
+    rows = _defense_board(conn).rows
+
+    # SQL's own SUM would say 9.0 and put him first; the untracked season
+    # makes the career total None, unranked and last.
+    assert [(r.rank, r.display_name, r.stats.def_sacks) for r in rows] == [
+        (1, "Zed Known", 1.0),
+        (None, "Abe Gap", None),
+    ]
+    assert rows[1].stats.def_tackles_solo == 90
+
+
+def test_every_defense_leaders_row_equals_that_players_career_totals(db: PlayerDb) -> None:
+    end = db.player("End", position="DE")
+    db.season(end, 2000, games=16, **_no_defense(def_sacks=11.5, def_fumbles_forced=3))
+    db.season(end, 2001, games=15, **_no_defense(def_sacks=8.0, def_tackles_solo=30))
+    db.season(end, 2001, season_type="postseason", games=2, **_no_defense(def_sacks=1.5))
+    corner = db.player("Corner", position="CB")
+    db.season(corner, 2000, games=16, **_no_defense(def_interceptions=6, def_pass_defended=18))
+    db.season(corner, 2001, games=None, **_no_defense(def_interceptions=None, def_pass_defended=12))
+    conn = conn_of(db)
+
+    checked = 0
+    for season_type in ("regular", "postseason"):
+        for sort in (None, *DEFENSE_SORTS):
+            for row in _defense_board(conn, sort, season_type).rows:
+                career = get_player_career(conn, sport="nfl", player_id=row.player_id)
+                totals = career.regular_season if season_type == "regular" else career.postseason
+                assert totals is not None
+                assert row.games == totals.games
+                assert row.stats == totals.stats
+                checked += 1
+    # Two regular rows and one postseason row, on each of the six boards.
+    assert checked == 3 * (len(DEFENSE_SORTS) + 1)
+    by_name = {r.display_name: r for r in _defense_board(conn).rows}
+    e, c = by_name["End"].stats, by_name["Corner"]
+    assert (e.def_sacks, e.def_fumbles_forced, e.def_tackles_solo) == (19.5, 3, 30)
+    assert (c.stats.def_interceptions, c.stats.def_pass_defended, c.games) == (None, 30, None)

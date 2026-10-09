@@ -293,8 +293,10 @@ export type PlayerSeasonType = (typeof PLAYER_SEASON_TYPES)[number]
  * what a board ranks. A stat category, never a position -- the rushing board
  * ranks everyone with a carry, quarterbacks included, the receiving board
  * (issue #314) everyone with a target or a reception, the kicking board
- * (issue #315) everyone with a field-goal or extra-point attempt and the
- * punting board everyone with a punt. Same caveat as `PLAYER_SEASON_TYPES`.
+ * (issue #315) everyone with a field-goal or extra-point attempt, the
+ * punting board everyone with a punt, and the defense board (issue #317)
+ * everyone with more than zero in any of its five stats. Same caveat as
+ * `PLAYER_SEASON_TYPES`.
  */
 export const PLAYER_LEADER_CATEGORIES = [
   'passing',
@@ -302,6 +304,7 @@ export const PLAYER_LEADER_CATEGORIES = [
   'receiving',
   'kicking',
   'punting',
+  'defense',
 ] as const
 
 export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
@@ -330,6 +333,13 @@ export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
     'pat_made',
   ],
   punting: ['pt_yards', 'pt_net_yards', 'pt_att', 'pt_inside_20'],
+  defense: [
+    'def_sacks',
+    'def_interceptions',
+    'def_tackles_solo',
+    'def_fumbles_forced',
+    'def_pass_defended',
+  ],
 } as const satisfies Record<PlayerLeaderCategory, readonly string[]>
 
 /**
@@ -354,6 +364,7 @@ export const PLAYER_LEADER_SORTS = [
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.receiving,
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.kicking,
   ...PLAYER_LEADER_SORTS_BY_CATEGORY.punting,
+  ...PLAYER_LEADER_SORTS_BY_CATEGORY.defense,
 ] as const
 
 export type PlayerLeaderSort = (typeof PLAYER_LEADER_SORTS)[number]
@@ -386,6 +397,15 @@ export interface StarterRecordOut {
  * `pat_att` and `pt_long` are mirrored but not shown; `fg_made_50_59` and
  * `fg_made_60_` (which keeps nflverse's trailing underscore) are shown only
  * summed, as the 50+ column.
+ *
+ * The five defense stats (issue #317) are shown only on the defense board,
+ * in the contract's order here (not the board's sort order). `def_sacks` is
+ * a decimal; the other four are counts. A non-defender carries the source's
+ * recorded zeros. Founder decision (#316): `def_sacks` and
+ * `def_fumbles_forced` can run short of the official total for 1999-2009,
+ * and `def_tackles_solo` and `def_pass_defended` are unofficial, so the
+ * board shows a note with each pair. The engine's EPA columns are not
+ * published.
  */
 export interface PlayerStatsOut {
   completions: number | null
@@ -416,6 +436,12 @@ export interface PlayerStatsOut {
   pt_net_yards: number | null
   pt_long: number | null
   pt_inside_20: number | null
+  def_interceptions: number | null
+  /** A decimal: a sack split between two rushers is 0.5 each, so 17.5 is real and is never rounded. */
+  def_sacks: number | null
+  def_fumbles_forced: number | null
+  def_tackles_solo: number | null
+  def_pass_defended: number | null
 }
 
 export interface PlayerLeaderRowOut {

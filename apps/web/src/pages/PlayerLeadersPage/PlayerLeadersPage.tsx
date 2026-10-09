@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { LeaderCategorySelect } from '../../components/LeaderCategorySelect/LeaderCategorySelect'
+import { LeaderColumnNotes } from '../../components/LeaderColumnNotes/LeaderColumnNotes'
 import { Pager } from '../../components/Pager/Pager'
 import { PlayerLeadersTable } from '../../components/PlayerLeadersTable/PlayerLeadersTable'
 import { PlayerStatsCredit } from '../../components/PlayerStatsCredit/PlayerStatsCredit'
@@ -53,12 +54,15 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * NFL career leaders (issues #296, #312, #314, #315): who threw for the most,
+ * NFL career leaders (issues #296, #312, #314, #315, #317): who threw for the most,
  * threw the most touchdowns, won the most as a starter; on the rushing
  * board, who ran for the most yards, the most touchdowns or carried it most
  * often; on the receiving board, who had the most receiving yards, receiving
  * touchdowns or receptions; on the kicking and punting boards, who made the
- * most field goals, kicked the longest or punted the most yards. The
+ * most field goals, kicked the longest or punted the most yards; on the
+ * defense board (#317), who had the most sacks, interceptions, solo tackles,
+ * forced fumbles or passes defended, with the founder's notes on the
+ * columns the source undercounts or the league doesn't keep officially. The
  * API sorts, ranks and pages; this page renders what it sends and keeps the
  * stat category, season type, sort and offset in the URL, so a shared link, a
  * reload and the Back button all show the same table.
@@ -154,6 +158,10 @@ export function PlayerLeadersPage() {
     (leaders?.sort ?? sort) === 'fg_pct'
       ? (leaders?.season_type ?? seasonType)
       : null
+  // The defense board's column notes (#317) follow the board on screen too,
+  // and live in the box above the table; the table's covered headers point
+  // at them by ids built from this prefix.
+  const columnNoteIdPrefix = `${noteId}-column`
   const describedBy =
     leaders === null
       ? undefined
@@ -167,9 +175,9 @@ export function PlayerLeadersPage() {
     <main className={styles.wrap}>
       <h1 className={styles.title}>NFL Leaders</h1>
       <p className={styles.lede}>
-        Career passing, rushing, receiving, kicking and punting totals for every
-        NFL player with stat lines in the source. Pick a stat category, then a
-        column to rank by.
+        Career passing, rushing, receiving, kicking, punting and defense totals
+        for every NFL player with stat lines in the source. Pick a stat
+        category, then a column to rank by.
       </p>
 
       <div className={styles.controls}>
@@ -185,6 +193,10 @@ export function PlayerLeadersPage() {
         {fgPctSeasonType !== null && (
           <p id={`${noteId}-fg-pct`}>{fgPctNote(fgPctSeasonType)}</p>
         )}
+        <LeaderColumnNotes
+          category={leaders?.category ?? category}
+          idPrefix={columnNoteIdPrefix}
+        />
         <p>{UNDERCOUNT_DISCLOSURE}</p>
         <p>{NOT_RECORDED_DISCLOSURE}</p>
       </section>
@@ -203,6 +215,7 @@ export function PlayerLeadersPage() {
             leaders={leaders}
             busy={pending}
             describedBy={describedBy}
+            columnNoteIdPrefix={columnNoteIdPrefix}
             onSort={handleSort}
             onPage={handlePage}
           />
@@ -218,6 +231,7 @@ function LeadersBoard({
   leaders,
   busy,
   describedBy,
+  columnNoteIdPrefix,
   onSort,
   onPage,
 }: {
@@ -225,6 +239,8 @@ function LeadersBoard({
   busy: boolean
   /** The starter-record note on the boards that show records, or the FG% minimum on the FG% board. */
   describedBy: string | undefined
+  /** The prefix of the column-note ids the page renders above the table (#317). */
+  columnNoteIdPrefix: string
   onSort: (sort: PlayerLeaderSort) => void
   onPage: (offset: number) => void
 }) {
@@ -272,6 +288,7 @@ function LeadersBoard({
         onSort={onSort}
         busy={busy}
         describedBy={describedBy}
+        columnNoteIdPrefix={columnNoteIdPrefix}
       />
       <Pager
         label="Leaders pages"

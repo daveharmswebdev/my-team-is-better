@@ -10,19 +10,21 @@ engine modules apps/api is permitted (`cfb_strength.players`, `db`,
   `StarterRecord.starts` (a property, so absent from `dataclasses.asdict`)
   added as the one derived field the API publishes. Comparing a response
   body to it checks names, nesting, order of rows and every number at once.
-  Its one narrowing is `PlayerStats`, which since #354 carries 42 stats, 14
+  Its one narrowing is `PlayerStats`, which since #354 carries 42 stats, 9
   of which the API does not publish (`UNPUBLISHED_STATS` below):
   `rushing_first_downs`, `rushing_fumbles_lost`, the four 0-49 yard
-  field-goal buckets left out on purpose by #315, and #354's five defensive
-  and three EPA columns (stored in the fixture, published by #317 and #347).
+  field-goal buckets left out on purpose by #315, and #354's three EPA
+  columns (stored in the fixture, to be published by #347). #354's five
+  defensive columns have been published since #317.
 - `PUBLISHED_STAT_NAMES` / `published_stats` / `stats_body` are the seam
-  between the 42-field engine contract and the 28 fields `PlayerStatsOut`
-  publishes (the original ten, #314's six receiving stats and #315's twelve
-  kicking and punting stats). All three read the published set off the response
-  model, so widening the API widens them with it and no expectation has to
-  be rewritten by hand. The flip side: a field *dropped* from the model
-  drops out of these too, so the helpers alone cannot catch it. That is
-  `PUBLISHED_STATS`' job, a literal list.
+  between the 42-field engine contract and the 33 fields `PlayerStatsOut`
+  publishes (the original ten, #314's six receiving stats, #315's twelve
+  kicking and punting stats and #317's five defensive stats). All three
+  read the published set off the response model, so widening the API
+  widens them with it and no expectation has to be rewritten by hand. The
+  flip side: a field *dropped* from the model drops out of these too, so
+  the helpers alone cannot catch it. That is `PUBLISHED_STATS`' job, a
+  literal list.
 - `make_player_db_with_null_stat` copies the committed fixture and NULLs
   one real season row's stat. No 1999-2025 nflverse row is NULL *for the
   stats this helper targets* -- that was true of all ten columns before
@@ -57,16 +59,17 @@ FIXTURE_DB = Path(__file__).resolve().parent / "cfb_verdict_fixture.sqlite3"
 
 # Every stat the engine contract carries (42 since issue #354)...
 STAT_NAMES: tuple[str, ...] = tuple(field.name for field in dataclasses.fields(PlayerStats))
-# ...and the subset the API publishes (28 since #315), read off the response
+# ...and the subset the API publishes (33 since #317), read off the response
 # model rather than repeated here, so that widening `PlayerStatsOut` widens
 # these helpers with it and no call site has to be edited.
 PUBLISHED_STAT_NAMES: tuple[str, ...] = tuple(PlayerStatsOut.model_fields)
 
-# The twenty-eight stats the API publishes, written out rather than derived:
-# the original ten, #314's six receiving stats and #315's twelve kicking and
-# punting stats, in `PlayerStatsOut`'s order. `contracts.PlayerStats` has
-# carried 42 columns since #354; the fourteen it carries and the API does not
-# publish are `UNPUBLISHED_STATS` below. Deriving this list from the response
+# The thirty-three stats the API publishes, written out rather than derived:
+# the original ten, #314's six receiving stats, #315's twelve kicking and
+# punting stats and #317's five defensive stats, in `PlayerStatsOut`'s order
+# (which is the contract's). `contracts.PlayerStats` has carried 42 columns
+# since #354; the nine it carries and the API does not publish are
+# `UNPUBLISHED_STATS` below. Deriving this list from the response
 # model would make every assertion on it tautological -- see
 # `test_players_leaders_endpoint.test_published_stat_keys_are_pinned`. It
 # lives here, not in one test module, because two modules compare response
@@ -101,13 +104,21 @@ PUBLISHED_STATS: tuple[str, ...] = (
     "pt_net_yards",
     "pt_long",
     "pt_inside_20",
+    # Defense (#317), in contract order; `def_sacks` is the one REAL among
+    # them (a shared sack is 0.5).
+    "def_interceptions",
+    "def_sacks",
+    "def_fumbles_forced",
+    "def_tackles_solo",
+    "def_pass_defended",
 )
 
 # The contract stats the API deliberately leaves out, in contract order,
 # also a literal: `rushing_first_downs` and `rushing_fumbles_lost` (#313,
 # never published), the 0-49 yard field-goal buckets (#315, left out on
-# purpose), and #354's five defensive and three EPA columns (publishing is
-# #317 for defense and #347 for EPA).
+# purpose), and #354's three EPA columns (publishing them is #347). #354's
+# five defensive columns left this list when #317 published them; they are
+# kept as `DEFENSE_STATS` for the tests that pin them.
 UNPUBLISHED_RUSHING_STATS: tuple[str, ...] = ("rushing_first_downs", "rushing_fumbles_lost")
 UNPUBLISHED_FG_BUCKETS: tuple[str, ...] = (
     "fg_made_0_19",
@@ -126,7 +137,6 @@ EPA_STATS: tuple[str, ...] = ("passing_epa", "rushing_epa", "receiving_epa")
 UNPUBLISHED_STATS: tuple[str, ...] = (
     *UNPUBLISHED_RUSHING_STATS,
     *UNPUBLISHED_FG_BUCKETS,
-    *DEFENSE_STATS,
     *EPA_STATS,
 )
 
@@ -135,12 +145,13 @@ if _UNPUBLISHED:
     raise AssertionError(f"PlayerStatsOut publishes non-contract stats: {sorted(_UNPUBLISHED)}")
 
 
-def published_stats(stats: PlayerStats) -> dict[str, int | None]:
+def published_stats(stats: PlayerStats) -> dict[str, int | float | None]:
     """The engine's stats projected onto what the API publishes today.
 
     `PlayerStats` has carried receiving, kicking and punting since #313;
     `PlayerStatsOut` publishes the original ten fields, the six receiving
-    ones (#314) and twelve kicking and punting ones (#315). So "faithful to
+    ones (#314), twelve kicking and punting ones (#315) and five defensive
+    ones (#317). So "faithful to
     the engine, field for field" means: every *published* field equals the
     engine's value under its own name. The projection is derived from the
     response model, so a field added there is checked against the engine
@@ -151,7 +162,7 @@ def published_stats(stats: PlayerStats) -> dict[str, int | None]:
     return {name: getattr(stats, name) for name in PUBLISHED_STAT_NAMES}
 
 
-def stats_body(**values: int) -> dict[str, int | None]:
+def stats_body(**values: int | float) -> dict[str, int | float | None]:
     """An expected `PlayerStatsOut` body, named rather than positional.
 
     Every published stat not named is `None` -- *not applicable*, never 0.

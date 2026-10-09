@@ -664,3 +664,108 @@ def test_a_kicking_or_punting_row_equals_the_career_totals(
         assert (row.stats.fg_made, row.stats.fg_att, row.stats.pat_made) == (516, 612, 763)
     else:
         assert row.stats.pt_yards == 4144
+
+
+# --- defense board (#317) -----------------------------------------------------
+#
+# No defense cell in 1999-2025 is NULL, so these null-aware totals are the
+# same numbers as a plain SUM over player_season_stats.
+
+JULIUS_PEPPERS = 2480384479
+ED_REED = 2392737139
+
+
+def test_defense_qualifying_populations(conn: sqlite3.Connection) -> None:
+    # 9,676 regular-season careers have more than zero in some defense column;
+    # another 964 have only 0s in all five and stay off the board.
+    assert _board(conn, "defense").total == 9676
+    assert _board(conn, "defense", season_type="postseason").total == 3443
+    for sort in ("def_interceptions", "def_tackles_solo", "def_fumbles_forced"):
+        assert _board(conn, "defense", sort).total == 9676, sort
+
+
+def test_regular_season_defense_boards(conn: sqlite3.Connection) -> None:
+    sacks = _board(conn, "defense", limit=5)
+    assert sacks.sort == "def_sacks"
+    assert [(r.rank, r.display_name, r.position, r.stats.def_sacks) for r in sacks.rows] == [
+        (1, "Julius Peppers", "DE", 159.0),
+        (2, "DeMarcus Ware", "OLB", 139.0),
+        (3, "Von Miller", "OLB", 138.5),
+        (4, "Terrell Suggs", "OLB", 138.0),
+        (5, "Jared Allen", "DE", 136.0),
+    ]
+    assert _top(_board(conn, "defense", "def_interceptions", limit=5), "def_interceptions") == [
+        (1, "Ed Reed", 64),
+        (2, "Darren Sharper", 61),
+        (3, "Charles Woodson", 60),
+        (4, "Champ Bailey", 52),
+        (5, "Asante Samuel", 51),
+    ]
+    assert _top(_board(conn, "defense", "def_tackles_solo", limit=5), "def_tackles_solo") == [
+        (1, "Lavonte David", 1033),
+        (2, "Bobby Wagner", 1016),
+        (3, "London Fletcher", 998),
+        (4, "Karlos Dansby", 974),
+        (5, "Ray Lewis", 908),
+    ]
+    # Charles Tillman and Jason Taylor share fifth at 41.
+    assert _top(_board(conn, "defense", "def_fumbles_forced", limit=6), "def_fumbles_forced") == [
+        (1, "Robert Mathis", 52),
+        (2, "Julius Peppers", 51),
+        (3, "John Abraham", 48),
+        (4, "Dwight Freeney", 46),
+        (5, "Charles Tillman", 41),
+        (5, "Jason Taylor", 41),
+    ]
+    # Woodson and Newman tie at 183; the display name breaks it.
+    assert _top(_board(conn, "defense", "def_pass_defended", limit=5), "def_pass_defended") == [
+        (1, "Champ Bailey", 203),
+        (2, "Johnathan Joseph", 200),
+        (3, "Ronde Barber", 197),
+        (4, "Charles Woodson", 183),
+        (4, "Terence Newman", 183),
+    ]
+
+
+def test_postseason_defense_boards(conn: sqlite3.Connection) -> None:
+    # Four share 11.0, not three: Clay Matthews too.
+    assert _top(_board(conn, "defense", season_type="postseason", limit=6), "def_sacks") == [
+        (1, "Frank Clark", 13.5),
+        (2, "Terrell Suggs", 12.5),
+        (3, "Clay Matthews", 11.0),
+        (3, "Dwight Freeney", 11.0),
+        (3, "James Harrison", 11.0),
+        (3, "LaMarr Woodley", 11.0),
+    ]
+    assert _top(
+        _board(conn, "defense", "def_interceptions", "postseason"), "def_interceptions"
+    ) == [
+        (1, "Ed Reed", 9),
+        (2, "Asante Samuel", 7),
+        (2, "Rodney Harrison", 7),
+    ]
+    assert _top(_board(conn, "defense", "def_tackles_solo", "postseason"), "def_tackles_solo") == [
+        (1, "Ray Lewis", 113),
+        (2, "Bobby Wagner", 95),
+        (3, "Devin McCourty", 88),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("player_id", "sort", "season_type"),
+    [(JULIUS_PEPPERS, "def_sacks", "regular"), (ED_REED, "def_interceptions", "postseason")],
+)
+def test_a_defense_row_equals_the_career_totals(
+    conn: sqlite3.Connection, player_id: int, sort: str, season_type: str
+) -> None:
+    (row,) = _board(conn, "defense", sort, season_type, limit=1).rows
+    assert row.player_id == player_id
+    career = get_player_career(conn, sport="nfl", player_id=player_id)
+    totals = career.regular_season if season_type == "regular" else career.postseason
+    assert totals is not None
+    assert row.stats == totals.stats
+    assert row.games == totals.games
+    if player_id == JULIUS_PEPPERS:
+        assert (row.stats.def_sacks, row.stats.def_fumbles_forced) == (159.0, 51)
+    else:
+        assert row.stats.def_interceptions == 9

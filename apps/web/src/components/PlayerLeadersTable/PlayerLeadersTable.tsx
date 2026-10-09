@@ -6,9 +6,10 @@ import type {
   PlayerStatsOut,
 } from '../../lib/api/types'
 import { formatRecord } from '../../lib/formatRecord'
-import type { LeaderStatKey } from '../../lib/playerStats'
+import type { LeaderStatColumn, LeaderStatKey } from '../../lib/playerStats'
 import {
   DASH,
+  LEADER_COLUMN_NOTES,
   NONE_LABEL,
   NOT_RECORDED,
   SEASON_TYPE_LABEL,
@@ -16,6 +17,7 @@ import {
   formatSeasonSpan,
   formatStat,
   leaderBoardColumns,
+  leaderColumnNoteId,
   leaderStatCell,
   sortForStat,
 } from '../../lib/playerStats'
@@ -30,6 +32,12 @@ export interface PlayerLeadersTableProps {
   busy?: boolean
   /** The id of the note that explains this board: the pulled-early starter note, or the FG% minimum. */
   describedBy?: string
+  /**
+   * The prefix the page built its column-note ids from (issue #317). A
+   * header a note covers is described by that note's id
+   * (`leaderColumnNoteId`); without a prefix no header is, so no id dangles.
+   */
+  columnNoteIdPrefix?: string
 }
 
 function SortArrow({ active }: { active: boolean }) {
@@ -48,16 +56,62 @@ function SortArrow({ active }: { active: boolean }) {
 }
 
 /**
+ * A header's text (issue #317). An abbreviation shows as itself, titled for
+ * the mouse, and is named in full for assistive tech; a column a note covers
+ * carries that note's marker, hidden from assistive tech, which gets the
+ * note itself through `aria-describedby` instead.
+ */
+function HeaderLabel({
+  label,
+  fullLabel,
+  marker,
+}: {
+  label: string
+  fullLabel: string | undefined
+  marker: string | undefined
+}) {
+  return (
+    <>
+      {fullLabel === undefined ? (
+        label
+      ) : (
+        <>
+          <abbr className={styles.abbr} title={fullLabel} aria-hidden="true">
+            {label}
+          </abbr>
+          <span className={styles.srOnly}>{fullLabel}</span>
+        </>
+      )}
+      {marker !== undefined && (
+        <span className={styles.marker} aria-hidden="true">
+          {marker}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** How a stat header reads, and which note (by element id) describes it. */
+interface HeaderText {
+  label: string
+  fullLabel: string | undefined
+  marker: string | undefined
+  describedBy: string | undefined
+}
+
+/**
  * A sortable column header: a button inside the `th`, with `aria-sort` on
- * the `th` itself, where assistive tech reads it.
+ * the `th` itself, where assistive tech reads it. A column a note covers
+ * describes its button by that note, so the note is read where the column
+ * is reached.
  */
 function SortHeader({
-  label,
+  text,
   sort,
   current,
   onSort,
 }: {
-  label: string
+  text: HeaderText
   sort: PlayerLeaderSort
   current: PlayerLeaderSort
   onSort: (sort: PlayerLeaderSort) => void
@@ -72,11 +126,16 @@ function SortHeader({
       <button
         type="button"
         className={active ? styles.sortActive : styles.sort}
+        aria-describedby={text.describedBy}
         onClick={() => {
           onSort(sort)
         }}
       >
-        {label}
+        <HeaderLabel
+          label={text.label}
+          fullLabel={text.fullLabel}
+          marker={text.marker}
+        />
         <SortArrow active={active} />
       </button>
     </th>
@@ -139,18 +198,38 @@ function StatCell({
  * exception to rendering only what was sent: the API ranks by them without
  * sending them, so `deriveKickingStats` computes each row's value -- never
  * its rank or its place.
+ *
+ * The defense board (#317) shows sacks to one decimal. The founder's notes
+ * (#316) for the columns that need one are rendered by the page, in its
+ * "About these numbers" box (`LeaderColumnNotes`); here each covered header
+ * carries the note's marker and, given the page's `columnNoteIdPrefix`, an
+ * `aria-describedby` to that note.
  */
 export function PlayerLeadersTable({
   leaders,
   onSort,
   busy = false,
   describedBy,
+  columnNoteIdPrefix,
 }: PlayerLeadersTableProps) {
   const captionId = useId()
   const caption = `NFL career leaders: ${SEASON_TYPE_LABEL[leaders.season_type].toLowerCase()}, by ${SORT_LABEL[leaders.sort]}`
   const { showsRecord, stats: statColumns } = leaderBoardColumns(
     leaders.category,
   )
+
+  function headerText(column: LeaderStatColumn): HeaderText {
+    const { note } = column
+    return {
+      label: column.label,
+      fullLabel: column.fullLabel,
+      marker: note === undefined ? undefined : LEADER_COLUMN_NOTES[note].marker,
+      describedBy:
+        note === undefined || columnNoteIdPrefix === undefined
+          ? undefined
+          : leaderColumnNoteId(columnNoteIdPrefix, note),
+    }
+  }
 
   return (
     <div
@@ -182,7 +261,12 @@ export function PlayerLeadersTable({
             {showsRecord && (
               <>
                 <SortHeader
-                  label="Starter record"
+                  text={{
+                    label: 'Starter record',
+                    fullLabel: undefined,
+                    marker: undefined,
+                    describedBy: undefined,
+                  }}
                   sort="wins"
                   current={leaders.sort}
                   onSort={onSort}
@@ -194,14 +278,24 @@ export function PlayerLeadersTable({
             )}
             {statColumns.map((column) => {
               const sort = sortForStat(leaders.category, column.key)
+              const text = headerText(column)
               return sort === undefined ? (
-                <th scope="col" className={styles.numeric} key={column.key}>
-                  {column.label}
+                <th
+                  scope="col"
+                  className={styles.numeric}
+                  key={column.key}
+                  aria-describedby={text.describedBy}
+                >
+                  <HeaderLabel
+                    label={text.label}
+                    fullLabel={text.fullLabel}
+                    marker={text.marker}
+                  />
                 </th>
               ) : (
                 <SortHeader
                   key={column.key}
-                  label={column.label}
+                  text={text}
                   sort={sort}
                   current={leaders.sort}
                   onSort={onSort}

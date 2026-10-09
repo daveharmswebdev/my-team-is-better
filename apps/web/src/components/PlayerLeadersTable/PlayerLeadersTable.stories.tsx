@@ -2,6 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter } from 'react-router-dom'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import {
+  DEFENSE_WITH_NULL_STATS,
+  LEADERS_BY_DEF_SACKS,
+  LEADERS_BY_DEF_SACKS_TAIL,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_MADE_TAIL,
   LEADERS_BY_FG_PCT,
@@ -15,6 +18,11 @@ import {
   LEADERS_BY_YARDS,
   LEADERS_WITH_NULL_STATS,
 } from '../../lib/playerFixtures'
+import {
+  DEFENSE_EARLY_ERA_NOTE,
+  DEFENSE_UNOFFICIAL_NOTE,
+} from '../../lib/playerStats'
+import { LeaderColumnNotes } from '../LeaderColumnNotes/LeaderColumnNotes'
 import { PlayerLeadersTable } from './PlayerLeadersTable'
 
 const meta = {
@@ -179,5 +187,76 @@ export const ByPuntingYards: Story = {
     await expect(canvas.getByText('4,831')).toBeInTheDocument()
     await userEvent.click(canvas.getByRole('button', { name: 'Inside 20' }))
     await expect(args.onSort).toHaveBeenCalledWith('pt_inside_20')
+  },
+}
+
+/**
+ * The page renders the defense notes (#316) above the table; these stories
+ * do the same, with the prefix the table's headers point at.
+ */
+function withDefenseNotes(Story: () => React.JSX.Element) {
+  return (
+    <>
+      <LeaderColumnNotes category="defense" idPrefix="story-notes" />
+      <Story />
+    </>
+  )
+}
+
+/**
+ * The defense board (issue #317): T.J. Watt's 19.0, then a real tie at 17.5
+ * -- a half sack shown, never rounded. Each header a founder's note (#316)
+ * covers carries its marker and is described by the note above the table.
+ */
+export const BySacks: Story = {
+  args: { leaders: LEADERS_BY_DEF_SACKS, columnNoteIdPrefix: 'story-notes' },
+  decorators: [withDefenseNotes],
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'Sacks' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(canvas.getByText('19.0')).toBeInTheDocument()
+    await expect(canvas.getAllByText('17.5')).toHaveLength(2)
+    await expect(
+      canvas.getByRole('button', { name: 'Sacks' }),
+    ).toHaveAccessibleDescription(DEFENSE_EARLY_ERA_NOTE)
+    await expect(
+      canvas.getByRole('button', { name: 'Solo tackles' }),
+    ).toHaveAccessibleDescription(DEFENSE_UNOFFICIAL_NOTE)
+    await userEvent.click(canvas.getByRole('button', { name: 'Interceptions' }))
+    await expect(args.onSort).toHaveBeenCalledWith('def_interceptions')
+  },
+}
+
+/**
+ * A defense board with a half sack (0.5) and stats the source didn't track:
+ * "not recorded", never 0 or 0.0. Invented, since the fixture has no nulls.
+ */
+export const DefenseWithNullStats: Story = {
+  args: {
+    leaders: DEFENSE_WITH_NULL_STATS,
+    columnNoteIdPrefix: 'story-notes',
+  },
+  decorators: [withDefenseNotes],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('0.5')).toBeInTheDocument()
+    await expect(canvas.getAllByText('not recorded')).toHaveLength(6)
+    await expect(
+      canvas.getByRole('button', { name: 'Forced fumbles' }),
+    ).toHaveAccessibleDescription(DEFENSE_EARLY_ERA_NOTE)
+  },
+}
+
+/** The foot of the sacks board: a receiver on one solo tackle, with 0.0 sacks. */
+export const DefenseTail: Story = {
+  args: { leaders: LEADERS_BY_DEF_SACKS_TAIL },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('rowheader', { name: 'Zola Davis' }),
+    ).toBeInTheDocument()
+    await expect(canvas.getAllByText('0.0')).toHaveLength(3)
   },
 }

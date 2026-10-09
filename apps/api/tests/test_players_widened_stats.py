@@ -4,8 +4,8 @@
 (#354: five defensive columns and three EPA columns), and the committed
 fixture was rebuilt through the widened nflverse ingest each time. This
 module pins the behavioural changes that came with the widening, so that
-none can regress silently. Since #315 the API (`PlayerStatsOut`) publishes
-28 of the contract's stats; the fourteen it leaves out are pinned below.
+none can regress silently. Since #317 the API (`PlayerStatsOut`) publishes
+33 of the contract's stats; the nine it leaves out are pinned below.
 
 1. Sign convention (#298). `sack_yards_lost` is stored and published
    POSITIVE. It used to be negative, and every consumer -- the career page,
@@ -20,14 +20,19 @@ none can regress silently. Since #315 the API (`PlayerStatsOut`) publishes
    coerces NULL to 0 would publish that. They are asserted against the
    fixture db directly and, since #315 publishes them, through HTTP too.
 
-3. Stored, not published (#354). The five defensive columns and three EPA
-   columns are in the fixture's `player_season_stats` -- `def_sacks` and the
-   EPA columns as REAL, because a shared sack is 0.5 and EPA is fractional
-   (`contracts.PLAYER_STAT_REAL_FIELDS`) -- and no player endpoint publishes
-   any of them yet (#317 for defense, #347 for EPA). Values are pinned on
-   season rows of the fixture db only: a career EPA total is the engine's
-   to compute (`contracts.PLAYER_STAT_SPARSE_FIELDS`), and no published
-   field carries one.
+3. Defense stored and published, EPA stored only (#354, #317). The five
+   defensive columns and three EPA columns are in the fixture's
+   `player_season_stats` -- `def_sacks` and the EPA columns as REAL, because
+   a shared sack is 0.5 and EPA is fractional
+   (`contracts.PLAYER_STAT_REAL_FIELDS`). #354 stored all eight and
+   published none. #317 published the five defensive ones on every player
+   endpoint, mapped 1:1 from the engine: the same season anchors now hold
+   through HTTP, `def_sacks` as a JSON float (17.5 stays 17.5), and a
+   quarterback's defensive line publishes whatever the engine returns. The
+   three EPA columns stay unpublished (#347); their values are pinned on
+   season rows of the fixture db only, because a career EPA total is the
+   engine's to compute (`contracts.PLAYER_STAT_SPARSE_FIELDS`) and no
+   published field carries one.
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from cfb_strength.players import get_player_career
 from fastapi.testclient import TestClient
 from fixtures.player_api_fixture import (
     DEFENSE_STATS,
@@ -49,6 +55,7 @@ from fixtures.player_api_fixture import (
 
 KURT_WARNER = 2044124519
 PATRICK_MAHOMES = 2319407936
+STEVE_MCNAIR = 2385180619
 
 # (player, season, season_type, sacks_suffered, sack_yards_lost), measured on
 # the rebuilt fixture. The yards were negative before #298.
@@ -171,12 +178,15 @@ def test_stats_body_rejects_a_name_that_is_not_a_stat() -> None:
 
 
 def test_the_contract_stats_the_api_leaves_out() -> None:
-    """Since #315 the API publishes every contract stat but these: the two
+    """Since #317 the API publishes every contract stat but these: the two
     rushing columns #313 added and nothing has published yet, the 0-49
     yard field-goal buckets, which #315 leaves out deliberately, and
-    #354's five defensive and three EPA columns (#317, #347). Both sides
-    are literals, so neither a dropped nor an added field can hide."""
-    assert len(UNPUBLISHED_STATS) == 14
+    #354's three EPA columns (#347). #354's five defensive columns left
+    this list when #317 published them. Both sides are literals, so
+    neither a dropped nor an added field can hide."""
+    assert len(UNPUBLISHED_STATS) == 9
+    assert set(DEFENSE_STATS) <= set(PUBLISHED_STATS)
+    assert set(DEFENSE_STATS).isdisjoint(UNPUBLISHED_STATS)
     assert [name for name in STAT_NAMES if name not in PUBLISHED_STAT_NAMES] == list(
         UNPUBLISHED_STATS
     )
@@ -216,6 +226,18 @@ def test_a_quarterbacks_maximum_is_published_as_null(client: TestClient, field: 
     assert field in totals and totals[field] is None
 
 
+def test_stats_body_accepts_the_defense_stats() -> None:
+    """#317: published now, so an expectation may name them; a half sack is
+    carried as given."""
+    body = stats_body(def_sacks=0.5, def_tackles_solo=3)
+
+    assert (body["def_sacks"], body["def_tackles_solo"], body["def_interceptions"]) == (
+        0.5,
+        3,
+        None,
+    )
+
+
 def test_stats_body_accepts_the_receiving_stats() -> None:
     body = stats_body(receptions=4, targets=6)
 
@@ -223,7 +245,8 @@ def test_stats_body_accepts_the_receiving_stats() -> None:
 
 
 # ---------------------------------------------------------------------------
-# #354: five defensive and three EPA columns, stored but not published.
+# #354: five defensive and three EPA columns, stored. #317 publishes the
+# defensive five; the EPA three stay unpublished (#347).
 # ---------------------------------------------------------------------------
 
 T_J_WATT = 2459036925
@@ -340,13 +363,15 @@ def _stats_objects(value: Any) -> list[Any]:
     return []
 
 
-def test_no_player_endpoint_publishes_the_defense_or_epa_columns(client: TestClient) -> None:
-    """#354 stores eight columns the API does not publish yet. Every player
-    endpoint -- every leaders board, the career page of a quarterback and of
-    three defenders, compare, search -- answers without any of their names,
-    and every stats object carries exactly the literal `PUBLISHED_STATS`,
-    unchanged by the widening."""
-    assert set(PUBLISHED_STATS).isdisjoint(NEW_STATS)
+def test_every_player_endpoint_publishes_defense_and_no_epa(client: TestClient) -> None:
+    """#354 stored eight columns and published none; #317 publishes the five
+    defensive ones. Every player endpoint -- every leaders board (defense
+    included), the career page of a quarterback and of three defenders,
+    compare, search -- answers without any EPA name, and every stats object
+    carries exactly the literal `PUBLISHED_STATS`, the five defensive stats
+    among them."""
+    assert set(DEFENSE_STATS) <= set(PUBLISHED_STATS)
+    assert set(PUBLISHED_STATS).isdisjoint(EPA_STATS)
 
     bodies: list[Any] = []
 
@@ -356,21 +381,94 @@ def test_no_player_endpoint_publishes_the_defense_or_epa_columns(client: TestCli
         bodies.append(response.json())
         return response.json()
 
-    for category in ("passing", "rushing", "receiving", "kicking", "punting"):
+    for category in ("passing", "rushing", "receiving", "kicking", "punting", "defense"):
         for season_type in ("regular", "postseason"):
             get("/api/players/leaders", category=category, season_type=season_type, limit=5)
     for player_id in (KURT_WARNER, T_J_WATT, DARON_BLAND, KEVIN_CARTER):
         get(f"/api/players/{player_id}")
-    get("/api/players/compare", a=KURT_WARNER, b=PATRICK_MAHOMES)
-    # Search lists only players who qualify for a leaderboard, and no board
-    # ranks defense yet (#317), so a pure defender is not found; search a
-    # quarterback instead.
+    # Warner and McNair met twice in 1999 (#301), so compare has games to check.
+    compare = get("/api/players/compare", a=KURT_WARNER, b=STEVE_MCNAIR)
+    # Search rows carry no stats, so search is here only for the EPA-name
+    # check. The engine's search still qualifies on the offensive and
+    # kicking boards only, so a pure defender is not found yet even though
+    # defense is a board (#317); search a quarterback.
     search = get("/api/players/search", q="Warner")
     assert KURT_WARNER in {row["player_id"] for row in search["rows"]}
 
     stats_objects = _stats_objects(bodies)
-    assert len(stats_objects) > 10 * 5
+    assert len(stats_objects) > 12 * 5
     for body in bodies:
-        assert _keys(body).isdisjoint(NEW_STATS)
+        assert _keys(body).isdisjoint(EPA_STATS)
     for stats in stats_objects:
         assert list(stats) == list(PUBLISHED_STATS)
+    # Compare's per-game sides are `a_stats`/`b_stats`, not `stats`.
+    games = [
+        game
+        for key in ("regular_season_head_to_head", "postseason_head_to_head")
+        for game in compare[key]["games"]
+    ]
+    assert len(games) == 2
+    for game in games:
+        assert list(game["a_stats"]) == list(game["b_stats"]) == list(PUBLISHED_STATS)
+
+
+@pytest.mark.parametrize("player_id,season,season_type,column,value", DEFENSE_ANCHORS)
+def test_defense_season_rows_are_published_as_stored(
+    client: TestClient,
+    player_id: int,
+    season: int,
+    season_type: str,
+    column: str,
+    value: float,
+) -> None:
+    """The same anchors as the db check above, through HTTP: the career
+    page publishes each value 1:1, and `def_sacks` stays a float -- a
+    half sack reaches JSON as 17.5, and Watt's 19 sacks as 19.0."""
+    stats = _season_stats(client, player_id, season, season_type)
+
+    assert stats[column] == value
+    assert type(stats[column]) is type(value)
+
+
+def test_a_defenders_career_publishes_his_five_stats(client: TestClient) -> None:
+    """T.J. Watt's career (2023 only on the fixture), every defense stat."""
+    response = client.get(f"/api/players/{T_J_WATT}")
+    assert response.status_code == 200, response.text
+    assert '"def_sacks":19.0' in response.text
+    body = response.json()
+
+    assert {name: body["regular_season"]["stats"][name] for name in DEFENSE_STATS} == {
+        "def_interceptions": 1,
+        "def_sacks": 19.0,
+        "def_fumbles_forced": 4,
+        "def_tackles_solo": 38,
+        "def_pass_defended": 8,
+    }
+    assert body["postseason"] is None
+
+
+def test_a_quarterbacks_defense_line_is_the_engines(client: TestClient) -> None:
+    """Kurt Warner's 1999 defensive line publishes exactly what the engine
+    returns: nflverse's recorded zeros, `def_sacks` as the float 0.0, and the
+    one solo tackle he made in the regular season (after an interception,
+    presumably). Nothing here is coerced -- a NULL would stay null, as
+    `test_a_null_defense_stat_stays_null_and_unranked` checks on a copy."""
+    with fixture_conn() as conn:
+        engine = get_player_career(conn, sport="nfl", player_id=KURT_WARNER)
+    body = client.get(f"/api/players/{KURT_WARNER}").json()
+
+    assert engine.regular_season is not None and engine.postseason is not None
+    for key, totals in (
+        ("regular_season", engine.regular_season),
+        ("postseason", engine.postseason),
+    ):
+        published = {name: body[key]["stats"][name] for name in DEFENSE_STATS}
+        assert published == {name: getattr(totals.stats, name) for name in DEFENSE_STATS}
+        assert type(published["def_sacks"]) is float
+    assert {name: body["regular_season"]["stats"][name] for name in DEFENSE_STATS} == {
+        "def_interceptions": 0,
+        "def_sacks": 0.0,
+        "def_fumbles_forced": 0,
+        "def_tackles_solo": 1,
+        "def_pass_defended": 0,
+    }

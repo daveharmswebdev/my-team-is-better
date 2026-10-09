@@ -86,6 +86,15 @@ _NO_KICKING_OR_PUNTING: dict[str, int] = {
     "pt_net_yards": 0,
     "pt_inside_20": 0,
 }
+# Defense (#317), measured the same way: in all four games both quarterbacks'
+# defensive lines are recorded zeros, `def_sacks` as the float 0.0 (REAL).
+_NO_DEFENSE: dict[str, int | float] = {
+    "def_interceptions": 0,
+    "def_sacks": 0.0,
+    "def_fumbles_forced": 0,
+    "def_tackles_solo": 0,
+    "def_pass_defended": 0,
+}
 _WARNER_REGULAR = (
     "St. Louis Rams",
     21,
@@ -102,6 +111,7 @@ _WARNER_REGULAR = (
         rushing_tds=0,
         **_NO_RECEIVING,
         **_NO_KICKING_OR_PUNTING,
+        **_NO_DEFENSE,
     ),
 )
 _MCNAIR_REGULAR = (
@@ -120,6 +130,7 @@ _MCNAIR_REGULAR = (
         rushing_tds=1,
         **_NO_RECEIVING,
         **_NO_KICKING_OR_PUNTING,
+        **_NO_DEFENSE,
     ),
 )
 _WARNER_POSTSEASON = (
@@ -138,6 +149,7 @@ _WARNER_POSTSEASON = (
         rushing_tds=0,
         **_NO_RECEIVING,
         **_NO_KICKING_OR_PUNTING,
+        **_NO_DEFENSE,
     ),
 )
 _MCNAIR_POSTSEASON = (
@@ -156,10 +168,11 @@ _MCNAIR_POSTSEASON = (
         rushing_tds=0,
         **_NO_RECEIVING,
         **_NO_KICKING_OR_PUNTING,
+        **_NO_DEFENSE,
     ),
 )
 
-Side = tuple[str, int, dict[str, int | None]]
+Side = tuple[str, int, dict[str, int | float | None]]
 
 
 def _game(

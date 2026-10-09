@@ -122,6 +122,18 @@
   opacity: 0.35;
 }
 
+/* An abbreviated header (issue #317): the button already underlines it. */
+.abbr {
+  text-decoration: none;
+}
+
+/* The marker pairing a header with its note in the page's notes box (issue #317). */
+.marker {
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--leather);
+}
+
 /* Read by assistive tech in place of a visible dash (issue #315). */
 .srOnly {
   position: absolute;

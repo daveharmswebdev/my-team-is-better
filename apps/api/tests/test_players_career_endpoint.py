@@ -80,6 +80,13 @@ WARNER_1999_REGULAR_STATS = {
     # not null: nflverse records 0, and the API publishes what it records.
     **NO_RECEIVING,
     **NO_KICKING_OR_PUNTING,
+    # Defense (#317): the source's recorded zeros, `def_sacks` as the float
+    # 0.0, plus one solo tackle -- published as recorded, not filtered out.
+    "def_interceptions": 0,
+    "def_sacks": 0.0,
+    "def_fumbles_forced": 0,
+    "def_tackles_solo": 1,
+    "def_pass_defended": 0,
 }
 WARNER_1999_POSTSEASON_STATS = {
     "completions": 77,
@@ -94,6 +101,11 @@ WARNER_1999_POSTSEASON_STATS = {
     "rushing_tds": 0,
     **NO_RECEIVING,
     **NO_KICKING_OR_PUNTING,
+    "def_interceptions": 0,
+    "def_sacks": 0.0,
+    "def_fumbles_forced": 0,
+    "def_tackles_solo": 0,
+    "def_pass_defended": 0,
 }
 
 

@@ -84,6 +84,31 @@ const NO_KICKING: KickingStats = {
   pt_inside_20: 0,
 }
 
+/** The five defense stats (issue #317), in the API's order. */
+type DefenseStats = Pick<
+  PlayerStatsOut,
+  | 'def_interceptions'
+  | 'def_sacks'
+  | 'def_fumbles_forced'
+  | 'def_tackles_solo'
+  | 'def_pass_defended'
+>
+
+/**
+ * The defense stats of everyone below who made no defensive play, exactly
+ * as the committed fixture sends them: a recorded 0 for each (the API's
+ * `0.0` sacks is `0` once parsed). Many offensive players and specialists
+ * do have a solo tackle or two (after a turnover, or on a return), so the
+ * rows that do override `def_tackles_solo` with the fixture's own number.
+ */
+const NO_DEFENSE: DefenseStats = {
+  def_interceptions: 0,
+  def_sacks: 0,
+  def_fumbles_forced: 0,
+  def_tackles_solo: 0,
+  def_pass_defended: 0,
+}
+
 /** Receiving stats in the API's order: receptions, targets, yards, TDs, first downs, fumbles lost. */
 function receiving(
   receptions: number,
@@ -125,6 +150,7 @@ export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
     rushing_tds: 0,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
 }
 
@@ -150,6 +176,8 @@ export const JARED_GOFF: PlayerLeaderRowOut = {
     rushing_tds: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
 }
 
@@ -175,6 +203,8 @@ export const DAK_PRESCOTT: PlayerLeaderRowOut = {
     rushing_tds: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
 }
 
@@ -200,6 +230,7 @@ export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
     rushing_tds: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
 }
 
@@ -225,6 +256,8 @@ export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
     rushing_tds: 1,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
 }
 
@@ -250,6 +283,7 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
     rushing_tds: 4,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
 }
 
@@ -312,6 +346,11 @@ export const UNRECORDED_STATS: PlayerStatsOut = {
   pt_net_yards: null,
   pt_long: null,
   pt_inside_20: null,
+  def_interceptions: null,
+  def_sacks: null,
+  def_fumbles_forced: null,
+  def_tackles_solo: null,
+  def_pass_defended: null,
 }
 
 /**
@@ -377,6 +416,7 @@ function nonPasserStats(
     rushing_tds: rushingTds,
     ...catches,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   }
 }
 
@@ -391,7 +431,10 @@ export const EDGERRIN_JAMES: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 16,
   record: NO_RECORD,
-  stats: nonPasserStats(369, 1553, 13, receiving(62, 86, 586, 4, 23, 1)),
+  stats: {
+    ...nonPasserStats(369, 1553, 13, receiving(62, 86, 586, 4, 23, 1)),
+    def_tackles_solo: 3,
+  },
 }
 
 export const CURTIS_MARTIN: PlayerLeaderRowOut = {
@@ -415,7 +458,10 @@ export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
   last_season: 2023,
   games: 16,
   record: NO_RECORD,
-  stats: nonPasserStats(272, 1459, 14, receiving(67, 83, 564, 7, 31, 0)),
+  stats: {
+    ...nonPasserStats(272, 1459, 14, receiving(67, 83, 564, 7, 31, 0)),
+    def_tackles_solo: 2,
+  },
 }
 
 export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
@@ -439,7 +485,10 @@ export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 14,
   record: NO_RECORD,
-  stats: nonPasserStats(290, 1405, 17, receiving(23, 28, 111, 0, 5, 0)),
+  stats: {
+    ...nonPasserStats(290, 1405, 17, receiving(23, 28, 111, 0, 5, 0)),
+    def_tackles_solo: 1,
+  },
 }
 
 /** A quarterback on the rushing board, tied at rank 3: he keeps his starter record. */
@@ -465,6 +514,8 @@ export const JALEN_HURTS: PlayerLeaderRowOut = {
     rushing_tds: 15,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
 }
 
@@ -490,6 +541,7 @@ export const JOSH_ALLEN: PlayerLeaderRowOut = {
     rushing_tds: 15,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
 }
 
@@ -665,6 +717,8 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
         rushing_tds: 1,
         ...receiving(0, 1, 0, 0, 0, 0),
         ...NO_KICKING,
+        ...NO_DEFENSE,
+        def_tackles_solo: 1,
       },
     },
     receiverRow(
@@ -698,6 +752,8 @@ export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_tds: 1,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
   games_without_stat_lines: 1,
 }
@@ -721,6 +777,7 @@ export const WARNER_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_tds: 0,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
   games_without_stat_lines: 0,
 }
@@ -825,6 +882,8 @@ const MCNAIR_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_tds: 8,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
   games_without_stat_lines: 0,
 }
@@ -848,6 +907,7 @@ const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_tds: 3,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
   games_without_stat_lines: 0,
 }
@@ -907,6 +967,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 0,
           ...NO_RECEIVING,
           ...NO_KICKING,
+          ...NO_DEFENSE,
         },
         b_stats: {
           completions: 13,
@@ -921,6 +982,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 1,
           ...NO_RECEIVING,
           ...NO_KICKING,
+          ...NO_DEFENSE,
         },
       },
     ],
@@ -952,6 +1014,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 0,
           ...NO_RECEIVING,
           ...NO_KICKING,
+          ...NO_DEFENSE,
         },
         b_stats: {
           completions: 22,
@@ -966,6 +1029,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 0,
           ...NO_RECEIVING,
           ...NO_KICKING,
+          ...NO_DEFENSE,
         },
       },
     ],
@@ -1115,6 +1179,8 @@ const MANNING_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_tds: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
+    def_tackles_solo: 1,
   },
   games_without_stat_lines: 0,
 }
@@ -1138,6 +1204,7 @@ const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_tds: 1,
     ...NO_RECEIVING,
     ...NO_KICKING,
+    ...NO_DEFENSE,
   },
   games_without_stat_lines: 0,
 }
@@ -1267,6 +1334,7 @@ export const TOM_BRADY_CAREER: PlayerCareerOut = inventedCareer(
       rushing_tds: 0,
       ...NO_RECEIVING,
       ...NO_KICKING,
+      ...NO_DEFENSE,
     },
     games_without_stat_lines: 0,
   },
@@ -1295,6 +1363,7 @@ export const BRADY_QUINN_CAREER: PlayerCareerOut = inventedCareer(
       rushing_tds: 0,
       ...NO_RECEIVING,
       ...NO_KICKING,
+      ...NO_DEFENSE,
     },
     games_without_stat_lines: 0,
   },
@@ -1364,6 +1433,7 @@ export const OLINDO_MARE: PlayerLeaderRowOut = {
     pt_net_yards: 30,
     pt_long: 36,
     pt_inside_20: 0,
+    def_tackles_solo: 3,
   }),
 }
 
@@ -1489,6 +1559,7 @@ export const MORRIS_UNUTOA: PlayerLeaderRowOut = {
     pt_net_yards: 0,
     pt_long: null,
     pt_inside_20: 0,
+    def_tackles_solo: 2,
   }),
 }
 
@@ -1514,6 +1585,7 @@ export const TOBY_GOWIN: PlayerLeaderRowOut = {
     pt_net_yards: 2841,
     pt_long: 64,
     pt_inside_20: 24,
+    def_tackles_solo: 4,
   }),
 }
 
@@ -1567,6 +1639,7 @@ export const CHRIS_GARDOCKI: PlayerLeaderRowOut = {
     pt_net_yards: 3663,
     pt_long: 61,
     pt_inside_20: 20,
+    def_tackles_solo: 1,
   }),
 }
 
@@ -1592,6 +1665,7 @@ export const BRYCE_BARINGER: PlayerLeaderRowOut = {
     pt_net_yards: 3999,
     pt_long: 79,
     pt_inside_20: 38,
+    def_tackles_solo: 1,
   }),
 }
 
@@ -1656,4 +1730,196 @@ export const LEADERS_BY_PT_YARDS: PlayerLeadersOut = {
   offset: 0,
   total: 83,
   rows: [THOMAS_MORSTEAD, CHRIS_GARDOCKI, BRYCE_BARINGER],
+}
+
+// ---------------------------------------------------------------------------
+// The defense category (issue #317). Copied from the same fixture db: the
+// board ranks everyone with more than zero in any of the five defense stats,
+// whatever their position, so a receiver with one solo tackle is at its foot.
+// Sacks are decimals (half sacks are real); the other four are counts.
+// ---------------------------------------------------------------------------
+
+/** Defense stats in the API's order: interceptions, sacks, forced fumbles, solo tackles, passes defended. */
+function defense(
+  interceptions: number | null,
+  sacks: number | null,
+  fumblesForced: number | null,
+  tacklesSolo: number | null,
+  passDefended: number | null,
+): DefenseStats {
+  return {
+    def_interceptions: interceptions,
+    def_sacks: sacks,
+    def_fumbles_forced: fumblesForced,
+    def_tackles_solo: tacklesSolo,
+    def_pass_defended: passDefended,
+  }
+}
+
+/** A one-season defender: every offensive and kicking stat a recorded 0, as the fixture sends it. */
+function defenderRow(
+  rank: number | null,
+  playerId: number,
+  displayName: string,
+  position: string,
+  season: number,
+  games: number,
+  stats: DefenseStats,
+): PlayerLeaderRowOut {
+  return {
+    rank,
+    player_id: playerId,
+    display_name: displayName,
+    position,
+    first_season: season,
+    last_season: season,
+    games,
+    record: NO_RECORD,
+    stats: { ...nonPasserStats(0, 0, 0, NO_RECEIVING), ...stats },
+  }
+}
+
+export const TJ_WATT = defenderRow(
+  1,
+  2459036925,
+  'T.J. Watt',
+  'OLB',
+  2023,
+  16,
+  defense(1, 19, 4, 38, 8),
+)
+
+export const JOSH_HINES_ALLEN = defenderRow(
+  2,
+  2031400630,
+  'Josh Hines-Allen',
+  'DE',
+  2023,
+  16,
+  defense(1, 17.5, 2, 37, 1),
+)
+
+export const TREY_HENDRICKSON = defenderRow(
+  2,
+  2125290444,
+  'Trey Hendrickson',
+  'LB',
+  2023,
+  17,
+  defense(0, 17.5, 3, 25, 3),
+)
+
+export const KHALIL_MACK = defenderRow(
+  4,
+  2160323933,
+  'Khalil Mack',
+  'OLB',
+  2023,
+  16,
+  defense(0, 17, 5, 45, 10),
+)
+
+export const DANIELLE_HUNTER = defenderRow(
+  5,
+  2116144800,
+  'Danielle Hunter',
+  'DE',
+  2023,
+  17,
+  defense(0, 16.5, 4, 44, 2),
+)
+
+/**
+ * The committed fixture's regular-season top five by sacks (2,619 qualify):
+ * T.J. Watt's 19.0, then Josh Hines-Allen and Trey Hendrickson tied at 17.5.
+ */
+export const LEADERS_BY_DEF_SACKS: PlayerLeadersOut = {
+  sport: 'nfl',
+  category: 'defense',
+  season_type: 'regular',
+  sort: 'def_sacks',
+  limit: 50,
+  offset: 0,
+  total: 2619,
+  rows: [
+    TJ_WATT,
+    JOSH_HINES_ALLEN,
+    TREY_HENDRICKSON,
+    KHALIL_MACK,
+    DANIELLE_HUNTER,
+  ],
+}
+
+/**
+ * The foot of the same board (`offset=2616`): three players tied at 812 with
+ * no sack, among them Zola Davis, a receiver, on one solo tackle.
+ */
+export const LEADERS_BY_DEF_SACKS_TAIL: PlayerLeadersOut = {
+  ...LEADERS_BY_DEF_SACKS,
+  offset: 2616,
+  rows: [
+    defenderRow(
+      812,
+      2071342796,
+      'Zayne Anderson',
+      'SAF',
+      2023,
+      3,
+      defense(0, 0, 0, 3, 0),
+    ),
+    {
+      rank: 812,
+      player_id: 2147735944,
+      display_name: 'Zola Davis',
+      position: 'WR',
+      first_season: 1999,
+      last_season: 1999,
+      games: 4,
+      record: NO_RECORD,
+      stats: {
+        ...nonPasserStats(0, 0, 0, receiving(2, 8, 38, 0, 2, 0)),
+        def_tackles_solo: 1,
+      },
+    },
+    defenderRow(
+      812,
+      2115215746,
+      'Zyon McCollum',
+      'CB',
+      2023,
+      13,
+      defense(0, 0, 2, 41, 9),
+    ),
+  ],
+}
+
+/**
+ * A defense board with stats the source only partly tracked: a half-sack
+ * row missing its solo tackles, and a row missing everything (so it has no
+ * rank). Invented, since the committed fixture has no null stats.
+ */
+export const DEFENSE_WITH_NULL_STATS: PlayerLeadersOut = {
+  ...LEADERS_BY_DEF_SACKS,
+  total: 3,
+  rows: [
+    TJ_WATT,
+    defenderRow(
+      2,
+      1004,
+      'Half Sack',
+      'DT',
+      2005,
+      12,
+      defense(0, 0.5, 0, null, 1),
+    ),
+    defenderRow(
+      null,
+      1005,
+      'Unrecorded Defender',
+      'CB',
+      2001,
+      9,
+      defense(null, null, null, null, null),
+    ),
+  ],
 }

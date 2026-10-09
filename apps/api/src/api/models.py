@@ -760,6 +760,23 @@ class PlayerStatsOut(BaseModel):
     pt_net_yards: int | None
     pt_long: int | None
     pt_inside_20: int | None
+    # Defense (#317): the defense board's five sorts, in the contract's order,
+    # each a career total of the column of the same name. `def_sacks` is a
+    # float, because a sack split between two rushers is 0.5 each: 17.5 is
+    # published as 17.5, never rounded. The other four are counts. A client
+    # must disclose the source calls #316 made, published as is:
+    # `def_sacks` and `def_fumbles_forced` are counted from play-by-play and
+    # can undercount a 1999-2009 season by 0.5-2 against the official total;
+    # `def_tackles_solo` and `def_pass_defended` are unofficial stats charted
+    # by team scorers; `def_interceptions` matched every official season
+    # leader 1999-2025. A non-defender's line is the source's recorded zeros
+    # (a quarterback's `def_sacks` is 0.0), and a stat the source did not
+    # record is null, never 0. The three EPA columns stay unpublished (#347).
+    def_interceptions: int | None
+    def_sacks: float | None
+    def_fumbles_forced: int | None
+    def_tackles_solo: int | None
+    def_pass_defended: int | None
 
     @classmethod
     def from_dataclass(cls, stats: PlayerStats) -> PlayerStatsOut:
@@ -792,6 +809,11 @@ class PlayerStatsOut(BaseModel):
             pt_net_yards=stats.pt_net_yards,
             pt_long=stats.pt_long,
             pt_inside_20=stats.pt_inside_20,
+            def_interceptions=stats.def_interceptions,
+            def_sacks=stats.def_sacks,
+            def_fumbles_forced=stats.def_fumbles_forced,
+            def_tackles_solo=stats.def_tackles_solo,
+            def_pass_defended=stats.def_pass_defended,
         )
 
 
