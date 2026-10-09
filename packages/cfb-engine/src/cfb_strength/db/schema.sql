@@ -259,6 +259,16 @@ CREATE TABLE IF NOT EXISTS player_game_stats (
     pt_net_yards INTEGER,
     pt_long INTEGER,
     pt_inside_20 INTEGER,
+    -- Defense and EPA (#354). def_sacks and the EPA columns are decimals
+    -- (contracts.PLAYER_STAT_REAL_FIELDS); every other stat is INTEGER.
+    def_interceptions INTEGER,
+    def_sacks REAL,
+    def_fumbles_forced INTEGER,
+    def_tackles_solo INTEGER,
+    def_pass_defended INTEGER,
+    passing_epa REAL,
+    rushing_epa REAL,
+    receiving_epa REAL,
     PRIMARY KEY (player_id, game_id)
 );
 CREATE INDEX IF NOT EXISTS idx_player_game_stats_game ON player_game_stats(game_id);
@@ -306,6 +316,16 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     pt_net_yards INTEGER,
     pt_long INTEGER,
     pt_inside_20 INTEGER,
+    -- Defense and EPA (#354). def_sacks and the EPA columns are decimals
+    -- (contracts.PLAYER_STAT_REAL_FIELDS); every other stat is INTEGER.
+    def_interceptions INTEGER,
+    def_sacks REAL,
+    def_fumbles_forced INTEGER,
+    def_tackles_solo INTEGER,
+    def_pass_defended INTEGER,
+    passing_epa REAL,
+    rushing_epa REAL,
+    receiving_epa REAL,
     PRIMARY KEY (player_id, season, season_type)
 );
 

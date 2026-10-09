@@ -167,12 +167,11 @@ class PlayerStats:
     append -- so a field inserted in the middle would give a fresh db and a
     migrated one different column orders.
 
-    Every column here is a whole number in the source. Deliberately absent:
-    rate columns (`fg_pct`, `pat_pct`) are derived from the counts beside
-    them, and nflverse's `def_sacks` is fractional (0.5 for a shared sack),
-    which the integer parse would reject -- the defensive columns arrive in
-    their own widening once #316 has verified them, and that round has to
-    settle the fractional case (#317).
+    Every column is a whole number in the source except
+    `PLAYER_STAT_REAL_FIELDS` (#354): `def_sacks` (0.5 for a shared sack)
+    and the three EPA columns, typed `float | None` and stored REAL.
+    Deliberately absent: rate columns (`fg_pct`, `pat_pct`) are derived
+    from the counts beside them.
 
     Issue #298 -- the sign convention, previously unstated: yardage a
     player *lost* is stored **positive**, so `sack_yards_lost` reads the way
@@ -227,6 +226,67 @@ class PlayerStats:
     pt_net_yards: int | None = None
     pt_long: int | None = None
     pt_inside_20: int | None = None
+    # Defense (#354), the five #316 verified against the official season
+    # leaders for 1999-2025. Interceptions matched 50/50; sacks 23/27 and
+    # forced fumbles 37/39, every miss in 1999-2009 and low by 0.5-2, so
+    # those two carry an early-era note wherever they are shown. Solo
+    # tackles and passes defended are charted by team scorers and are not
+    # an official statistic. Left out on purpose: `def_qb_hits` (0 for every
+    # 2003-2005 row) and `def_tackles_for_loss` (0 for 2003-2011) -- the
+    # source writes a false 0, not a blank, so NULL-not-zero cannot catch
+    # it -- and assisted tackles, which nearly triple across the range from
+    # charting drift.
+    def_interceptions: int | None = None
+    def_sacks: float | None = None
+    def_fumbles_forced: int | None = None
+    def_tackles_solo: int | None = None
+    def_pass_defended: int | None = None
+    # Expected points added (#354, for #347): nflfastR's EP model, every
+    # season from 1999, measured per season with no zero-filled era. A
+    # season value is the sum of the game values; rates (per dropback,
+    # carry or target) are computed at read time, not stored.
+    passing_epa: float | None = None
+    rushing_epa: float | None = None
+    receiving_epa: float | None = None
+
+
+PLAYER_STAT_REAL_FIELDS: frozenset[str] = frozenset(
+    {"def_sacks", "passing_epa", "rushing_epa", "receiving_epa"}
+)
+"""The `PlayerStats` columns that are decimals in the source: typed
+`float | None`, stored REAL on both stat tables, parsed with `float()`
+(issue #354). Every other column is a whole number, stored INTEGER and
+parsed with `int()`, which rejects a fractional value loudly.
+
+Named here because three layers need the same set: the DDL (schema.sql and
+`connection._migrate_player_stat_columns`, which would otherwise add a new
+column as INTEGER), the ingest parse, and the column-rule pin in
+tests/test_player_stat_rules.py. All four sum over a season and a career.
+"""
+
+
+PLAYER_STAT_SPARSE_FIELDS: frozenset[str] = frozenset(
+    {"passing_epa", "rushing_epa", "receiving_epa"}
+)
+"""The `PlayerStats` columns where a blank in the source means "no play of
+that kind" -- a zero contribution -- not "not tracked" (issue #354).
+
+Every other column follows the NULL-not-zero rule: a NULL season means the
+source did not track the stat, so a career total over it is unknown and the
+null-aware career SUM is NULL. EPA is different. nflverse leaves it blank on
+a player's game line when he had no dropback, carry or target, and measured
+over 1999-2025 a blank with plays recorded happens 37 times in ~460,000
+player-week rows (single trick plays), so the blank is an absence, not a
+gap. A wide receiver with no carries one season must not lose his career
+rushing EPA.
+
+So a blank is skipped where the player *has* a stat line: the ingest's
+season aggregate already sums only the non-blank game values, and a career
+total sums only the non-NULL season rows. A season with no stat row at all
+(a start-only line) is different -- nothing was tracked for it -- so it
+still makes the career total NULL, as it does for every other column. A
+career whose season rows are all NULL for the column stays NULL.
+"""
 
 
 PLAYER_STAT_MAX_FIELDS: frozenset[str] = frozenset({"fg_long", "pt_long"})

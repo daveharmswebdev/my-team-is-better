@@ -5,7 +5,7 @@ import warnings
 from pathlib import Path
 
 from cfb_strength.config import DB_PATH
-from cfb_strength.contracts import PlayerStats
+from cfb_strength.contracts import PLAYER_STAT_REAL_FIELDS, PlayerStats
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -41,6 +41,10 @@ _TEAM_ALIAS_COLUMNS = (("mascot", "TEXT"), ("alternate_names", "TEXT"))
 # just #313's slice is both correct and self-maintaining. Importing
 # `contracts` from `db` is within the layer contract: .importlinter puts
 # `cfb_strength.db` above `cfb_strength.contracts`.
+#
+# The DDL type comes from the contract too (#354): REAL for
+# `PLAYER_STAT_REAL_FIELDS`, INTEGER otherwise, so a migrated db and a fresh
+# one agree on type as well as on order.
 _PLAYER_STAT_TABLES = ("player_game_stats", "player_season_stats")
 _PLAYER_STAT_COLUMNS: tuple[str, ...] = tuple(f.name for f in dataclasses.fields(PlayerStats))
 
@@ -252,7 +256,8 @@ def _migrate_player_stat_columns(conn: sqlite3.Connection) -> list[str]:
     for table in _PLAYER_STAT_TABLES:
         for column in _PLAYER_STAT_COLUMNS:
             if not _has_column(conn, table, column):
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} INTEGER")
+                ddl_type = "REAL" if column in PLAYER_STAT_REAL_FIELDS else "INTEGER"
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
                 added.append(f"{table}.{column}")
     return added
 

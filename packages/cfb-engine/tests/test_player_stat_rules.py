@@ -24,13 +24,20 @@ from pathlib import Path
 
 import pytest
 
-from cfb_strength.contracts import PLAYER_STAT_MAX_FIELDS, PlayerStats
+from cfb_strength.contracts import (
+    PLAYER_STAT_MAX_FIELDS,
+    PLAYER_STAT_SPARSE_FIELDS,
+    PlayerStats,
+)
 from cfb_strength.db.connection import ensure_schema, get_conn
 
 STAT_TABLES = ("player_game_stats", "player_season_stats")
 
 # column -> (DDL type, season aggregation). Edit this only after re-checking
-# the sites the failure message lists.
+# the sites the failure message lists. The aggregation is "max"
+# (`PLAYER_STAT_MAX_FIELDS`), "sparse_sum" (`PLAYER_STAT_SPARSE_FIELDS`, #354:
+# a NULL on a season row is skipped, a start-only season still makes the
+# total NULL) or "sum" (the null-aware sum).
 PINNED_RULES: dict[str, tuple[str, str]] = {
     "completions": ("INTEGER", "sum"),
     "attempts": ("INTEGER", "sum"),
@@ -66,6 +73,14 @@ PINNED_RULES: dict[str, tuple[str, str]] = {
     "pt_net_yards": ("INTEGER", "sum"),
     "pt_long": ("INTEGER", "max"),
     "pt_inside_20": ("INTEGER", "sum"),
+    "def_interceptions": ("INTEGER", "sum"),
+    "def_sacks": ("REAL", "sum"),
+    "def_fumbles_forced": ("INTEGER", "sum"),
+    "def_tackles_solo": ("INTEGER", "sum"),
+    "def_pass_defended": ("INTEGER", "sum"),
+    "passing_epa": ("REAL", "sparse_sum"),
+    "rushing_epa": ("REAL", "sparse_sum"),
+    "receiving_epa": ("REAL", "sparse_sum"),
 }
 
 # The Python annotation each DDL type pairs with.
@@ -113,6 +128,14 @@ def contract_derived_sites() -> list[str]:
     return sites
 
 
+def aggregation_of(name: str) -> str:
+    if name in PLAYER_STAT_MAX_FIELDS:
+        return "max"
+    if name in PLAYER_STAT_SPARSE_FIELDS:
+        return "sparse_sum"
+    return "sum"
+
+
 def actual_rules(conn: sqlite3.Connection) -> dict[str, tuple[str, str]]:
     ddl = {
         table: {row["name"]: row["type"] for row in conn.execute(f"PRAGMA table_info({table})")}
@@ -122,7 +145,7 @@ def actual_rules(conn: sqlite3.Connection) -> dict[str, tuple[str, str]]:
     for f in dataclasses.fields(PlayerStats):
         game_type, season_type = (ddl[table].get(f.name, "missing") for table in STAT_TABLES)
         ddl_type = game_type if game_type == season_type else f"{game_type}/{season_type}"
-        aggregation = "max" if f.name in PLAYER_STAT_MAX_FIELDS else "sum"
+        aggregation = aggregation_of(f.name)
         rules[f.name] = (ddl_type, aggregation)
     return rules
 
@@ -186,7 +209,24 @@ def test_the_site_scan_finds_both_shapes() -> None:
 
 
 def test_the_drift_report_names_a_new_column_and_the_sites() -> None:
-    actual = {**PINNED_RULES, "def_sacks": ("REAL", "sum")}
+    actual = {**PINNED_RULES, "def_qb_hits": ("INTEGER", "sum")}
     report = drift_report(PINNED_RULES, actual)
-    assert "new: [\"def_sacks ('REAL', 'sum')\"]" in report
+    assert "new: [\"def_qb_hits ('INTEGER', 'sum')\"]" in report
     assert "test_players_career.py" in report
+
+
+def test_the_aggregation_sets_are_consistent() -> None:
+    """A column has exactly one aggregation, and every named column exists:
+    a sparse column that was also a MAX one would be decided by whichever
+    branch `stat_total` checks first, and a misspelt one would silently fall
+    back to the null-aware sum."""
+    stat_names = {f.name for f in dataclasses.fields(PlayerStats)}
+    assert PLAYER_STAT_SPARSE_FIELDS.isdisjoint(PLAYER_STAT_MAX_FIELDS)
+    assert stat_names >= PLAYER_STAT_SPARSE_FIELDS
+    assert stat_names >= PLAYER_STAT_MAX_FIELDS
+
+
+def test_the_drift_report_names_a_column_whose_aggregation_changed() -> None:
+    actual = {**PINNED_RULES, "rushing_epa": ("REAL", "sum")}
+    report = drift_report(PINNED_RULES, actual)
+    assert "changed: [\"rushing_epa ('REAL', 'sparse_sum') -> ('REAL', 'sum')\"]" in report

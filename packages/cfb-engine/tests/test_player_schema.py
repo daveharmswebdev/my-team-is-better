@@ -18,6 +18,7 @@ import pytest
 
 from cfb_strength.contracts import (
     PLAYER_STAT_MAX_FIELDS,
+    PLAYER_STAT_REAL_FIELDS,
     GameStarterRow,
     PlayerGameStatRow,
     PlayerRow,
@@ -49,6 +50,10 @@ def conn(tmp_path: Path):
 
 def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
     return [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
+
+
+def _types(conn: sqlite3.Connection, table: str) -> dict[str, str]:
+    return {row["name"]: row["type"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
 def _primary_key(conn: sqlite3.Connection, table: str) -> list[str]:
@@ -282,11 +287,14 @@ def test_migrating_a_pre_313_db_preserves_the_rows_it_already_had(tmp_path: Path
         with pytest.warns(StaleDatabaseWarning):
             ensure_schema(c)
         row = c.execute(
-            "SELECT attempts, passing_yards, receptions, fg_made FROM player_game_stats"
+            "SELECT attempts, passing_yards, receptions, fg_made, def_sacks, passing_epa "
+            "FROM player_game_stats"
         ).fetchone()
         assert (row["attempts"], row["passing_yards"]) == (30, 250)
         assert row["receptions"] is None
         assert row["fg_made"] is None
+        assert row["def_sacks"] is None
+        assert row["passing_epa"] is None
     finally:
         c.close()
 
@@ -305,6 +313,9 @@ def test_migrating_a_pre_313_db_matches_a_fresh_one_column_for_column(tmp_path: 
             ensure_schema(migrated)
         for table in ("player_game_stats", "player_season_stats"):
             assert _columns(migrated, table) == _columns(fresh, table), table
+            # ...and type for type: since #354 the migration has to add the
+            # PLAYER_STAT_REAL_FIELDS columns as REAL, as a fresh db has them.
+            assert _types(migrated, table) == _types(fresh, table), table
     finally:
         fresh.close()
         migrated.close()
@@ -332,14 +343,38 @@ def test_max_fields_are_real_stat_columns(conn: sqlite3.Connection) -> None:
     assert PLAYER_STAT_MAX_FIELDS == {"fg_long", "pt_long"}
 
 
-def test_no_rate_or_fractional_columns_are_stored(conn: sqlite3.Connection) -> None:
-    """Every stat column is a whole number in the source, which is what lets
-    the DDL be uniformly INTEGER and the ingest parse with `int()`. Rate
-    columns are derived from the counts beside them, and nflverse's
-    `def_sacks` is fractional -- both are deliberately absent (#313, #317)."""
+def test_no_rate_columns_are_stored_and_only_the_real_fields_are_fractional(
+    conn: sqlite3.Connection,
+) -> None:
+    """Rate columns are derived from the counts beside them, so none is
+    stored. Since #354 the stat columns are not uniformly whole numbers:
+    `PLAYER_STAT_REAL_FIELDS` (nflverse's half-sack `def_sacks` and the
+    three EPA columns) are REAL and parsed with `float()`, and every other
+    column stays INTEGER and parsed with `int()`, so a fraction in a count
+    column still fails loudly."""
     stat_fields = {f.name for f in dataclasses.fields(PlayerStats)}
     assert not {f for f in stat_fields if f.endswith("_pct")}
-    assert "def_sacks" not in stat_fields
+    assert PLAYER_STAT_REAL_FIELDS == {"def_sacks", "passing_epa", "rushing_epa", "receiving_epa"}
+    assert PLAYER_STAT_REAL_FIELDS <= stat_fields
     for table in ("player_game_stats", "player_season_stats"):
         types = {row["name"]: row["type"] for row in conn.execute(f"PRAGMA table_info({table})")}
-        assert {types[f] for f in stat_fields} == {"INTEGER"}, table
+        assert {f for f in stat_fields if types[f] == "REAL"} == PLAYER_STAT_REAL_FIELDS, table
+        assert {types[f] for f in stat_fields - PLAYER_STAT_REAL_FIELDS} == {"INTEGER"}, table
+
+
+def test_a_real_column_round_trips_a_half_sack_and_an_unrounded_epa(
+    conn: sqlite3.Connection,
+) -> None:
+    _seed_game(conn)
+    conn.execute(
+        "INSERT INTO player_game_stats (player_id, game_id, team_id, sport, def_sacks, "
+        "rushing_epa, def_tackles_solo) VALUES (100, 10, 1, 'nfl', ?, ?, ?)",
+        (0.5, float("0.000720168085535988"), 3),
+    )
+    row = conn.execute(
+        "SELECT def_sacks, rushing_epa, def_tackles_solo, passing_epa FROM player_game_stats"
+    ).fetchone()
+    assert row["def_sacks"] == 0.5
+    assert row["rushing_epa"] == float("0.000720168085535988")
+    assert row["def_tackles_solo"] == 3 and isinstance(row["def_tackles_solo"], int)
+    assert row["passing_epa"] is None

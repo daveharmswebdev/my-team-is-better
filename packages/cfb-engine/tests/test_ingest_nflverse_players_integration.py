@@ -26,6 +26,9 @@ counts the cut can't.
 Issue #313 widened the stat columns from ten to 34, so the cut was remade
 from the refetched cache: it now carries the receiving, kicking and punting
 lines the ten-column row filter dropped (1999 grew from 149 rows to 432).
+Issue #354 widened them to 42 (five def_* columns and three EPA columns),
+and the cut was remade again: it now carries the sampled teams' defenders
+too (1999 grew from 432 rows to 1,100).
 """
 
 from __future__ import annotations
@@ -40,7 +43,7 @@ from pathlib import Path
 import pytest
 
 from cfb_strength.config import RAW_DIR
-from cfb_strength.contracts import PLAYER_STAT_MAX_FIELDS
+from cfb_strength.contracts import PLAYER_STAT_MAX_FIELDS, PLAYER_STAT_REAL_FIELDS
 from cfb_strength.db.connection import get_conn
 from cfb_strength.ingest.nflverse import client as nflverse_client
 from cfb_strength.ingest.nflverse import player_normalize
@@ -238,7 +241,15 @@ def test_season_row_aggregates_its_game_rows_with_the_one_team(
     sums = _aggregate_of_game_rows(conn, warner, 1999, "regular")
     row = _season_row(conn, "Kurt Warner", 1999, "regular")
 
-    assert all(row[c] == sums[c] for c in STAT_FIELDS)
+    # The REAL columns (#354) are compared to a tolerance: the season row is
+    # Python's float sum and SQL's SUM may add in another order. Every
+    # INTEGER column is still exact.
+    for c in STAT_FIELDS:
+        if c in PLAYER_STAT_REAL_FIELDS and row[c] is not None:
+            assert row[c] == pytest.approx(sums[c], rel=1e-12, abs=1e-12), c
+        else:
+            assert row[c] == sums[c], c
+    assert row["passing_epa"] is not None and row["def_sacks"] == 0.0
     assert row["games"] == sums["games"]
     assert sums["teams"] == 1
     assert row["team_id"] == sums["team_id"] == mint_surrogate_id("nfl_team", "STL")
@@ -283,10 +294,14 @@ def test_a_season_row_is_null_only_where_the_source_leaves_the_cell_empty(
     ingested: tuple[sqlite3.Connection, PlayerIngestReport],
 ) -> None:
     conn, _ = ingested
-    # nflverse fills every one of the 34 columns with a number except
+    # nflverse fills every one of the 42 columns with a number except
     # `fg_long` and `pt_long`, which are empty for a game with no field goal
-    # and no punt. So those two are the only columns a season row may hold
-    # NULL in; a NULL anywhere else would have been invented here.
+    # and no punt, and the three EPA columns (#354), empty for a player with
+    # no play of that kind -- a defender's line has no EPA at all. So those
+    # five are the only columns a season row may hold NULL in; a NULL
+    # anywhere else (the five def_* columns included, filled on every row)
+    # would have been invented here.
+    epa = {"passing_epa", "rushing_epa", "receiving_epa"}
     nulls = {
         column: conn.execute(
             f"SELECT COUNT(*) FROM player_season_stats WHERE {column} IS NULL"
@@ -294,8 +309,11 @@ def test_a_season_row_is_null_only_where_the_source_leaves_the_cell_empty(
         for column in STAT_FIELDS
     }
 
-    assert {column for column, count in nulls.items() if count} == set(PLAYER_STAT_MAX_FIELDS)
+    assert {column for column, count in nulls.items() if count} == set(PLAYER_STAT_MAX_FIELDS) | epa
     assert nulls["fg_long"] > 0 and nulls["pt_long"] > 0
+    assert all(nulls[column] > 0 for column in epa)
+    # A season with any EPA cell is never NULL: Warner's 1999 passing EPA.
+    assert _season_row(conn, "Kurt Warner", 1999, "regular")["passing_epa"] is not None
 
 
 def test_a_stat_missing_on_every_game_row_stays_null_while_an_all_zero_stat_stays_zero(
@@ -616,7 +634,7 @@ def test_the_player_sample_is_exactly_what_the_builder_cuts_from_the_cache(
 ) -> None:
     # The cut is a projection of the committed cache, so it goes stale the
     # moment the cache is refetched with different columns (#313 widened
-    # them from ten to 34). Rebuilding it here proves the committed files
+    # them from ten to 34, #354 to 42). Rebuilding it here proves the committed files
     # are the documented cut of the current cache, not a stale hand cut.
     out = build_nfl_player_sample.build(tmp_path / "nfl")
 

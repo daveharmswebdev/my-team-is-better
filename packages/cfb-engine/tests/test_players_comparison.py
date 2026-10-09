@@ -94,6 +94,21 @@ def test_a_and_b_are_exactly_their_careers(db: PlayerDb) -> None:
     assert c.b == get_player_career(conn, sport="nfl", player_id=b)
 
 
+def test_career_epa_skips_a_null_season_row_in_a_comparison(db: PlayerDb) -> None:
+    # The careers are `get_player_career`'s, so the sparse EPA rule (#354)
+    # holds here too: a NULL on a season row is skipped.
+    a, b = db.player("A"), db.player("B")
+    for season, epa in ((2000, 1.5), (2001, None), (2002, 2.0)):
+        db.season(a, season, **full_stats(rushing_epa=epa))
+    db.season(b, 2000, **full_stats())
+    conn = conn_of(db)
+
+    c = get_player_comparison(conn, sport="nfl", a=a, b=b)
+
+    assert c.a.regular_season is not None
+    assert c.a.regular_season.stats.rushing_epa == 3.5
+
+
 # --- which games are head-to-head -----------------------------------------------
 
 
