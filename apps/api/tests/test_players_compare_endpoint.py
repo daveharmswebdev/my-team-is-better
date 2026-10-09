@@ -58,7 +58,7 @@ GAME_KEYS = {
 
 
 # One side of each measured game: (team, points, stats). Named, not
-# positional: `PlayerStats` is append-only (34 fields since #313). These are
+# positional: `PlayerStats` is append-only (42 fields since #354). These are
 # quarterback starts, and nflverse records a quarterback's receiving line as
 # zeros (#314), so the receiving stats are 0 here, not None -- measured, not
 # assumed. Every stat not named is None. `sack_yards_lost` is positive since
