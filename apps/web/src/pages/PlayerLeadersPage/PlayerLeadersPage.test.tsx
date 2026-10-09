@@ -19,6 +19,7 @@ import type { PlayerLeadersQuery } from '../../lib/api/client'
 import type { PlayerLeaderRowOut, PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
+  LEADERS_BY_DEF_SACKS,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_PCT,
   LEADERS_BY_FG_PCT_EMPTY,
@@ -33,6 +34,8 @@ import {
   TUA_TAGOVAILOA,
 } from '../../lib/playerFixtures'
 import {
+  DEFENSE_EARLY_ERA_NOTE,
+  DEFENSE_UNOFFICIAL_NOTE,
   STARTER_RECORD_NOTE,
   fgPctEmptyCopy,
   fgPctNote,
@@ -570,7 +573,14 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
       within(select)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['Passing', 'Rushing', 'Receiving', 'Kicking', 'Punting'])
+    ).toEqual([
+      'Passing',
+      'Rushing',
+      'Receiving',
+      'Kicking',
+      'Punting',
+      'Defense',
+    ])
   })
 
   it('starts on passing, and is the first control the keyboard reaches', async () => {
@@ -699,13 +709,13 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
     expect(table).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
   })
 
-  it('names every category in the lede (issues #314, #315)', async () => {
+  it('names every category in the lede (issues #314, #315, #317)', async () => {
     renderPage()
 
     await screen.findByRole('table')
     expect(
       screen.getByText(
-        /career passing, rushing, receiving, kicking and punting totals/i,
+        /career passing, rushing, receiving, kicking, punting and defense totals/i,
       ),
     ).toBeInTheDocument()
   })
@@ -804,13 +814,15 @@ describe('PlayerLeadersPage, kicking and punting (issue #315)', () => {
   /** Answers each request with the board its category and sort name. */
   function boardFor(query: PlayerLeadersQuery): PlayerLeadersOut {
     const base =
-      query.category === 'punting'
-        ? LEADERS_BY_PT_YARDS
-        : query.category === 'kicking'
-          ? query.sort === 'fg_pct'
-            ? LEADERS_BY_FG_PCT
-            : LEADERS_BY_FG_MADE
-          : LEADERS_BY_YARDS
+      query.category === 'defense'
+        ? LEADERS_BY_DEF_SACKS
+        : query.category === 'punting'
+          ? LEADERS_BY_PT_YARDS
+          : query.category === 'kicking'
+            ? query.sort === 'fg_pct'
+              ? LEADERS_BY_FG_PCT
+              : LEADERS_BY_FG_MADE
+            : LEADERS_BY_YARDS
     return {
       ...base,
       category: query.category,
@@ -1018,6 +1030,80 @@ describe('PlayerLeadersPage, kicking and punting (issue #315)', () => {
       category: 'punting',
       sort: 'pt_net_yards',
     })
+  })
+
+  it('switches to defense, keeping the season type, and shows the board with both notes (issue #317)', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=punting&season_type=postseason&offset=0')
+    await screen.findByRole('table')
+
+    await user.selectOptions(categorySelect(), 'Defense')
+
+    expect(lastQuery()).toEqual({
+      category: 'defense',
+      season_type: 'postseason',
+      sort: 'def_sacks',
+      limit: 50,
+      offset: 0,
+    })
+    expect(search()).toBe(
+      '?category=defense&season_type=postseason&sort=def_sacks&offset=0',
+    )
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by sacks',
+    })
+    const first = within(table).getAllByRole('row')[1] as HTMLElement
+    expect(within(first).getByRole('link')).toHaveTextContent('T.J. Watt')
+    expect(within(first).getByText('19.0')).toBeInTheDocument()
+    expect(categorySelect()).toHaveValue('defense')
+    expect(screen.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
+    expect(screen.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+  })
+
+  it('re-sorts the defense board by INT through the API, keeping the category (issue #317)', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=defense')
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by sacks',
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Interceptions' }))
+
+    expect(lastQuery()).toEqual({
+      category: 'defense',
+      season_type: 'regular',
+      sort: 'def_interceptions',
+      limit: 50,
+      offset: 0,
+    })
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by interceptions',
+    })
+  })
+
+  it('falls back to sacks for a sort the defense board does not own (issue #317)', async () => {
+    renderPage('/nfl/leaders?category=defense&sort=passing_interceptions')
+
+    await screen.findByRole('table')
+    expect(lastQuery()).toMatchObject({
+      category: 'defense',
+      sort: 'def_sacks',
+    })
+  })
+
+  it('drops the defense notes when the board leaves defense (issue #317)', async () => {
+    const user = userEvent.setup()
+    renderPage('/nfl/leaders?category=defense')
+    await screen.findByText(DEFENSE_EARLY_ERA_NOTE)
+
+    await user.selectOptions(categorySelect(), 'Kicking')
+
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field goals made',
+    })
+    expect(screen.queryByText(DEFENSE_EARLY_ERA_NOTE)).not.toBeInTheDocument()
+    expect(screen.queryByText(DEFENSE_UNOFFICIAL_NOTE)).not.toBeInTheDocument()
   })
 
   it('falls back to field goals made for a punting sort under kicking', async () => {

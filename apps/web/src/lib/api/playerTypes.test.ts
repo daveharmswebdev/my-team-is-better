@@ -78,6 +78,18 @@ describe('player vocabularies', () => {
     ]) {
       expect(isPlayerLeaderSort(sort)).toBe(true)
     }
+    // The five defense sorts joined with their board (#317), each the stat
+    // of the same name. The EPA columns are stored but never published.
+    for (const sort of [
+      'def_sacks',
+      'def_interceptions',
+      'def_tackles_solo',
+      'def_fumbles_forced',
+      'def_pass_defended',
+    ]) {
+      expect(isPlayerLeaderSort(sort)).toBe(true)
+    }
+    expect(isPlayerLeaderSort('def_tackles_assist')).toBe(false)
     expect(isPlayerLeaderSort('pat_att')).toBe(false)
     expect(isPlayerLeaderSort('pt_long')).toBe(false)
     expect(isPlayerLeaderSort('fg_made_50_59')).toBe(false)
@@ -97,6 +109,8 @@ describe('leaderboard categories', () => {
     expect(isPlayerLeaderCategory('receiving')).toBe(true)
     expect(isPlayerLeaderCategory('kicking')).toBe(true)
     expect(isPlayerLeaderCategory('punting')).toBe(true)
+    expect(isPlayerLeaderCategory('defense')).toBe(true)
+    expect(isPlayerLeaderCategory('Defense')).toBe(false)
     expect(isPlayerLeaderCategory('Rushing')).toBe(false)
     expect(isPlayerLeaderCategory('Kicking')).toBe(false)
     expect(isPlayerLeaderCategory('returning')).toBe(false)
@@ -107,6 +121,7 @@ describe('leaderboard categories', () => {
       'receiving',
       'kicking',
       'punting',
+      'defense',
     ])
   })
 
@@ -124,7 +139,15 @@ describe('leaderboard categories', () => {
         'pat_made',
       ],
       punting: ['pt_yards', 'pt_net_yards', 'pt_att', 'pt_inside_20'],
+      defense: [
+        'def_sacks',
+        'def_interceptions',
+        'def_tackles_solo',
+        'def_fumbles_forced',
+        'def_pass_defended',
+      ],
     })
+    expect(defaultSortFor('defense')).toBe('def_sacks')
     expect(defaultSortFor('passing')).toBe('passing_yards')
     expect(defaultSortFor('rushing')).toBe('rushing_yards')
     expect(defaultSortFor('receiving')).toBe('receiving_yards')
@@ -139,7 +162,7 @@ describe('leaderboard categories', () => {
       )
       expect(owners).toHaveLength(1)
     }
-    expect(PLAYER_LEADER_SORTS).toHaveLength(19)
+    expect(PLAYER_LEADER_SORTS).toHaveLength(24)
   })
 
   it('refuses a sort from another category', () => {
@@ -158,6 +181,10 @@ describe('leaderboard categories', () => {
     expect(isSortInCategory('kicking', 'pat_att')).toBe(false)
     expect(isSortInCategory('kicking', 'fg_pct')).toBe(true)
     expect(isSortInCategory('punting', 'pt_inside_20')).toBe(true)
+    // #317: the defense sorts are the defense board's alone.
+    expect(isSortInCategory('defense', 'def_pass_defended')).toBe(true)
+    expect(isSortInCategory('defense', 'passing_interceptions')).toBe(false)
+    expect(isSortInCategory('passing', 'def_interceptions')).toBe(false)
   })
 
   it("mirrors the engine's FG% attempts minimum per season type (#315)", () => {

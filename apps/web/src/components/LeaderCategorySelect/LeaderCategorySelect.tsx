@@ -13,8 +13,9 @@ export interface LeaderCategorySelectProps {
 }
 
 /**
- * Which leaderboard to show (issues #312, #314, #315): Passing, Rushing,
- * Receiving, Kicking or Punting. Founder decision (epic #311): this picks a
+ * Which leaderboard to show (issues #312, #314, #315, #317): Passing,
+ * Rushing, Receiving, Kicking, Punting or Defense. Founder decision (epic
+ * #311): this picks a
  * stat *category*, not a position -- the rushing board ranks every player
  * with a carry, the receiving board every player with a target or a
  * reception, the kicking board every player with a field-goal or extra-point

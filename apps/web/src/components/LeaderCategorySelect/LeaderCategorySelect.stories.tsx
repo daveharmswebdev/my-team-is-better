@@ -71,3 +71,15 @@ export const Punting: Story = {
     ).toHaveValue('punting')
   },
 }
+
+/** The defense board (issue #317), chosen from the dropdown. */
+export const Defense: Story = {
+  args: { value: 'defense' },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    const select = canvas.getByRole('combobox', { name: 'Stat category' })
+    await expect(select).toHaveValue('defense')
+    await userEvent.selectOptions(select, 'kicking')
+    await expect(args.onChange).toHaveBeenCalledWith('kicking')
+  },
+}

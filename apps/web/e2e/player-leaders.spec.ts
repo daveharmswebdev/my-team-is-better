@@ -400,6 +400,100 @@ test('choosing Punting ranks Thomas Morstead first on 4,831 yards', async ({
   await expect(page.getByText('1–50 of 83')).toBeVisible()
 })
 
+// Issue #317: the defense board. Sacks keep their half (the fixture's 2023
+// has Josh Hines-Allen and Trey Hendrickson tied at 17.5, Hines-Allen first
+// by name), and the founder's two notes (#316) are on the page with it.
+// 2,619 players qualify in the regular season, 508 in the playoffs.
+const EARLY_ERA_NOTE =
+  "Sacks and forced fumbles are counted from play-by-play. For 1999-2009, that can leave a player's season 0.5 to 2 short of the official total, and we show the source's number as is."
+const UNOFFICIAL_NOTE =
+  "Solo tackles and passes defended are unofficial stats. Each team's scorers chart them, and the league doesn't keep them as official stats."
+
+/** The defense board's stat columns, by accessible name, and where each sits after Rank, Player, Position, Seasons and Games. */
+const DEFENSE_COLUMNS = [
+  'Sacks',
+  'Interceptions',
+  'Solo tackles',
+  'Forced fumbles',
+  'Passes defended',
+]
+
+function defenseCell(row: Locator, name: string): Locator {
+  return row.locator('th, td').nth(5 + DEFENSE_COLUMNS.indexOf(name))
+}
+
+test('choosing Defense ranks T.J. Watt first on 19.0 sacks, keeps the 17.5 tie, and shows both notes', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+
+  await page.getByLabel('Stat category').selectOption('Defense')
+
+  await expect(page).toHaveURL(
+    /category=defense&season_type=regular&sort=def_sacks&offset=0/,
+  )
+  const table = leadersTable(page, 'regular season, by sacks')
+  await expectRow(table, 0, '1', 'T.J. Watt')
+  await expectRow(table, 1, '2', 'Josh Hines-Allen')
+  await expectRow(table, 2, '2', 'Trey Hendrickson')
+  await expectRow(table, 3, '4', 'Khalil Mack')
+  await expect(defenseCell(bodyRow(table, 0), 'Sacks')).toHaveText('19.0')
+  await expect(defenseCell(bodyRow(table, 1), 'Sacks')).toHaveText('17.5')
+  await expect(defenseCell(bodyRow(table, 2), 'Sacks')).toHaveText('17.5')
+  await expect(defenseCell(bodyRow(table, 3), 'Sacks')).toHaveText('17.0')
+  const headers = table.locator('thead th')
+  await expect(headers).toHaveCount(10)
+  for (const [index, name] of DEFENSE_COLUMNS.entries()) {
+    await expect(headers.nth(5 + index)).toHaveAccessibleName(name)
+  }
+  await expect(page.getByText(EARLY_ERA_NOTE)).toBeVisible()
+  await expect(page.getByText(UNOFFICIAL_NOTE)).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Sacks', exact: true }),
+  ).toHaveAccessibleDescription(EARLY_ERA_NOTE)
+  await expect(
+    page.getByRole('button', { name: 'Passes defended', exact: true }),
+  ).toHaveAccessibleDescription(UNOFFICIAL_NOTE)
+  await expect(page.getByText('1–50 of 2,619')).toBeVisible()
+})
+
+test('re-sorting Defense by INT puts DaRon Bland first on 9', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=defense')
+  await expect(leadersTable(page, 'regular season, by sacks')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Interceptions', exact: true }).click()
+
+  await expect(page).toHaveURL(
+    /category=defense&season_type=regular&sort=def_interceptions&offset=0/,
+  )
+  const table = leadersTable(page, 'regular season, by interceptions')
+  await expectRow(table, 0, '1', 'DaRon Bland')
+  await expect(defenseCell(bodyRow(table, 0), 'Interceptions')).toHaveText('9')
+  await expect(page.getByText(EARLY_ERA_NOTE)).toBeVisible()
+  await expect(page.getByText(UNOFFICIAL_NOTE)).toBeVisible()
+})
+
+test('playoff Defense by solo tackles puts Derrick Brooks first on 19, notes and all', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=defense&season_type=postseason')
+  await expect(leadersTable(page, 'playoffs, by sacks')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Solo tackles', exact: true }).click()
+
+  const table = leadersTable(page, 'playoffs, by solo tackles')
+  await expectRow(table, 0, '1', 'Derrick Brooks')
+  await expect(defenseCell(bodyRow(table, 0), 'Solo tackles')).toHaveText('19')
+  await expect(page.getByText(EARLY_ERA_NOTE)).toBeVisible()
+  await expect(page.getByText(UNOFFICIAL_NOTE)).toBeVisible()
+  await expect(page.getByText('1–50 of 508')).toBeVisible()
+})
+
 test('sorting Kicking by FG% says no kicker has reached 100 attempts, and offers the default sort back', async ({
   page,
 }) => {

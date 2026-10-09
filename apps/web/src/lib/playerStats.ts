@@ -64,8 +64,23 @@ export interface DerivedStatColumn {
 /** What a leaderboard column shows: a stat as sent, or one of the two derived ones. */
 export type LeaderStatKey = keyof PlayerStatsOut | DerivedKickingStat
 
+/**
+ * A founder-required note (#316) that covers some leaderboard columns
+ * (issue #317). The copy and its marker live in `LEADER_COLUMN_NOTES`.
+ */
+export type LeaderColumnNote = 'early-era' | 'unofficial'
+
+/** What only a leaderboard column carries: a full name for an abbreviated label, and the note that covers it. */
+export interface LeaderColumnExtras {
+  /** The readable name of an abbreviated `label` ("INT" is "Interceptions"): the header's accessible name and its title. */
+  fullLabel?: string
+  /** The note this column's numbers can't be shown without. */
+  note?: LeaderColumnNote
+}
+
 /** A leaderboard column. The career and compare tables only ever take a `StatColumn`. */
-export type LeaderStatColumn = StatColumn | DerivedStatColumn
+export type LeaderStatColumn = (StatColumn | DerivedStatColumn) &
+  LeaderColumnExtras
 
 export interface DerivedKickingStats {
   /** `fg_made / fg_att`, unrounded; `null` with no attempts or a null count. */
@@ -118,6 +133,23 @@ function valueCell(value: number | null): LeaderCell {
     : { kind: 'value', text: formatStat(value) }
 }
 
+/**
+ * The stats that are decimals (issue #317): a sack split between two rushers
+ * is 0.5 each, so sacks always show one decimal -- 17.5, 19.0, 0.5 -- and a
+ * half is never rounded away.
+ */
+const ONE_DECIMAL_STATS: ReadonlySet<keyof PlayerStatsOut> = new Set([
+  'def_sacks',
+])
+
+/** A decimal stat to exactly one place, thousands grouped: "138.5", "19.0". */
+function formatOneDecimal(value: number): string {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+}
+
 /** FG% to one decimal with a percent sign: "94.7%". */
 function formatFgPct(ratio: number): string {
   return `${(ratio * 100).toFixed(1)}%`
@@ -140,6 +172,9 @@ export function leaderStatCell(
   const value = stats[key]
   if (value === null && MAX_STATS.has(key)) {
     return { kind: 'none' }
+  }
+  if (value !== null && ONE_DECIMAL_STATS.has(key)) {
+    return { kind: 'value', text: formatOneDecimal(value) }
   }
   return valueCell(value)
 }
@@ -186,15 +221,21 @@ export const SORT_LABEL: Record<PlayerLeaderSort, string> = {
   pt_net_yards: 'net punting yards',
   pt_att: 'punts',
   pt_inside_20: 'punts inside the 20',
+  def_sacks: 'sacks',
+  def_interceptions: 'interceptions',
+  def_tackles_solo: 'solo tackles',
+  def_fumbles_forced: 'forced fumbles',
+  def_pass_defended: 'passes defended',
 }
 
-/** How the category dropdown names each board (issues #312, #314, #315). */
+/** How the category dropdown names each board (issues #312, #314, #315, #317). */
 export const CATEGORY_LABEL: Record<PlayerLeaderCategory, string> = {
   passing: 'Passing',
   rushing: 'Rushing',
   receiving: 'Receiving',
   kicking: 'Kicking',
   punting: 'Punting',
+  defense: 'Defense',
 }
 
 /** The stat keys the rushing board shows; their labels and order come from `STAT_COLUMNS`. */
@@ -242,6 +283,54 @@ const PUNTING_COLUMNS: readonly StatColumn[] = [
   { key: 'pt_inside_20', label: 'Inside 20' },
 ]
 
+/**
+ * The defense board's columns (issue #317), in the founder's order (not the
+ * API's sort order). Its own list, never part of `STAT_COLUMNS`: career and
+ * compare pages stay QB-only (#352). Each column that #316 found can run
+ * short of the official total, or that the league doesn't keep officially,
+ * carries the note that says so; INT matched every official season leader
+ * 1999-2025, so it carries none. QB hits, tackles for loss, assisted tackles
+ * and the EPA columns are not shown.
+ */
+const DEFENSE_COLUMNS: readonly LeaderStatColumn[] = [
+  { key: 'def_sacks', label: 'Sacks', note: 'early-era' },
+  { key: 'def_interceptions', label: 'INT', fullLabel: 'Interceptions' },
+  { key: 'def_tackles_solo', label: 'Solo tackles', note: 'unofficial' },
+  {
+    key: 'def_fumbles_forced',
+    label: 'FF',
+    fullLabel: 'Forced fumbles',
+    note: 'early-era',
+  },
+  {
+    key: 'def_pass_defended',
+    label: 'PD',
+    fullLabel: 'Passes defended',
+    note: 'unofficial',
+  },
+]
+
+/** Founder decision (#316): the note that covers the defense board's sacks and forced fumbles. */
+export const DEFENSE_EARLY_ERA_NOTE =
+  "Sacks and forced fumbles are counted from play-by-play. For 1999-2009, that can leave a player's season 0.5 to 2 short of the official total, and we show the source's number as is."
+
+/** Founder decision (#316): the note that covers the defense board's solo tackles and passes defended. */
+export const DEFENSE_UNOFFICIAL_NOTE =
+  "Solo tackles and passes defended are unofficial stats. Each team's scorers chart them, and the league doesn't keep them as official stats."
+
+/**
+ * Each column note's copy, and the marker its headers and its line share, so
+ * a sighted reader can match one to the other. Assistive tech gets the same
+ * pairing from `aria-describedby` instead, so the marker is hidden from it.
+ */
+export const LEADER_COLUMN_NOTES: Record<
+  LeaderColumnNote,
+  { marker: string; text: string }
+> = {
+  'early-era': { marker: '*', text: DEFENSE_EARLY_ERA_NOTE },
+  unofficial: { marker: '†', text: DEFENSE_UNOFFICIAL_NOTE },
+}
+
 export interface LeaderBoardColumns {
   /**
    * Whether this board shows the starter record and starts -- and so whether
@@ -271,6 +360,7 @@ export const LEADER_BOARD_COLUMNS = {
   receiving: { showsRecord: false, stats: RECEIVING_COLUMNS },
   kicking: { showsRecord: false, stats: KICKING_COLUMNS },
   punting: { showsRecord: false, stats: PUNTING_COLUMNS },
+  defense: { showsRecord: false, stats: DEFENSE_COLUMNS },
 } satisfies Record<PlayerLeaderCategory, LeaderBoardColumns>
 
 /** One category's board, at the common column type. */
@@ -278,6 +368,24 @@ export function leaderBoardColumns(
   category: PlayerLeaderCategory,
 ): LeaderBoardColumns {
   return LEADER_BOARD_COLUMNS[category]
+}
+
+/**
+ * The column notes a board shows (issue #317), once each, in the order their
+ * first column appears. Read off the columns themselves, so a board shows a
+ * note exactly when it shows a column the note covers -- never one without
+ * the other.
+ */
+export function leaderColumnNotes(
+  category: PlayerLeaderCategory,
+): readonly LeaderColumnNote[] {
+  const notes: LeaderColumnNote[] = []
+  for (const column of leaderBoardColumns(category).stats) {
+    if (column.note !== undefined && !notes.includes(column.note)) {
+      notes.push(column.note)
+    }
+  }
+  return notes
 }
 
 /**

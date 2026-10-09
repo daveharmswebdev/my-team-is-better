@@ -5,6 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PlayerLeadersOut } from '../../lib/api/types'
 import {
   BRANDON_AUBREY,
+  DEFENSE_WITH_NULL_STATS,
+  LEADERS_BY_DEF_SACKS,
+  LEADERS_BY_DEF_SACKS_TAIL,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_MADE_TAIL,
   LEADERS_BY_FG_PCT,
@@ -20,6 +23,11 @@ import {
   TUA_TAGOVAILOA,
   TYREEK_HILL,
 } from '../../lib/playerFixtures'
+import {
+  DEFENSE_EARLY_ERA_NOTE,
+  DEFENSE_UNOFFICIAL_NOTE,
+  LEADER_COLUMN_NOTES,
+} from '../../lib/playerStats'
 import { PlayerLeadersTable } from './PlayerLeadersTable'
 
 function renderTable(
@@ -773,5 +781,232 @@ describe('PlayerLeadersTable, the punting board (issue #315)', () => {
       ['pt_att'],
       ['pt_inside_20'],
     ])
+  })
+})
+
+/**
+ * Issue #317: the defense board. Sacks keep their half (17.5, never 17 or
+ * 18), and the founder's two notes (#316) sit under the table, each tied to
+ * the headers it covers: no sacks or forced-fumbles number without the
+ * early-era note, no solo-tackle or passes-defended number without the
+ * unofficial one. INT matched every official leader, so it has no note.
+ */
+describe('PlayerLeadersTable, the defense board (issue #317)', () => {
+  /** The five defense headers' accessible names, in column order. */
+  const DEFENSE_HEADERS = [
+    'Sacks',
+    'Interceptions',
+    'Solo tackles',
+    'Forced fumbles',
+    'Passes defended',
+  ]
+
+  /**
+   * The cell of `row` under the column whose accessible name is `name`: an
+   * abbreviated header is named in full, and its marker is not in its name.
+   */
+  function cellAt(row: HTMLElement, name: string): HTMLElement {
+    const index = screen
+      .getAllByRole('columnheader')
+      .indexOf(screen.getByRole('columnheader', { name }))
+    return row.querySelectorAll('th, td')[index] as HTMLElement
+  }
+
+  it('names itself by the sacks sort in its caption', () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by sacks',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the five defense columns only, in order, with no record or other category', () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    const headers = screen.getAllByRole('columnheader')
+    expect(headers).toHaveLength(10)
+    expect(headers.slice(0, 5).map((header) => header.textContent)).toEqual([
+      'Rank',
+      'Player',
+      'Position',
+      'Seasons',
+      'Games',
+    ])
+    expect(headers.slice(5)).toEqual(
+      DEFENSE_HEADERS.map((name) => screen.getByRole('columnheader', { name })),
+    )
+    expect(
+      screen.queryByRole('columnheader', { name: 'Starter record' }),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('table')).not.toHaveTextContent(/EPA|QB hits/i)
+  })
+
+  it('gives each abbreviation a readable name, and a title for the mouse', () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    for (const [abbreviation, name] of [
+      ['INT', 'Interceptions'],
+      ['FF', 'Forced fumbles'],
+      ['PD', 'Passes defended'],
+    ] as const) {
+      const button = screen.getByRole('button', { name })
+      expect(within(button).getByTitle(name)).toHaveTextContent(abbreviation)
+    }
+  })
+
+  it('renders the rows the API sent, sacks to one decimal, the tie at 17.5 as sent', () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    const rows = bodyRows()
+    expect(
+      rows.map((row) => within(row).getByRole('link').textContent),
+    ).toEqual([
+      'T.J. Watt',
+      'Josh Hines-Allen',
+      'Trey Hendrickson',
+      'Khalil Mack',
+      'Danielle Hunter',
+    ])
+    const [watt, hinesAllen, hendrickson, mack] = rows as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ]
+    expect(cellAt(watt, 'Rank')).toHaveTextContent(/^1$/)
+    expect(cellAt(watt, 'Position')).toHaveTextContent(/^OLB$/)
+    expect(cellAt(watt, 'Sacks')).toHaveTextContent(/^19\.0$/)
+    expect(cellAt(watt, 'Interceptions')).toHaveTextContent(/^1$/)
+    expect(cellAt(watt, 'Solo tackles')).toHaveTextContent(/^38$/)
+    expect(cellAt(watt, 'Forced fumbles')).toHaveTextContent(/^4$/)
+    expect(cellAt(watt, 'Passes defended')).toHaveTextContent(/^8$/)
+    expect(cellAt(hinesAllen, 'Rank')).toHaveTextContent(/^2$/)
+    expect(cellAt(hinesAllen, 'Sacks')).toHaveTextContent(/^17\.5$/)
+    expect(cellAt(hendrickson, 'Rank')).toHaveTextContent(/^2$/)
+    expect(cellAt(hendrickson, 'Sacks')).toHaveTextContent(/^17\.5$/)
+    expect(cellAt(mack, 'Sacks')).toHaveTextContent(/^17\.0$/)
+  })
+
+  it('shows a half sack as 0.5 and a null stat as "not recorded", never 0', () => {
+    renderTable(DEFENSE_WITH_NULL_STATS)
+
+    const [, half, unrecorded] = bodyRows() as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ]
+    expect(cellAt(half, 'Sacks')).toHaveTextContent(/^0\.5$/)
+    expect(cellAt(half, 'Solo tackles')).toHaveTextContent(/^not recorded$/)
+    expect(cellAt(unrecorded, 'Rank')).toHaveTextContent('not ranked')
+    for (const name of DEFENSE_HEADERS) {
+      expect(cellAt(unrecorded, name)).toHaveTextContent(/^not recorded$/)
+    }
+  })
+
+  it('ranks a receiver with one solo tackle at the foot, showing his position and 0.0 sacks', () => {
+    renderTable(LEADERS_BY_DEF_SACKS_TAIL)
+
+    const davis = screen
+      .getByRole('rowheader', { name: 'Zola Davis' })
+      .closest('tr') as HTMLElement
+    expect(cellAt(davis, 'Rank')).toHaveTextContent(/^812$/)
+    expect(cellAt(davis, 'Position')).toHaveTextContent(/^WR$/)
+    expect(cellAt(davis, 'Sacks')).toHaveTextContent(/^0\.0$/)
+    expect(cellAt(davis, 'Solo tackles')).toHaveTextContent(/^1$/)
+  })
+
+  it('makes all five defense columns sortable, and asks for each its own sort', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_DEF_SACKS)
+
+    expect(screen.getByRole('columnheader', { name: 'Sacks' })).toHaveAttribute(
+      'aria-sort',
+      'descending',
+    )
+    for (const name of DEFENSE_HEADERS.slice(1)) {
+      expect(screen.getByRole('columnheader', { name })).toHaveAttribute(
+        'aria-sort',
+        'none',
+      )
+      await user.click(screen.getByRole('button', { name }))
+    }
+    await user.click(screen.getByRole('button', { name: 'Sacks' }))
+
+    expect(onSort.mock.calls).toEqual([
+      ['def_interceptions'],
+      ['def_tackles_solo'],
+      ['def_fumbles_forced'],
+      ['def_pass_defended'],
+      ['def_sacks'],
+    ])
+  })
+
+  it('shows both notes under the table, exactly as written', () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    expect(screen.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
+    expect(screen.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+  })
+
+  it('shows both notes on the playoff defense board too', () => {
+    renderTable({ ...LEADERS_BY_DEF_SACKS, season_type: 'postseason' })
+
+    expect(screen.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeInTheDocument()
+    expect(screen.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeInTheDocument()
+  })
+
+  it('ties each note to the headers it covers, and INT to neither', () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    for (const name of ['Sacks', 'Forced fumbles']) {
+      expect(screen.getByRole('button', { name })).toHaveAccessibleDescription(
+        DEFENSE_EARLY_ERA_NOTE,
+      )
+    }
+    for (const name of ['Solo tackles', 'Passes defended']) {
+      expect(screen.getByRole('button', { name })).toHaveAccessibleDescription(
+        DEFENSE_UNOFFICIAL_NOTE,
+      )
+    }
+    expect(
+      screen.getByRole('button', { name: 'Interceptions' }),
+    ).toHaveAccessibleDescription('')
+  })
+
+  it("marks each covered header with its note's marker, and the note with the same one", () => {
+    renderTable(LEADERS_BY_DEF_SACKS)
+
+    const early = LEADER_COLUMN_NOTES['early-era'].marker
+    const unofficial = LEADER_COLUMN_NOTES.unofficial.marker
+    const marker = (name: string) =>
+      screen.getByRole('button', { name }).textContent ?? ''
+    expect(marker('Sacks')).toContain(early)
+    expect(marker('Forced fumbles')).toContain(early)
+    expect(marker('Solo tackles')).toContain(unofficial)
+    expect(marker('Passes defended')).toContain(unofficial)
+    expect(marker('Interceptions')).not.toContain(early)
+    expect(marker('Interceptions')).not.toContain(unofficial)
+    expect(
+      screen.getByText(DEFENSE_EARLY_ERA_NOTE).closest('p'),
+    ).toHaveTextContent(new RegExp(`^\\${early}`))
+    expect(
+      screen.getByText(DEFENSE_UNOFFICIAL_NOTE).closest('p'),
+    ).toHaveTextContent(new RegExp(`^${unofficial}`))
+  })
+
+  it.each([
+    ['passing', LEADERS_BY_YARDS],
+    ['rushing', LEADERS_BY_RUSHING_YARDS],
+    ['receiving', LEADERS_BY_RECEIVING_YARDS],
+    ['kicking', LEADERS_BY_FG_MADE],
+    ['kicking, by FG%', LEADERS_BY_FG_PCT],
+    ['punting', LEADERS_BY_PT_YARDS],
+  ])('shows neither defense note on the %s board', (_name, leaders) => {
+    renderTable(leaders)
+
+    expect(screen.queryByText(DEFENSE_EARLY_ERA_NOTE)).not.toBeInTheDocument()
+    expect(screen.queryByText(DEFENSE_UNOFFICIAL_NOTE)).not.toBeInTheDocument()
   })
 })

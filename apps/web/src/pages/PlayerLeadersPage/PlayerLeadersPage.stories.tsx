@@ -2,9 +2,16 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { expect, userEvent, within } from 'storybook/test'
 import type { PlayerLeadersOut } from '../../lib/api/types'
-import { fgPctEmptyCopy, fgPctNote } from '../../lib/playerStats'
+import {
+  DEFENSE_EARLY_ERA_NOTE,
+  DEFENSE_UNOFFICIAL_NOTE,
+  fgPctEmptyCopy,
+  fgPctNote,
+} from '../../lib/playerStats'
 import {
   DATA_SOURCES,
+  DEFENSE_WITH_NULL_STATS,
+  LEADERS_BY_DEF_SACKS,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_PCT,
   LEADERS_BY_FG_PCT_EMPTY,
@@ -88,6 +95,9 @@ function answeringByCategory(url: URL) {
   }
   if (url.searchParams.get('category') === 'punting') {
     return answering(LEADERS_BY_PT_YARDS)(url)
+  }
+  if (url.searchParams.get('category') === 'defense') {
+    return answering(LEADERS_BY_DEF_SACKS)(url)
   }
   return answering(LEADERS_BY_YARDS)(url)
 }
@@ -362,6 +372,56 @@ export const Punting: Story = {
     await expect(
       canvas.getByRole('columnheader', { name: 'Yards' }),
     ).toHaveAttribute('aria-sort', 'descending')
+  },
+}
+
+/**
+ * The defense board (issue #317), with a half sack and stats the source
+ * didn't track, and the founder's two notes (#316) under the table.
+ */
+export const Defense: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answering(DEFENSE_WITH_NULL_STATS))
+      return <Story />
+    },
+    atRoute('?category=defense&season_type=regular&sort=def_sacks&offset=0'),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'T.J. Watt' })
+    await expect(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+    ).toHaveValue('defense')
+    await expect(canvas.getByText('19.0')).toBeInTheDocument()
+    await expect(canvas.getByText('0.5')).toBeInTheDocument()
+    await expect(canvas.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
+    await expect(canvas.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
+  },
+}
+
+/** Defense, chosen from the dropdown: the board and both notes arrive together. */
+export const DefenseChosen: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(answeringByCategory)
+      return <Story />
+    },
+    atRoute(),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
+    await userEvent.selectOptions(
+      canvas.getByRole('combobox', { name: 'Stat category' }),
+      'defense',
+    )
+    await canvas.findByRole('table', {
+      name: 'NFL career leaders: regular season, by sacks',
+    })
+    await expect(canvas.getAllByText('17.5')).toHaveLength(2)
+    await expect(canvas.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeVisible()
+    await expect(canvas.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeVisible()
   },
 }
 
