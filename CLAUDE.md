@@ -20,6 +20,13 @@ reconstructs state from them rather than asking the founder to re-explain it. `/
 reports what other sessions have in flight, what just landed and what it flagged, open
 and claimed issues, untracked gaps, and which files are at collision risk.
 
+**The project board is the founder's view of the tracker**
+(github.com/users/daveharmswebdev/projects/4). Every open issue is on it with a Kind
+(Bug, Feature, Epic, or Engineering) and a Priority (P0–P3). The founder watches the
+Product view (everything except Engineering). `founder`-labelled issues, filed through
+the "Report a bug" form, come before everything else. P0 and P1 are the founder's call.
+`/triage` puts agent findings in Engineering at P3 unless a user of the site would notice.
+
 If something real surfaces with no tracking issue, file it (`/triage`) before starting
 unrelated work. `ingest_season.py`'s hardcoded year range was mentioned in three places
 before anyone filed it (#9); don't let a gap get rediscovered a third time.

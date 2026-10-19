@@ -75,7 +75,9 @@ Add the attribution lines your session's instructions give you.
 
 ## 4. After the merge
 
-- `gh issue edit <n> --remove-label in-progress` for each issue it touched.
+- `gh issue edit <n> --remove-label in-progress` for each issue it touched. A closed
+  issue moves to Done on the board by itself; one that stays open goes back with
+  `uv run .claude/hooks/board.py <n> --status Todo`.
 - **Verify the deploys.** Don't assume auto-deploy fired; it has stalled before. Use the
   Render MCP (`list_services`, then `list_deploys`) for `my-team-is-better-api` and
   `my-team-is-better-web`:
