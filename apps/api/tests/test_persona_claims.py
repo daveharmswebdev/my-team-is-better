@@ -770,7 +770,7 @@ def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
     meetings = _row(texas_colorado_2005, "head_to_head", "meetings")
     assert [(m["home_team"], m["week"], m["neutral_site"]) for m in meetings] == [
         ("Texas", 7, False),
-        ("Colorado", 14, False),
+        ("Colorado", 14, True),
     ]
     for side in ("team_a", "team_b"):
         rows = _row(texas_colorado_2005, side, "quality_wins")
@@ -780,13 +780,12 @@ def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
 
     home = _game("v", "where", "Texas", "Colorado", "W", week=7)
     # Week 14 is the 2005 Big 12 Championship, played at Reliant Stadium in
-    # Houston -- so "at home" below is what the FACT BLOCK says, not what is
-    # true. `games.neutral_site` is 0 for it (issue #343): this asserts the
-    # renderer is faithful to the block, and the block is wrong. When #343
-    # lands, this expectation becomes "at a neutral site".
+    # Houston: a neutral site from either side, though Colorado is listed home.
     away = _game("v", "where", "Colorado", "Texas", "L", week=14, season_type="regular")
+    title = _game("v", "where", "Texas", "Colorado", "W", week=14, season_type="regular")
     assert rendered("{v}", [home], texas_colorado_2005, catalog) == "at home"
-    assert rendered("{v}", [away], texas_colorado_2005, catalog) == "at home"
+    assert rendered("{v}", [away], texas_colorado_2005, catalog) == "at a neutral site"
+    assert rendered("{v}", [title], texas_colorado_2005, catalog) == "at a neutral site"
     mirrored = _game("v", "where", "Colorado", "Texas", "L", week=7)
     assert rendered("{v}", [mirrored], texas_colorado_2005, catalog) == "on the road"
 
