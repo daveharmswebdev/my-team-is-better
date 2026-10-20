@@ -223,7 +223,7 @@ def test_prompt_version_is_past_the_typed_score_prompt() -> None:
     grounding version moved too, to `claims-v1`)."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v11"  # type: ignore[attr-defined]  # _reimport_config() -> object
+    assert config.PROMPT_VERSION == "persona-v12"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:

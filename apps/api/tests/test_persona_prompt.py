@@ -68,7 +68,8 @@ whole and only truth. Rules, non-negotiable:
      `team`'s rating sits above `opponent`'s ("218"), where `team` is the
      one rated higher.
    - `when` {team, opponent, result}: when the game was played: "to open
-     the season", "in the postseason" or "in week 11".
+     the season", "in the regular-season finale", "in the Big 12 title
+     game", "in the postseason" or "in week 11".
    - `where` {team, opponent, result}: "at a neutral site", and only for a
      game the FACT BLOCK marks neutral-site.
    - `year` {}: the season.

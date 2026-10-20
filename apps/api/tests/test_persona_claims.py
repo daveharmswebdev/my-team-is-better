@@ -653,9 +653,8 @@ def test_win_pct_for_a_non_subject_is_rejected(
     ("opponent", "result", "expected"),
     [
         ("Florida State", "W", "to open the season"),
-        # The last regular-season game is only its week until #300 tells a
-        # conference title game from a true finale (founder decision 2, #291).
-        ("Auburn", "L", "in week 13"),
+        # The last regular-season game, and not a title game (#300)
+        ("Auburn", "L", "in the regular-season finale"),
         # 2017 Alabama's postseason games are both week 1: never "week 1"
         ("Georgia", "W", "in the postseason"),
         ("Clemson", "W", "in the postseason"),
@@ -1066,50 +1065,73 @@ def test_check_and_render_is_pure_on_the_block(
     claim = _game("w", "when", "Alabama", "Auburn", "L")
     first = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
     second = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
-    assert first == second == ClaimOutcome(errors=(), text="in week 13")
+    assert first == second == ClaimOutcome(errors=(), text="in the regular-season finale")
     assert _row(alabama_2017, "games") == before
 
 
 # ---------------------------------------------------------------------------
-# `when` renders no "regular-season finale" until #300 (founder decision 2 on
-# #291, 2026-09-15)
+# the last regular-season game: a title game or the finale (#300, founder
+# decision 2026-10-20, reversing decision 2 on #291)
 # ---------------------------------------------------------------------------
 
 # Every team case the #291 brief measured, with its last season_type='regular'
 # game: a conference title game in five of the nine, a true finale in four.
-# The engine cannot tell the two apart yet (#300), so both print their week.
-LAST_REGULAR_GAMES: list[tuple[int, str, str, int]] = [
-    (2003, "LSU", "Georgia", 16),
-    (2005, "Texas", "Colorado", 14),
-    (2013, "Florida State", "Duke", 15),
-    (2019, "LSU", "Georgia", 15),
-    (2017, "Auburn", "Georgia", 14),
-    (2001, "Miami", "Virginia Tech", 15),
-    (2004, "USC", "UCLA", 15),
-    (2005, "USC", "UCLA", 14),
-    (2017, "Alabama", "Auburn", 13),
+# Since #300 the block's `title_game_conference` tells the two apart.
+LAST_REGULAR_GAMES: list[tuple[int, str, str, int, str | None]] = [
+    (2003, "LSU", "Georgia", 16, "SEC"),
+    (2005, "Texas", "Colorado", 14, "Big 12"),
+    (2013, "Florida State", "Duke", 15, "ACC"),
+    (2019, "LSU", "Georgia", 15, "SEC"),
+    (2017, "Auburn", "Georgia", 14, "SEC"),
+    (2001, "Miami", "Virginia Tech", 15, None),
+    (2004, "USC", "UCLA", 15, None),
+    (2005, "USC", "UCLA", 14, None),
+    (2017, "Alabama", "Auburn", 13, None),
 ]
 
 
-@pytest.mark.parametrize(("year", "team", "opponent", "week"), LAST_REGULAR_GAMES)
-def test_the_last_regular_season_game_renders_its_week_not_a_finale(
-    catalog: tuple[TeamRecord, ...], year: int, team: str, opponent: str, week: int
+@pytest.mark.parametrize(("year", "team", "opponent", "week", "conference"), LAST_REGULAR_GAMES)
+def test_the_last_regular_season_game_is_a_title_game_or_the_finale(
+    catalog: tuple[TeamRecord, ...],
+    year: int,
+    team: str,
+    opponent: str,
+    week: int,
+    conference: str | None,
 ) -> None:
     block = cfb_team_case_block(year, team)
     regular = [g for g in _row(block, "games") if g["season_type"] == "regular"]
     last = regular[-1]
     assert (last["opponent_name"], last["week"]) == (opponent, week)
+    assert last["title_game_conference"] == conference
+    expected = (
+        "in the regular-season finale" if conference is None else f"in the {conference} title game"
+    )
     claim = _game("w", "when", team, opponent, last["result"], week=week, season_type="regular")
-    assert rendered("It happened {w}.", [claim], block, catalog) == f"It happened in week {week}."
+    assert rendered("It happened {w}.", [claim], block, catalog) == f"It happened {expected}."
 
 
 @pytest.mark.parametrize(
     ("year", "team", "opponent", "result", "extra", "expected"),
     [
-        # Texas met Colorado twice in 2005 (week 7 and week 14)
-        (2005, "Texas", "Colorado", "W", {"week": 14, "season_type": "regular"}, "in week 14"),
+        # Texas met Colorado twice in 2005 (week 7 and the week-14 title game)
+        (
+            2005,
+            "Texas",
+            "Colorado",
+            "W",
+            {"week": 14, "season_type": "regular"},
+            "in the Big 12 title game",
+        ),
         # Auburn met Georgia twice in 2017 (a week-11 win, the week-14 title-game loss)
-        (2017, "Auburn", "Georgia", "L", {"week": 14, "season_type": "regular"}, "in week 14"),
+        (
+            2017,
+            "Auburn",
+            "Georgia",
+            "L",
+            {"week": 14, "season_type": "regular"},
+            "in the SEC title game",
+        ),
         (2005, "Texas", "Louisiana", "W", {}, "to open the season"),
         (2005, "Texas", "USC", "W", {}, "in the postseason"),
     ],
@@ -1128,9 +1150,12 @@ def test_when_keeps_the_opener_and_the_postseason(
     assert rendered("{w}", [claim], block, catalog) == expected
 
 
-def test_no_when_on_any_measured_block_says_finale(catalog: tuple[TeamRecord, ...]) -> None:
-    for year, team, _, _ in LAST_REGULAR_GAMES:
+def test_each_measured_block_has_exactly_one_finale(catalog: tuple[TeamRecord, ...]) -> None:
+    """Exactly one game of a team case's games[] is "the regular-season
+    finale": its last regular-season game that isn't a title game."""
+    for year, team, _, _, _ in LAST_REGULAR_GAMES:
         block = cfb_team_case_block(year, team)
+        finales: list[str] = []
         for game in _row(block, "games"):
             claim = _game(
                 "w",
@@ -1143,7 +1168,9 @@ def test_no_when_on_any_measured_block_says_finale(catalog: tuple[TeamRecord, ..
             )
             outcome = check_and_render({"text": "{w}", "claims": [claim]}, block, catalog)
             assert outcome.text is not None, outcome.errors
-            assert "finale" not in outcome.text
+            if "finale" in outcome.text:
+                finales.append(game["opponent_name"])
+        assert len(finales) == 1, (year, team, finales)
 
 
 # ---------------------------------------------------------------------------

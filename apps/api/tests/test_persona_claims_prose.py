@@ -626,6 +626,6 @@ def test_a_full_narration_renders(alabama_2017: str, catalog: tuple[TeamRecord, 
     )
     assert rendered(text, claims, alabama_2017, catalog) == (
         "Look, Alabama 13-1. They beat No. 3 Georgia 26-23 in the "
-        "postseason. The one loss was 26-14 to Auburn in week 13, and the "
-        "numbers are the numbers."
+        "postseason. The one loss was 26-14 to Auburn in the regular-season "
+        "finale, and the numbers are the numbers."
     )

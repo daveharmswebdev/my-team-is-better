@@ -119,7 +119,13 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # schema's description strings are prompt-facing too, so changing them moves
 # this version as well. The cache key's grounding version moved with it, to
 # `api.persona.claims.GROUNDING_VERSION` ("claims-v1").
-PROMPT_VERSION = "persona-v11"
+# persona-v12 (issue #300): the prompt changed -- the `when` claim kind's
+# enumeration gained "in the regular-season finale" and "in the Big 12 title
+# game", which the validator renders now that every game row in the fact
+# block carries the engine's `title_game_conference`. The fact block changed
+# with it, which the #145 key already misses on; the wording change is what
+# moves this.
+PROMPT_VERSION = "persona-v12"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

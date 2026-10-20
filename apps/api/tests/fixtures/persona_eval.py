@@ -34,7 +34,8 @@ narration by `format_record` and as rates by `format_summary`:
 (a) `timing_venue_flags`: when/where wording the narrator typed itself, over
     the raw tool-call text with every `{placeholder}` removed, so the phrases
     `when`/`where` claims render ("in the postseason", "to open the season",
-    "in week 11", "at a neutral site") never count. A false positive costs
+    "in the regular-season finale", "in the SEC title game", "in week 11",
+    "at a neutral site") never count. A false positive costs
     nothing; the list errs wide.
 (b) `ambiguous_when_sentences`: a raw sentence holding a `when` or `where`
     placeholder and game_score placeholders for two or more different games,
