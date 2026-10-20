@@ -60,6 +60,7 @@ from fixtures.claim_blocks import (
 from fixtures.narrator_fake import FakeNarrator
 from fixtures.sport_fixture import make_sport_fixture_db
 
+from api.persona.budget import UnlimitedCallBudget
 from api.persona.narrate import NarrationResult, narrate
 from api.repositories.teams import TeamRecord
 
@@ -407,6 +408,7 @@ def test_a_typed_score_is_rejected_and_the_retry_feedback_names_every_real_meeti
         catalog=nfl_catalog,
         narrator=narrator,
         fallback_text="Kilo Kings over Lima Lions, says the math.",
+        budget=UnlimitedCallBudget(),
     )
 
     assert result == NarrationResult(

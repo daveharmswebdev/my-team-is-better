@@ -47,6 +47,15 @@ before, except that a missing `DATABASE_URL` no longer raises (issue #206):
 `get_narration_cache` logs a warning and returns a `DisabledNarrationCache`,
 so verdicts are served uncached instead of 500-ing.
 
+`get_call_budget` (issue #236) returns the one `RollingWindowCallBudget` this
+process has, sized by `api.config.CLAUDE_CALLS_PER_MINUTE`: it is created at
+import, not per request, because a per-request budget would bound nothing.
+Under `APP_TEST_MODE` it is an `UnlimitedCallBudget` -- the `StubNarrator`
+costs nothing, and a cap would only make the e2e suite flaky. The pytest
+suite overrides it with an unlimited budget for every test
+(`tests/conftest.py`), since this module-level budget is shared by the whole
+run; `tests/test_persona_call_budget.py` injects its own with a fake clock.
+
 This module is the dependency-injection wiring and nothing else. The two
 team-name queries (`list_all_team_names`, issue #13, and
 `list_team_records`, issue #78) lived here until issue #209 moved them to
@@ -67,7 +76,8 @@ from collections.abc import Iterator
 from cfb_strength.config import DB_PATH
 from cfb_strength.db.connection import get_conn
 
-from api.config import APP_TEST_MODE, DATABASE_URL, PROMPT_VERSION
+from api.config import APP_TEST_MODE, CLAUDE_CALLS_PER_MINUTE, DATABASE_URL, PROMPT_VERSION
+from api.persona.budget import CallBudget, RollingWindowCallBudget, UnlimitedCallBudget
 from api.persona.cache import (
     DisabledNarrationCache,
     InMemoryNarrationCache,
@@ -106,6 +116,17 @@ def get_narration_cache() -> NarrationCacheStore:
         logger.warning("DATABASE_URL is not configured -- persona narration cache disabled")
         return DisabledNarrationCache()
     return PostgresNarrationCache(DATABASE_URL, prompt_version=PROMPT_VERSION)
+
+
+_CALL_BUDGET: CallBudget = (
+    UnlimitedCallBudget()
+    if APP_TEST_MODE
+    else RollingWindowCallBudget(CLAUDE_CALLS_PER_MINUTE, window_seconds=60.0)
+)
+
+
+def get_call_budget() -> CallBudget:
+    return _CALL_BUDGET
 
 
 def get_narrator() -> Narrator:
