@@ -45,6 +45,25 @@ describe('ShareButton (issue #184)', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
   })
 
+  it('renders a non-default label as the button text and accessible name (issue #310)', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    stubNavigator('clipboard', { writeText })
+    render(<ShareButton url={URL_TO_SHARE} label="Share this comparison" />)
+
+    const button = screen.getByRole('button', { name: 'Share this comparison' })
+    expect(button).toHaveTextContent('Share this comparison')
+    expect(
+      screen.queryByRole('button', { name: 'Share this verdict' }),
+    ).not.toBeInTheDocument()
+
+    // The label changes the wording only: the link still goes out the same way.
+    fireEvent.click(button)
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied'),
+    )
+    expect(writeText).toHaveBeenCalledWith(URL_TO_SHARE)
+  })
+
   it('uses the native share sheet with the title and url when it exists', async () => {
     const share = vi.fn().mockResolvedValue(undefined)
     const writeText = vi.fn().mockResolvedValue(undefined)

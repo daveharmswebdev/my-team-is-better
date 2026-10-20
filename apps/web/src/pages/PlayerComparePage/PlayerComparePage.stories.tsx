@@ -271,6 +271,42 @@ export const ClosedAfterComparing: Story = {
     ).toHaveValue('Kurt Warner')
     await expect(playerB(canvas)).toHaveValue('Steve McNair')
     await expect(canvas.getByRole('button', { name: 'Compare' })).toBeEnabled()
+    // The form holds two players, so it doesn't ask for two (issue #324).
+    await expect(canvas.queryByText(PICK_TWO_COPY)).toBeNull()
+  },
+}
+
+/**
+ * A link whose comparison failed, closed (issue #308): the fields hold the
+ * link's players by id, since nothing named them, and Compare -- focused --
+ * asks for the same pair again without a reload.
+ */
+export const ClosedAfterFailedLink: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => Promise.reject(new TypeError('Failed to fetch')),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: COMPARISON_TITLE,
+    })
+    await within(dialog).findByRole('alert')
+
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
+
+    await expect(canvas.queryByRole('dialog')).toBeNull()
+    await expect(
+      canvas.getByLabelText('Player A', { exact: true }),
+    ).toHaveValue(`Player #${WARNER}`)
+    await expect(playerB(canvas)).toHaveValue(`Player #${MCNAIR}`)
+    const compare = canvas.getByRole('button', { name: 'Compare' })
+    await expect(compare).toBeEnabled()
+    await expect(compare).toHaveFocus()
+    await expect(canvas.queryByText(PICK_TWO_COPY)).toBeNull()
   },
 }
 

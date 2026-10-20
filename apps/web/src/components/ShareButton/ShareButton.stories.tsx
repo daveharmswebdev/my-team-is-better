@@ -48,6 +48,31 @@ type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
 
+/**
+ * A caller's own wording (issue #310): the NFL player comparison shares a
+ * comparison, not a verdict. The label is the button's accessible name too.
+ */
+export const CustomLabel: Story = {
+  args: { label: 'Share this comparison' },
+  beforeEach: withNavigator({
+    share: undefined,
+    clipboard: { writeText: copyToClipboard },
+  }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.queryByRole('button', { name: 'Share this verdict' }),
+    ).toBeNull()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Share this comparison' }),
+    )
+    await expect(await canvas.findByRole('status')).toHaveTextContent(
+      'Link copied',
+    )
+    await expect(copyToClipboard).toHaveBeenCalledWith(SHARE_URL)
+  },
+}
+
 /** Where the browser has a share sheet, the link goes to it, and nothing else shows. */
 export const NativeShareSheet: Story = {
   beforeEach: withNavigator({

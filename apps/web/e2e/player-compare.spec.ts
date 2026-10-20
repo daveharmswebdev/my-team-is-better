@@ -20,6 +20,8 @@ const MANNING = '2153701690'
 /** The share link this page writes, and the one the specs below open. */
 const WARNER_VS_MCNAIR_SEARCH = `a=${WARNER}&b=${MCNAIR}`
 
+const PICK_TWO_COPY = 'Pick two players to put their careers side by side.'
+
 // Browser-side snippets, type-checked against the DOM lib by
 // tsconfig.e2e.json (issue #226). Each is self-contained: Playwright ships a
 // callback's source to the page, so it cannot close over anything here.
@@ -182,8 +184,10 @@ test('changing Player B and pressing Compare again puts Kurt Warner next to Peyt
   ).toBeVisible()
   await page.getByRole('option', { name: /Peyton Manning/ }).click()
   await expect(playerB).toHaveValue('Peyton Manning')
-  // Nothing is compared until Compare is pressed.
+  // Nothing is compared until Compare is pressed: no answer opens, and the
+  // address bar names no pair, not even a lone ?b=<id> prompt (issue #325).
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect.poll(() => new URL(page.url()).search).toBe('')
 
   await compare.click()
 
@@ -360,12 +364,78 @@ test('closing the comparison returns to the filled-in form, drops the query, and
   await expect(page.getByLabel('Player B', { exact: true })).toHaveValue(
     'Steve McNair',
   )
+  // The form holds two players, so it doesn't ask for two (issue #324).
+  await expect(page.getByText(PICK_TWO_COPY)).toHaveCount(0)
 
   await page.reload()
   await expect(
     page.getByRole('heading', { level: 1, name: 'Compare NFL players' }),
   ).toBeVisible()
   await expect(page.getByRole('dialog')).toHaveCount(0)
+  // A reload re-seeds from the empty URL: nobody held, so pick two.
+  await expect(page.getByText(PICK_TWO_COPY)).toBeVisible()
+})
+
+// Issue #308: a link whose comparison fails keeps its pair. The fields say
+// which players the link named, closing puts focus on an enabled Compare,
+// and pressing it asks for the same pair again, with no reload. The retry
+// is held until the test has seen it loading: the first failure's line must
+// not stand in for the retry's answer while it is out (round 2).
+test('a link whose comparison failed can be asked again after closing it', async ({
+  page,
+}) => {
+  let failNext = true
+  let releaseRetry: () => void = () => {}
+  const retryReleased = new Promise<void>((resolve) => {
+    releaseRetry = resolve
+  })
+  await page.route('**/api/players/compare**', async (route) => {
+    if (failNext) {
+      failNext = false
+      await route.abort('failed')
+      return
+    }
+    await retryReleased
+    await route.continue()
+  })
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const alert = page.getByRole('dialog').getByRole('alert')
+  await expect(alert).toBeVisible()
+  await closeButton(page).click()
+
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  const playerA = page.getByLabel('Player A', { exact: true })
+  const playerB = page.getByLabel('Player B', { exact: true })
+  await expect(playerA).toHaveValue(`Player #${WARNER}`)
+  await expect(playerB).toHaveValue(`Player #${MCNAIR}`)
+  const compare = page.getByRole('button', { name: 'Compare', exact: true })
+  await expect(compare).toBeEnabled()
+  await expect(compare).toBeFocused()
+
+  await compare.click()
+
+  await expect(page).toHaveURL(
+    new RegExp(`/nfl/compare\\?${WARNER_VS_MCNAIR_SEARCH}$`),
+  )
+  // The retry is still out: loading, not the first failure's line.
+  const reopened = page.getByRole('dialog')
+  await expect(reopened.getByRole('status')).toHaveText(
+    'Loading the comparison\u2026',
+  )
+  await expect(reopened.getByRole('alert')).toHaveCount(0)
+  releaseRetry()
+
+  await expect(
+    comparisonModal(page, 'Kurt Warner and Steve McNair').getByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    }),
+  ).toBeVisible()
+
+  // The answer named both players, so the fields name them after a close.
+  await closeButton(page).click()
+  await expect(playerA).toHaveValue('Kurt Warner')
+  await expect(playerB).toHaveValue('Steve McNair')
 })
 
 test('on a phone, a share link opens its comparison full screen with the first line in view, no scrolling, and a working close button', async ({
