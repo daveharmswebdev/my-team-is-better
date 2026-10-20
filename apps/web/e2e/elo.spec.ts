@@ -10,7 +10,7 @@ import { pickTeam } from './pickTeam.ts'
 // Issues #154 and #183 (epic #147): the Engine toggle end to end, against the
 // real API and the committed fixture db. The fixture holds `elo` ratings and
 // ledgers for 2005 (k 40, 100 points of home field), and Texas is the 2005 Elo
-// #1 (1933.19...) with 13 games. An Elo rating shows the engine's game-by-game
+// #1 (1926.75...) with 13 games. An Elo rating shows the engine's game-by-game
 // work, replacing #153's "no per-opponent breakdown" explainer.
 
 /** #153's retired explainer, which #183 replaced with the ledger itself. */
@@ -77,8 +77,8 @@ test('asking Elo for the 2005 champion shows Texas’s Elo rating game by game, 
   await expect(verdict.getByText('Engine: Elo (second opinion)')).toBeVisible()
 
   const receipts = verdict.getByRole('region', { name: 'Texas evidence' })
-  const trigger = receipts.getByRole('button', { name: '1,933', exact: true })
-  await expect(trigger).toHaveText('1,933')
+  const trigger = receipts.getByRole('button', { name: '1,927', exact: true })
+  await expect(trigger).toHaveText('1,927')
   await expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
   await expect(verdict.getByText(RETIRED_EXPLAINER)).toHaveCount(0)
   await expect(verdict).not.toContainText('no per-opponent breakdown')
@@ -101,7 +101,7 @@ test('asking Elo for the 2005 champion shows Texas’s Elo rating game by game, 
 
   await expect(gamesInOrder(dialog)).toHaveCount(GAMES_2005)
   await expect(
-    dialog.getByText('The card rounds this to 1,933.', { exact: true }),
+    dialog.getByText('The card rounds this to 1,927.', { exact: true }),
   ).toBeVisible()
 
   // A fan with a calculator: every row's printed operands multiply out to

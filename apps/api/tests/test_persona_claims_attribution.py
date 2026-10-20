@@ -19,8 +19,8 @@ protect:
   documented limit -- a two-team swap in one sentence went uncaught -- is gone
   with it, and section B pins that too.
 * A rating is the display value, at the method's own scale and decimals
-  (section C). Every rounding the old checker had to *allow* ("1933",
-  "1933.2", "1,933") is now rejected outright when typed, because the prose
+  (section C). Every rounding the old checker had to *allow* ("1927",
+  "1926.7", "1,927") is now rejected outright when typed, because the prose
   carries no digits at all; the one rendering is the block's.
 * Neither the wrong team's figure nor a right figure said about the wrong team
   can be expressed (section B), which is the whole point of #199.
@@ -165,11 +165,11 @@ def test_fixture_facts_these_tests_rely_on(
     assert keener["team_b"]["rating"] == 0.004736299273644764
     elo = _json(texas_usc_2005_elo)
     assert elo["method"] == "elo"
-    assert elo["team_a"]["rating"] == 1933.1932908945062
-    assert elo["team_b"]["rating"] == 1891.8303466707475
-    assert elo["rating_diff"] == 41.36294422375863
-    assert '"opponent_rating":1891.8303466707475' in texas_2005_elo
-    assert '"rating":1891.8303466707475' not in texas_2005_elo
+    assert elo["team_a"]["rating"] == 1926.7476671637426
+    assert elo["team_b"]["rating"] == 1891.162467238319
+    assert elo["rating_diff"] == 35.58519992542347
+    assert '"opponent_rating":1891.162467238319' in texas_2005_elo
+    assert '"rating":1891.162467238319' not in texas_2005_elo
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +277,7 @@ def test_both_ratings_in_one_sentence_cannot_be_swapped(
 
     assert (
         rendered("Elo has {a} over {b}.", claims, texas_usc_2005_elo, catalog)
-        == "Elo has Texas 1933 over USC 1892."
+        == "Elo has Texas 1927 over USC 1891."
     )
 
 
@@ -341,9 +341,9 @@ def test_the_other_teams_figure_typed_into_the_prose_is_rejected(
 def test_a_rating_of_the_wrong_team_typed_into_the_prose_is_rejected(
     texas_usc_2005_elo: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
-    """#166's other headline ("Elo has Texas at 1892", USC's rating)."""
-    errors = rejected("Elo has Texas at 1892.", [], texas_usc_2005_elo, catalog)
-    assert_an_error_says(errors, "1892")
+    """#166's other headline ("Elo has Texas at 1891", USC's rating)."""
+    errors = rejected("Elo has Texas at 1891.", [], texas_usc_2005_elo, catalog)
+    assert_an_error_says(errors, "1891")
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +359,7 @@ def test_a_rating_of_the_wrong_team_typed_into_the_prose_is_rejected(
 
 @pytest.mark.parametrize(
     ("block_name", "expected"),
-    [("texas_usc_2005", "Texas 5.04"), ("texas_usc_2005_elo", "Texas 1933")],
+    [("texas_usc_2005", "Texas 5.04"), ("texas_usc_2005_elo", "Texas 1927")],
 )
 def test_a_rating_renders_at_the_blocks_own_method_scale(
     request: pytest.FixtureRequest,
@@ -378,20 +378,20 @@ def test_a_rating_renders_at_the_blocks_own_method_scale(
 @pytest.mark.parametrize(
     "typed",
     [
-        # every form #162 had to allow for the Elo rating 1933.1932908945062
-        "1933",
-        "1933.2",
-        "1,933",
-        "1933.19",
-        "1933.1932908945062",
+        # every form #162 had to allow for the Elo rating 1926.7476671637426
+        "1927",
+        "1926.7",
+        "1,927",
+        "1926.75",
+        "1926.7476671637426",
         # the roundings #162 rejected, now rejected for the same reason as the rest
-        "1933.1",
-        "1891",
+        "1926.8",
+        "1926",
         # #165's wrong-scale answer: keener's scale applied to an elo rating
-        "1933193.29",
+        "1926747.67",
         # #165 and #108: a rating_diff, at display precision or rounded
-        "41.4",
-        "41.36294422375863",
+        "35.6",
+        "35.58519992542347",
     ],
 )
 def test_no_form_of_a_rating_may_be_typed_into_the_prose(
@@ -423,7 +423,7 @@ def test_a_rating_gap_is_the_gap_between_the_displayed_ratings(
     """#165 pinned that `rating_diff` is derived and never grounded, so a
     narrator quoting a gap had nothing to lean on. A `rating_gap` claim is the
     supported way to say it, and it prints the difference of the two numbers
-    on screen (1933 - 1892), not of the raw ratings (41.36...)."""
+    on screen (1927 - 1891), not of the raw ratings (35.59...)."""
     claim: dict[str, object] = {
         "id": "g",
         "kind": "rating_gap",
@@ -432,7 +432,7 @@ def test_a_rating_gap_is_the_gap_between_the_displayed_ratings(
     }
 
     assert rendered("{g} points of daylight.", [claim], texas_usc_2005_elo, catalog) == (
-        "41 points of daylight."
+        "36 points of daylight."
     )
 
 
@@ -463,7 +463,7 @@ def test_a_rating_gap_is_the_gap_between_the_displayed_ratings(
                 "text": "Elo rates {r}, and nobody's arguing.",
                 "claims": [{"id": "r", "kind": "rating", "team": "Texas"}],
             },
-            "Elo rates Texas 1933, and nobody's arguing.",
+            "Elo rates Texas 1927, and nobody's arguing.",
         ),
         (
             "/api/verdict/compare",
@@ -482,7 +482,7 @@ def test_a_rating_gap_is_the_gap_between_the_displayed_ratings(
                     },
                 ],
             },
-            "Elo has Texas 1933 and USC 1892, and Texas beat USC 41-38 to prove it.",
+            "Elo has Texas 1927 and USC 1891, and Texas beat USC 41-38 to prove it.",
         ),
     ],
 )

@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +50,11 @@ from cfb_strength.config import DB_PATH, RAW_DIR, SEASON_TYPES
 from cfb_strength.contracts import GameRow, TeamRow
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest.client import CFBDClientError, get_games, get_teams
+from cfb_strength.ingest.neutral_site_overrides import (
+    NeutralSiteOverride,
+    apply_neutral_site_overrides,
+    load_neutral_site_overrides,
+)
 from cfb_strength.ingest.normalize import (
     dedupe_game_records,
     is_unreported_result,
@@ -304,8 +310,22 @@ def _write_ingestion_log(
     )
 
 
-def ingest_one(conn: Any, year: int, season_type: str, *, force: bool = False) -> IngestResult:
-    """Fetch (cache-first), normalize, and write one year/season-type batch."""
+def ingest_one(
+    conn: Any,
+    year: int,
+    season_type: str,
+    *,
+    force: bool = False,
+    neutral_site_overrides: Sequence[NeutralSiteOverride] | None = None,
+) -> IngestResult:
+    """Fetch (cache-first), normalize, and write one year/season-type batch.
+
+    `neutral_site_overrides` defaults to the committed
+    `data/raw/cfbd_neutral_site_overrides.json` (issue #343). A test that
+    feeds a hand-picked payload passes its own, possibly empty, set.
+    """
+    if neutral_site_overrides is None:
+        neutral_site_overrides = load_neutral_site_overrides()
     games_raw, fetched_live = get_games(year, season_type, force=force)
 
     # Issue #125: CFBD lists some real games twice under two game ids. This
@@ -323,6 +343,16 @@ def ingest_one(conn: Any, year: int, season_type: str, *, force: bool = False) -
     unreported_results = sum(1 for g in games if is_unreported_result(g))
 
     game_rows = [normalize_game(g, season=year, season_type=season_type) for g in games]
+
+    # Issue #343: CFBD stores neutralSite=false for neutral-site games in
+    # 1998-2007. The committed override file lists each one by id, and this
+    # is the one place it is applied: on the deduped batch, to the rows only,
+    # so `raw_json` keeps CFBD's original record. A listed id this batch
+    # should hold but doesn't, or whose teams differ, raises before anything
+    # is written. See `neutral_site_overrides`.
+    game_rows = apply_neutral_site_overrides(
+        game_rows, season=year, season_type=season_type, overrides=neutral_site_overrides
+    )
 
     team_rows: dict[int, TeamRow] = {}
     for g in games:

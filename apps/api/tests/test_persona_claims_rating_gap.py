@@ -9,11 +9,11 @@ printed at the method's decimals, with no team names. It is valid only on a
 comparison, between its two compared teams, with `team` the higher-rated.
 
 Measured on the fixtures: 2013 Florida State 4.57 vs Michigan State 4.28
-(keener) -> "0.29"; 2005 Texas 1933 vs Oklahoma 1715 (elo) -> "218"; NFL 2023
+(keener) -> "0.29"; 2005 Texas 1927 vs Oklahoma 1709 (elo) -> "218"; NFL 2023
 Lima Lions 350.00 vs Kilo Kings 250.00 (keener) -> "100.00". On those three the
 difference of the displayed values equals the displayed raw difference, so a
-synthetic Elo pair (1933.4 and 1714.6, derived from the real Texas-Oklahoma
-block) pins the displayed-difference rule: "218", never "219".
+synthetic Elo pair (1933.4 and 1714.6, derived from the Texas-Oklahoma block
+before #343 corrected its neutral sites) pins the displayed-difference rule: "218", never "219".
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ def test_block_facts_these_tests_rely_on(
         {"id": "b", "kind": "rating", "team": "Oklahoma"},
     ]
     assert rendered("{a}, {b}", ratings, texas_oklahoma_2005_elo, catalog) == (
-        "Texas 1933, Oklahoma 1715"
+        "Texas 1927, Oklahoma 1709"
     )
     data = json.loads(texas_oklahoma_2005_elo)
     assert (data["team_a"]["team_name"], data["team_b"]["team_name"]) == ("Texas", "Oklahoma")
