@@ -341,7 +341,8 @@ def _check(message: str, agent: str, ownership: Ownership) -> tuple[ReturnCheck,
     if errors:
         return ReturnCheck(errors=errors), ""
     check = validate_return(data, agent_type=agent, ownership=ownership)
-    assert isinstance(data, dict)
+    if check.errors or not isinstance(data, dict):  # a non-object has schema errors
+        return check, ""
     return check, str(data.get("status"))
 
 
@@ -443,7 +444,11 @@ def subagent_stop(
     if attempts == 0:
         return {"systemMessage": _validated_note(agent, agent_id, check, status)}
     if attempts <= MAX_RETURN_RETRIES:
-        return {"decision": "block", "reason": _retry_feedback(attempts, check.errors)}
+        return {
+            "decision": "block",
+            "reason": _retry_feedback(attempts, check.errors)
+            + f"\nIf you have the {HANDBACK_TOOL} tool, hand the corrected return back with it.",
+        }
     return {"systemMessage": _malformed_note(agent, agent_id, check.errors)}
 
 

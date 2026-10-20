@@ -492,6 +492,21 @@ def test_pre_handback_denies_an_invalid_report_with_the_errors(tmp_path: Path) -
     assert "SubagentHandback" in reason
 
 
+@pytest.mark.parametrize("value", ["[]", "null", '"done"', "3"])
+def test_both_hooks_reject_a_block_that_is_not_an_object(tmp_path: Path, value: str) -> None:
+    # A crash exits 0 and fails open, so a non-object must be an error, not an assert.
+    message = f"```json\n{value}\n```"
+    _denial(delegation.pre_handback(_pre_handback_payload(message), OWNERSHIP, tmp_path))
+    out = delegation.subagent_stop(_stop_payload(message, agent_id="agent_2"), OWNERSHIP, tmp_path)
+    assert out is not None and out["decision"] == "block"
+
+
+def test_stop_hook_feedback_names_the_handback_tool(tmp_path: Path) -> None:
+    # Closing text isn't delivered to a caller that expects a handback.
+    out = delegation.subagent_stop(_stop_payload("no json"), OWNERSHIP, tmp_path)
+    assert out is not None and "SubagentHandback" in out["reason"]
+
+
 def test_pre_handback_lets_the_report_through_after_the_retry_cap(tmp_path: Path) -> None:
     payload = _pre_handback_payload("no json at all", agent_id="agent_stuck")
     for retry in range(1, delegation.MAX_RETURN_RETRIES + 1):
