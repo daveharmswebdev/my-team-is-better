@@ -477,9 +477,11 @@ function isSentStatColumn(column: LeaderStatColumn): column is TableStatColumn {
  * The stats that put a group on a player's table when one of them is a
  * recorded, non-zero number. Beyond each group's own columns: `targets`
  * (a target he never caught is still a receiving stat) and `pat_att`.
- * Defense counts every one of its columns, solo tackles included, since the
- * defense board ranks anyone with a solo tackle and his page must show it --
- * except that `recordedStatGroups` drops a passer's lone solo tackles.
+ * Defense leaves out solo tackles (founder decision on #352: defense
+ * columns on an offensive player's page are distracting). Quarterbacks,
+ * receivers and kickers make one after a turnover or on a return (Kurt
+ * Warner's 1999), so solo tackles alone mean defense only for a player who
+ * recorded nothing else.
  */
 const GROUP_TRIGGERS: Record<StatGroup, readonly (keyof PlayerStatsOut)[]> = {
   passing: PASSING_COLUMNS.map((column) => column.key),
@@ -490,13 +492,10 @@ const GROUP_TRIGGERS: Record<StatGroup, readonly (keyof PlayerStatsOut)[]> = {
     'pat_att',
   ],
   punting: PUNTING_COLUMNS.map((column) => column.key),
-  defense: STAT_GROUP_COLUMNS.defense.map((column) => column.key),
+  defense: STAT_GROUP_COLUMNS.defense
+    .map((column) => column.key)
+    .filter((key) => key !== 'def_tackles_solo'),
 }
-
-/** The defense stats beyond solo tackles: any of them is defense, passer or not. */
-const DEFENSE_PLAYS = GROUP_TRIGGERS.defense.filter(
-  (key) => key !== 'def_tackles_solo',
-)
 
 /** What a player with nothing recorded gets: the quarterback columns, as before #352. */
 const FALLBACK_GROUPS: readonly StatGroup[] = ['passing', 'rushing']
@@ -514,25 +513,52 @@ function recordedIn(
 }
 
 /**
- * The stat groups a player -- or either of two players -- recorded, across
- * every stat line given (issue #352). A group shows when one of its stats is
+ * The groups one player recorded across his stat lines, with no fallback:
+ * `recordedStatGroups`' rule, before a player with nothing gets one.
+ */
+function playerGroups(stats: readonly PlayerStatsOut[]): StatGroup[] {
+  const groups = STAT_GROUPS.filter((group) =>
+    recordedIn(stats, GROUP_TRIGGERS[group]),
+  )
+  if (groups.length === 0 && recordedIn(stats, ['def_tackles_solo'])) {
+    return ['defense']
+  }
+  return groups
+}
+
+/**
+ * The stat groups ONE player recorded, judged across all his stat lines
+ * together (issue #352) -- a career's season lines, or one season type's
+ * totals. Pass several players to `recordedStatGroupsOfPlayers` instead:
+ * the solo-tackle rule below is about a player, not a table. A group shows when one of its stats is
  * a recorded, non-zero number; `null` (not tracked) and 0 never put a group
  * on the table, though inside a shown group a `null` still reads "not
- * recorded". Any defense stat means defense, solo tackles included (the
- * defense board ranks on them), except a passer's solo tackles alone: the
- * tackle a quarterback makes after his own interception (Kurt Warner's
- * 1999) is not a defensive career. A player with nothing at all gets
- * passing and rushing.
+ * recorded". A sack, interception, forced fumble or pass defended means
+ * defense; solo tackles mean defense only for a player who recorded nothing
+ * else (founder decision on #352), so a receiver's tackles after a turnover
+ * add no defense columns. A player with nothing at all gets passing and
+ * rushing.
  */
 export function recordedStatGroups(
   stats: readonly PlayerStatsOut[],
 ): StatGroup[] {
-  const passed = recordedIn(stats, GROUP_TRIGGERS.passing)
-  const groups = STAT_GROUPS.filter((group) =>
-    group === 'defense' && passed
-      ? recordedIn(stats, DEFENSE_PLAYS)
-      : recordedIn(stats, GROUP_TRIGGERS[group]),
-  )
+  return recordedStatGroupsOfPlayers([stats])
+}
+
+/**
+ * The stat groups several players recorded, for a table that shows them
+ * side by side (issue #352, round 3): each player's groups are decided on
+ * his own stat lines, and the table shows their union, in group order. So a
+ * quarterback's passing never hides a tackles-only defender's solo tackles,
+ * and one player's groups never add to another's. Only
+ * when no player recorded anything does the table fall back to passing and
+ * rushing.
+ */
+export function recordedStatGroupsOfPlayers(
+  players: readonly (readonly PlayerStatsOut[])[],
+): StatGroup[] {
+  const recorded = new Set(players.flatMap(playerGroups))
+  const groups = STAT_GROUPS.filter((group) => recorded.has(group))
   return groups.length > 0 ? groups : [...FALLBACK_GROUPS]
 }
 
@@ -550,11 +576,20 @@ export function showsStarterRecord(
   )
 }
 
-/** The career or compare columns for these stat lines, group by group (#352). */
+/** One player's career columns for his stat lines, group by group (#352). */
 export function statColumnsFor(
   stats: readonly PlayerStatsOut[],
 ): TableStatColumn[] {
-  return recordedStatGroups(stats).flatMap((group) => STAT_GROUP_COLUMNS[group])
+  return statColumnsForPlayers([stats])
+}
+
+/** The compare columns for several players, each judged on his own lines (#352). */
+export function statColumnsForPlayers(
+  players: readonly (readonly PlayerStatsOut[])[],
+): TableStatColumn[] {
+  return recordedStatGroupsOfPlayers(players).flatMap(
+    (group) => STAT_GROUP_COLUMNS[group],
+  )
 }
 
 /**

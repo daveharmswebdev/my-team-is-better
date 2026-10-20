@@ -159,7 +159,7 @@ describe('PlayerComparisonTable (issue #301)', () => {
    * Issue #352: the rows are the stat groups either player recorded, so two
    * receivers, or a kicker and a punter, are compared on their own stats.
    */
-  it('compares a receiver and a back on rushing, receiving and defense, with no passing or record row', () => {
+  it('compares a receiver and a back on rushing and receiving, with no passing or record row', () => {
     const table = renderTable(
       HARRISON_VS_JAMES.a.regular_season,
       HARRISON_VS_JAMES.b.regular_season,
@@ -168,8 +168,7 @@ describe('PlayerComparisonTable (issue #301)', () => {
     expect(
       within(table)
         .getAllByRole('rowheader')
-        .map((header) => header.textContent)
-        .slice(0, 10),
+        .map((header) => header.textContent),
     ).toEqual([
       'Seasons',
       'Games',
@@ -182,10 +181,6 @@ describe('PlayerComparisonTable (issue #301)', () => {
       'Receiving yards',
       'Receiving TDs',
     ])
-    // Their solo tackles put both on the defense board, so the defense rows follow.
-    for (const name of ['Sacks', 'Interceptions', 'Solo tackles']) {
-      expect(within(table).getByRole('rowheader', { name })).toBeInTheDocument()
-    }
     const [harrison, james] = cellsOf(table, 'Receptions')
     expect(harrison).toHaveTextContent('115')
     expect(isMarked(harrison)).toBe(true)
@@ -202,8 +197,7 @@ describe('PlayerComparisonTable (issue #301)', () => {
     expect(
       within(table)
         .getAllByRole('rowheader')
-        .map((header) => header.textContent)
-        .slice(0, 10),
+        .map((header) => header.textContent),
     ).toEqual([
       'Seasons',
       'Games',
@@ -216,10 +210,6 @@ describe('PlayerComparisonTable (issue #301)', () => {
       'Net punt yards',
       'Inside 20',
     ])
-    // Their solo tackles put both on the defense board, so the defense rows follow.
-    for (const name of ['Sacks', 'Interceptions', 'Solo tackles']) {
-      expect(within(table).getByRole('rowheader', { name })).toBeInTheDocument()
-    }
     const [mare, gowin] = cellsOf(table, 'FG long')
     expect(mare).toHaveTextContent('54')
     expect(gowin).toHaveTextContent('none')

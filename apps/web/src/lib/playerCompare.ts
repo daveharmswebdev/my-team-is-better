@@ -26,7 +26,7 @@ import {
   leaderStatCell,
   recordedStatGroups,
   showsStarterRecord,
-  statColumnsFor,
+  statColumnsForPlayers,
   statValue,
 } from './playerStats'
 
@@ -124,14 +124,15 @@ function statRow(column: TableStatColumn): RowSpec {
 /**
  * The comparison's rows, in order (issue #352): seasons, games, the starter
  * record when either player passed or started, then the stat groups either
- * player recorded (`statColumnsFor`). No sack rows until #298.
+ * player recorded, each judged on his own totals (`statColumnsForPlayers`).
+ * No sack rows until #298.
  */
 function rowSpecs(totals: readonly PlayerCareerTotalsOut[]): RowSpec[] {
   return [
     SEASONS_ROW,
     GAMES_ROW,
     ...(showsStarterRecord(totals) ? [RECORD_ROW] : []),
-    ...statColumnsFor(totals.map((side) => side.stats)).map(statRow),
+    ...statColumnsForPlayers(totals.map((side) => [side.stats])).map(statRow),
   ]
 }
 

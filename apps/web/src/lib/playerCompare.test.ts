@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   CAREER_WITH_NULL_STATS,
   EDGERRIN_JAMES,
+  FRED_MCCRARY_CAREER,
   HARRISON_VS_JAMES,
   KURT_WARNER_CAREER,
   MARE_VS_GOWIN,
   STEVE_MCNAIR_CAREER,
   WARNER_VS_MCNAIR,
+  ZAYNE_ANDERSON_CAREER,
 } from './playerFixtures'
 import {
   compareUndercountNote,
@@ -163,7 +165,7 @@ describe('comparisonRows (issue #301)', () => {
  * passed or started.
  */
 describe('comparisonRows for non-quarterbacks (issue #352)', () => {
-  it('gives a receiver and a back the rushing, receiving and (for their solo tackles) defense rows, and no passing or record row', () => {
+  it('gives a receiver and a back the rushing and receiving rows, and no passing or record row', () => {
     const rows = comparisonRows(
       HARRISON_VS_JAMES.a.regular_season,
       HARRISON_VS_JAMES.b.regular_season,
@@ -179,11 +181,6 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
       'Receptions',
       'Receiving yards',
       'Receiving TDs',
-      'Sacks',
-      'INT',
-      'Solo tackles',
-      'FF',
-      'PD',
     ])
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Receiving yards']).toMatchObject({
@@ -198,7 +195,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
     })
   })
 
-  it('gives a kicker and a punter the kicking, punting and (for their solo tackles) defense rows, a missing longest field goal as a dash, unmarked', () => {
+  it('gives a kicker and a punter the kicking and punting rows, a missing longest field goal as a dash, unmarked', () => {
     const rows = comparisonRows(
       MARE_VS_GOWIN.a.regular_season,
       MARE_VS_GOWIN.b.regular_season,
@@ -214,21 +211,44 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
       'Punt yards',
       'Net punt yards',
       'Inside 20',
-      'Sacks',
-      'INT',
-      'Solo tackles',
-      'FF',
-      'PD',
     ])
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['FG long']).toMatchObject({ a: '54', b: DASH, marked: null })
     expect(byLabel['Punts']).toMatchObject({ a: '1', b: '81', marked: 'b' })
+  })
+
+  it("shows a tackles-only defender's solo tackles next to a quarterback (round 3)", () => {
+    const rows = comparisonRows(
+      KURT_WARNER_CAREER.regular_season,
+      ZAYNE_ANDERSON_CAREER.regular_season,
+    )
+    const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Solo tackles']).toMatchObject({
-      a: '3',
-      b: '4',
+      a: '1',
+      b: '3',
       marked: 'b',
-      note: 'unofficial',
     })
+    expect(byLabel['Passing yards']).toBeDefined()
+  })
+
+  it('gives a receiver with solo tackles no defense rows next to a quarterback', () => {
+    const rows = comparisonRows(
+      KURT_WARNER_CAREER.regular_season,
+      FRED_MCCRARY_CAREER.regular_season,
+    )
+    const labels = rows.map((row) => row.label)
+    expect(labels).toContain('Receptions')
+    expect(labels).not.toContain('Solo tackles')
+  })
+
+  it('shows no defense rows for two quarterbacks with a stray tackle each', () => {
+    const rows = comparisonRows(
+      KURT_WARNER_CAREER.regular_season,
+      STEVE_MCNAIR_CAREER.regular_season,
+    )
+    expect(KURT_WARNER_CAREER.regular_season!.stats.def_tackles_solo).toBe(1)
+    expect(STEVE_MCNAIR_CAREER.regular_season!.stats.def_tackles_solo).toBe(1)
+    expect(rows.map((row) => row.label)).not.toContain('Solo tackles')
   })
 
   it('keeps the rows of the player who has totals when the other has none', () => {
@@ -270,7 +290,6 @@ describe('headToHeadStatLine (issue #352)', () => {
     expect(
       headToHeadStatLine('Wildcat Starter', {
         ...EDGERRIN_JAMES.stats,
-        def_tackles_solo: 0,
         carries: 18,
         rushing_yards: 97,
         rushing_tds: 1,

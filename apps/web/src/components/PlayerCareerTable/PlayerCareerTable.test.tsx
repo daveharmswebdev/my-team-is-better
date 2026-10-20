@@ -252,7 +252,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     expect(cellUnder(row, 'Rushing fumbles lost')).toHaveTextContent(/^2$/)
   })
 
-  it('gives a receiver his rushing, receiving and defense columns, and no passing column or starter record', () => {
+  it('gives a receiver his receiving and rushing columns, and no passing column or starter record', () => {
     const [regular] = MARVIN_HARRISON_CAREER.seasons
     render(
       <PlayerCareerTable
@@ -263,10 +263,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     )
 
     expect(
-      screen
-        .getAllByRole('columnheader')
-        .map((header) => header.textContent)
-        .slice(0, 11),
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
     ).toEqual([
       'Season',
       'Teams',
@@ -280,10 +277,6 @@ describe('PlayerCareerTable (issue #296)', () => {
       'Receiving yards',
       'Receiving TDs',
     ])
-    // His solo tackles put him on the defense board, so defense follows.
-    expect(
-      screen.getByRole('columnheader', { name: 'Solo tackles' }),
-    ).toBeInTheDocument()
     const row = screen.getByRole('rowheader', { name: '1999' })
       .parentElement as HTMLElement
     expect(cellUnder(row, 'Receptions')).toHaveTextContent(/^115$/)
@@ -292,7 +285,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     expect(cellUnder(row, 'Carries')).toHaveTextContent(/^1$/)
   })
 
-  it('gives a kicker his kicking columns, punting when he punted, and defense for his solo tackles', () => {
+  it('gives a kicker his kicking columns, and punting when he punted', () => {
     const [, postseason] = OLINDO_MARE_CAREER.seasons
     render(
       <PlayerCareerTable
@@ -303,10 +296,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     )
 
     expect(
-      screen
-        .getAllByRole('columnheader')
-        .map((header) => header.textContent)
-        .slice(0, 11),
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
     ).toEqual([
       'Season',
       'Teams',
@@ -320,10 +310,6 @@ describe('PlayerCareerTable (issue #296)', () => {
       'Net punt yards',
       'Inside 20',
     ])
-    // His solo tackles put him on the defense board, so defense follows.
-    expect(
-      screen.getByRole('columnheader', { name: 'Solo tackles' }),
-    ).toBeInTheDocument()
     const [regularRow, postseasonRow] = screen
       .getAllByRole('rowheader')
       .map((header) => header.parentElement as HTMLElement) as [

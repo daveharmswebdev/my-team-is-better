@@ -6,12 +6,15 @@ import {
   CHRIS_GARDOCKI,
   CRIS_CARTER,
   EDGERRIN_JAMES,
+  FRED_MCCRARY_CAREER,
+  JARED_GOFF,
   KURT_WARNER_REGULAR,
   LEADERS_BY_DEF_SACKS_TAIL,
   MARVIN_HARRISON,
   OLINDO_MARE,
   TJ_WATT,
   UNRECORDED_STATS,
+  ZAYNE_ANDERSON_CAREER,
 } from './playerFixtures'
 import {
   CATEGORY_LABEL,
@@ -36,9 +39,11 @@ import {
   leaderColumnNotes,
   leaderStatCell,
   recordedStatGroups,
+  recordedStatGroupsOfPlayers,
   sortForStat,
   statColumnNotes,
   statColumnsFor,
+  statColumnsForPlayers,
   undercountNote,
 } from './playerStats'
 
@@ -628,13 +633,6 @@ describe('the career and compare columns (issue #352)', () => {
     'rushing_fumbles_lost',
   ]
   const RECEIVING_KEYS = ['receptions', 'receiving_yards', 'receiving_tds']
-  const DEFENSE_KEYS = [
-    'def_sacks',
-    'def_interceptions',
-    'def_tackles_solo',
-    'def_fumbles_forced',
-    'def_pass_defended',
-  ]
 
   it('gives a quarterback passing and rushing, the passing board in order', () => {
     expect(recordedStatGroups([KURT_WARNER_REGULAR.stats])).toEqual([
@@ -658,17 +656,14 @@ describe('the career and compare columns (issue #352)', () => {
     )
   })
 
-  it('gives a back rushing, with first downs and fumbles lost, then receiving, and defense for his solo tackles', () => {
-    expect(EDGERRIN_JAMES.stats.def_tackles_solo).toBe(3)
+  it('gives a back rushing, with first downs and fumbles lost, then receiving', () => {
     expect(recordedStatGroups([EDGERRIN_JAMES.stats])).toEqual([
       'rushing',
       'receiving',
-      'defense',
     ])
     expect(keysFor(EDGERRIN_JAMES.stats)).toEqual([
       ...RUSHING_KEYS,
       ...RECEIVING_KEYS,
-      ...DEFENSE_KEYS,
     ])
   })
 
@@ -692,25 +687,16 @@ describe('the career and compare columns (issue #352)', () => {
     expect(recordedStatGroups([OLINDO_MARE.stats])).toEqual([
       'kicking',
       'punting',
-      'defense',
     ])
   })
 
   it('gives a punter punting', () => {
-    expect(
-      recordedStatGroups([{ ...CHRIS_GARDOCKI.stats, def_tackles_solo: 0 }]),
-    ).toEqual(['punting'])
-    expect(keysFor({ ...CHRIS_GARDOCKI.stats, def_tackles_solo: 0 })).toEqual([
+    expect(recordedStatGroups([CHRIS_GARDOCKI.stats])).toEqual(['punting'])
+    expect(keysFor(CHRIS_GARDOCKI.stats)).toEqual([
       'pt_att',
       'pt_yards',
       'pt_net_yards',
       'pt_inside_20',
-    ])
-    // His one solo tackle (on a return) puts him on the defense board, so
-    // his page shows it.
-    expect(recordedStatGroups([CHRIS_GARDOCKI.stats])).toEqual([
-      'punting',
-      'defense',
     ])
   })
 
@@ -725,32 +711,35 @@ describe('the career and compare columns (issue #352)', () => {
     ])
   })
 
-  it('gives a defender with nothing but solo tackles defense, and a receiver on the defense board for a tackle defense too', () => {
+  /**
+   * Founder decision on #352: defense columns on an offensive player's page
+   * are distracting. Solo tackles alone mean defense only for a player who
+   * recorded nothing else, so Fred McCrary (16 solo tackles, 37 catches)
+   * gets receiving, and that is accepted.
+   */
+  it('gives a defender with nothing but solo tackles defense, and a receiver with one only receiving', () => {
     const [safety, receiver] = LEADERS_BY_DEF_SACKS_TAIL.rows
     expect(recordedStatGroups([safety!.stats])).toEqual(['defense'])
     expect(receiver!.stats.def_tackles_solo).toBe(1)
-    expect(recordedStatGroups([receiver!.stats])).toEqual([
-      'receiving',
-      'defense',
-    ])
+    expect(recordedStatGroups([receiver!.stats])).toEqual(['receiving'])
+    const mccrary = FRED_MCCRARY_CAREER.regular_season!.stats
+    expect(mccrary.def_tackles_solo).toBe(16)
+    expect(recordedStatGroups([mccrary])).toEqual(['receiving'])
   })
 
-  /**
-   * Round 2 of #352: the defense board ranks anyone with a solo tackle, so
-   * Fred McCrary (16 solo tackles, 37 receptions, nothing else on defense)
-   * must find a Solo tackles column on his page. Only a passer's tackle --
-   * the one after his own interception -- stays off his table.
-   */
-  it('gives a player with solo tackles and receptions receiving and defense (Fred McCrary)', () => {
-    const stats = {
-      ...CRIS_CARTER.stats,
-      receptions: 37,
-      receiving_yards: 201,
-      receiving_tds: 1,
-      def_tackles_solo: 16,
+  it('counts a sack, interception, forced fumble or pass defended as defense for anyone', () => {
+    for (const play of [
+      'def_sacks',
+      'def_interceptions',
+      'def_fumbles_forced',
+      'def_pass_defended',
+    ] as const) {
+      expect(recordedStatGroups([{ ...CRIS_CARTER.stats, [play]: 1 }])).toEqual(
+        ['receiving', 'defense'],
+      )
     }
-    expect(recordedStatGroups([stats])).toEqual(['receiving', 'defense'])
-    expect(keysFor(stats)).toContain('def_tackles_solo')
+    expect(EDGERRIN_JAMES.stats.def_tackles_solo).toBe(3)
+    expect(recordedStatGroups([EDGERRIN_JAMES.stats])).not.toContain('defense')
   })
 
   it('keeps a solo tackle off the table of a player who passed', () => {
@@ -775,11 +764,7 @@ describe('the career and compare columns (issue #352)', () => {
     const stats = partial as PlayerStatsOut
     expect('rushing_first_downs' in stats).toBe(false)
     expect(() => statColumnsFor([stats])).not.toThrow()
-    expect(recordedStatGroups([stats])).toEqual([
-      'rushing',
-      'receiving',
-      'defense',
-    ])
+    expect(recordedStatGroups([stats])).toEqual(['rushing', 'receiving'])
     expect(leaderStatCell(stats, 'rushing_first_downs')).toEqual({
       kind: 'not-recorded',
     })
@@ -798,8 +783,63 @@ describe('the career and compare columns (issue #352)', () => {
 
   it('shows a group either player recorded, for a comparison', () => {
     expect(
-      recordedStatGroups([CRIS_CARTER.stats, BRANDON_AUBREY.stats]),
+      recordedStatGroupsOfPlayers([
+        [CRIS_CARTER.stats],
+        [BRANDON_AUBREY.stats],
+      ]),
     ).toEqual(['receiving', 'kicking'])
+  })
+
+  /**
+   * Round 3 of #352: the solo-tackle rule is per player. A quarterback next
+   * to a tackles-only defender must not hide the defender's solo tackles.
+   */
+  it("decides each player's groups on his own stats, then shows the union", () => {
+    const anderson = ZAYNE_ANDERSON_CAREER.regular_season!.stats
+    expect(recordedStatGroups([anderson])).toEqual(['defense'])
+    // Merged, Warner's passing would hide the safety's tackles-only defense.
+    expect(
+      recordedStatGroupsOfPlayers([[KURT_WARNER_REGULAR.stats], [anderson]]),
+    ).toEqual(['passing', 'rushing', 'defense'])
+    expect(
+      statColumnsForPlayers([[KURT_WARNER_REGULAR.stats], [anderson]]).map(
+        (column) => column.key,
+      ),
+    ).toContain('def_tackles_solo')
+    // And one player's groups never add to the other's.
+    expect(
+      recordedStatGroupsOfPlayers([
+        [FRED_MCCRARY_CAREER.regular_season!.stats],
+        [KURT_WARNER_REGULAR.stats],
+      ]),
+    ).toEqual(['passing', 'rushing', 'receiving'])
+  })
+
+  it('shows no defense for two passers with a stray tackle each', () => {
+    expect(
+      recordedStatGroupsOfPlayers([
+        [{ ...KURT_WARNER_REGULAR.stats, def_tackles_solo: 2 }],
+        [{ ...JARED_GOFF.stats, def_tackles_solo: 1 }],
+      ]),
+    ).toEqual(['passing', 'rushing'])
+  })
+
+  it("doesn't let a player with nothing recorded add the fallback groups to another's", () => {
+    expect(
+      recordedStatGroupsOfPlayers([[UNRECORDED_STATS], [CRIS_CARTER.stats]]),
+    ).toEqual(['receiving'])
+    expect(
+      recordedStatGroupsOfPlayers([[UNRECORDED_STATS], [UNRECORDED_STATS]]),
+    ).toEqual(['passing', 'rushing'])
+  })
+
+  it("judges one player's season lines together: a passer's tackle in one season stays off", () => {
+    expect(
+      recordedStatGroups([
+        KURT_WARNER_REGULAR.stats,
+        { ...UNRECORDED_STATS, def_tackles_solo: 2 },
+      ]),
+    ).toEqual(['passing', 'rushing'])
   })
 
   it('falls back to passing and rushing when nothing at all was recorded', () => {

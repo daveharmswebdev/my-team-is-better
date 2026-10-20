@@ -2126,6 +2126,39 @@ export const TJ_WATT_CAREER: PlayerCareerOut = oneSeasonCareer(
   null,
 )
 
+/**
+ * `GET /api/players/2071342796?sport=nfl`: a safety with nothing but solo
+ * tackles (3 in the regular season, 2 in the playoffs).
+ */
+export const ZAYNE_ANDERSON_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2071342796,
+  'Zayne Anderson',
+  'SAF',
+  nonStarterLine(2023, 'regular', 'Green Bay Packers', 3, {
+    ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING),
+    ...defense(0, 0, 0, 3, 0),
+  }),
+  nonStarterLine(2023, 'postseason', 'Green Bay Packers', 1, {
+    ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING),
+    ...defense(0, 0, 0, 2, 0),
+  }),
+)
+
+/**
+ * `GET /api/players/2215351959?sport=nfl`: a back on the defense board by
+ * solo tackles alone (#844 there, 16 of them), with 37 catches and no carry.
+ */
+export const FRED_MCCRARY_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2215351959,
+  'Fred McCrary',
+  'RB',
+  nonStarterLine(1999, 'regular', 'San Diego Chargers', 15, {
+    ...nonPasserStats(0, 0, 0, 0, 0, receiving(37, 50, 201, 1, 7, 0)),
+    def_tackles_solo: 16,
+  }),
+  null,
+)
+
 /** Invented pairing of real careers: a receiver and a back, who never met. */
 export const HARRISON_VS_JAMES: PlayerComparisonOut = {
   sport: 'nfl',

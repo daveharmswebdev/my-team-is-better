@@ -132,6 +132,47 @@ describe('PlayerCareerPage (issue #296)', () => {
     expect(screen.getAllByText(/undercount/i)).toHaveLength(1)
   })
 
+  it("judges a passer's season lines together: a season of nothing but a stray tackle adds no defense column (#352)", async () => {
+    const [regular, postseason] = KURT_WARNER_CAREER.seasons
+    const tackleOnly = {
+      ...regular!,
+      season: 2000,
+      record: { wins: 0, losses: 0, ties: 0, starts: 0 },
+      stats: {
+        ...regular!.stats,
+        completions: 0,
+        attempts: 0,
+        passing_yards: 0,
+        passing_tds: 0,
+        passing_interceptions: 0,
+        carries: 0,
+        rushing_yards: 0,
+        rushing_tds: 0,
+        rushing_first_downs: 0,
+        rushing_fumbles_lost: 0,
+        def_tackles_solo: 2,
+      },
+      games_without_stat_lines: 0,
+    }
+    mockedFetchPlayerCareer.mockResolvedValue({
+      ...KURT_WARNER_CAREER,
+      seasons: [regular!, tackleOnly, postseason!],
+    })
+
+    renderPage()
+
+    const table = await screen.findByRole('table', {
+      name: 'Kurt Warner, regular season',
+    })
+    expect(within(table).getAllByRole('row')).toHaveLength(4)
+    expect(
+      within(table).getByRole('columnheader', { name: 'Passing yards' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('columnheader', { name: 'Solo tackles' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('states the pulled-early starter note once, describing both tables', async () => {
     mockedFetchPlayerCareer.mockResolvedValue(KURT_WARNER_CAREER)
 

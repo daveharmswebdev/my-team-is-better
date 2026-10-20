@@ -238,6 +238,28 @@ test('a link to two receivers compares their receiving, with no passing or recor
   }
 })
 
+// Round 3 of #352: each player's columns are decided on his own stats.
+// Zayne Anderson (SAF, 2023) recorded nothing but solo tackles (3), which
+// is defense for him; next to Kurt Warner, whose passing would otherwise
+// hide a tackles-only line, his Solo tackles row still shows.
+test("a quarterback next to a tackles-only defender keeps the defender's Solo tackles row", async ({
+  page,
+}) => {
+  await page.goto(`/nfl/compare?a=${WARNER}&b=2071342796`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Zayne Anderson')
+  const regular = dialog.getByRole('table', {
+    name: 'Kurt Warner and Zayne Anderson, regular season',
+  })
+  const tackles = valueCells(regular, 'Solo tackles')
+  await expect(tackles.nth(0)).toHaveText('1')
+  await expect(tackles.nth(1)).toContainText('3')
+  await expect(tackles.nth(1)).toContainText('(larger number)')
+  await expect(valueCells(regular, 'Passing yards').nth(0)).toContainText(
+    '4,044',
+  )
+})
+
 test('the Primary nav reaches the compare page', async ({ page }) => {
   await page.goto('/')
   await page
