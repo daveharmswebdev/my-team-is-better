@@ -142,6 +142,11 @@ export interface VerdictRequestOptions {
   signal?: AbortSignal
 }
 
+/** Options for `searchPlayers`: a `limit` (default 10) and a caller `signal`. */
+export interface PlayerSearchOptions extends VerdictRequestOptions {
+  limit?: number
+}
+
 function abortError(): DOMException {
   return new DOMException('The verdict request was aborted.', 'AbortError')
 }
@@ -370,11 +375,20 @@ export function fetchCompare(
  * `VerdictHttpError`. Bounded by `CATALOG_TIMEOUT_MS` from the start of the
  * request to the end of reading its body (issue #237): a hung request rejects
  * with a `VerdictNetworkError` too, so callers take the failure path they
- * already have. No caller signal: callers discard stale results themselves.
+ * already have. `callerSignal`, if given, aborts the request itself (issue
+ * #370): the call then rejects with a `DOMException` named `AbortError`,
+ * never a `VerdictNetworkError`. Callers without one discard stale results
+ * themselves.
  */
-function getJson<T>(url: string, typedError?: TypedErrorMapper): Promise<T> {
-  return withDeadline(CATALOG_TIMEOUT_MS, (signal) =>
-    receiveJson<T>(url, signal, typedError),
+function getJson<T>(
+  url: string,
+  typedError?: TypedErrorMapper,
+  callerSignal?: AbortSignal,
+): Promise<T> {
+  return withDeadline(
+    CATALOG_TIMEOUT_MS,
+    (signal) => receiveJson<T>(url, signal, typedError),
+    callerSignal,
   )
 }
 
@@ -502,10 +516,12 @@ export function fetchPlayerComparison(
  * `GET /api/players/search?q=&limit=&sport=nfl` (issue #301): players whose
  * name contains `query`. The API wants 2..100 characters once stripped and a
  * `limit` of 1..20; callers screen the query. No match is a 200 with no rows.
+ * `signal` aborts the request when the typed text has moved on (issue #370);
+ * the call then rejects with a `DOMException` named `AbortError`.
  */
 export function searchPlayers(
   query: string,
-  limit = 10,
+  { limit = 10, signal }: PlayerSearchOptions = {},
 ): Promise<PlayerSearchOut> {
   const params = new URLSearchParams({
     q: query,
@@ -514,6 +530,8 @@ export function searchPlayers(
   })
   return getJson<PlayerSearchOut>(
     `${API_BASE_URL}/api/players/search?${params.toString()}`,
+    undefined,
+    signal,
   )
 }
 
