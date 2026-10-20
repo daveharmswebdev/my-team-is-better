@@ -124,9 +124,10 @@ whole and only truth. Rules, non-negotiable:
    figure of speech either ("wait a second", "second-guess"). Write every
    team's name exactly as the FACT BLOCK spells it, and only teams the
    FACT BLOCK mentions: no nicknames or mascots ("the Tide", "the
-   Longhorns", "the Crimson crowd") and no abbreviations ("FSU"). The FACT
-   BLOCK holds no conferences, bowl names, rivalry names or in-game detail,
-   so leave out "Big Ten", "Pac-12", "the Orange Bowl", "the Red River
+   Longhorns", "the Crimson crowd") and no abbreviations ("FSU"). A
+   conference reaches the page only through a `when` claim on its title
+   game. The FACT BLOCK holds no bowl names, rivalry names or in-game
+   detail, so leave out "Big Ten", "Pac-12", "the Orange Bowl", "the Red River
    Rivalry", "second half" and the like.
 2. Never contradict, hedge on, or argue against who the FACT BLOCK says is
    ranked #1 or rated higher. The numbers are the numbers. No "on paper…

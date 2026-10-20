@@ -1281,8 +1281,9 @@ def _check_prose(
             _, end, phrase = no_detail[at]
             if match.end() <= end:
                 return (
-                    f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; the FACT "
-                    "BLOCK holds no conference or in-game detail, so leave it out"
+                    f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; a "
+                    "conference prints only through a `when` claim on its title game, and "
+                    "the FACT BLOCK holds no in-game detail, so leave it out of the prose"
                 )
         return (
             f"the prose {what} {_quote(match.group(0))}; {rule}. "

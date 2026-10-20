@@ -416,8 +416,8 @@ def test_a_conference_or_game_phase_is_rejected_saying_the_block_holds_no_such_d
         errors,
         f'"{token}"',
         f'"{phrase}"',
-        "FACT BLOCK holds no conference or in-game detail",
-        "leave it out",
+        "a conference prints only through a `when` claim on its title game",
+        "leave it out of the prose",
     )
 
 
