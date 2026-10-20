@@ -10,7 +10,7 @@ import pytest
 
 from cfb_strength.contracts import PLAYER_SEARCH_MAX_LIMIT, PlayerSearchRow
 from cfb_strength.players import search_players
-from tests.test_players_support import PlayerDb, conn_of, full_stats
+from tests.test_players_support import STAT_COLUMNS, PlayerDb, conn_of, full_stats
 
 
 @pytest.fixture
@@ -22,10 +22,20 @@ def db(tmp_path: Path) -> Iterator[PlayerDb]:
         d.close()
 
 
-def _passer(db: PlayerDb, name: str, yards: int | None = 100, season: int = 2000) -> int:
+def _passer(
+    db: PlayerDb, name: str, yards: int | None = 100, season: int = 2000, games: int | None = 1
+) -> int:
     p = db.player(name)
-    db.season(p, season, **full_stats(passing_yards=yards))
+    db.season(p, season, games=games, **full_stats(passing_yards=yards))
     return p
+
+
+def _only(**stats: float | None) -> dict[str, float | None]:
+    """A season line with every stat None except `stats`, so it qualifies for
+    exactly the categories those stats satisfy."""
+    line: dict[str, float | None] = dict.fromkeys(STAT_COLUMNS, None)
+    line.update(stats)
+    return line
 
 
 def _names(db: PlayerDb, query: str, limit: int = 10) -> list[str]:
@@ -39,9 +49,9 @@ def _names(db: PlayerDb, query: str, limit: int = 10) -> list[str]:
 
 
 def test_matching_is_a_case_insensitive_substring(db: PlayerDb) -> None:
-    _passer(db, "Peyton Manning", 300)
-    _passer(db, "Eli Manning", 200)
-    _passer(db, "Tom Brady", 400)
+    _passer(db, "Peyton Manning", games=300)
+    _passer(db, "Eli Manning", games=200)
+    _passer(db, "Tom Brady", games=400)
     assert _names(db, "MANN") == ["Peyton Manning", "Eli Manning"]
     assert _names(db, "ning") == ["Peyton Manning", "Eli Manning"]
     assert _names(db, "tOm b") == ["Tom Brady"]
@@ -105,54 +115,98 @@ def test_a_nul_in_the_query_matches_literally_so_nothing(db: PlayerDb) -> None:
 # --- who qualifies ------------------------------------------------------------
 
 
-def test_only_passers_and_qb_starters_qualify(db: PlayerDb) -> None:
+# One line per category, each qualifying for that category alone (#371).
+_CATEGORY_ONLY = {
+    "rushing": _only(carries=3, rushing_yards=10),
+    "receiving": _only(targets=2),
+    "receiving_without_targets": _only(receptions=1, targets=0),
+    "kicking": _only(fg_att=1),
+    "kicking_pat_only": _only(pat_att=2),
+    "punting": _only(pt_att=4),
+    "defense": _only(def_tackles_solo=1),
+    "defense_half_sack": _only(def_sacks=0.5),
+}
+
+
+@pytest.mark.parametrize("line", _CATEGORY_ONLY.values(), ids=_CATEGORY_ONLY.keys())
+@pytest.mark.parametrize("season_type", ["regular", "postseason"])
+def test_a_player_qualifying_for_any_one_category_is_found(
+    db: PlayerDb, line: dict[str, float | None], season_type: str
+) -> None:
+    # #371: search found only passers, so typing "gore" missed Frank Gore.
+    p = db.player("Gore Nonpasser", position="RB")
+    db.season(p, 2005, season_type=season_type, **line)
+    rows = search_players(conn_of(db), sport="nfl", query="gore").rows
+    assert [r.player_id for r in rows] == [p]
+
+
+def test_passers_and_qb_starters_still_qualify(db: PlayerDb) -> None:
     home, away = db.team("Home"), db.team("Away")
     playoff_only = db.player("Smith Playoff Starter")
     db.start(db.game(2003, home, away, 7, 3, season_type="postseason", week=19), home, playoff_only)
-    zero_attempts = db.player("Smith No Attempts")
-    db.season(zero_attempts, 2003, **full_stats(attempts=0, passing_yards=0))
-    db.season(zero_attempts, 2004, season_type="postseason", **full_stats(attempts=0))
-    db.player("Smith No Rows")
     postseason_passer = db.player("Smith Postseason Passer")
-    db.season(postseason_passer, 2003, season_type="postseason", **full_stats(attempts=1))
+    db.season(postseason_passer, 2003, season_type="postseason", **_only(attempts=1))
     assert _names(db, "smith") == ["Smith Playoff Starter", "Smith Postseason Passer"]
 
 
-def test_order_is_regular_yards_desc_none_last_then_name_then_id(db: PlayerDb) -> None:
+def test_a_player_qualifying_for_no_category_is_not_found(db: PlayerDb) -> None:
+    # Every stat a real 0, every stat untracked, or no rows at all: on no board.
+    zeros = db.player("Smith All Zeros")
+    db.season(zeros, 2003, games=16, **dict.fromkeys(STAT_COLUMNS, 0))
+    db.season(zeros, 2004, season_type="postseason", **dict.fromkeys(STAT_COLUMNS, 0))
+    untracked = db.player("Smith Untracked")
+    db.season(untracked, 2003, games=16, **_only())
+    db.player("Smith No Rows")
+    kicker = db.player("Smith Kicker", position="K")
+    db.season(kicker, 2003, games=1, **_only(fg_att=0, pat_att=1))
+    assert _names(db, "smith") == ["Smith Kicker"]
+
+
+def test_order_is_regular_games_desc_none_last_then_name_then_id(db: PlayerDb) -> None:
     home, away = db.team("Home"), db.team("Away")
-    _passer(db, "Qb Low", 10)
-    _passer(db, "Qb High", 900)
-    # Same yards: display_name breaks the tie.
-    _passer(db, "Qb Mid Zed", 500)
-    _passer(db, "Qb Mid Abe", 500)
-    # Same name and yards: player_id breaks it (inserted high id first).
-    twin_high = db.player("Qb Twin", player_id=9_002)
-    db.season(twin_high, 2000, **full_stats(passing_yards=500))
-    twin_low = db.player("Qb Twin", player_id=9_001)
-    db.season(twin_low, 2000, **full_stats(passing_yards=500))
-    # No regular-season yards at all: postseason only, a regular start without a
-    # season row, and a regular season row whose yards weren't tracked.
-    playoff = db.player("Qb Aaa Playoff")
-    db.season(playoff, 2000, season_type="postseason", **full_stats(passing_yards=5000))
-    starter = db.player("Qb Bbb Starter")
-    db.start(db.game(2000, home, away, 1, 0), home, starter)
-    untracked = _passer(db, "Qb Ccc Untracked", None)
+    # A non-QB with more regular-season games ranks above a QB with fewer,
+    # however many yards the QB threw for (#371). Games add up across seasons.
+    rusher = db.player("Ord Rusher", position="RB")
+    db.season(rusher, 2000, games=8, **_only(carries=100))
+    db.season(rusher, 2001, games=8, **_only(carries=100))
+    db.season(rusher, 2001, season_type="postseason", games=3, **_only(carries=10))
+    qb = _passer(db, "Ord Qb", 9_000, games=3)
+    # Postseason games don't count toward the order.
+    db.season(qb, 2000, season_type="postseason", games=20, **full_stats(passing_yards=900))
+    # Same games: display_name breaks the tie.
+    zed = db.player("Ord Mid Zed", position="P")
+    db.season(zed, 2000, games=5, **_only(pt_att=40))
+    abe = db.player("Ord Mid Abe", position="LB")
+    db.season(abe, 2000, games=5, **_only(def_sacks=2))
+    # Same name and games: player_id breaks it (inserted high id first).
+    twin_high = db.player("Ord Twin", position="WR", player_id=9_002)
+    db.season(twin_high, 2000, games=5, **_only(targets=9))
+    twin_low = db.player("Ord Twin", position="K", player_id=9_001)
+    db.season(twin_low, 2000, games=5, **_only(fg_att=9))
     # A zero is a number, not None: it sorts above the None rows.
-    _passer(db, "Qb Zero", 0)
+    zero = _passer(db, "Ord Zero", 50, games=0)
+    # No regular-season games total: postseason only, a regular start without
+    # a season row, and a regular season row whose games weren't tracked.
+    playoff = db.player("Ord Aaa Playoff", position="RB")
+    db.season(playoff, 2000, season_type="postseason", games=4, **_only(carries=50))
+    starter = db.player("Ord Bbb Starter")
+    db.start(db.game(2000, home, away, 1, 0), home, starter)
+    untracked = db.player("Ord Ccc Untracked", position="DE")
+    db.season(untracked, 2000, games=None, **_only(def_tackles_solo=30))
 
-    rows = search_players(conn_of(db), sport="nfl", query="qb", limit=20).rows
+    rows = search_players(conn_of(db), sport="nfl", query="ord", limit=20).rows
 
-    assert [(r.display_name, r.player_id) for r in rows] == [
-        ("Qb High", rows[0].player_id),
-        ("Qb Mid Abe", rows[1].player_id),
-        ("Qb Mid Zed", rows[2].player_id),
-        ("Qb Twin", 9_001),
-        ("Qb Twin", 9_002),
-        ("Qb Low", rows[5].player_id),
-        ("Qb Zero", rows[6].player_id),
-        ("Qb Aaa Playoff", playoff),
-        ("Qb Bbb Starter", starter),
-        ("Qb Ccc Untracked", untracked),
+    assert [r.player_id for r in rows] == [
+        rusher,
+        abe,
+        zed,
+        9_001,
+        9_002,
+        qb,
+        zero,
+        playoff,
+        starter,
+        untracked,
     ]
 
 
@@ -229,7 +283,7 @@ def _db_with_bystanders(path: Path, bystanders: int) -> PlayerDb:
     d = PlayerDb(path)
     home, away = d.team("Home"), d.team("Away")
     for i in range(3):
-        _passer(d, f"Needle {i}", 100 + i)
+        _passer(d, f"Needle {i}", 100, games=10 + i)
     for i in range(bystanders):
         # A qualifying player who doesn't match: a passing season and a QB start.
         p = _passer(d, f"Bystander {i:04d}", 50)

@@ -435,24 +435,53 @@ def test_search_real_names(conn: sqlite3.Connection) -> None:
             r.display_name for r in search_players(conn, sport="nfl", query=query, limit=limit).rows
         ]
 
-    assert names("manning") == ["Peyton Manning", "Eli Manning"]
-    assert names("brady") == ["Tom Brady", "Brady Quinn", "Brady Cook"]
+    # Any leaderboard qualifies, ordered by regular-season career games (#371).
+    assert names("manning") == [
+        "Peyton Manning",
+        "Eli Manning",
+        "Danieal Manning",
+        "Ricky Manning",
+        "Mario Manningham",
+        "Roy Manning",
+        "Terrell Manning",
+    ]
+    assert names("brady") == [
+        "Tom Brady",
+        "Kyle Brady",
+        "Brady Poppinga",
+        "Brady Smith",
+        "Brady Quinn",
+        "Brady Russell",
+        "Brady Cook",
+        "Brady Breeze",
+        "Brady Christensen",
+        "Bradyn Swinson",
+    ]
     assert names("josh", limit=6) == [
+        "Josh Brown",
+        "Josh Scobee",
+        "Josh Bidwell",
         "Josh Allen",
-        "Josh McCown",
-        "Josh Freeman",
-        "Joshua Dobbs",
-        "Josh Rosen",
-        "Josh Johnson",
+        "Josh Miller",
+        "Josh Norman",
     ]
     assert names("jo", limit=6) == [
+        "Johnny Hekker",
+        "Donnie Jones",
+        "Cameron Jordan",
         "Joe Flacco",
-        "Josh Allen",
-        "Jon Kitna",
-        "Brad Johnson",
-        "Joe Burrow",
-        "Josh McCown",
+        "Johnathan Joseph",
+        "Josh Brown",
     ]
+    # #371's report: Frank Gore leads the rushing board and threw no pass.
+    gore = search_players(conn, sport="nfl", query="gore").rows
+    assert [(r.display_name, r.position) for r in gore] == [
+        ("Frank Gore", "RB"),
+        ("Derrick Gore", "RB"),
+        ("Daniel Kilgore", "C"),
+        ("Frank Gore Jr.", "RB"),
+    ]
+    assert (gore[0].first_season, gore[0].last_season) == (2005, 2020)
     (peyton,) = search_players(conn, sport="nfl", query=" Peyton Manning ").rows
     assert (peyton.player_id, peyton.first_season, peyton.last_season) == (
         PEYTON_MANNING,
