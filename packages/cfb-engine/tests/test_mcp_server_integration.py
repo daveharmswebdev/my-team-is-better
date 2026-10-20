@@ -512,3 +512,66 @@ def test_unexpected_exception_returns_fixed_body_and_logs_cause(
     assert len(records) == 1, [r.getMessage() for r in caplog.records]
     assert records[0].exc_info is not None
     assert "sentinel-path" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Issue #280: a stale database (one built before the #183 Elo ledger, opened
+# read-only so nothing can migrate it) makes the evidence layer raise
+# `StaleDatabaseError`. Every tool that reaches the ledger returns a distinct,
+# fixed `stale_database` body -- not internal_error, and never the
+# exception's text (which names the tables and the fix: operator material).
+# The operator still gets that text at error level.
+# ---------------------------------------------------------------------------
+
+STALE_DATABASE_MESSAGE = (
+    "The ranking data is being rebuilt right now, so this answer isn't available yet. "
+    "Try again in a few minutes."
+)
+LEDGER_TABLES = ("elo_ledger_configs", "elo_ledger_steps")
+
+
+@pytest.fixture
+def stale_db(mcp_fixture_db: Path) -> Path:
+    """The 2005 fixture with real ratings, then the #183 ledger tables
+    dropped, so the real `StaleDatabaseError` fires inside the evidence
+    layer (no monkeypatched raise)."""
+    conn = get_conn(mcp_fixture_db)
+    try:
+        for table in reversed(LEDGER_TABLES):
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
+        conn.commit()
+        remaining = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (?, ?)",
+            LEDGER_TABLES,
+        ).fetchall()
+        assert remaining == []
+    finally:
+        conn.close()
+    return mcp_fixture_db
+
+
+@pytest.mark.parametrize("tool_name", ["get_team_season", "compare_teams", "get_champion"])
+def test_stale_database_returns_fixed_stale_body_and_logs_tables(
+    stale_db: Path, caplog: pytest.LogCaptureFixture, tool_name: str
+) -> None:
+    import cfb_strength.mcp_server.server as server_module
+
+    calls = {
+        "get_team_season": lambda: server_module.get_team_season(2005, "Texas"),
+        "compare_teams": lambda: server_module.compare_teams(2005, "Texas", "USC"),
+        "get_champion": lambda: server_module.get_champion(2005),
+    }
+    caplog.set_level(logging.ERROR, logger=SERVER_LOGGER)
+
+    result = calls[tool_name]()
+
+    assert result == {"error": "stale_database", "message": STALE_DATABASE_MESSAGE}, result
+    assert getattr(server_module, "STALE_DATABASE_MESSAGE", None) == STALE_DATABASE_MESSAGE
+    dumped = json.dumps(result)
+    for table in LEDGER_TABLES:
+        assert table not in dumped
+
+    records = [r for r in caplog.records if r.name == SERVER_LOGGER and r.levelno >= logging.ERROR]
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    for table in LEDGER_TABLES:
+        assert table in records[0].getMessage()

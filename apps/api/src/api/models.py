@@ -1173,6 +1173,21 @@ class MissingChampionErrorBody(BaseModel):
     sport: Sport
 
 
+class StaleDatabaseErrorBody(BaseModel):
+    """The engine's `StaleDatabaseError` (issue #280): the db predates the
+    schema the evidence layer reads (today, issue #183's Elo ledger tables),
+    so every verdict fails, whatever team, year or method was asked.
+    `api.errors` maps it to 503: nothing about the request was wrong, and a
+    rebuild/redeploy fixes it.
+
+    **Deliberately carries nothing but `error`.** The exception's message
+    names the missing tables and the operator fix; that is the operator's
+    business, so `api.errors` logs it at error level and never sends it.
+    """
+
+    error: Literal["stale_database"] = "stale_database"
+
+
 # ---------------------------------------------------------------------------
 # `{"detail": <Body>}` envelopes (issue #111) -- the error bodies as they
 # actually go over the wire. `api.errors`' handlers send
@@ -1202,6 +1217,10 @@ class SameTeamComparisonErrorResponse(BaseModel):
 
 class MissingChampionErrorResponse(BaseModel):
     detail: MissingChampionErrorBody
+
+
+class StaleDatabaseErrorResponse(BaseModel):
+    detail: StaleDatabaseErrorBody
 
 
 class UnknownPlayerErrorBody(BaseModel):

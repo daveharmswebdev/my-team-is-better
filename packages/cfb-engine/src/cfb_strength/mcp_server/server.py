@@ -13,7 +13,9 @@ circumstance. Every tool catches its own exceptions and returns a
 JSON-serializable `{"error": ...}` dict rather than raising across the MCP
 boundary, so a malformed request (bad year, ambiguous team name) surfaces as
 data the calling LLM can read and react to, not a protocol-level failure.
-The typed, recoverable errors keep their structured bodies; anything else
+The typed, recoverable errors keep their structured bodies; a database that
+predates the schema the evidence layer reads gets a fixed `stale_database`
+body from `_stale_database` (issue #280); anything else
 gets one fixed `internal_error` body from `_internal_error` (issue #208), so
 an exception's text -- a db path, a SQL fragment -- never reaches the
 connected model. The real cause goes to the operator through `logging`:
@@ -59,13 +61,28 @@ from cfb_strength.contracts import (
 )
 from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.credits import get_credits
-from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
+from cfb_strength.evidence.proof import (
+    StaleDatabaseError,
+    build_comparison,
+    build_team_case,
+    list_available_years,
+)
 
 logger = logging.getLogger(__name__)
 
 # The one body every catch-all returns. Fixed on purpose: the model gets a
 # code it can react to and nothing that came out of the exception (#208).
 INTERNAL_ERROR_MESSAGE = "The ranking engine hit an unexpected error."
+
+# The body for a database that predates the schema the evidence layer reads
+# (issue #280). Fixed for the same reason as INTERNAL_ERROR_MESSAGE: the
+# exception's text names tables and the operator's fix, which the model must
+# not see. It tells the model the data is being rebuilt, not that something
+# unexpected broke.
+STALE_DATABASE_MESSAGE = (
+    "The ranking data is being rebuilt right now, so this answer isn't available yet. "
+    "Try again in a few minutes."
+)
 
 mcp: MCPServer = MCPServer(
     "cfb-strength",
@@ -101,6 +118,15 @@ def _internal_error(e: BaseException) -> dict[str, Any]:
     """
     logger.exception("Unexpected error inside the MCP boundary", exc_info=e)
     return {"error": "internal_error", "message": INTERNAL_ERROR_MESSAGE}
+
+
+def _stale_database(e: StaleDatabaseError) -> dict[str, Any]:
+    """Log a stale-database failure (its text names the missing tables and
+    the fix) at error level for the operator, and return the fixed
+    `stale_database` body for the model -- never `str(e)` (#208, #280).
+    """
+    logger.error("Stale database inside the MCP boundary: %s", e)
+    return {"error": "stale_database", "message": STALE_DATABASE_MESSAGE}
 
 
 def _unknown_year(e: UnknownYearError, sport: str) -> dict[str, Any]:
@@ -327,6 +353,8 @@ def get_team_season(
         return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
         return _unknown_year(e, sport)
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001
         return _internal_error(e)
 
@@ -362,6 +390,8 @@ def compare_teams(
         return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
         return _unknown_year(e, sport)
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001
         return _internal_error(e)
 
@@ -405,6 +435,8 @@ def get_champion(year: int, method: str = "keener", sport: Sport = "cfb") -> dic
         return {"error": "unknown_team", "query": e.query, "year": e.year, "sport": e.sport}
     except UnknownYearError as e:
         return _unknown_year(e, sport)
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001
         return _internal_error(e)
 

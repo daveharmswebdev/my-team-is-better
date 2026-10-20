@@ -1,4 +1,4 @@
-"""Maps `cfb_strength.contracts`' typed engine exceptions to HTTP responses
+"""Maps the engine's typed exceptions to HTTP responses
 (Architecture Brief §4.4 -- the HTTP-response half only; in-character
 persona copy for these is issue #4's job, not this one's).
 
@@ -10,6 +10,7 @@ persona copy for these is issue #4's job, not this one's).
 | `SameTeamComparisonError`  | 400                                           |
 | `MissingChampionError`     | 500, body echoes `year`/`method`/`sport`      |
 | `UnknownPlayerError`       | 404, body echoes `player_id`/`sport` (#296)   |
+| `StaleDatabaseError`       | 503, `error` tag only, details logged (#280)  |
 
 Registered once on the app (`api.main`) rather than caught per-route, so
 there is exactly one place this mapping is spelled out:
@@ -28,6 +29,16 @@ team query and came back as a 422 `ambiguous_team` listing every rated team
 as a candidate for a query the user never typed. It is declared on the
 champion route only (`CHAMPION_ERROR_RESPONSES`), and the handler logs it
 at error level, since it is the operator's problem, not the user's.
+
+`StaleDatabaseError` (issue #280) is the engine's, from
+`cfb_strength.evidence.proof`: `_elo_ledger` raises it when the db predates
+issue #183's ledger tables, which `build_team_case` reads for every method,
+so it is declared on every route that reaches `build_team_case` or
+`build_comparison` (all three verdict routes). 503, not 500: nothing about the
+request was wrong, and a rebuild/redeploy fixes it. The exception's message
+names the missing tables and the operator fix; that goes to the error log
+only, never on the wire, so the body is the bare `stale_database` tag. Before
+#280 it was unmapped and came back as Starlette's plain-text 500.
 
 Why declarations are needed at all (issue #111): routes never raise or catch
 these exceptions themselves, so FastAPI cannot see them. Unless a route
@@ -80,6 +91,7 @@ from cfb_strength.contracts import (
     UnknownTeamError,
     UnknownYearError,
 )
+from cfb_strength.evidence.proof import StaleDatabaseError
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import (
     validation_error_definition,
@@ -97,6 +109,8 @@ from api.models import (
     MissingChampionErrorResponse,
     SameTeamComparisonErrorBody,
     SameTeamComparisonErrorResponse,
+    StaleDatabaseErrorBody,
+    StaleDatabaseErrorResponse,
     UnknownPlayerErrorBody,
     UnknownPlayerErrorResponse,
     UnknownTeamErrorBody,
@@ -138,6 +152,7 @@ ENGINE_ERROR_RESPONSES: dict[type[Exception], MappedError] = {
     SameTeamComparisonError: MappedError(400, SameTeamComparisonErrorResponse),
     MissingChampionError: MappedError(500, MissingChampionErrorResponse),
     UnknownPlayerError: MappedError(404, UnknownPlayerErrorResponse),
+    StaleDatabaseError: MappedError(503, StaleDatabaseErrorResponse),
 }
 
 
@@ -200,6 +215,18 @@ def register_exception_handlers(app: FastAPI) -> None:
         body = UnknownPlayerErrorBody(player_id=exc.player_id, sport=exc.sport)
         return JSONResponse(
             status_code=ENGINE_ERROR_RESPONSES[UnknownPlayerError].status_code,
+            content={"detail": body.model_dump()},
+        )
+
+    @app.exception_handler(StaleDatabaseError)
+    def _stale_database(request: Request, exc: StaleDatabaseError) -> JSONResponse:
+        # `str(exc)` names the missing tables and the rebuild that fixes
+        # them. That is for the operator, so it is logged and kept off the
+        # wire (#280): the client gets the bare tag.
+        logger.error("stale database: %s", exc)
+        body = StaleDatabaseErrorBody()
+        return JSONResponse(
+            status_code=ENGINE_ERROR_RESPONSES[StaleDatabaseError].status_code,
             content={"detail": body.model_dump()},
         )
 
@@ -279,21 +306,31 @@ def openapi_error_responses(*errors: type[Exception]) -> dict[int | str, dict[st
 # `build_team_case` goes through `resolve_team`: `_require_year` raises
 # `UnknownYearError`, then no match raises `UnknownTeamError` and several
 # matches raise `AmbiguousTeamError`.
+# Every one of them also reads the Elo ledger, which raises
+# `StaleDatabaseError` on a db that predates it (#280).
 TEAM_CASE_ERROR_RESPONSES = openapi_error_responses(
-    UnknownYearError, UnknownTeamError, AmbiguousTeamError
+    UnknownYearError, UnknownTeamError, AmbiguousTeamError, StaleDatabaseError
 )
 
 # `build_comparison` resolves both teams the same way, then raises
 # `SameTeamComparisonError` if they are the same team.
 COMPARISON_ERROR_RESPONSES = openapi_error_responses(
-    UnknownYearError, UnknownTeamError, AmbiguousTeamError, SameTeamComparisonError
+    UnknownYearError,
+    UnknownTeamError,
+    AmbiguousTeamError,
+    SameTeamComparisonError,
+    StaleDatabaseError,
 )
 
 # /champion resolves the rank-1 team itself (`MissingChampionError` when a
 # rated year has none, #172) and then hands that name to `build_team_case`,
 # so it can reach everything the team-case set can.
 CHAMPION_ERROR_RESPONSES = openapi_error_responses(
-    UnknownYearError, UnknownTeamError, AmbiguousTeamError, MissingChampionError
+    UnknownYearError,
+    UnknownTeamError,
+    AmbiguousTeamError,
+    MissingChampionError,
+    StaleDatabaseError,
 )
 
 # `GET /api/players/{player_id}` (issue #296): `players.get_player_career`

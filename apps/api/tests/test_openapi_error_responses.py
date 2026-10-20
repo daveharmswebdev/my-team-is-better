@@ -118,6 +118,7 @@ from cfb_strength.contracts import (
     UnknownTeamError,
     UnknownYearError,
 )
+from cfb_strength.evidence.proof import StaleDatabaseError
 from fastapi import FastAPI, routing
 from fastapi.dependencies.models import Dependant
 from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
@@ -139,6 +140,7 @@ AMBIGUOUS_TEAM = "AmbiguousTeamErrorResponse"
 SAME_TEAM = "SameTeamComparisonErrorResponse"
 MISSING_CHAMPION = "MissingChampionErrorResponse"
 UNKNOWN_PLAYER = "UnknownPlayerErrorResponse"
+STALE_DATABASE = "StaleDatabaseErrorResponse"
 HTTP_VALIDATION = "HTTPValidationError"
 
 # Every component that describes one of today's engine errors, envelope or
@@ -151,12 +153,14 @@ ENGINE_ERROR_COMPONENTS = frozenset(
         SAME_TEAM,
         MISSING_CHAMPION,
         UNKNOWN_PLAYER,
+        STALE_DATABASE,
         "UnknownYearErrorBody",
         "UnknownTeamErrorBody",
         "AmbiguousTeamErrorBody",
         "SameTeamComparisonErrorBody",
         "MissingChampionErrorBody",
         "UnknownPlayerErrorBody",
+        "StaleDatabaseErrorBody",
     }
 )
 
@@ -167,10 +171,13 @@ ENGINE_ERROR_COMPONENTS = frozenset(
 # `resolve_team`, and `build_comparison` goes through it and can also raise
 # same_team_comparison. /champion additionally raises the API-local
 # `MissingChampionError` (issue #172, `api.verdict._resolve_champion_name`)
-# for a rated year with no rank-1 row; it is the only route that can.
+# for a rated year with no rank-1 row; it is the only route that can. All
+# three read the Elo ledger through the engine (`_elo_ledger`), which raises
+# `StaleDatabaseError` on a db that predates it (#280).
 _TEAM_CASE_COMPONENTS: dict[str, frozenset[str]] = {
     "404": frozenset({UNKNOWN_YEAR, UNKNOWN_TEAM}),
     "422": frozenset({HTTP_VALIDATION, AMBIGUOUS_TEAM}),
+    "503": frozenset({STALE_DATABASE}),
 }
 VERDICT_ROUTE_COMPONENTS: dict[tuple[str, str], dict[str, frozenset[str]]] = {
     ("/api/verdict/champion", "post"): {
@@ -188,7 +195,7 @@ VERDICT_ROUTE_COMPONENTS: dict[tuple[str, str], dict[str, frozenset[str]]] = {
 # floor, not its source: every route in the app is checked by derivation,
 # and this only proves the derivation gets today's routes right.
 _TEAM_CASE_KINDS: frozenset[type[BaseException]] = frozenset(
-    {UnknownYearError, UnknownTeamError, AmbiguousTeamError}
+    {UnknownYearError, UnknownTeamError, AmbiguousTeamError, StaleDatabaseError}
 )
 KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
     ("/api/verdict/champion", "post"): _TEAM_CASE_KINDS | {MissingChampionError},
@@ -241,6 +248,11 @@ EXAMPLE_EXCEPTIONS: dict[type[BaseException], BaseException] = {
     # Issue #296: GET /api/players/{player_id}. Triggered for real in
     # test_player_errors_validate_against_advertised_schema below.
     UnknownPlayerError: UnknownPlayerError(1, "nfl"),
+    # Issue #280, the engine's. RUNTIME_CASES cannot trigger it: the committed
+    # fixture has the #183 ledger tables. tests/test_verdict_stale_database.py
+    # drops them on a copy, triggers it for real through every verdict route
+    # and validates the body against the advertised 503 schema.
+    StaleDatabaseError: StaleDatabaseError(("elo_ledger_configs", "elo_ledger_steps")),
 }
 
 # Only code in these top-level packages is followed by the derivation.
