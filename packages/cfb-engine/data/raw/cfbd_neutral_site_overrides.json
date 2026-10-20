@@ -1,0 +1,505 @@
+{
+  "description": "Curated corrections to CFBD's neutralSite flag (issue #343). CFBD's cached /games data stores neutralSite=false for neutral-site games in 1998-2007; its flagging only becomes reliable at 2008. Each entry names one CFBD game id with the season, season type and home/away team names exactly as CFBD reports them, and ingest (cfb_strength/ingest/neutral_site_overrides.py) raises unless the entry matches that record. Only these ids change: ingest stores neutral_site=1 and this venue for them, and raw_json keeps CFBD's original record. Every other game is stored as CFBD reports it.",
+  "overrides": [
+    {
+      "id": 62020,
+      "season": 1998,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 62143,
+      "season": 1998,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 62356,
+      "season": 1998,
+      "season_type": "regular",
+      "home_team": "Army",
+      "away_team": "Navy",
+      "neutral_site": true,
+      "venue": "Veterans Stadium",
+      "source": "Wikipedia: 1998 Army-Navy Game"
+    },
+    {
+      "id": 62704,
+      "season": 1999,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 62830,
+      "season": 1999,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 63043,
+      "season": 1999,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "Veterans Stadium",
+      "source": "Wikipedia: 1999 Army-Navy Game"
+    },
+    {
+      "id": 63388,
+      "season": 2000,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Texas",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 63520,
+      "season": 2000,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 63742,
+      "season": 2000,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "PSINet Stadium",
+      "source": "Wikipedia: 2000 Army-Navy Game"
+    },
+    {
+      "id": 212790251,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 213000057,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 213350251,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Colorado",
+      "neutral_site": true,
+      "venue": "Texas Stadium",
+      "source": "Wikipedia: 2001 Big 12 Championship Game"
+    },
+    {
+      "id": 213352426,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "Veterans Stadium",
+      "source": "Wikipedia: 2001 Army-Navy Game"
+    },
+    {
+      "id": 213420099,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Tennessee",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2001 SEC Championship Game"
+    },
+    {
+      "id": 222850201,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Texas",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 223060061,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "Florida",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 223410008,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Arkansas",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2002 SEC Championship Game"
+    },
+    {
+      "id": 223410038,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Colorado",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Reliant Stadium",
+      "source": "Wikipedia: 2002 Big 12 Championship Game"
+    },
+    {
+      "id": 223412426,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "Giants Stadium",
+      "source": "Wikipedia: 2002 Army-Navy Game"
+    },
+    {
+      "id": 232840251,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 233050057,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 233400061,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "LSU",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2003 SEC Championship Game"
+    },
+    {
+      "id": 233400201,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Kansas State",
+      "neutral_site": true,
+      "venue": "Arrowhead Stadium",
+      "source": "Wikipedia: 2003 Big 12 Championship Game"
+    },
+    {
+      "id": 233402426,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "Lincoln Financial Field",
+      "source": "Wikipedia: 2003 Army-Navy Game"
+    },
+    {
+      "id": 242830201,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Texas",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 243370193,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Miami (OH)",
+      "away_team": "Toledo",
+      "neutral_site": true,
+      "venue": "Ford Field",
+      "source": "Wikipedia: 2004 MAC Championship Game"
+    },
+    {
+      "id": 243390002,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Tennessee",
+      "away_team": "Auburn",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2004 SEC Championship Game"
+    },
+    {
+      "id": 243390038,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Colorado",
+      "neutral_site": true,
+      "venue": "Arrowhead Stadium",
+      "source": "Wikipedia: 2004 Big 12 Championship Game"
+    },
+    {
+      "id": 243392426,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "Lincoln Financial Field",
+      "source": "Wikipedia: 2004 Army-Navy Game"
+    },
+    {
+      "id": 252810251,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 253010057,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 253352459,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Northern Illinois",
+      "away_team": "Akron",
+      "neutral_site": true,
+      "venue": "Ford Field",
+      "source": "Wikipedia: 2005 MAC Championship Game"
+    },
+    {
+      "id": 253370099,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2005 SEC Championship Game"
+    },
+    {
+      "id": 253370251,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Colorado",
+      "away_team": "Texas",
+      "neutral_site": true,
+      "venue": "Reliant Stadium",
+      "source": "Wikipedia: 2005 Big 12 Championship Game"
+    },
+    {
+      "id": 253370259,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Florida State",
+      "away_team": "Virginia Tech",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: 2005 ACC Championship Game"
+    },
+    {
+      "id": 253370349,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Army",
+      "away_team": "Navy",
+      "neutral_site": true,
+      "venue": "Lincoln Financial Field",
+      "source": "Wikipedia: 2005 Army-Navy Game"
+    },
+    {
+      "id": 262800201,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Texas",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 263010057,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "Florida",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 263340195,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Ohio",
+      "away_team": "Central Michigan",
+      "neutral_site": true,
+      "venue": "Ford Field",
+      "source": "Wikipedia: 2006 MAC Championship Game"
+    },
+    {
+      "id": 263360057,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Arkansas",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2006 SEC Championship Game"
+    },
+    {
+      "id": 263360059,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Georgia Tech",
+      "away_team": "Wake Forest",
+      "neutral_site": true,
+      "venue": "Alltel Stadium",
+      "source": "Wikipedia: 2006 ACC Championship Game"
+    },
+    {
+      "id": 263360201,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Nebraska",
+      "neutral_site": true,
+      "venue": "Arrowhead Stadium",
+      "source": "Wikipedia: 2006 Big 12 Championship Game"
+    },
+    {
+      "id": 263362426,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "Lincoln Financial Field",
+      "source": "Wikipedia: 2006 Army-Navy Game"
+    },
+    {
+      "id": 272790251,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Cotton Bowl",
+      "source": "Wikipedia: Red River Rivalry"
+    },
+    {
+      "id": 273000061,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Georgia",
+      "neutral_site": true,
+      "venue": "Jacksonville Municipal Stadium",
+      "source": "Wikipedia: Florida-Georgia football rivalry"
+    },
+    {
+      "id": 273350099,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Tennessee",
+      "neutral_site": true,
+      "venue": "Georgia Dome",
+      "source": "Wikipedia: 2007 SEC Championship Game"
+    },
+    {
+      "id": 273350103,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Boston College",
+      "away_team": "Virginia Tech",
+      "neutral_site": true,
+      "venue": "Jacksonville Municipal Stadium",
+      "source": "Wikipedia: 2007 ACC Championship Game"
+    },
+    {
+      "id": 273350142,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Missouri",
+      "away_team": "Oklahoma",
+      "neutral_site": true,
+      "venue": "Alamodome",
+      "source": "Wikipedia: 2007 Big 12 Championship Game"
+    },
+    {
+      "id": 273352117,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Central Michigan",
+      "away_team": "Miami (OH)",
+      "neutral_site": true,
+      "venue": "Ford Field",
+      "source": "Wikipedia: 2007 MAC Championship Game"
+    },
+    {
+      "id": 273352426,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Army",
+      "neutral_site": true,
+      "venue": "M&T Bank Stadium",
+      "source": "Wikipedia: 2007 Army-Navy Game"
+    }
+  ]
+}
