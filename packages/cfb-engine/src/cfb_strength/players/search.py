@@ -1,4 +1,4 @@
-"""Player search by name (#301), among players who qualify for a leaderboard."""
+"""Player search by name (#301), among players on any leaderboard (#371)."""
 
 from __future__ import annotations
 
@@ -11,30 +11,30 @@ from cfb_strength.contracts import (
     PlayerSearchRow,
     Sport,
 )
-from cfb_strength.players._sql import lines_cte, totals_select
+from cfb_strength.players._sql import any_category_totals_select, lines_cte
 
 # The same per-(player, season_type) totals a leaderboard ranks, folded to one
-# row per player: qualifying in either season type, the season span across
-# both, and regular-season career passing yards for the order (None when that
-# total is None or the player has no regular-season line). Only the players
-# whose name matches are aggregated at all (#368); the WHERE below restates
-# the match on the joined row.
+# row per player: qualifying for any leaderboard category in either season
+# type (#371), the season span across both, and regular-season career games
+# for the order (None when that total is None or the player has no
+# regular-season line). Only the players whose name matches are aggregated at
+# all (#368); the WHERE below restates the match on the joined row.
 #
 # The caller's text reaches SQLite only as the bound `:pattern`, with LIKE's
 # wildcards and the escape character escaped, so `%` and `_` match themselves.
 _SEARCH_SQL = f"""
 {lines_cte(by_player=False, by_season_type=False, by_name=True)},
-totals AS ({totals_select()})
+totals AS ({any_category_totals_select()})
 SELECT p.id AS player_id, p.display_name, p.position,
        MIN(t.first_season) AS first_season,
        MAX(t.last_season) AS last_season,
-       MAX(CASE WHEN t.season_type = 'regular' THEN t.passing_yards END) AS regular_yards
+       MAX(CASE WHEN t.season_type = 'regular' THEN t.games END) AS regular_games
 FROM totals t
 JOIN players p ON p.id = t.player_id AND p.sport = :sport
 WHERE lower(p.display_name) LIKE lower(:pattern) ESCAPE '\\'
 GROUP BY p.id, p.display_name, p.position
 HAVING MAX(t.qualifies) = 1
-ORDER BY regular_yards DESC NULLS LAST, p.display_name, p.id
+ORDER BY regular_games DESC NULLS LAST, p.display_name, p.id
 LIMIT :limit
 """
 
@@ -47,10 +47,10 @@ def _like_substring(text: str) -> str:
 def search_players(
     conn: sqlite3.Connection, *, sport: Sport, query: str, limit: int = 10
 ) -> PlayerSearch:
-    """Qualifying players in `sport` whose `display_name` contains the
-    stripped `query`, case-insensitively. Ordered by regular-season career
-    passing yards descending (None last), then `display_name`, then
-    `player_id`.
+    """Players in `sport` on any leaderboard (`_sql.QUALIFYING`, either
+    season type) whose `display_name` contains the stripped `query`,
+    case-insensitively. Ordered by regular-season career games descending
+    (None last), then `display_name`, then `player_id` (#371).
 
     Raises ValueError unless 1 <= limit <= PLAYER_SEARCH_MAX_LIMIT and the
     stripped query has at least PLAYER_SEARCH_MIN_QUERY_LENGTH characters."""

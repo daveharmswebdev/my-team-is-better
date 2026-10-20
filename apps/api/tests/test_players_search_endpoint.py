@@ -2,10 +2,16 @@
 faithfully from `cfb_strength.players.search_players` on the committed
 fixture's real NFL 1999 + 2023 slice.
 
+Any player who qualifies for any leaderboard category (passing, rushing,
+receiving, kicking, punting, defense) in either season type can match, not
+only passers (#371): 'warner' finds the linebacker Fred Warner as well as
+the quarterback Kurt Warner.
+
 The expected rows are measured on the fixture, in the engine's contracted
-order (regular-season passing yards descending, None last, then name, then
-id), so the API re-sorts nothing and a faithful copy of a wrong engine
-answer still fails here.
+order (regular-season career games descending, None last, then name, then
+id; #371), so the API re-sorts nothing and a faithful copy of a wrong engine
+answer still fails here. The slice is two seasons, so many players tie on
+games and the ties fall to name.
 
 The HTTP boundary is the only thing this route adds. `q` is required and at
 most 100 characters; after stripping it must keep at least
@@ -29,20 +35,38 @@ from fixtures.player_api_fixture import engine_json, fixture_conn
 SEARCH = "/api/players/search"
 
 KURT_WARNER = 2044124519
+FRED_WARNER = 2283364210
 STEVE_MCNAIR = 2385180619
 
 MEASURED: dict[str, list[str]] = {
-    "warner": ["Kurt Warner"],
+    # Fred Warner (MLB, 2023) played more regular-season games than Kurt
+    # Warner (QB, 1999), and is found at all only because defense qualifies.
+    "warner": ["Fred Warner", "Kurt Warner"],
     "mcnair": ["Steve McNair"],
     "mc": [
-        "Steve McNair",
-        "Mike Tomczak",
-        "Cade McNown",
-        "Donovan McNabb",
-        "AJ McCarron",
-        "Jerick McKinnon",
+        "Brandon McManus",
+        "Chase McLaughlin",
+        "Evan McPherson",
+        "Jaleel McLaughlin",
+        "Terry McLaurin",
+        "Trey McBride",
+        "Xavier McKinney",
+        "Christian McCaffrey",
+        "Daylon McCutcheon",
+        "Keenan McCardell",
     ],
-    "man": ["Peyton Manning", "Troy Aikman", "Braden Mann", "Michael Pittman"],
+    "man": [
+        "Brandon McManus",
+        "Adam Trautman",
+        "Amani Toomer",
+        "Antonio Freeman",
+        "Cris Dishman",
+        "Germane Crowell",
+        "Kavika Pittman",
+        "Marcus Coleman",
+        "Michael Pittman",
+        "Napoleon Kaufman",
+    ],
 }
 
 
@@ -86,6 +110,21 @@ def test_a_row_carries_the_engines_fields(client: TestClient) -> None:
     ]
 
 
+def test_a_non_passer_is_found_and_carries_its_own_position(client: TestClient) -> None:
+    """#371: a defender qualifies through the defense board alone."""
+    body = _search(client, q="fred warner")
+
+    assert body["rows"] == [
+        {
+            "player_id": FRED_WARNER,
+            "display_name": "Fred Warner",
+            "position": "MLB",
+            "first_season": 2023,
+            "last_season": 2023,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "q,limit", [("warner", 10), ("mc", 3), ("man", 20), ("an", 20), ("  Mc ", 5)]
 )
@@ -102,7 +141,7 @@ def test_the_query_is_echoed_stripped(client: TestClient) -> None:
     body = _search(client, q="  Warner \t")
 
     assert body["query"] == "Warner"
-    assert [row["player_id"] for row in body["rows"]] == [KURT_WARNER]
+    assert [row["player_id"] for row in body["rows"]] == [FRED_WARNER, KURT_WARNER]
 
 
 def test_limit_caps_the_rows_and_is_echoed(client: TestClient) -> None:

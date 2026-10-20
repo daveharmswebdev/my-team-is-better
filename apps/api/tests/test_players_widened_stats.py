@@ -68,6 +68,7 @@ from fixtures.player_api_fixture import (
 )
 
 KURT_WARNER = 2044124519
+FRED_WARNER = 2283364210
 PATRICK_MAHOMES = 2319407936
 STEVE_MCNAIR = 2385180619
 
@@ -415,11 +416,10 @@ def test_every_player_endpoint_publishes_defense_and_no_epa(client: TestClient) 
     # Warner and McNair met twice in 1999 (#301), so compare has games to check.
     compare = get("/api/players/compare", a=KURT_WARNER, b=STEVE_MCNAIR)
     # Search rows carry no stats, so search is here only for the EPA-name
-    # check. The engine's search still qualifies on the offensive and
-    # kicking boards only, so a pure defender is not found yet even though
-    # defense is a board (#317); search a quarterback.
+    # check. Every board qualifies a player for search (#371), so "Warner"
+    # finds the linebacker Fred Warner as well as the quarterback.
     search = get("/api/players/search", q="Warner")
-    assert KURT_WARNER in {row["player_id"] for row in search["rows"]}
+    assert {FRED_WARNER, KURT_WARNER} <= {row["player_id"] for row in search["rows"]}
 
     stats_objects = _stats_objects(bodies)
     assert len(stats_objects) > 12 * 5

@@ -194,12 +194,29 @@ def lines_cte(*, by_player: bool, by_season_type: bool, by_name: bool = False) -
     """
 
 
+# A line on any leaderboard: the OR of every category's rule in `QUALIFYING`,
+# each parenthesized so its own ORs stay inside it. Built from the mapping, so
+# a category added there is included here without touching this line (#371).
+ANY_CATEGORY_QUALIFYING = " OR ".join(f"({rule})" for rule in QUALIFYING.values())
+
+
 def totals_select(category: PlayerLeaderCategory = "passing") -> str:
     """The per-(player, season_type) aggregate over `lines`. `qualifies` is
     `category`'s leaderboard rule (`QUALIFYING`) holding on any line; the
     totals themselves are the same whatever the category. Each stat column
     combines by `stat_total`, so a career "long" is a MAX, an EPA column a
     `sparse_sum` and everything else a null-aware SUM."""
+    return _totals_select(QUALIFYING[category])
+
+
+def any_category_totals_select() -> str:
+    """`totals_select` with `qualifies` meaning any leaderboard category's
+    rule holds on some line (`ANY_CATEGORY_QUALIFYING`): who a name search
+    can find (#371). The totals are the same aggregate either way."""
+    return _totals_select(ANY_CATEGORY_QUALIFYING)
+
+
+def _totals_select(qualifying: str) -> str:
     stats = ", ".join(f"{stat_total(c)} AS {c}" for c in STAT_COLUMNS)
     return f"""
     SELECT player_id, season_type,
@@ -209,7 +226,7 @@ def totals_select(category: PlayerLeaderCategory = "passing") -> str:
            {null_aware_sum("games")} AS games,
            SUM(wins) AS wins, SUM(losses) AS losses, SUM(ties) AS ties,
            {stats},
-           MAX(CASE WHEN {QUALIFYING[category]} THEN 1 ELSE 0 END) AS qualifies
+           MAX(CASE WHEN {qualifying} THEN 1 ELSE 0 END) AS qualifies
     FROM lines
     GROUP BY player_id, season_type
     """

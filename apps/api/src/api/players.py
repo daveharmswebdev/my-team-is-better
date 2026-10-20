@@ -234,9 +234,10 @@ def search(
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> PlayerSearchOut:
     """Players whose name contains `q` (case-insensitive, literal), in the
-    engine's order: regular-season passing yards descending, then name, then
-    id. `query` echoes `q` stripped; no match is a 200 with no rows. A `q`
-    under two characters once stripped is a 422 at `q`."""
+    engine's order: regular-season career games descending, then name, then
+    id (#371). Any player on any leaderboard can match. `query` echoes `q`
+    stripped; no match is a 200 with no rows. A `q` under two characters once
+    stripped is a 422 at `q`."""
     if len(q.strip()) < PLAYER_SEARCH_MIN_QUERY_LENGTH:
         raise RequestValidationError(
             [
