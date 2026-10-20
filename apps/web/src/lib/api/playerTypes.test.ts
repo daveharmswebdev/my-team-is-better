@@ -54,6 +54,9 @@ describe('player vocabularies', () => {
     expect(isPlayerLeaderSort('rushing_yards')).toBe(true)
     expect(isPlayerLeaderSort('rushing_tds')).toBe(true)
     expect(isPlayerLeaderSort('carries')).toBe(true)
+    // Rushing first downs and fumbles lost are published (#352) but never sorts.
+    expect(isPlayerLeaderSort('rushing_first_downs')).toBe(false)
+    expect(isPlayerLeaderSort('rushing_fumbles_lost')).toBe(false)
     // Receiving sorts joined with the receiving board (#314); targets is
     // published but never a sort.
     expect(isPlayerLeaderSort('receiving_yards')).toBe(true)

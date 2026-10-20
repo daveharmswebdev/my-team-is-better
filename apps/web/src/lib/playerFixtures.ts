@@ -11,6 +11,7 @@
 import type {
   CreditsDataSourceOut,
   PlayerCareerOut,
+  PlayerCareerTotalsOut,
   PlayerComparisonOut,
   PlayerHeadToHeadGameOut,
   PlayerHeadToHeadOut,
@@ -19,6 +20,7 @@ import type {
   PlayerSearchOut,
   PlayerSearchRowOut,
   PlayerSeasonLineOut,
+  PlayerSeasonType,
   PlayerStatsOut,
 } from './api/types'
 
@@ -148,6 +150,8 @@ export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
     carries: 35,
     rushing_yards: 74,
     rushing_tds: 0,
+    rushing_first_downs: 5,
+    rushing_fumbles_lost: 4,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -174,6 +178,8 @@ export const JARED_GOFF: PlayerLeaderRowOut = {
     carries: 32,
     rushing_yards: 21,
     rushing_tds: 2,
+    rushing_first_downs: 5,
+    rushing_fumbles_lost: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -201,6 +207,8 @@ export const DAK_PRESCOTT: PlayerLeaderRowOut = {
     carries: 55,
     rushing_yards: 242,
     rushing_tds: 2,
+    rushing_first_downs: 21,
+    rushing_fumbles_lost: 1,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -228,6 +236,8 @@ export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
     carries: 27,
     rushing_yards: 124,
     rushing_tds: 2,
+    rushing_first_downs: 7,
+    rushing_fumbles_lost: 3,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -254,6 +264,8 @@ export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
     carries: 22,
     rushing_yards: 93,
     rushing_tds: 1,
+    rushing_first_downs: 5,
+    rushing_fumbles_lost: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -281,6 +293,8 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
     carries: 50,
     rushing_yards: 247,
     rushing_tds: 4,
+    rushing_first_downs: 16,
+    rushing_fumbles_lost: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -328,6 +342,8 @@ export const UNRECORDED_STATS: PlayerStatsOut = {
   carries: null,
   rushing_yards: null,
   rushing_tds: null,
+  rushing_first_downs: null,
+  rushing_fumbles_lost: null,
   receptions: null,
   targets: null,
   receiving_yards: null,
@@ -401,6 +417,8 @@ function nonPasserStats(
   carries: number,
   rushingYards: number,
   rushingTds: number,
+  rushingFirstDowns: number,
+  rushingFumblesLost: number,
   catches: ReceivingStats,
 ): PlayerStatsOut {
   return {
@@ -414,6 +432,8 @@ function nonPasserStats(
     carries,
     rushing_yards: rushingYards,
     rushing_tds: rushingTds,
+    rushing_first_downs: rushingFirstDowns,
+    rushing_fumbles_lost: rushingFumblesLost,
     ...catches,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -432,7 +452,7 @@ export const EDGERRIN_JAMES: PlayerLeaderRowOut = {
   games: 16,
   record: NO_RECORD,
   stats: {
-    ...nonPasserStats(369, 1553, 13, receiving(62, 86, 586, 4, 23, 1)),
+    ...nonPasserStats(369, 1553, 13, 80, 3, receiving(62, 86, 586, 4, 23, 1)),
     def_tackles_solo: 3,
   },
 }
@@ -446,7 +466,7 @@ export const CURTIS_MARTIN: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 16,
   record: NO_RECORD,
-  stats: nonPasserStats(367, 1464, 5, receiving(45, 61, 259, 0, 9, 0)),
+  stats: nonPasserStats(367, 1464, 5, 84, 0, receiving(45, 61, 259, 0, 9, 0)),
 }
 
 export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
@@ -459,7 +479,7 @@ export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
   games: 16,
   record: NO_RECORD,
   stats: {
-    ...nonPasserStats(272, 1459, 14, receiving(67, 83, 564, 7, 31, 0)),
+    ...nonPasserStats(272, 1459, 14, 83, 2, receiving(67, 83, 564, 7, 31, 0)),
     def_tackles_solo: 2,
   },
 }
@@ -473,7 +493,7 @@ export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
   last_season: 2023,
   games: 15,
   record: NO_RECORD,
-  stats: nonPasserStats(209, 1012, 18, receiving(25, 32, 175, 3, 6, 0)),
+  stats: nonPasserStats(209, 1012, 18, 59, 1, receiving(25, 32, 175, 3, 6, 0)),
 }
 
 export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
@@ -486,7 +506,7 @@ export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
   games: 14,
   record: NO_RECORD,
   stats: {
-    ...nonPasserStats(290, 1405, 17, receiving(23, 28, 111, 0, 5, 0)),
+    ...nonPasserStats(290, 1405, 17, 85, 1, receiving(23, 28, 111, 0, 5, 0)),
     def_tackles_solo: 1,
   },
 }
@@ -512,6 +532,8 @@ export const JALEN_HURTS: PlayerLeaderRowOut = {
     carries: 157,
     rushing_yards: 605,
     rushing_tds: 15,
+    rushing_first_downs: 68,
+    rushing_fumbles_lost: 4,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -539,6 +561,8 @@ export const JOSH_ALLEN: PlayerLeaderRowOut = {
     carries: 111,
     rushing_yards: 524,
     rushing_tds: 15,
+    rushing_first_downs: 57,
+    rushing_fumbles_lost: 3,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -608,7 +632,7 @@ export const TYREEK_HILL: PlayerLeaderRowOut = receiverRow(
   'WR',
   2023,
   16,
-  nonPasserStats(6, 15, 0, receiving(119, 171, 1799, 13, 83, 1)),
+  nonPasserStats(6, 15, 0, 2, 0, receiving(119, 171, 1799, 13, 83, 1)),
 )
 
 export const CEEDEE_LAMB: PlayerLeaderRowOut = receiverRow(
@@ -618,7 +642,7 @@ export const CEEDEE_LAMB: PlayerLeaderRowOut = receiverRow(
   'WR',
   2023,
   17,
-  nonPasserStats(14, 113, 2, receiving(135, 181, 1749, 12, 80, 2)),
+  nonPasserStats(14, 113, 2, 6, 0, receiving(135, 181, 1749, 12, 80, 2)),
 )
 
 export const MARVIN_HARRISON: PlayerLeaderRowOut = receiverRow(
@@ -628,7 +652,7 @@ export const MARVIN_HARRISON: PlayerLeaderRowOut = receiverRow(
   'WR',
   1999,
   16,
-  nonPasserStats(1, 4, 0, receiving(115, 193, 1663, 12, 79, 1)),
+  nonPasserStats(1, 4, 0, 0, 0, receiving(115, 193, 1663, 12, 79, 1)),
 )
 
 export const CRIS_CARTER: PlayerLeaderRowOut = receiverRow(
@@ -638,7 +662,7 @@ export const CRIS_CARTER: PlayerLeaderRowOut = receiverRow(
   'WR',
   1999,
   15,
-  nonPasserStats(0, 0, 0, receiving(90, 136, 1241, 13, 65, 0)),
+  nonPasserStats(0, 0, 0, 0, 0, receiving(90, 136, 1241, 13, 65, 0)),
 )
 
 export const MIKE_EVANS: PlayerLeaderRowOut = receiverRow(
@@ -648,7 +672,7 @@ export const MIKE_EVANS: PlayerLeaderRowOut = receiverRow(
   'WR',
   2023,
   17,
-  nonPasserStats(0, 0, 0, receiving(79, 136, 1255, 13, 54, 0)),
+  nonPasserStats(0, 0, 0, 0, 0, receiving(79, 136, 1255, 13, 54, 0)),
 )
 
 /** `?category=receiving`, regular season: the top three of 926, the default sort. */
@@ -715,6 +739,8 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
         carries: 17,
         rushing_yards: 74,
         rushing_tds: 1,
+        rushing_first_downs: 4,
+        rushing_fumbles_lost: 0,
         ...receiving(0, 1, 0, 0, 0, 0),
         ...NO_KICKING,
         ...NO_DEFENSE,
@@ -728,7 +754,7 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
       'TE',
       2023,
       2,
-      nonPasserStats(0, 0, 0, receiving(0, 2, 0, 0, 0, 0)),
+      nonPasserStats(0, 0, 0, 0, 0, receiving(0, 2, 0, 0, 0, 0)),
     ),
   ],
 }
@@ -750,6 +776,8 @@ export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {
     carries: 22,
     rushing_yards: 93,
     rushing_tds: 1,
+    rushing_first_downs: 5,
+    rushing_fumbles_lost: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -775,6 +803,8 @@ export const WARNER_1999_POSTSEASON: PlayerSeasonLineOut = {
     carries: 6,
     rushing_yards: 3,
     rushing_tds: 0,
+    rushing_first_downs: 1,
+    rushing_fumbles_lost: 1,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -880,6 +910,8 @@ const MCNAIR_1999_REGULAR: PlayerSeasonLineOut = {
     carries: 72,
     rushing_yards: 337,
     rushing_tds: 8,
+    rushing_first_downs: 34,
+    rushing_fumbles_lost: 0,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -905,6 +937,8 @@ const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
     carries: 30,
     rushing_yards: 209,
     rushing_tds: 3,
+    rushing_first_downs: 16,
+    rushing_fumbles_lost: 1,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -965,6 +999,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 2,
           rushing_yards: 22,
           rushing_tds: 0,
+          rushing_first_downs: 1,
+          rushing_fumbles_lost: 1,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -980,6 +1016,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 12,
           rushing_yards: 36,
           rushing_tds: 1,
+          rushing_first_downs: 5,
+          rushing_fumbles_lost: 0,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1012,6 +1050,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 1,
           rushing_yards: 1,
           rushing_tds: 0,
+          rushing_first_downs: 0,
+          rushing_fumbles_lost: 0,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1027,6 +1067,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           carries: 8,
           rushing_yards: 64,
           rushing_tds: 0,
+          rushing_first_downs: 6,
+          rushing_fumbles_lost: 0,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1177,6 +1219,8 @@ const MANNING_1999_REGULAR: PlayerSeasonLineOut = {
     carries: 35,
     rushing_yards: 73,
     rushing_tds: 2,
+    rushing_first_downs: 8,
+    rushing_fumbles_lost: 2,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1202,6 +1246,8 @@ const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
     carries: 3,
     rushing_yards: 22,
     rushing_tds: 1,
+    rushing_first_downs: 1,
+    rushing_fumbles_lost: 0,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1332,6 +1378,8 @@ export const TOM_BRADY_CAREER: PlayerCareerOut = inventedCareer(
       carries: 36,
       rushing_yards: 43,
       rushing_tds: 0,
+      rushing_first_downs: 3,
+      rushing_fumbles_lost: 1,
       ...NO_RECEIVING,
       ...NO_KICKING,
       ...NO_DEFENSE,
@@ -1361,6 +1409,8 @@ export const BRADY_QUINN_CAREER: PlayerCareerOut = inventedCareer(
       carries: 23,
       rushing_yards: 97,
       rushing_tds: 0,
+      rushing_first_downs: 7,
+      rushing_fumbles_lost: 1,
       ...NO_RECEIVING,
       ...NO_KICKING,
       ...NO_DEFENSE,
@@ -1406,7 +1456,7 @@ export const BRADY_VS_MANNING: PlayerComparisonOut = {
  */
 function specialistStats(stats: Partial<PlayerStatsOut>): PlayerStatsOut {
   return {
-    ...nonPasserStats(0, 0, 0, NO_RECEIVING),
+    ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING),
     ...stats,
   }
 }
@@ -1775,7 +1825,7 @@ function defenderRow(
     last_season: season,
     games,
     record: NO_RECORD,
-    stats: { ...nonPasserStats(0, 0, 0, NO_RECEIVING), ...stats },
+    stats: { ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING), ...stats },
   }
 }
 
@@ -1877,7 +1927,7 @@ export const LEADERS_BY_DEF_SACKS_TAIL: PlayerLeadersOut = {
       games: 4,
       record: NO_RECORD,
       stats: {
-        ...nonPasserStats(0, 0, 0, receiving(2, 8, 38, 0, 2, 0)),
+        ...nonPasserStats(0, 0, 0, 0, 0, receiving(2, 8, 38, 0, 2, 0)),
         def_tackles_solo: 1,
       },
     },
@@ -1922,4 +1972,205 @@ export const DEFENSE_WITH_NULL_STATS: PlayerLeadersOut = {
       defense(null, null, null, null, null),
     ),
   ],
+}
+
+// ---------------------------------------------------------------------------
+// Non-quarterback careers and comparisons (issue #352): a click from the
+// rushing, receiving, kicking, punting or defense board lands on one of
+// these. Copied from `apps/api` booted on the committed fixture db, with the
+// rushing first downs and fumbles lost from the same db's season rows.
+// ---------------------------------------------------------------------------
+
+/** One season type's totals for a one-season career: that season's line. */
+function oneSeasonTotals(line: PlayerSeasonLineOut): PlayerCareerTotalsOut {
+  return {
+    season_type: line.season_type,
+    seasons: 1,
+    games: line.games,
+    record: line.record,
+    stats: line.stats,
+  }
+}
+
+/** A career of one season, with or without playoff games. */
+function oneSeasonCareer(
+  playerId: number,
+  displayName: string,
+  position: string,
+  regular: PlayerSeasonLineOut,
+  postseason: PlayerSeasonLineOut | null,
+): PlayerCareerOut {
+  return {
+    sport: 'nfl',
+    player_id: playerId,
+    display_name: displayName,
+    position,
+    seasons: postseason === null ? [regular] : [regular, postseason],
+    regular_season: oneSeasonTotals(regular),
+    postseason: postseason === null ? null : oneSeasonTotals(postseason),
+  }
+}
+
+/** One season line with no starts at quarterback. */
+function nonStarterLine(
+  season: number,
+  seasonType: PlayerSeasonType,
+  team: string,
+  games: number,
+  stats: PlayerStatsOut,
+): PlayerSeasonLineOut {
+  return {
+    season,
+    season_type: seasonType,
+    teams: [team],
+    games,
+    record: NO_RECORD,
+    stats,
+    games_without_stat_lines: 0,
+  }
+}
+
+/** `GET /api/players/2009851825?sport=nfl`: a receiver with one carry. */
+export const MARVIN_HARRISON_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2009851825,
+  'Marvin Harrison',
+  'WR',
+  nonStarterLine(1999, 'regular', 'Indianapolis Colts', 16, {
+    ...MARVIN_HARRISON.stats,
+    def_tackles_solo: 1,
+  }),
+  nonStarterLine(
+    1999,
+    'postseason',
+    'Indianapolis Colts',
+    1,
+    nonPasserStats(0, 0, 0, 0, 0, receiving(5, 18, 65, 0, 5, 0)),
+  ),
+)
+
+/** `GET /api/players/2425879833?sport=nfl`: a back who runs and catches. */
+export const EDGERRIN_JAMES_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2425879833,
+  'Edgerrin James',
+  'RB',
+  nonStarterLine(
+    1999,
+    'regular',
+    'Indianapolis Colts',
+    16,
+    EDGERRIN_JAMES.stats,
+  ),
+  nonStarterLine(
+    1999,
+    'postseason',
+    'Indianapolis Colts',
+    1,
+    nonPasserStats(20, 56, 0, 2, 0, receiving(1, 4, 8, 0, 0, 0)),
+  ),
+)
+
+/** `GET /api/players/2147978801?sport=nfl`: a kicker who also punted once. */
+export const OLINDO_MARE_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2147978801,
+  'Olindo Mare',
+  'K',
+  nonStarterLine(1999, 'regular', 'Miami Dolphins', 16, OLINDO_MARE.stats),
+  nonStarterLine(
+    1999,
+    'postseason',
+    'Miami Dolphins',
+    2,
+    specialistStats({
+      fg_made: 2,
+      fg_att: 2,
+      fg_long: 50,
+      fg_made_50_59: 1,
+      fg_made_60_: 0,
+      pat_made: 3,
+      pat_att: 3,
+    }),
+  ),
+)
+
+/**
+ * `GET /api/players/2279601441?sport=nfl`: a punter with one field-goal
+ * attempt and eight extra points, and no field goal made (so no longest).
+ */
+export const TOBY_GOWIN_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2279601441,
+  'Toby Gowin',
+  'P',
+  nonStarterLine(1999, 'regular', 'Dallas Cowboys', 16, TOBY_GOWIN.stats),
+  nonStarterLine(
+    1999,
+    'postseason',
+    'Dallas Cowboys',
+    1,
+    specialistStats({
+      fg_att: 1,
+      pt_att: 4,
+      pt_yards: 182,
+      pt_net_yards: 153,
+      pt_long: 56,
+      pt_inside_20: 1,
+    }),
+  ),
+)
+
+/** `GET /api/players/2459036925?sport=nfl`: a pass rusher, no playoff games. */
+export const TJ_WATT_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2459036925,
+  'T.J. Watt',
+  'OLB',
+  nonStarterLine(2023, 'regular', 'Pittsburgh Steelers', 16, TJ_WATT.stats),
+  null,
+)
+
+/**
+ * `GET /api/players/2071342796?sport=nfl`: a safety with nothing but solo
+ * tackles (3 in the regular season, 2 in the playoffs).
+ */
+export const ZAYNE_ANDERSON_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2071342796,
+  'Zayne Anderson',
+  'SAF',
+  nonStarterLine(2023, 'regular', 'Green Bay Packers', 3, {
+    ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING),
+    ...defense(0, 0, 0, 3, 0),
+  }),
+  nonStarterLine(2023, 'postseason', 'Green Bay Packers', 1, {
+    ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING),
+    ...defense(0, 0, 0, 2, 0),
+  }),
+)
+
+/**
+ * `GET /api/players/2215351959?sport=nfl`: a back on the defense board by
+ * solo tackles alone (#844 there, 16 of them), with 37 catches and no carry.
+ */
+export const FRED_MCCRARY_CAREER: PlayerCareerOut = oneSeasonCareer(
+  2215351959,
+  'Fred McCrary',
+  'RB',
+  nonStarterLine(1999, 'regular', 'San Diego Chargers', 15, {
+    ...nonPasserStats(0, 0, 0, 0, 0, receiving(37, 50, 201, 1, 7, 0)),
+    def_tackles_solo: 16,
+  }),
+  null,
+)
+
+/** Invented pairing of real careers: a receiver and a back, who never met. */
+export const HARRISON_VS_JAMES: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: MARVIN_HARRISON_CAREER,
+  b: EDGERRIN_JAMES_CAREER,
+  ...NEVER_MET_HEAD_TO_HEADS,
+}
+
+/** Invented pairing of real careers: a kicker and a punter, who never met. */
+export const MARE_VS_GOWIN: PlayerComparisonOut = {
+  sport: 'nfl',
+  a: OLINDO_MARE_CAREER,
+  b: TOBY_GOWIN_CAREER,
+  ...NEVER_MET_HEAD_TO_HEADS,
 }

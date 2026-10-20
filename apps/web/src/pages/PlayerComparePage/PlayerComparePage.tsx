@@ -38,6 +38,7 @@ import {
   PLAYER_NOT_FOUND_COPY,
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
+  showsStarterRecord,
 } from '../../lib/playerStats'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
 import { usePlayerSearch } from './usePlayerSearch'
@@ -573,6 +574,9 @@ function Comparison({
     comparison.postseason_head_to_head,
   ]
   const headToHeadId = `${noteId}-head-to-head`
+  // The note explains the starter record, so it shows only when a table can
+  // show one: two receivers have no record row for it to describe (#352).
+  const showsRecordNote = showsStarterRecord([...a.seasons, ...b.seasons])
 
   return (
     <>
@@ -599,7 +603,7 @@ function Comparison({
           </span>{' '}
           {MARK_LEGEND}
         </p>
-        <p id={noteId}>{STARTER_RECORD_NOTE}</p>
+        {showsRecordNote && <p id={noteId}>{STARTER_RECORD_NOTE}</p>}
         {undercount !== null && (
           <p className={styles.undercount}>{undercount}</p>
         )}
@@ -625,7 +629,7 @@ function Comparison({
                 a={{ name: a.display_name, totals: aTotals }}
                 b={{ name: b.display_name, totals: bTotals }}
                 noTotalsCopy={NO_TOTALS_COPY[seasonType]}
-                describedBy={noteId}
+                describedBy={showsRecordNote ? noteId : undefined}
               />
             )}
           </section>

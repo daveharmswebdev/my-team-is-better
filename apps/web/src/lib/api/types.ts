@@ -418,6 +418,10 @@ export interface PlayerStatsOut {
   carries: number | null
   rushing_yards: number | null
   rushing_tds: number | null
+  /** Never null in any season 1999-2025 (measured on #352), so a 0 is a real zero. Not a leader sort. */
+  rushing_first_downs: number | null
+  /** Not a leader sort. */
+  rushing_fumbles_lost: number | null
   receptions: number | null
   targets: number | null
   receiving_yards: number | null

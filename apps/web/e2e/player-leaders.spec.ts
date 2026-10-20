@@ -614,6 +614,122 @@ test("Kurt Warner's name opens his career: 1999 St. Louis Rams, 4,044 yards, and
   )
 })
 
+// Issue #352: a click from any board lands on a career page that shows the
+// stats that player has. Tyreek Hill's 2023 on the fixture: 119 catches for
+// 1,799 yards and 13 TDs, 6 carries for 15 yards, and in the playoffs 5
+// catches for 62 yards and no carry at all.
+test("Tyreek Hill's name on the receiving board opens his receiving career, with no passing columns", async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=receiving')
+
+  await page.getByRole('link', { name: 'Tyreek Hill' }).click()
+
+  await expect(page).toHaveURL(/\/nfl\/players\/2052934910$/)
+  const regular = page.getByRole('table', {
+    name: 'Tyreek Hill, regular season',
+  })
+  await expect(regular.locator('thead th')).toHaveText([
+    'Season',
+    'Teams',
+    'Games',
+    'Carries',
+    'Rushing yards',
+    'Rushing TDs',
+    'Rushing first downs',
+    'Rushing fumbles lost',
+    'Receptions',
+    'Receiving yards',
+    'Receiving TDs',
+  ])
+  const line = regular.locator('tbody tr').first()
+  await expect(line).toContainText('Miami Dolphins')
+  await expect(line).toContainText('1,799')
+  await expect(line).toContainText('119')
+
+  // No carry in the playoffs, so no rushing columns there either.
+  const playoffs = page.getByRole('table', { name: 'Tyreek Hill, playoffs' })
+  await expect(playoffs.locator('thead th')).toHaveText([
+    'Season',
+    'Teams',
+    'Games',
+    'Receptions',
+    'Receiving yards',
+    'Receiving TDs',
+  ])
+  await expect(playoffs.locator('tbody tr').first()).toContainText('62')
+
+  for (const gone of ['Passing yards', 'Completions', 'Starter record']) {
+    await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
+  }
+  await expect(page.getByText(/Starter records follow/)).toHaveCount(0)
+})
+
+test("Olindo Mare's name on the kicking board opens his kicking career", async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=kicking')
+
+  await page.getByRole('link', { name: 'Olindo Mare' }).click()
+
+  await expect(page).toHaveURL(/\/nfl\/players\/2147978801$/)
+  const playoffs = page.getByRole('table', { name: 'Olindo Mare, playoffs' })
+  await expect(playoffs.locator('thead th')).toHaveText([
+    'Season',
+    'Teams',
+    'Games',
+    'FG made',
+    'FG att',
+    'FG long',
+    'XP made',
+  ])
+  const regular = page.getByRole('table', {
+    name: 'Olindo Mare, regular season',
+  })
+  // He punted once in 1999, so the regular season shows punting too.
+  await expect(
+    regular.getByRole('columnheader', { name: 'Punts' }),
+  ).toBeVisible()
+  // Kicking and punting share this table, so no column is a bare "Long" or "Yards".
+  for (const label of ['FG long', 'Punt yards', 'Net punt yards']) {
+    await expect(
+      regular.getByRole('columnheader', { name: label, exact: true }),
+    ).toBeVisible()
+  }
+  for (const label of ['Long', 'Yards', 'Net yards']) {
+    await expect(
+      regular.getByRole('columnheader', { name: label, exact: true }),
+    ).toHaveCount(0)
+  }
+  await expect(regular.locator('tbody tr').first()).toContainText('39')
+  await expect(
+    page.getByRole('columnheader', { name: 'Passing yards' }),
+  ).toHaveCount(0)
+})
+
+test("T.J. Watt's name on the defense board opens his defense career, notes and all", async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders?category=defense')
+
+  await page.getByRole('link', { name: 'T.J. Watt' }).click()
+
+  await expect(page).toHaveURL(/\/nfl\/players\/2459036925$/)
+  const regular = page.getByRole('table', {
+    name: 'T.J. Watt, regular season',
+  })
+  await expect(regular.locator('tbody tr').first()).toContainText('19.0')
+  await expect(
+    regular.getByRole('columnheader', { name: 'Sacks' }),
+  ).toHaveAccessibleDescription(/counted from play-by-play/)
+  await expect(
+    regular.getByRole('columnheader', { name: 'Passes defended' }),
+  ).toHaveAccessibleDescription(/unofficial stats/)
+  await expect(
+    page.getByRole('columnheader', { name: 'Passing yards' }),
+  ).toHaveCount(0)
+})
+
 test('an unknown player gets the narrator, not a status code', async ({
   page,
 }) => {

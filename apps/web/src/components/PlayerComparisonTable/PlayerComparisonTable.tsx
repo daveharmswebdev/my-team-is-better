@@ -1,11 +1,19 @@
 import { useId } from 'react'
 import type { PlayerCareerTotalsOut } from '../../lib/api/types'
+import type { ComparisonRow } from '../../lib/playerCompare'
 import {
   MARK_GLYPH,
   MARK_SCREEN_READER_TEXT,
   comparisonRows,
 } from '../../lib/playerCompare'
-import { NOT_RECORDED } from '../../lib/playerStats'
+import {
+  DASH,
+  LEADER_COLUMN_NOTES,
+  NONE_LABEL,
+  NOT_RECORDED,
+  leaderColumnNoteId,
+  statColumnNotes,
+} from '../../lib/playerStats'
 import styles from './PlayerComparisonTable.module.css'
 
 export interface ComparedPlayer {
@@ -47,7 +55,7 @@ function ValueCell({
     ) : null
   }
   const classes = [styles.numeric]
-  if (value === NOT_RECORDED) {
+  if (value === NOT_RECORDED || value === DASH) {
     classes.push(styles.notRecorded)
   }
   if (marked) {
@@ -55,7 +63,16 @@ function ValueCell({
   }
   return (
     <td className={classes.join(' ')}>
-      {value}
+      {value === DASH ? (
+        // A value that can't exist (no longest kick): a bare dash is read
+        // as nothing, or as "minus", so assistive tech hears "none".
+        <>
+          <span aria-hidden="true">{DASH}</span>
+          <span className={styles.srOnly}>{NONE_LABEL}</span>
+        </>
+      ) : (
+        value
+      )}
       {marked && (
         <>
           {' '}
@@ -70,10 +87,54 @@ function ValueCell({
 }
 
 /**
+ * A row's header. An abbreviation ("INT") shows as itself, titled for the
+ * mouse, and is named in full for assistive tech; a row a note covers
+ * carries the note's marker, and is described by the note itself.
+ */
+function RowHeader({
+  row,
+  noteIdPrefix,
+}: {
+  row: ComparisonRow
+  noteIdPrefix: string
+}) {
+  const { label, fullLabel, note } = row
+  return (
+    <th
+      scope="row"
+      className={styles.label}
+      aria-describedby={
+        note === undefined ? undefined : leaderColumnNoteId(noteIdPrefix, note)
+      }
+    >
+      {fullLabel === undefined ? (
+        label
+      ) : (
+        <>
+          <abbr className={styles.abbr} title={fullLabel} aria-hidden="true">
+            {label}
+          </abbr>
+          <span className={styles.srOnly}>{fullLabel}</span>
+        </>
+      )}
+      {note !== undefined && (
+        <span className={styles.marker} aria-hidden="true">
+          {LEADER_COLUMN_NOTES[note].marker}
+        </span>
+      )}
+    </th>
+  )
+}
+
+/**
  * Two players' career totals of one season type, side by side (issue #301):
  * a column per player, a row per total. In each row the larger of two
  * recorded, unequal numbers is marked, with a glyph and with words a screen
  * reader announces. Nothing is added up, averaged or declared.
+ *
+ * The rows are the stat groups either player recorded (issue #352), so two
+ * receivers are compared on receiving, two kickers on kicking. Defense rows
+ * bring the founder's notes (#316) with them, under the table.
  */
 export function PlayerComparisonTable({
   caption,
@@ -83,54 +144,66 @@ export function PlayerComparisonTable({
   describedBy,
 }: PlayerComparisonTableProps) {
   const captionId = useId()
+  const noteIdPrefix = useId()
   const rows = comparisonRows(a.totals, b.totals)
+  const notes = statColumnNotes(rows)
   return (
-    <div
-      className={styles.scroll}
-      role="region"
-      aria-labelledby={captionId}
-      // Focusable, so a keyboard user can scroll a table wider than the screen.
-      tabIndex={0}
-    >
-      <table className={styles.table} aria-describedby={describedBy}>
-        <caption id={captionId} className={styles.caption}>
-          {caption}
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Total</th>
-            <th scope="col" className={styles.numeric}>
-              {a.name}
-            </th>
-            <th scope="col" className={styles.numeric}>
-              {b.name}
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={row.key}>
-              <th scope="row" className={styles.label}>
-                {row.label}
+    <>
+      <div
+        className={styles.scroll}
+        role="region"
+        aria-labelledby={captionId}
+        // Focusable, so a keyboard user can scroll a table wider than the screen.
+        tabIndex={0}
+      >
+        <table className={styles.table} aria-describedby={describedBy}>
+          <caption id={captionId} className={styles.caption}>
+            {caption}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Total</th>
+              <th scope="col" className={styles.numeric}>
+                {a.name}
               </th>
-              <ValueCell
-                value={row.a}
-                marked={row.marked === 'a'}
-                firstRow={index === 0}
-                rowCount={rows.length}
-                noTotalsCopy={noTotalsCopy}
-              />
-              <ValueCell
-                value={row.b}
-                marked={row.marked === 'b'}
-                firstRow={index === 0}
-                rowCount={rows.length}
-                noTotalsCopy={noTotalsCopy}
-              />
+              <th scope="col" className={styles.numeric}>
+                {b.name}
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => (
+              <tr key={row.key}>
+                <RowHeader row={row} noteIdPrefix={noteIdPrefix} />
+                <ValueCell
+                  value={row.a}
+                  marked={row.marked === 'a'}
+                  firstRow={index === 0}
+                  rowCount={rows.length}
+                  noTotalsCopy={noTotalsCopy}
+                />
+                <ValueCell
+                  value={row.b}
+                  marked={row.marked === 'b'}
+                  firstRow={index === 0}
+                  rowCount={rows.length}
+                  noTotalsCopy={noTotalsCopy}
+                />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {notes.map((note) => (
+        <p key={note} className={styles.note}>
+          <span className={styles.marker} aria-hidden="true">
+            {LEADER_COLUMN_NOTES[note].marker}
+          </span>{' '}
+          <span id={leaderColumnNoteId(noteIdPrefix, note)}>
+            {LEADER_COLUMN_NOTES[note].text}
+          </span>
+        </p>
+      ))}
+    </>
   )
 }

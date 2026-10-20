@@ -729,6 +729,10 @@ class PlayerStatsOut(BaseModel):
     carries: int | None
     rushing_yards: int | None
     rushing_tds: int | None
+    # #352: published 1:1 from the engine. nflverse never leaves either
+    # blank for a player with a carry (1999-2025), so a 0 is a real zero.
+    rushing_first_downs: int | None
+    rushing_fumbles_lost: int | None
     # Receiving (#314). `targets` qualifies a player for the receiving board
     # but is not one of its sorts; nflverse publishes it as 0 for 2003-2008
     # (#345), which is why the engine qualifies on a target *or* a reception.
@@ -791,6 +795,8 @@ class PlayerStatsOut(BaseModel):
             carries=stats.carries,
             rushing_yards=stats.rushing_yards,
             rushing_tds=stats.rushing_tds,
+            rushing_first_downs=stats.rushing_first_downs,
+            rushing_fumbles_lost=stats.rushing_fumbles_lost,
             receptions=stats.receptions,
             targets=stats.targets,
             receiving_yards=stats.receiving_yards,

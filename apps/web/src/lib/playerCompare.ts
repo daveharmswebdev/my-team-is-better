@@ -10,10 +10,25 @@ import type {
   PlayerCareerTotalsOut,
   PlayerHeadToHeadGameOut,
   PlayerSeasonType,
+  PlayerStatsOut,
   StarterRecordOut,
 } from './api/types'
 import { formatRecord } from './formatRecord'
-import { STAT_COLUMNS, formatStat } from './playerStats'
+import type {
+  LeaderColumnExtras,
+  StatGroup,
+  TableStatColumn,
+} from './playerStats'
+import {
+  DASH,
+  NOT_RECORDED,
+  formatStat,
+  leaderStatCell,
+  recordedStatGroups,
+  showsStarterRecord,
+  statColumnsForPlayers,
+  statValue,
+} from './playerStats'
 
 /** Player A's side of a comparison, or player B's. */
 export type Side = 'a' | 'b'
@@ -37,62 +52,196 @@ export function largerRecordSide(
   return largerSide(a.wins, b.wins)
 }
 
-export interface ComparisonRow {
+export interface ComparisonRow extends LeaderColumnExtras {
   key: string
   label: string
-  /** The formatted value, or `null` when the player has no totals of this type. */
+  /**
+   * The formatted value -- `NOT_RECORDED` for a stat the source didn't
+   * track, `DASH` for one that can't exist (no longest kick) -- or `null`
+   * when the player has no totals of this type.
+   */
   a: string | null
   b: string | null
   marked: Side | null
 }
 
-interface RowSpec {
+interface RowSpec extends LeaderColumnExtras {
   key: string
   label: string
   text: (totals: PlayerCareerTotalsOut) => string
   marked: (a: PlayerCareerTotalsOut, b: PlayerCareerTotalsOut) => Side | null
 }
 
-/** The comparison's rows, in order. No sack rows until #298. */
-const ROWS: readonly RowSpec[] = [
-  {
-    key: 'seasons',
-    label: 'Seasons',
-    text: (totals) => formatStat(totals.seasons),
-    marked: (a, b) => largerSide(a.seasons, b.seasons),
-  },
-  {
-    key: 'games',
-    label: 'Games',
-    text: (totals) => formatStat(totals.games),
-    marked: (a, b) => largerSide(a.games, b.games),
-  },
-  {
-    key: 'record',
-    label: 'Starter record',
-    text: ({ record }) => formatRecord(record.wins, record.losses, record.ties),
-    marked: (a, b) => largerRecordSide(a.record, b.record),
-  },
-  ...STAT_COLUMNS.map((column): RowSpec => ({
+const SEASONS_ROW: RowSpec = {
+  key: 'seasons',
+  label: 'Seasons',
+  text: (totals) => formatStat(totals.seasons),
+  marked: (a, b) => largerSide(a.seasons, b.seasons),
+}
+
+const GAMES_ROW: RowSpec = {
+  key: 'games',
+  label: 'Games',
+  text: (totals) => formatStat(totals.games),
+  marked: (a, b) => largerSide(a.games, b.games),
+}
+
+const RECORD_ROW: RowSpec = {
+  key: 'record',
+  label: 'Starter record',
+  text: ({ record }) => formatRecord(record.wins, record.losses, record.ties),
+  marked: (a, b) => largerRecordSide(a.record, b.record),
+}
+
+/** A stat cell as text: the value, `NOT_RECORDED`, or `DASH`. */
+function statText(totals: PlayerCareerTotalsOut, key: keyof PlayerStatsOut) {
+  const cell = leaderStatCell(totals.stats, key)
+  switch (cell.kind) {
+    case 'value':
+      return cell.text
+    case 'not-recorded':
+      return NOT_RECORDED
+    case 'none':
+      return DASH
+  }
+}
+
+function statRow(column: TableStatColumn): RowSpec {
+  return {
     key: column.key,
     label: column.label,
-    text: (totals) => formatStat(totals.stats[column.key]),
-    marked: (a, b) => largerSide(a.stats[column.key], b.stats[column.key]),
-  })),
-]
+    fullLabel: column.fullLabel,
+    note: column.note,
+    text: (totals) => statText(totals, column.key),
+    marked: (a, b) =>
+      largerSide(
+        statValue(a.stats, column.key),
+        statValue(b.stats, column.key),
+      ),
+  }
+}
+
+/**
+ * The comparison's rows, in order (issue #352): seasons, games, the starter
+ * record when either player passed or started, then the stat groups either
+ * player recorded, each judged on his own totals (`statColumnsForPlayers`).
+ * No sack rows until #298.
+ */
+function rowSpecs(totals: readonly PlayerCareerTotalsOut[]): RowSpec[] {
+  return [
+    SEASONS_ROW,
+    GAMES_ROW,
+    ...(showsStarterRecord(totals) ? [RECORD_ROW] : []),
+    ...statColumnsForPlayers(totals.map((side) => [side.stats])).map(statRow),
+  ]
+}
 
 /** Both players' totals of one season type, row by row, with each row's mark. */
 export function comparisonRows(
   a: PlayerCareerTotalsOut | null,
   b: PlayerCareerTotalsOut | null,
 ): ComparisonRow[] {
-  return ROWS.map((row) => ({
+  const present = [a, b].filter(
+    (side): side is PlayerCareerTotalsOut => side !== null,
+  )
+  return rowSpecs(present).map((row) => ({
     key: row.key,
     label: row.label,
+    fullLabel: row.fullLabel,
+    note: row.note,
     a: a === null ? null : row.text(a),
     b: b === null ? null : row.text(b),
     marked: a === null || b === null ? null : row.marked(a, b),
   }))
+}
+
+/** How a head-to-head line names one stat, in the singular and the plural. */
+interface LinePart {
+  key: keyof PlayerStatsOut
+  singular: string
+  plural: string
+}
+
+/**
+ * What a head-to-head line says for each group (issue #352): the passing
+ * line as it always was, and a short line for each other group.
+ */
+const HEAD_TO_HEAD_PARTS: Record<StatGroup, readonly LinePart[]> = {
+  passing: [
+    { key: 'passing_yards', singular: 'passing yard', plural: 'passing yards' },
+    { key: 'passing_tds', singular: 'TD', plural: 'TDs' },
+    { key: 'passing_interceptions', singular: 'INT', plural: 'INTs' },
+  ],
+  rushing: [
+    { key: 'carries', singular: 'carry', plural: 'carries' },
+    { key: 'rushing_yards', singular: 'rushing yard', plural: 'rushing yards' },
+    { key: 'rushing_tds', singular: 'rushing TD', plural: 'rushing TDs' },
+  ],
+  receiving: [
+    { key: 'receptions', singular: 'reception', plural: 'receptions' },
+    {
+      key: 'receiving_yards',
+      singular: 'receiving yard',
+      plural: 'receiving yards',
+    },
+    { key: 'receiving_tds', singular: 'receiving TD', plural: 'receiving TDs' },
+  ],
+  kicking: [
+    { key: 'fg_made', singular: 'field goal made', plural: 'field goals made' },
+    { key: 'fg_att', singular: 'field-goal try', plural: 'field-goal tries' },
+    {
+      key: 'pat_made',
+      singular: 'extra point made',
+      plural: 'extra points made',
+    },
+  ],
+  punting: [
+    { key: 'pt_att', singular: 'punt', plural: 'punts' },
+    { key: 'pt_yards', singular: 'punting yard', plural: 'punting yards' },
+  ],
+  defense: [
+    { key: 'def_sacks', singular: 'sack', plural: 'sacks' },
+    {
+      key: 'def_interceptions',
+      singular: 'interception',
+      plural: 'interceptions',
+    },
+    {
+      key: 'def_tackles_solo',
+      singular: 'solo tackle',
+      plural: 'solo tackles',
+    },
+  ],
+}
+
+/** "328 passing yards", "1 TD", "1.5 sacks", or "TDs not recorded". */
+function linePart(stats: PlayerStatsOut, part: LinePart): string {
+  const value = statValue(stats, part.key)
+  if (value === null) {
+    return `${part.plural} ${NOT_RECORDED}`
+  }
+  const cell = leaderStatCell(stats, part.key)
+  const text = cell.kind === 'value' ? cell.text : formatStat(value)
+  return `${text} ${value === 1 ? part.singular : part.plural}`
+}
+
+/**
+ * One starter's line in one head-to-head game (issue #352): the groups he
+ * recorded in that game, by the career table's rule (`recordedStatGroups`),
+ * a group's stats joined by commas and the groups by semicolons. No stat
+ * line at all is "not recorded".
+ */
+export function headToHeadStatLine(
+  name: string,
+  stats: PlayerStatsOut | null,
+): string {
+  if (stats === null) {
+    return `${name}: ${NOT_RECORDED}`
+  }
+  const groups = recordedStatGroups([stats]).map((group) =>
+    HEAD_TO_HEAD_PARTS[group].map((part) => linePart(stats, part)).join(', '),
+  )
+  return `${name}: ${groups.join('; ')}`
 }
 
 /** The visible mark. Decorative: `MARK_SCREEN_READER_TEXT` says the same in words. */
