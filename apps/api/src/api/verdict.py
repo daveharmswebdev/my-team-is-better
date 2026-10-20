@@ -65,7 +65,7 @@ from cfb_strength.contracts import UnknownYearError
 from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
 from fastapi import APIRouter, Depends
 
-from api.deps import get_db_conn, get_narration_cache, get_narrator
+from api.deps import get_call_budget, get_db_conn, get_narration_cache, get_narrator
 from api.errors import (
     CHAMPION_ERROR_RESPONSES,
     COMPARISON_ERROR_RESPONSES,
@@ -86,6 +86,7 @@ from api.models import (
     TeamCaseOut,
     TeamCaseRequest,
 )
+from api.persona.budget import CallBudget
 from api.persona.cache import NarrationCacheStore
 from api.persona.claude_client import Narrator
 from api.persona.service import narrate_comparison, narrate_team_case
@@ -228,6 +229,7 @@ def champion(
     conn: sqlite3.Connection = Depends(get_db_conn),
     cache: NarrationCacheStore = Depends(get_narration_cache),
     narrator: Narrator = Depends(get_narrator),
+    budget: CallBudget = Depends(get_call_budget),
 ) -> TeamCaseEnvelope:
     """'Who was the best team in <year>?' -- resolve the #1-ranked team, then
     return its full evidentiary case (same shape as /team-case) plus its
@@ -246,6 +248,7 @@ def champion(
         catalog=catalog,
         cache=cache,
         narrator=narrator,
+        budget=budget,
     )
     return TeamCaseEnvelope(evidence=case_out, narration=narration)
 
@@ -256,6 +259,7 @@ def team_case(
     conn: sqlite3.Connection = Depends(get_db_conn),
     cache: NarrationCacheStore = Depends(get_narration_cache),
     narrator: Narrator = Depends(get_narrator),
+    budget: CallBudget = Depends(get_call_budget),
 ) -> TeamCaseEnvelope:
     """'How good was <team> in <year>?'"""
     require_season_year(conn, payload.year, payload.method, payload.sport)
@@ -273,6 +277,7 @@ def team_case(
         catalog=catalog,
         cache=cache,
         narrator=narrator,
+        budget=budget,
     )
     return TeamCaseEnvelope(evidence=case_out, narration=narration)
 
@@ -283,6 +288,7 @@ def compare(
     conn: sqlite3.Connection = Depends(get_db_conn),
     cache: NarrationCacheStore = Depends(get_narration_cache),
     narrator: Narrator = Depends(get_narrator),
+    budget: CallBudget = Depends(get_call_budget),
 ) -> ComparisonEnvelope:
     """'Was <team_a> better than <team_b> in <year>?'"""
     require_season_year(conn, payload.year, payload.method, payload.sport)
@@ -304,5 +310,6 @@ def compare(
         catalog=catalog,
         cache=cache,
         narrator=narrator,
+        budget=budget,
     )
     return ComparisonEnvelope(evidence=comparison_out, narration=narration)

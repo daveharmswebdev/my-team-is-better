@@ -28,6 +28,7 @@ from fixtures.narrator_fake import FakeNarrator
 
 from api.config import PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
+from api.persona.budget import UnlimitedCallBudget
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
 from api.persona.claims import GROUNDING_VERSION
 from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
@@ -88,6 +89,7 @@ def _ask(
             catalog=catalog,
             cache=cache,
             narrator=narrator,
+            budget=UnlimitedCallBudget(),
         )
     return narrate_comparison(
         _comparison(conn),
@@ -97,6 +99,7 @@ def _ask(
         catalog=catalog,
         cache=cache,
         narrator=narrator,
+        budget=UnlimitedCallBudget(),
     )
 
 

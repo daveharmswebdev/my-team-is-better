@@ -45,6 +45,13 @@ this app is scoped to. This module loads `apps/api/.env` (via
   `get_narrator`, which branch on this flag). Distinct from `DATABASE_URL`
   being merely unset: this is an explicit "run in test mode" signal, not an
   absence of config.
+- `CLAUDE_CALLS_PER_MINUTE`: the per-process cap on Claude calls in any
+  rolling 60 seconds (issue #236; `api.persona.budget`). Every call counts,
+  the grounding retry included; past the cap a cache-missing verdict is
+  served the templated fallback without a call. A non-negative integer,
+  default 20; 0 turns narration off entirely (a kill switch). Anything else,
+  an empty string included, raises `ValueError` at import, so a typo stops
+  the process at boot instead of silently running uncapped.
 """
 
 from __future__ import annotations
@@ -120,3 +127,25 @@ CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
 }
 
 APP_TEST_MODE: bool = os.environ.get("APP_TEST_MODE") == "1"
+
+# Issue #236. One narration call is about 5-6k input tokens (system prompt,
+# tool schema and fact block: 17-19k characters on the 2005 fixture) and
+# ~360 output tokens, roughly $0.008 on claude-haiku-4-5 ($1/M in, $5/M out);
+# a retry replays the first attempt, so it costs a little more. 20 calls a
+# minute bounds a script at about $0.20 a minute (~$12 an hour) while still
+# leaving room for 10-20 fresh verdicts a minute across the whole site --
+# far above this site's real traffic, and cache hits never count.
+DEFAULT_CLAUDE_CALLS_PER_MINUTE = 20
+
+
+def _parse_calls_per_minute(raw: str | None) -> int:
+    if raw is None:
+        return DEFAULT_CLAUDE_CALLS_PER_MINUTE
+    value = raw.strip()
+    # Not `str.isdigit`, which also accepts digits `int()` can't parse ("²").
+    if not value or not all("0" <= char <= "9" for char in value):
+        raise ValueError(f"CLAUDE_CALLS_PER_MINUTE must be a non-negative integer, got {raw!r}")
+    return int(value)
+
+
+CLAUDE_CALLS_PER_MINUTE: int = _parse_calls_per_minute(os.environ.get("CLAUDE_CALLS_PER_MINUTE"))

@@ -28,6 +28,7 @@ from anthropic.types import MessageParam
 from fixtures.claim_blocks import cfb_catalog, cfb_team_case_block
 from fixtures.narrator_fake import FakeNarrator, no_tool_reply
 
+from api.persona.budget import UnlimitedCallBudget
 from api.persona.claims import TOOL_NAME, check_and_render
 from api.persona.claude_client import NarratorReply, ToolCall, tool_reply
 from api.persona.narrate import (
@@ -75,6 +76,7 @@ def _narrate(narrator: FakeNarrator, *, user_team: str | None = None) -> Narrati
         catalog=cfb_catalog(),
         narrator=narrator,
         fallback_text=FALLBACK_TEXT,
+        budget=UnlimitedCallBudget(),
     )
 
 

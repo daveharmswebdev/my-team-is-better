@@ -33,6 +33,13 @@ evidence, so it is computed before the lookup, and a cached entry whose text
 equals it is treated as a miss; a later successful narration overwrites the
 row through the cache's upsert.
 
+**A spent call budget degrades the same way (issue #236).** Every entry
+point takes a `CallBudget` and hands it to `narrate()`, which asks it for a
+unit before each Claude call. A refused unit is the fallback, served with
+`cached=False` and never written, like a Claude outage. The budget is only
+consulted on a miss, so a cache hit costs nothing and is served while the
+budget is spent.
+
 Accepted trade-off: a key whose fact block fails grounding persistently now
 costs up to two Claude calls on every request, instead of being pinned to
 the fallback after the first failure.
@@ -69,6 +76,7 @@ from pydantic.main import IncEx
 
 from api.config import CONTESTED_YEARS, PROMPT_VERSION
 from api.models import ComparisonResultOut, NarrationOut, Sport, TeamCaseOut
+from api.persona.budget import CallBudget
 from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
 from api.persona.claims import GROUNDING_VERSION
 from api.persona.claude_client import Narrator
@@ -158,6 +166,7 @@ def narrate_team_case(
     catalog: Sequence[TeamRecord],
     cache: NarrationCacheStore,
     narrator: Narrator,
+    budget: CallBudget,
 ) -> NarrationOut:
     """Narrate a champion or team-case verdict. `catalog` is every team
     record (name, mascot, aliases) for `sport`, year-unrestricted: the claim
@@ -185,6 +194,7 @@ def narrate_team_case(
         catalog=catalog,
         cache=cache,
         narrator=narrator,
+        budget=budget,
     )
 
 
@@ -197,6 +207,7 @@ def narrate_comparison(
     catalog: Sequence[TeamRecord],
     cache: NarrationCacheStore,
     narrator: Narrator,
+    budget: CallBudget,
 ) -> NarrationOut:
     """Narrate a compare verdict; `catalog` as in `narrate_team_case`."""
     fact_block_json = comparison_fact_block_json(comparison)
@@ -221,6 +232,7 @@ def narrate_comparison(
         catalog=catalog,
         cache=cache,
         narrator=narrator,
+        budget=budget,
     )
 
 
@@ -235,6 +247,7 @@ def _cached_narration(
     catalog: Sequence[TeamRecord],
     cache: NarrationCacheStore,
     narrator: Narrator,
+    budget: CallBudget,
 ) -> NarrationOut:
     """Serve a real cached narration, or narrate and cache the result unless
     it is the fallback. Two kinds of cached entry count as a miss (see the
@@ -264,6 +277,7 @@ def _cached_narration(
         catalog=catalog,
         narrator=narrator,
         fallback_text=fallback_text,
+        budget=budget,
     )
 
     if not result.is_fallback:
