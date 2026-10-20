@@ -4,8 +4,8 @@
 (#354: five defensive columns and three EPA columns), and the committed
 fixture was rebuilt through the widened nflverse ingest each time. This
 module pins the behavioural changes that came with the widening, so that
-none can regress silently. Since #317 the API (`PlayerStatsOut`) publishes
-33 of the contract's stats; the nine it leaves out are pinned below.
+none can regress silently. Since #352 the API (`PlayerStatsOut`) publishes
+35 of the contract's stats; the seven it leaves out are pinned below.
 
 1. Sign convention (#298). `sack_yards_lost` is stored and published
    POSITIVE. It used to be negative, and every consumer -- the career page,
@@ -33,10 +33,20 @@ none can regress silently. Since #317 the API (`PlayerStatsOut`) publishes
    season rows of the fixture db only, because a career EPA total is the
    engine's to compute (`contracts.PLAYER_STAT_SPARSE_FIELDS`) and no
    published field carries one.
+
+4. Rushing first downs and fumbles lost published (#352). #313 added
+   `rushing_first_downs` and `rushing_fumbles_lost` to the contract and the
+   API deliberately left them out; the founder's call on #352 publishes
+   both. They sit right after `rushing_tds`, are mapped 1:1 from the
+   engine on every stats object (leaders rows, career lines and totals,
+   compare careers and head-to-head game lines), and a NULL stays null.
+   nflverse never leaves either blank for a player with a carry,
+   1999-2025, so a published 0 is a real zero.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -47,9 +57,13 @@ from fixtures.player_api_fixture import (
     EPA_STATS,
     PUBLISHED_STAT_NAMES,
     PUBLISHED_STATS,
+    RUSHING_DETAIL_STATS,
     STAT_NAMES,
     UNPUBLISHED_STATS,
+    client_for_db,
+    engine_json,
     fixture_conn,
+    make_player_db_with_null_stat,
     stats_body,
 )
 
@@ -178,15 +192,16 @@ def test_stats_body_rejects_a_name_that_is_not_a_stat() -> None:
 
 
 def test_the_contract_stats_the_api_leaves_out() -> None:
-    """Since #317 the API publishes every contract stat but these: the two
-    rushing columns #313 added and nothing has published yet, the 0-49
+    """Since #352 the API publishes every contract stat but these: the 0-49
     yard field-goal buckets, which #315 leaves out deliberately, and
     #354's three EPA columns (#347). #354's five defensive columns left
-    this list when #317 published them. Both sides are literals, so
+    this list when #317 published them, and the two rushing columns #313
+    added left it when #352 published them. Both sides are literals, so
     neither a dropped nor an added field can hide."""
-    assert len(UNPUBLISHED_STATS) == 9
-    assert set(DEFENSE_STATS) <= set(PUBLISHED_STATS)
-    assert set(DEFENSE_STATS).isdisjoint(UNPUBLISHED_STATS)
+    assert len(UNPUBLISHED_STATS) == 7
+    for published in (DEFENSE_STATS, RUSHING_DETAIL_STATS):
+        assert set(published) <= set(PUBLISHED_STATS)
+        assert set(published).isdisjoint(UNPUBLISHED_STATS)
     assert [name for name in STAT_NAMES if name not in PUBLISHED_STAT_NAMES] == list(
         UNPUBLISHED_STATS
     )
@@ -234,6 +249,17 @@ def test_stats_body_accepts_the_defense_stats() -> None:
     assert (body["def_sacks"], body["def_tackles_solo"], body["def_interceptions"]) == (
         0.5,
         3,
+        None,
+    )
+
+
+def test_stats_body_accepts_the_rushing_detail_stats() -> None:
+    """#352: published now, so an expectation may name them."""
+    body = stats_body(rushing_first_downs=5, rushing_fumbles_lost=0)
+
+    assert (body["rushing_first_downs"], body["rushing_fumbles_lost"], body["carries"]) == (
+        5,
+        0,
         None,
     )
 
@@ -472,3 +498,140 @@ def test_a_quarterbacks_defense_line_is_the_engines(client: TestClient) -> None:
         "def_tackles_solo": 1,
         "def_pass_defended": 0,
     }
+
+
+# ---------------------------------------------------------------------------
+# #352: `rushing_first_downs` and `rushing_fumbles_lost`, published.
+# ---------------------------------------------------------------------------
+
+EDDIE_GEORGE = 2464876093
+
+# (player, season, season_type, rushing_first_downs, rushing_fumbles_lost),
+# measured on the fixture's `player_season_stats`; McNair's regular season
+# carries a real 0.
+RUSHING_DETAIL_ANCHORS = [
+    (KURT_WARNER, 1999, "regular", 5, 2),
+    (KURT_WARNER, 1999, "postseason", 1, 1),
+    (STEVE_MCNAIR, 1999, "regular", 34, 0),
+    (STEVE_MCNAIR, 1999, "postseason", 16, 1),
+    (EDDIE_GEORGE, 1999, "regular", 66, 4),
+]
+
+
+def _rushing_detail(stats: dict[str, Any]) -> tuple[Any, ...]:
+    return tuple(stats[name] for name in RUSHING_DETAIL_STATS)
+
+
+def test_the_rushing_detail_stats_sit_after_rushing_tds() -> None:
+    position = PUBLISHED_STATS.index("rushing_tds")
+    assert PUBLISHED_STATS[position + 1 : position + 3] == RUSHING_DETAIL_STATS
+
+
+@pytest.mark.parametrize(
+    "player_id,season,season_type,first_downs,fumbles_lost", RUSHING_DETAIL_ANCHORS
+)
+def test_a_career_season_line_publishes_the_rushing_detail(
+    client: TestClient,
+    player_id: int,
+    season: int,
+    season_type: str,
+    first_downs: int,
+    fumbles_lost: int,
+) -> None:
+    stats = _season_stats(client, player_id, season, season_type)
+
+    assert _rushing_detail(stats) == (first_downs, fumbles_lost)
+
+
+def test_career_totals_publish_the_rushing_detail(client: TestClient) -> None:
+    """The fixture holds Warner's and McNair's 1999 only, so each total is
+    that one season's line; checked against the engine as well."""
+    for player_id, regular, postseason in (
+        (KURT_WARNER, (5, 2), (1, 1)),
+        (STEVE_MCNAIR, (34, 0), (16, 1)),
+    ):
+        body = client.get(f"/api/players/{player_id}").json()
+        with fixture_conn() as conn:
+            engine = get_player_career(conn, sport="nfl", player_id=player_id)
+        assert engine.regular_season is not None and engine.postseason is not None
+        for key, totals, expected in (
+            ("regular_season", engine.regular_season, regular),
+            ("postseason", engine.postseason, postseason),
+        ):
+            published = _rushing_detail(body[key]["stats"])
+            assert published == expected
+            assert published == tuple(getattr(totals.stats, name) for name in RUSHING_DETAIL_STATS)
+
+
+def test_a_rushing_leaders_row_publishes_the_rushing_detail(client: TestClient) -> None:
+    """Eddie George's 1999 is his whole fixture career: 66 rushing first
+    downs and 4 fumbles lost, on his rushing-board row."""
+    response = client.get(
+        "/api/players/leaders",
+        params={"category": "rushing", "season_type": "regular", "limit": 50},
+    )
+    assert response.status_code == 200, response.text
+    rows = [row for row in response.json()["rows"] if row["player_id"] == EDDIE_GEORGE]
+
+    assert len(rows) == 1
+    assert _rushing_detail(rows[0]["stats"]) == (66, 4)
+
+
+def test_compare_publishes_the_rushing_detail_on_careers_and_games(client: TestClient) -> None:
+    """Warner against McNair (#301): both careers and both head-to-head
+    game lines carry the two stats, measured on `player_game_stats`."""
+    response = client.get("/api/players/compare", params={"a": KURT_WARNER, "b": STEVE_MCNAIR})
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert _rushing_detail(body["a"]["regular_season"]["stats"]) == (5, 2)
+    assert _rushing_detail(body["b"]["postseason"]["stats"]) == (16, 1)
+    (regular,) = body["regular_season_head_to_head"]["games"]
+    (postseason,) = body["postseason_head_to_head"]["games"]
+    assert (_rushing_detail(regular["a_stats"]), _rushing_detail(regular["b_stats"])) == (
+        (1, 1),
+        (5, 0),
+    )
+    assert (_rushing_detail(postseason["a_stats"]), _rushing_detail(postseason["b_stats"])) == (
+        (0, 0),
+        (6, 0),
+    )
+
+
+@pytest.mark.parametrize("stat", RUSHING_DETAIL_STATS)
+def test_a_null_rushing_detail_stat_stays_null(tmp_path: Path, stat: str) -> None:
+    """No fixture row has either stat NULL, so the copy NULLs Kurt Warner's
+    1999 regular-season value: his season line publishes null, never 0, the
+    other stat is untouched, and the whole body is still the engine's."""
+    db = make_player_db_with_null_stat(
+        tmp_path, player_id=KURT_WARNER, season=1999, season_type="regular", stat=stat
+    )
+    expected_other = {"rushing_first_downs": 5, "rushing_fumbles_lost": 2}
+    (other,) = (name for name in RUSHING_DETAIL_STATS if name != stat)
+
+    with client_for_db(db) as nulled:
+        response = nulled.get(f"/api/players/{KURT_WARNER}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    (line,) = (
+        line
+        for line in body["seasons"]
+        if line["season"] == 1999 and line["season_type"] == "regular"
+    )
+    assert stat in line["stats"] and line["stats"][stat] is None
+    assert line["stats"][other] == expected_other[other]
+    with fixture_conn(db) as conn:
+        assert body == engine_json(get_player_career(conn, sport="nfl", player_id=KURT_WARNER))
+
+
+def test_openapi_lists_the_rushing_detail_stats() -> None:
+    from api.main import app
+
+    schema = app.openapi()["components"]["schemas"]["PlayerStatsOut"]
+
+    assert list(schema["properties"]) == list(PUBLISHED_STATS)
+    for name in RUSHING_DETAIL_STATS:
+        assert name in schema["required"]
+        types = {option.get("type") for option in schema["properties"][name]["anyOf"]}
+        assert types == {"integer", "null"}

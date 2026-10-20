@@ -307,7 +307,7 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
 
 def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     """Every stats object a player endpoint serves has exactly these
-    thirty-three keys, in this order: on a leaders row of every board, and on a career
+    thirty-five keys, in this order: on a leaders row of every board, and on a career
     season line and its totals.
 
     The expectation is the literal `PUBLISHED_STATS`, never
@@ -316,7 +316,7 @@ def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     together by construction and a comparison between them could never fail
     (#313 and #338 reviews). Dropping or adding a field must go red here.
     """
-    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 33
+    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 35
     stats_objects: list[Any] = []
     for category in CATEGORIES:
         stats_objects += [r["stats"] for r in _get(client, category=category, limit=3)["rows"]]

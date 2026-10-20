@@ -76,6 +76,9 @@ WARNER_1999_REGULAR_STATS = {
     "carries": 22,
     "rushing_yards": 93,
     "rushing_tds": 1,
+    # #352: measured on the fixture, the source's own counts.
+    "rushing_first_downs": 5,
+    "rushing_fumbles_lost": 2,
     # A quarterback's receiving line is the source's recorded zeros (#314),
     # not null: nflverse records 0, and the API publishes what it records.
     **NO_RECEIVING,
@@ -99,6 +102,8 @@ WARNER_1999_POSTSEASON_STATS = {
     "carries": 6,
     "rushing_yards": 3,
     "rushing_tds": 0,
+    "rushing_first_downs": 1,
+    "rushing_fumbles_lost": 1,
     **NO_RECEIVING,
     **NO_KICKING_OR_PUNTING,
     "def_interceptions": 0,
