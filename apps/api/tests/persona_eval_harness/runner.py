@@ -49,6 +49,7 @@ from fixtures.persona_eval import (
     named_team_violations,
 )
 
+from api.persona.budget import UnlimitedCallBudget
 from api.persona.claude_client import Narrator, NarratorReply
 from api.persona.narrate import narrate
 from persona_eval_harness.budget import BudgetedNarrator, BudgetExhausted, CallBudget
@@ -188,6 +189,8 @@ def narrate_case(
         catalog=case.catalog,
         narrator=swapped,
         fallback_text=case.fallback_text,
+        # The harness caps its own calls (`--max-calls`, BudgetedNarrator).
+        budget=UnlimitedCallBudget(),
     )
     judgement = judge_narration(
         served_text=result.text,

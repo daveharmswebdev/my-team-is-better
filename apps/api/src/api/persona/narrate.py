@@ -19,6 +19,13 @@ A Claude transport/API error on either call skips straight to the fallback
 rather than raising, so a Claude outage degrades the narration, not the whole
 verdict request.
 
+**The per-minute call budget** (issue #236). Each of the two calls first takes
+one unit from the caller's `CallBudget` (`api.persona.budget`). A refused unit
+means that call is never made and the fallback is served, logged once: before
+call 1 because the budget is spent, and before call 2 because a rejected
+first attempt is never served, so with no unit left for the retry the
+fallback is the only grounded thing to give.
+
 **The cap** (founder decision 2 on #291). The validator's errors are
 unbounded: a text of 4,000 typed numbers gives 4,000 errors, 590,890
 characters. `cap_feedback` keeps the first `MAX_FEEDBACK_ERRORS` in validator
@@ -48,6 +55,7 @@ from dataclasses import dataclass
 import anthropic
 from anthropic.types import MessageParam
 
+from api.persona.budget import CallBudget
 from api.persona.claims import TOOL_NAME, ClaimOutcome, check_and_render
 from api.persona.claude_client import Narrator, NarratorReply
 from api.persona.prompt import build_system_prompt, build_user_message
@@ -111,12 +119,15 @@ def narrate(
     catalog: Sequence[TeamRecord],
     narrator: Narrator,
     fallback_text: str,
+    budget: CallBudget,
 ) -> NarrationResult:
     """Narrate `fact_block_json` in-character. `catalog` is the sport's full
     team catalog (`api.repositories.teams.list_team_records`), which the claim
     validator reads for names, mascots and aliases. Never raises for a Claude
     outage or a rejected submission: both degrade to `fallback_text`, with
-    `is_fallback=True` so the caller knows not to cache it.
+    `is_fallback=True` so the caller knows not to cache it. Neither does a
+    spent `budget`: a call it refuses is not made, and the result is the same
+    fallback (issue #236).
     """
     system_prompt = build_system_prompt(user_team)
     messages: list[MessageParam] = [
@@ -124,6 +135,9 @@ def narrate(
     ]
     fallback = NarrationResult(text=fallback_text, is_fallback=True)
 
+    if not budget.try_acquire():
+        logger.warning("Claude call budget spent, serving fallback narration without a call")
+        return fallback
     try:
         first = narrator.submit(system=system_prompt, messages=list(messages))
     except _TRANSPORT_ERRORS as exc:
@@ -136,6 +150,11 @@ def narrate(
 
     messages.extend(_retry_turns(first, first_outcome.errors))
 
+    if not budget.try_acquire():
+        logger.warning(
+            "Claude call budget spent before the claim retry, serving fallback narration"
+        )
+        return fallback
     try:
         second = narrator.submit(system=system_prompt, messages=list(messages))
     except _TRANSPORT_ERRORS as exc:

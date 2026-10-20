@@ -1,4 +1,5 @@
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
+import { RouteErrorBoundary } from '../RouteErrorBoundary/RouteErrorBoundary'
 import styles from './AppShell.module.css'
 
 /**
@@ -9,8 +10,14 @@ import styles from './AppShell.module.css'
  * inside via `<Outlet />`; this component stays route-agnostic (it doesn't
  * import any page) so it can live under `components/` without violating the
  * components-must-not-import-pages rule in `.dependency-cruiser.cjs`.
+ *
+ * The outlet sits inside a route-level error boundary (issue #268): a page
+ * that throws while rendering or in an effect shows the narrator's fallback
+ * while this header and nav stay usable. `location.key` changes on every
+ * navigation, so moving to any route (even back to the same one) clears it.
  */
 export function AppShell() {
+  const location = useLocation()
   return (
     <>
       <header className={styles.topbar}>
@@ -29,7 +36,9 @@ export function AppShell() {
           </Link>
         </nav>
       </header>
-      <Outlet />
+      <RouteErrorBoundary resetKey={location.key}>
+        <Outlet />
+      </RouteErrorBoundary>
       <footer className={styles.foot}>
         <span>
           Palette pulls from the program-cover / leather / chalkboard era of the

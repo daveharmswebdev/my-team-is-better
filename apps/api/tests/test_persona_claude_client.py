@@ -20,6 +20,7 @@ import anthropic
 from anthropic.types import ContentBlock, Message, TextBlock, ToolUseBlock, Usage
 from fixtures.claim_blocks import cfb_catalog, cfb_comparison_block, cfb_team_case_block
 
+from api.persona.budget import UnlimitedCallBudget
 from api.persona.claims import TOOL_NAME, check_and_render, tool_schema
 from api.persona.claude_client import (
     MAX_TOKENS,
@@ -172,5 +173,6 @@ def test_stub_narration_passes_the_claim_validator_on_real_blocks_verbatim() -> 
             catalog=catalog,
             narrator=StubNarrator(),
             fallback_text="the fallback",
+            budget=UnlimitedCallBudget(),
         )
         assert served == NarrationResult(text=STUB_TEXT, is_fallback=False)

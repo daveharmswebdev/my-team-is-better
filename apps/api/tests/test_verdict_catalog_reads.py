@@ -50,6 +50,7 @@ from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, TeamCaseOut
 from api.persona import service
+from api.persona.budget import UnlimitedCallBudget
 from api.persona.cache import InMemoryNarrationCache
 from api.persona.narrate import NarrationResult
 from api.persona.service import narrate_comparison, narrate_team_case
@@ -259,6 +260,7 @@ def test_narrate_team_case_hands_narrate_exactly_the_given_catalog(
         catalog=records,
         cache=InMemoryNarrationCache(),
         narrator=FakeNarrator(),
+        budget=UnlimitedCallBudget(),
     )
 
     assert [call["catalog"] for call in recorder.kwargs] == [records]
@@ -286,6 +288,7 @@ def test_narrate_comparison_hands_narrate_exactly_the_given_catalog(
         catalog=records,
         cache=InMemoryNarrationCache(),
         narrator=FakeNarrator(),
+        budget=UnlimitedCallBudget(),
     )
 
     assert [call["catalog"] for call in recorder.kwargs] == [records]

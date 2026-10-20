@@ -60,6 +60,25 @@ from fixtures.sport_fixture import make_sport_fixture_db
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
 
+@pytest.fixture(autouse=True)
+def _unlimited_call_budget() -> Iterator[None]:
+    """Issue #236: production's Claude call budget is one per process
+    (`api.deps.get_call_budget`), so without this every verdict request in
+    the whole run would spend from the same 20-a-minute budget and later
+    tests would start getting the fallback. Every test gets an unlimited one
+    instead, whichever `TestClient` it builds; `test_persona_call_budget.py`
+    overrides it again with a small budget and a fake clock."""
+    from api.deps import get_call_budget
+    from api.main import app
+    from api.persona.budget import UnlimitedCallBudget
+
+    app.dependency_overrides[get_call_budget] = UnlimitedCallBudget
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_call_budget, None)
+
+
 @pytest.fixture
 def client() -> Iterator[TestClient]:
     """A TestClient wired to the verdict fixture db via FastAPI dependency
