@@ -786,3 +786,53 @@ def test_fresh_db_has_floor_fraction_column_from_the_ddl_with_no_default(tmp_pat
             "VALUES (2005, 'elo', 'cfb', 1500.0, 40.0, 100.0, 400.0, 2.2, 0.001, 'x')"
         )
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #300: games.conference_championship. CFBD files conference title games
+# as season_type 'regular' (2001 onward), so the last 'regular' game reads as
+# the regular-season finale. The flag says which games are title games while
+# season_type keeps CFBD's label. Same in-place migration concern as the
+# blocks above: `CREATE TABLE IF NOT EXISTS games` is a no-op against a
+# pre-existing db. Existing rows backfill to 0, which is honest only until the
+# season is re-ingested; production always builds from an empty db.
+# ---------------------------------------------------------------------------
+
+
+@_MIGRATES_A_POPULATED_STALE_DB
+def test_migration_adds_conference_championship_defaulting_existing_games_to_zero(
+    pre_51_db: Path,
+) -> None:
+    conn = get_conn(pre_51_db)
+    ensure_schema(conn)
+
+    row = conn.execute("SELECT conference_championship FROM games WHERE id = 1").fetchone()
+    assert row["conference_championship"] == 0
+
+    conn.close()
+
+
+@_MIGRATES_A_POPULATED_STALE_DB
+def test_conference_championship_migration_is_idempotent_when_run_twice(
+    pre_51_db: Path,
+) -> None:
+    conn = get_conn(pre_51_db)
+    ensure_schema(conn)
+    ensure_schema(conn)  # must not raise "duplicate column name"
+
+    assert conn.execute("SELECT COUNT(*) AS c FROM games").fetchone()["c"] == 1
+    conn.close()
+
+
+def test_fresh_db_has_conference_championship_column_from_the_ddl(tmp_path: Path) -> None:
+    """A clean Render build must get the column from schema.sql itself."""
+    dest = tmp_path / "fresh_championship.sqlite3"
+    conn = get_conn(dest)
+    conn.executescript(SCHEMA_PATH.read_text())  # DDL only -- no migration
+
+    cols = {row["name"]: row for row in conn.execute("PRAGMA table_info(games)")}
+    assert "conference_championship" in cols
+    assert cols["conference_championship"]["notnull"] == 1
+    assert cols["conference_championship"]["dflt_value"] == "0"
+
+    conn.close()
