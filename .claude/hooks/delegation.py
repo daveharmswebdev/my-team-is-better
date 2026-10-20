@@ -112,7 +112,7 @@ def extract_json_block(message: str) -> tuple[object | None, list[str]]:
         ]
     try:
         return json.loads(match.group(1)), []
-    except json.JSONDecodeError as error:
+    except (ValueError, RecursionError) as error:  # JSONDecodeError is a ValueError
         return None, [f"the fenced block is not valid JSON: {error}"]
 
 
@@ -297,13 +297,13 @@ def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
     path = payload.get("agent_transcript_path")
     try:
         lines = Path(path).read_text().splitlines() if isinstance(path, str) else []
-    except OSError:
+    except (OSError, ValueError):  # unreadable, not UTF-8, or a NUL in the path
         return fallback, False
     failed_calls: set[str] = set()  # tool results come after their calls in the file
     for line in reversed(lines):
         try:
             entry = json.loads(line)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             continue
         message = entry.get("message") if isinstance(entry, dict) else None
         if not isinstance(message, dict):
@@ -358,7 +358,10 @@ def _count_attempt(state_dir: Path, agent_id: str, errors: list[str]) -> int:
         counter.unlink(missing_ok=True)
         return 0
     state_dir.mkdir(parents=True, exist_ok=True)
-    attempts = int(counter.read_text()) + 1 if counter.exists() else 1
+    try:
+        attempts = int(counter.read_text()) + 1
+    except (OSError, ValueError):  # missing, or left empty by an interrupted write
+        attempts = 1
     if attempts > MAX_RETURN_RETRIES:
         counter.unlink(missing_ok=True)
     else:

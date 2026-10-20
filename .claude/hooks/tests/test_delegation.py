@@ -501,6 +501,30 @@ def test_both_hooks_reject_a_block_that_is_not_an_object(tmp_path: Path, value: 
     assert out is not None and out["decision"] == "block"
 
 
+@pytest.mark.parametrize(
+    "value", ["9" * 5000, "[" * 100_000 + "]" * 100_000], ids=["huge-int", "deep-nesting"]
+)
+def test_a_block_json_cannot_parse_is_denied_not_crashed(tmp_path: Path, value: str) -> None:
+    # json.loads raises ValueError/RecursionError here, not JSONDecodeError (#305 r3).
+    message = f"```json\n{value}\n```"
+    _denial(delegation.pre_handback(_pre_handback_payload(message), OWNERSHIP, tmp_path))
+
+
+def test_an_unreadable_transcript_falls_back_to_the_last_message(tmp_path: Path) -> None:
+    transcript = tmp_path / "agent-transcript.jsonl"
+    transcript.write_bytes(b"\xff\xfe not utf-8\n")
+    payload = _stop_payload(_fenced(_success()))
+    payload["agent_transcript_path"] = str(transcript)
+    out = delegation.subagent_stop(payload, OWNERSHIP, tmp_path)
+    assert out is not None and "validated" in out["systemMessage"]
+
+
+def test_a_corrupt_retry_counter_counts_as_a_first_attempt(tmp_path: Path) -> None:
+    (tmp_path / "agent_1.return-attempts").write_text("")
+    reason = _denial(delegation.pre_handback(_pre_handback_payload("no json"), OWNERSHIP, tmp_path))
+    assert f"retry 1 of {delegation.MAX_RETURN_RETRIES}" in reason
+
+
 def test_stop_hook_feedback_names_the_handback_tool(tmp_path: Path) -> None:
     # Closing text isn't delivered to a caller that expects a handback.
     out = delegation.subagent_stop(_stop_payload("no json"), OWNERSHIP, tmp_path)
