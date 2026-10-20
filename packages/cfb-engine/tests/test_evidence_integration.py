@@ -987,3 +987,124 @@ def test_common_opponent_meetings_carry_the_game_ids_of_the_sides_own_games(
                 assert m.game_id in side_ids, (common.opponent_name, m)
                 row = _game_row(rated_conn, m.game_id)
                 assert common.opponent_team_id in (row["home_team_id"], row["away_team_id"]), m
+
+
+# ---------------------------------------------------------------------------
+# Issue #300: every per-game evidence record says whether it was a conference
+# title game, and whose. CFBD labels title games `season_type='regular'`, so
+# without the flag a narrator calls the Big 12 title game "the regular-season
+# finale". Read from `games.conference_championship` (ingest's curated list),
+# never derived from week, date or conference. Ids measured on
+# tests/fixtures/cfb_regression.sqlite3 with the sqlite3 CLI (2026-10-20).
+# ---------------------------------------------------------------------------
+
+TEXAS_2005_BIG_12_TITLE_GAME_ID = 253370251  # week 14, Colorado 3 Texas 70
+TEXAS_2005_AT_TEXAS_AM_GAME_ID = 253290245  # week 13, the real regular-season finale
+TEXAS_2005_COLORADO_REGULAR_GAME_ID = 252880251  # week 7, Texas 42 Colorado 17
+AUBURN_GEORGIA_2017_REGULAR_GAME_ID = 400933913  # week 11, Auburn 40 Georgia 17
+AUBURN_GEORGIA_2017_SEC_TITLE_GAME_ID = 400955153  # week 14, Auburn 7 Georgia 28
+
+
+def test_team_case_games_name_the_conference_of_a_title_game_and_none_otherwise(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """2005 Texas played two late 'regular' games: at Texas A&M in week 13
+    (the real regular-season finale) and the Big 12 title game against
+    Colorado in week 14. Only the second says 'Big 12'; every other listed
+    game says None."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+    by_id = {g.game_id: g for g in case.games}
+
+    title = by_id[TEXAS_2005_BIG_12_TITLE_GAME_ID]
+    assert title.title_game_conference == "Big 12"
+    assert title.season_type == "regular"  # unchanged: CFBD's label stays
+    assert by_id[TEXAS_2005_AT_TEXAS_AM_GAME_ID].title_game_conference is None
+    others = [g for g in case.games if g.game_id != TEXAS_2005_BIG_12_TITLE_GAME_ID]
+    assert others
+    assert all(g.title_game_conference is None for g in others)
+
+
+def test_quality_wins_and_worst_loss_carry_the_same_title_game_conference(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """quality_wins and worst_loss are drawn from `games`, so the field agrees
+    whichever list a consumer reads."""
+    case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+    by_id = {g.game_id: g.title_game_conference for g in case.games}
+    records = list(case.quality_wins)
+    if case.worst_loss is not None:
+        records.append(case.worst_loss)
+    assert records
+    for record in records:
+        assert record.title_game_conference == by_id[record.game_id], record
+
+
+def test_head_to_head_flags_only_the_sec_title_game_of_a_2017_auburn_georgia_rematch(
+    regression_conn: sqlite3.Connection,
+) -> None:
+    """Auburn and Georgia met twice in 2017: week 11 in the regular season and
+    week 14 in the SEC title game. Both are `season_type='regular'`; only the
+    title game carries 'SEC'."""
+    compute_and_store(regression_conn, 2017, "keener")
+    comparison = build_comparison(regression_conn, 2017, "Auburn", "Georgia", method="keener")
+
+    meetings = comparison.head_to_head.meetings
+    assert [m.game_id for m in meetings] == [
+        AUBURN_GEORGIA_2017_REGULAR_GAME_ID,
+        AUBURN_GEORGIA_2017_SEC_TITLE_GAME_ID,
+    ]
+    assert [m.title_game_conference for m in meetings] == [None, "SEC"]
+    assert [m.season_type for m in meetings] == ["regular", "regular"]
+
+
+def test_common_opponent_meeting_that_was_a_title_game_carries_the_conference(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """2005 Texas and Nebraska share Colorado. Texas met Colorado twice
+    (week 7, then the Big 12 title game in week 14); Nebraska once (week 13).
+    Each side's meeting copies that side's OpponentResult value."""
+    comparison = build_comparison(rated_conn, 2005, "Texas", "Nebraska", method="keener")
+    (colorado,) = [c for c in comparison.common_opponents if c.opponent_name == "Colorado"]
+
+    assert [(m.game_id, m.title_game_conference) for m in colorado.team_a_meetings] == [
+        (TEXAS_2005_COLORADO_REGULAR_GAME_ID, None),
+        (TEXAS_2005_BIG_12_TITLE_GAME_ID, "Big 12"),
+    ]
+    assert [m.title_game_conference for m in colorado.team_b_meetings] == [None]
+
+    texas_case = build_team_case(rated_conn, 2005, "Texas", method="keener")
+    texas = {g.game_id: g.title_game_conference for g in texas_case.games}
+    for common in comparison.common_opponents:
+        for m in common.team_a_meetings:
+            assert m.title_game_conference == texas[m.game_id], (common.opponent_name, m)
+
+
+def test_every_nfl_evidence_row_has_no_title_game_conference(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    """The flag is CFB-only (always 0 for NFL rows), so no NFL team case,
+    head-to-head meeting or common-opponent meeting names a conference."""
+    conn = nfl_regression_conn
+    compute_and_store(conn, 2013, "keener", sport="nfl")
+    schools = [
+        row["school"]
+        for row in conn.execute(
+            "SELECT t.school FROM ratings r JOIN teams t ON t.id = r.team_id "
+            "WHERE r.year = 2013 AND r.method = 'keener' AND r.sport = 'nfl'"
+        )
+    ]
+    assert len(schools) == 32
+    for school in schools:
+        case = build_team_case(conn, 2013, school, method="keener", sport="nfl")
+        assert case.games
+        assert all(g.title_game_conference is None for g in case.games), school
+
+    comparison = build_comparison(
+        conn, 2013, "Green Bay Packers", "Minnesota Vikings", method="keener", sport="nfl"
+    )
+    assert comparison.head_to_head.meetings
+    assert all(m.title_game_conference is None for m in comparison.head_to_head.meetings)
+    assert comparison.common_opponents
+    for common in comparison.common_opponents:
+        for m in [*common.team_a_meetings, *common.team_b_meetings]:
+            assert m.title_game_conference is None, (common.opponent_name, m)

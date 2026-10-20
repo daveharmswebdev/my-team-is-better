@@ -70,11 +70,15 @@ open the season" for the first game of a team case's games[], "in week 11",
 "at a neutral site"). Since #294 every game row in the block carries a
 team-relative `venue`, so `where` also prints "at home" and "on the road" --
 the narrator's register for an away game -- and there is no longer a game
-whose venue the block fails to record. `when` no longer prints "in the
-regular-season finale" (founder decision on #291, 2026-09-15): the last
-season_type 'regular' game is a conference title game in five of the nine
-fixture team cases measured, so until #300 tells the two apart it prints its
-week like any other.
+whose venue the block fails to record. Since #300 every game row also carries
+`title_game_conference`, so `when` prints "in the Big 12 title game" for a
+conference title game and "in the regular-season finale" for the last
+season_type 'regular' game of a team case's games[] that isn't one (founder
+decision on #300, 2026-10-20). That reverses the #291 removal of the finale
+(2026-09-15), which existed only because the last regular game was a title
+game in five of the nine fixture team cases measured and the block couldn't
+tell the two apart. The title game is read from the block, never derived from
+week, date or conference.
 
 At most `MAX_CLAIMS` claims, and at most `MAX_GAME_SCORE_CLAIMS` of kind
 game_score, per submission (founder decision on #291, 2026-09-15): the
@@ -519,6 +523,9 @@ class _Game:
     # #294: every game row in the block carries it, common-opponent meetings
     # included. `mirrored()` flips it with the rest of the side.
     venue: Venue
+    # The conference whose title game this was (#300), or None. The same from
+    # either side, so `mirrored()` keeps it.
+    title_game_conference: str | None
 
     @property
     def key(self) -> tuple[str, str, int | None, str]:
@@ -679,6 +686,7 @@ def _parse_comparison(data: Any, block: _Block) -> None:
                 # this `_Game` is the home team's side, and `add_game` mirrors
                 # it for the away team.
                 venue="neutral" if meeting["neutral_site"] else "home",
+                title_game_conference=_conference(meeting["title_game_conference"]),
             )
         )
     for common in data["common_opponents"]:
@@ -699,6 +707,7 @@ def _parse_comparison(data: Any, block: _Block) -> None:
                         week=_week(meeting["week"]),
                         season_type=str(meeting["season_type"]),
                         venue=_venue(meeting["venue"]),
+                        title_game_conference=_conference(meeting["title_game_conference"]),
                     )
                 )
     block.common_opponents = len(data["common_opponents"])
@@ -747,6 +756,7 @@ def _parse_row(team: str, row: Any, block: _Block) -> _Game:
         week=_week(row["week"]),
         season_type=str(row["season_type"]),
         venue=_venue(row["venue"]),
+        title_game_conference=_conference(row["title_game_conference"]),
     )
     block.add_game(game)
     return game
@@ -754,6 +764,10 @@ def _parse_row(team: str, row: Any, block: _Block) -> _Game:
 
 def _week(value: Any) -> int | None:
     return None if value is None else int(value)
+
+
+def _conference(value: Any) -> str | None:
+    return None if value is None else str(value)
 
 
 def _venue(value: Any) -> Venue:
@@ -1018,21 +1032,35 @@ def _resolve_game_kind(
 
 
 def _when(where: str, game: _Game, block: _Block) -> tuple[str | None, list[str]]:
-    # Postseason first: 2017 Alabama's two playoff games are both "week 1".
+    # A title game first (#300), before postseason: CFBD filed the 1998-2000
+    # title games as postseason, and the block's flag is what says which it was.
+    if game.title_game_conference is not None:
+        return f"in the {game.title_game_conference} title game", []
+    # Postseason next: 2017 Alabama's two playoff games are both "week 1".
     if game.season_type == "postseason":
         return "in the postseason", []
     subject = block.subjects.get(game.team)
     # games[] is the engine's order: regular season by week, then postseason.
-    # The last regular game prints its week, not "the regular-season finale":
-    # it is often a conference title game, which #300 will tell apart.
-    if subject is not None and subject.games and game.key == subject.games[0].key:
-        return "to open the season", []
+    # Only a team case holds it, so a comparison never says opener or finale.
+    if subject is not None and subject.games:
+        if game.key == subject.games[0].key:
+            return "to open the season", []
+        finale = _finale(subject.games)
+        if finale is not None and game.key == finale.key:
+            return "in the regular-season finale", []
     if game.week is not None:
         return f"in week {game.week}", []
     return None, [
         f"{where}: the fact block has no week for {game.team} vs {game.opponent} "
         f"({game.season_type}), so it records no time to state"
     ]
+
+
+def _finale(games: Sequence[_Game]) -> _Game | None:
+    """The last season_type 'regular' game of a subject's games[] that isn't
+    a conference title game (#300), if any."""
+    regular = [g for g in games if g.season_type == "regular" and g.title_game_conference is None]
+    return regular[-1] if regular else None
 
 
 def _where(where: str, game: _Game) -> tuple[str | None, list[str]]:
@@ -1253,8 +1281,9 @@ def _check_prose(
             _, end, phrase = no_detail[at]
             if match.end() <= end:
                 return (
-                    f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; the FACT "
-                    "BLOCK holds no conference or in-game detail, so leave it out"
+                    f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; a "
+                    "conference prints only through a `when` claim on its title game, and "
+                    "the FACT BLOCK holds no in-game detail, so leave it out of the prose"
                 )
         return (
             f"the prose {what} {_quote(match.group(0))}; {rule}. "

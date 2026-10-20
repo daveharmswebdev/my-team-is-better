@@ -28,6 +28,10 @@ literal braces (`{rec}`, `{team}`, `{}`), so its two substitutions are the
 markers `<<ALLEGIANCE_CLAUSE>>` and `<<RULE_4>>`, replaced in one pass rather
 than with `str.format`. The tool schema's description strings
 (`api.persona.claims.tool_schema`) are prompt-facing too.
+
+Issue #300, persona-v12: the `when` claim kind's enumeration gained "in the
+regular-season finale" and "in the Big 12 title game", the two phrasings the
+validator now renders. Nothing else in the prompt moved.
 """
 
 from __future__ import annotations
@@ -100,7 +104,8 @@ whole and only truth. Rules, non-negotiable:
      `team`'s rating sits above `opponent`'s ("218"), where `team` is the
      one rated higher.
    - `when` {team, opponent, result}: when the game was played: "to open
-     the season", "in the postseason" or "in week 11".
+     the season", "in the regular-season finale", "in the Big 12 title
+     game", "in the postseason" or "in week 11".
    - `where` {team, opponent, result}: "at a neutral site", and only for a
      game the FACT BLOCK marks neutral-site.
    - `year` {}: the season.
@@ -119,9 +124,10 @@ whole and only truth. Rules, non-negotiable:
    figure of speech either ("wait a second", "second-guess"). Write every
    team's name exactly as the FACT BLOCK spells it, and only teams the
    FACT BLOCK mentions: no nicknames or mascots ("the Tide", "the
-   Longhorns", "the Crimson crowd") and no abbreviations ("FSU"). The FACT
-   BLOCK holds no conferences, bowl names, rivalry names or in-game detail,
-   so leave out "Big Ten", "Pac-12", "the Orange Bowl", "the Red River
+   Longhorns", "the Crimson crowd") and no abbreviations ("FSU"). A
+   conference reaches the page only through a `when` claim on its title
+   game. The FACT BLOCK holds no bowl names, rivalry names or in-game
+   detail, so leave out "Big Ten", "Pac-12", "the Orange Bowl", "the Red River
    Rivalry", "second half" and the like.
 2. Never contradict, hedge on, or argue against who the FACT BLOCK says is
    ranked #1 or rated higher. The numbers are the numbers. No "on paper…

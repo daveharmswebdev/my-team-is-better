@@ -44,6 +44,13 @@ the key hashes the block), which is the intended and sufficient invalidation;
 fix: excluding `venue` here to keep the byte-for-byte pins green would publish
 the field to `apps/web` while hiding it from the narrator, which is exactly
 what #294 exists to prevent.
+
+`title_game_conference` (issue #300) is in the block on purpose too, on
+every game row: the conference whose title game it was, as CFBD names it, or
+null. A `when` claim reads it to print "in the Big 12 title game" and to tell
+the regular-season finale from a title game (founder decision on #300). It
+is a name, not a figure the grounding check accepts: the prose may still not
+type "Big 12" itself, only a `when` placeholder prints it.
 """
 
 from __future__ import annotations
@@ -188,6 +195,7 @@ def test_team_case_fact_block_keeps_the_games_with_their_other_fields(
             "season_type",
             "venue",
             "neutral_site",
+            "title_game_conference",
         }
 
 
@@ -231,6 +239,7 @@ def test_comparison_fact_block_texas_usc_has_no_game_id_anywhere(
         "home_points",
         "away_points",
         "winner",
+        "title_game_conference",
     }
     assert len(parsed["team_a"]["quality_wins"]) == 4
     assert parsed["team_b"]["worst_loss"]["opponent_name"] == "Texas"
@@ -269,6 +278,7 @@ def test_comparison_fact_block_texas_colorado_common_opponents_have_no_game_id(
                     "week",
                     "season_type",
                     "venue",
+                    "title_game_conference",
                 }
 
 
@@ -318,6 +328,7 @@ def test_team_case_fact_block_publishes_venue_for_every_game_row(
         "season_type",
         "venue",
         "neutral_site",
+        "title_game_conference",
     }
     # `venue` and `neutral_site` agree wherever both are published; the
     # engine contract rejects a disagreeing pair.

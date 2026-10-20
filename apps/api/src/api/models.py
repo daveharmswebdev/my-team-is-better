@@ -193,6 +193,13 @@ class OpponentResultOut(BaseModel):
     # `apps/web/src/lib/api/types.ts`).
     venue: Literal["home", "away", "neutral"]
     neutral_site: bool
+    # Issue #300: the conference whose title game this was, as CFBD names it
+    # ("SEC", "Big 12", "Mid-American", ...), else None -- see
+    # `cfb_strength.contracts.OpponentResult.title_game_conference`. Copied
+    # from the engine, never derived here from week, date or conference. It
+    # reaches the persona fact block, where a `when` claim reads it. Always
+    # None for the NFL.
+    title_game_conference: str | None
 
     @classmethod
     def from_dataclass(cls, o: OpponentResult) -> OpponentResultOut:
@@ -209,6 +216,7 @@ class OpponentResultOut(BaseModel):
             season_type=o.season_type,
             venue=o.venue,
             neutral_site=o.neutral_site,
+            title_game_conference=o.title_game_conference,
         )
 
 
@@ -440,6 +448,8 @@ class HeadToHeadMeetingOut(BaseModel):
     home_points: int
     away_points: int
     winner: str | None
+    # Issue #300 -- see `OpponentResultOut.title_game_conference`.
+    title_game_conference: str | None
 
     @classmethod
     def from_dataclass(cls, meeting: HeadToHeadMeeting) -> HeadToHeadMeetingOut:
@@ -453,6 +463,7 @@ class HeadToHeadMeetingOut(BaseModel):
             home_points=meeting.home_points,
             away_points=meeting.away_points,
             winner=meeting.winner,
+            title_game_conference=meeting.title_game_conference,
         )
 
 
@@ -488,6 +499,8 @@ class CommonOpponentMeetingOut(BaseModel):
     # This side's own venue (issue #294). No `neutral_site` companion, here or
     # in the engine contract: "neutral" already says it, for both teams.
     venue: Literal["home", "away", "neutral"]
+    # Issue #300 -- see `OpponentResultOut.title_game_conference`.
+    title_game_conference: str | None
 
     @classmethod
     def from_dataclass(cls, meeting: CommonOpponentMeeting) -> CommonOpponentMeetingOut:
@@ -499,6 +512,7 @@ class CommonOpponentMeetingOut(BaseModel):
             week=meeting.week,
             season_type=meeting.season_type,
             venue=meeting.venue,
+            title_game_conference=meeting.title_game_conference,
         )
 
 
@@ -1175,13 +1189,14 @@ class MissingChampionErrorBody(BaseModel):
 
 class StaleDatabaseErrorBody(BaseModel):
     """The engine's `StaleDatabaseError` (issue #280): the db predates the
-    schema the evidence layer reads (today, issue #183's Elo ledger tables),
-    so every verdict fails, whatever team, year or method was asked.
+    schema the evidence layer reads (issue #183's Elo ledger tables, or since
+    issue #300 the `games.conference_championship` column), so every verdict
+    fails, whatever team, year or method was asked.
     `api.errors` maps it to 503: nothing about the request was wrong, and a
     rebuild/redeploy fixes it.
 
     **Deliberately carries nothing but `error`.** The exception's message
-    names the missing tables and the operator fix; that is the operator's
+    names the missing tables or columns and the operator fix; that is the operator's
     business, so `api.errors` logs it at error level and never sends it.
     """
 

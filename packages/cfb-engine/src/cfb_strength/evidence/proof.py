@@ -82,30 +82,60 @@ VERDICT_RATING_FORMATS: dict[Method, str] = {
 # of a bare `sqlite3.OperationalError: no such table` (issue #192).
 ELO_LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
 
+# The `games` column issue #300 added: the conference title-game flag every
+# per-game evidence record reads. Checked before the games query for the same
+# reason as the ledger tables: a pre-#300 database opened read-only would
+# otherwise fail with a bare `sqlite3.OperationalError: no such column`.
+TITLE_GAME_COLUMN = "conference_championship"
+
 
 class StaleDatabaseError(RuntimeError):
     """Raised by evidence functions when the database predates the schema
-    they read (issue #192): today, the Elo ledger tables from issue #183.
+    they read (issue #192): the Elo ledger tables from issue #183, or the
+    `games.conference_championship` column from issue #300.
 
-    Deliberately loud rather than degrading to "no ledger" (the #97 spirit).
-    A reader that opens the db read-only cannot migrate it, and a stale db is
-    stale whichever method is asked -- `build_team_case` reads the ledger for
-    every method -- so every verdict fails, keener included, with a message
-    that names the missing table(s), the diagnosis and the fix. A
-    RuntimeError, not a ValueError: nothing about the request was wrong.
+    Deliberately loud rather than degrading to "no ledger" (the #97 spirit)
+    or to "no title games". A reader that opens the db read-only cannot
+    migrate it, and a stale db is stale whichever method is asked --
+    `build_team_case` reads the ledger and the games for every method -- so
+    every verdict fails, keener included, with a message that names what is
+    missing, the diagnosis and the fix. A RuntimeError, not a ValueError:
+    nothing about the request was wrong.
+
+    `missing_tables` and `missing_columns` (`table.column`) name exactly what
+    is absent; either may be empty, never both.
     """
 
-    def __init__(self, missing_tables: tuple[str, ...]):
-        names = ", ".join(missing_tables)
-        noun = "table" if len(missing_tables) == 1 else "tables"
-        super().__init__(
-            f"stale database: missing {noun} {names}. This database was built "
-            "before the Elo ledger (issue #183) and is opened read-only, so nothing "
-            "has added the ledger tables to it. Run `cfb doctor` for the diagnosis; "
-            "the fix is a rebuild of the ratings (`cfb rate --years ... --method elo`, "
-            "or the full render.yaml build sequence)."
-        )
+    def __init__(
+        self,
+        missing_tables: tuple[str, ...] = (),
+        missing_columns: tuple[str, ...] = (),
+    ):
+        sentences: list[str] = []
+        if missing_tables:
+            names = ", ".join(missing_tables)
+            noun = "table" if len(missing_tables) == 1 else "tables"
+            sentences.append(
+                f"stale database: missing {noun} {names}. This database was built "
+                "before the Elo ledger (issue #183) and is opened read-only, so nothing "
+                "has added the ledger tables to it. Run `cfb doctor` for the diagnosis; "
+                "the fix is a rebuild of the ratings (`cfb rate --years ... --method elo`, "
+                "or the full render.yaml build sequence)."
+            )
+        if missing_columns:
+            names = ", ".join(missing_columns)
+            noun = "column" if len(missing_columns) == 1 else "columns"
+            sentences.append(
+                f"stale database: missing {noun} {names}. This database was built "
+                "before conference title games were flagged (issue #300) and is opened "
+                "read-only, so nothing has added the column to it. Run `cfb doctor` for "
+                "the diagnosis; the fix is a rebuild from an empty database "
+                "(`cfb ingest --years ...` then `cfb rate`, i.e. the full render.yaml "
+                "build sequence), since only ingest can set the flag."
+            )
+        super().__init__(" ".join(sentences))
         self.missing_tables = missing_tables
+        self.missing_columns = missing_columns
 
 
 # ---------------------------------------------------------------------------
@@ -467,12 +497,48 @@ def resolve_team(
     raise UnknownTeamError(query, year, sport)
 
 
+def _require_title_game_column(conn: sqlite3.Connection) -> None:
+    """Raise `StaleDatabaseError` unless `games.conference_championship`
+    (issue #300) exists. One `PRAGMA table_info` per call, before the games
+    query that reads it, so a pre-#300 db opened read-only fails as the named
+    error rather than `sqlite3.OperationalError: no such column`."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(games)")}
+    if TITLE_GAME_COLUMN not in columns:
+        raise StaleDatabaseError(missing_columns=(f"games.{TITLE_GAME_COLUMN}",))
+
+
+def _title_game_conference(game: sqlite3.Row) -> str | None:
+    """Issue #300: the conference whose title game this was, else None.
+
+    Read from the flag ingest sets from its curated list, never derived from
+    week, date or conference. A flagged game is an intra-conference game
+    (home_conference == away_conference for every listed one), so the home
+    side's conference names it. Every unflagged game -- and every NFL game,
+    whose flag is always 0 -- is None.
+
+    Raises ValueError for a flagged game with no `home_conference`: a corrupt
+    row, and returning None would quietly turn a title game back into the
+    "regular-season finale" this field exists to prevent.
+    """
+    if not game["conference_championship"]:
+        return None
+    conference = game["home_conference"]
+    if conference is None:
+        raise ValueError(
+            f"games row {game['id']} is flagged conference_championship but has no "
+            "home_conference to name the title game by"
+        )
+    return str(conference)
+
+
 def _team_games(conn: sqlite3.Connection, year: int, team_id: int, sport: str) -> list[sqlite3.Row]:
+    _require_title_game_column(conn)
     return conn.execute(
         """
         SELECT id, week, season_type, neutral_site,
                home_team_id, away_team_id, home_team, away_team,
-               home_points, away_points
+               home_points, away_points,
+               conference_championship, home_conference
         FROM games
         WHERE season = ? AND sport = ? AND completed = 1
           AND (home_team_id = ? OR away_team_id = ?)
@@ -533,6 +599,7 @@ def _opponent_result(
         season_type=game["season_type"],
         venue=venue,
         neutral_site=neutral_site,
+        title_game_conference=_title_game_conference(game),
     )
 
 
@@ -641,10 +708,12 @@ def build_comparison(
     case_b = build_team_case(conn, year, team_b, method=method, sport=sport)
 
     # Head-to-head: any completed game this season between the two teams.
+    # build_team_case has already run `_require_title_game_column` above.
     h2h_games = conn.execute(
         """
         SELECT id, week, season_type, neutral_site, home_team_id, away_team_id,
-               home_team, away_team, home_points, away_points
+               home_team, away_team, home_points, away_points,
+               conference_championship, home_conference
         FROM games
         WHERE season = ? AND sport = ? AND completed = 1
           AND ((home_team_id = ? AND away_team_id = ?)
@@ -680,6 +749,7 @@ def build_comparison(
                     home_points=g["home_points"],
                     away_points=g["away_points"],
                     winner=winner,
+                    title_game_conference=_title_game_conference(g),
                 )
             )
     head_to_head = HeadToHead(played=bool(meetings), meetings=meetings)
@@ -747,6 +817,7 @@ def _meetings_by_opponent(
                 week=g.week,
                 season_type=g.season_type,
                 venue=g.venue,
+                title_game_conference=g.title_game_conference,
             )
         )
     return by_opp

@@ -416,8 +416,8 @@ def test_a_conference_or_game_phase_is_rejected_saying_the_block_holds_no_such_d
         errors,
         f'"{token}"',
         f'"{phrase}"',
-        "FACT BLOCK holds no conference or in-game detail",
-        "leave it out",
+        "a conference prints only through a `when` claim on its title game",
+        "leave it out of the prose",
     )
 
 
@@ -626,6 +626,6 @@ def test_a_full_narration_renders(alabama_2017: str, catalog: tuple[TeamRecord, 
     )
     assert rendered(text, claims, alabama_2017, catalog) == (
         "Look, Alabama 13-1. They beat No. 3 Georgia 26-23 in the "
-        "postseason. The one loss was 26-14 to Auburn in week 13, and the "
-        "numbers are the numbers."
+        "postseason. The one loss was 26-14 to Auburn in the regular-season "
+        "finale, and the numbers are the numbers."
     )

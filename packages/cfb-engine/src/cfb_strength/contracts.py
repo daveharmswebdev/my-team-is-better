@@ -1184,6 +1184,13 @@ class OpponentResult:
     # (`evidence/proof.py::_opponent_result`) to keep in step.
     venue: Literal["home", "away", "neutral"]
     neutral_site: bool
+    # Issue #300: the conference whose title game this was, as CFBD names it
+    # ("SEC", "Big 12", "Mid-American"), read from `games.home_conference`
+    # where `games.conference_championship` is set; None for every other
+    # game. `season_type` keeps CFBD's label, so this is how a consumer tells
+    # a title game from the regular-season finale. Defaults None so every
+    # construction site outside evidence stays valid.
+    title_game_conference: str | None = None
 
     def __post_init__(self) -> None:
         if self.neutral_site != (self.venue == "neutral"):
@@ -1246,6 +1253,8 @@ class HeadToHeadMeeting:
     home_points: int
     away_points: int
     winner: str | None
+    # Issue #300 -- see `OpponentResult.title_game_conference`.
+    title_game_conference: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1277,6 +1286,9 @@ class CommonOpponentMeeting:
     # re-derived. No `neutral_site` companion: this shape never had one, so
     # nothing reads it, and `venue == "neutral"` says the same thing.
     venue: Literal["home", "away", "neutral"]
+    # Issue #300 -- that side's `OpponentResult.title_game_conference`,
+    # copied like `venue`.
+    title_game_conference: str | None = None
 
 
 @dataclass(frozen=True)
