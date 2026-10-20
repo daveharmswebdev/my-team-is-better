@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import sqlite3
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -187,3 +188,69 @@ def test_results_are_scoped_to_the_sport(db: PlayerDb) -> None:
         "Shared Name College",
         "Shared Name Cfb Starter",
     ]
+
+
+# --- cost ---------------------------------------------------------------------
+
+# A substring LIKE can use no index, so finding who matches reads every name in
+# the sport once. That scan is the floor; the cost above it is what #368 is about.
+_NAME_SCAN = (
+    "SELECT id FROM players WHERE sport = 'nfl'"
+    " AND lower(display_name) LIKE lower('%needle%') ESCAPE '\\'"
+)
+
+
+def _steps(conn: sqlite3.Connection, run: Callable[[], object]) -> int:
+    """SQLite VM steps (in tens) `run` takes: a deterministic stand-in for
+    its cost, so the test asserts no wall-clock time (#368)."""
+    steps = 0
+
+    def tick() -> int:
+        nonlocal steps
+        steps += 1
+        return 0
+
+    conn.set_progress_handler(tick, 10)
+    try:
+        run()
+    finally:
+        conn.set_progress_handler(None, 0)
+    return steps
+
+
+def _cost_above_name_scan(db: PlayerDb) -> int:
+    conn = conn_of(db)
+    search = _steps(conn, lambda: search_players(conn, sport="nfl", query="needle"))
+    scan = _steps(conn, lambda: conn.execute(_NAME_SCAN).fetchall())
+    return search - scan
+
+
+def _db_with_bystanders(path: Path, bystanders: int) -> PlayerDb:
+    d = PlayerDb(path)
+    home, away = d.team("Home"), d.team("Away")
+    for i in range(3):
+        _passer(d, f"Needle {i}", 100 + i)
+    for i in range(bystanders):
+        # A qualifying player who doesn't match: a passing season and a QB start.
+        p = _passer(d, f"Bystander {i:04d}", 50)
+        d.start(d.game(2000 + i % 20, home, away, 7, 3, week=1 + i // 20), home, p)
+    return d
+
+
+def test_search_cost_does_not_scale_with_players_who_do_not_match(tmp_path: Path) -> None:
+    # #368: search aggregated every player's career before applying the name
+    # filter, so each keystroke cost a whole leaderboard. Beyond the one scan
+    # of names, its work must scale with the players who match, not with the
+    # size of the table: 20x the non-matching players, well under 2x the work.
+    small = _db_with_bystanders(tmp_path / "small.sqlite3", 20)
+    large = _db_with_bystanders(tmp_path / "large.sqlite3", 400)
+    try:
+        expected = ["Needle 2", "Needle 1", "Needle 0"]
+        assert _names(small, "needle") == _names(large, "needle") == expected
+        small_cost = _cost_above_name_scan(small)
+        large_cost = _cost_above_name_scan(large)
+    finally:
+        small.close()
+        large.close()
+    assert 0 < small_cost
+    assert large_cost < 2 * small_cost, (small_cost, large_cost)
