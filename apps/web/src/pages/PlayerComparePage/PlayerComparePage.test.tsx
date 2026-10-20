@@ -545,21 +545,32 @@ describe('PlayerComparePage: changing a pick (issue #304)', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('pressing Compare twice on the pair already shown asks the API twice', async () => {
+  /**
+   * Issue #325: the form behind the open modal is inert in a real browser, so
+   * the pair on screen can't be asked again from the open modal. The way a
+   * user re-asks is close, then Compare, which pushes the pair to ?a&b again.
+   */
+  it('closing, then pressing Compare on the same pair, asks the API again', async () => {
     const user = userEvent.setup()
     mockedCompare.mockReset()
     mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
 
-    await screen.findByRole('table', {
-      name: 'Kurt Warner and Steve McNair, regular season',
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Kurt Warner and Steve McNair',
     })
     expect(mockedCompare).toHaveBeenCalledTimes(1)
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
     expect(compareButton()).toBeEnabled()
 
     await user.click(compareButton())
 
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `?a=${WARNER}&b=${MCNAIR}`,
+    )
     await waitFor(() => {
       expect(mockedCompare).toHaveBeenCalledTimes(2)
     })
@@ -834,5 +845,189 @@ describe('PlayerComparePage: the comparison modal (issue #310)', () => {
     expect(playerA()).toHaveValue('')
     expect(playerB()).toHaveValue('')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Issue #308: a link whose comparison fails leaves picks the API never named.
+ * They still count for Compare, so the link's pair can be asked again without
+ * a reload, and the fields say which player they hold instead of reading as
+ * blank. Issue #324: after a close the prompt follows the fields, not the
+ * address bar the close emptied.
+ */
+describe('PlayerComparePage: the form after a close (issues #308, #324)', () => {
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    searchByQuery()
+  })
+
+  async function closeTheModal(user: User) {
+    const dialog = await screen.findByRole('dialog')
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  }
+
+  it('a failed link keeps its pair: the fields say who, Compare is enabled and asks again (a)', async () => {
+    const user = userEvent.setup()
+    mockedCompare
+      .mockRejectedValueOnce(new VerdictNetworkError(NETWORK_ERROR_COPY))
+      .mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    expect(
+      await within(await screen.findByRole('dialog')).findByRole('alert'),
+    ).toHaveTextContent(NETWORK_ERROR_COPY)
+    await closeTheModal(user)
+
+    // Neither field reads as blank while it holds the link's player.
+    expect(playerA()).toHaveValue(`Player #${WARNER}`)
+    expect(playerB()).toHaveValue(`Player #${MCNAIR}`)
+    expect(compareButton()).toBeEnabled()
+
+    await user.click(compareButton())
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `?a=${WARNER}&b=${MCNAIR}`,
+    )
+    await waitFor(() => {
+      expect(mockedCompare).toHaveBeenCalledTimes(2)
+    })
+    expect(mockedCompare).toHaveBeenNthCalledWith(2, WARNER, MCNAIR)
+    expect(
+      await screen.findByRole('dialog', {
+        name: 'Kurt Warner and Steve McNair',
+      }),
+    ).toBeInTheDocument()
+
+    // The answer names both picks, so after this close the fields do too.
+    await closeTheModal(user)
+    expect(playerA()).toHaveValue('Kurt Warner')
+    expect(playerB()).toHaveValue('Steve McNair')
+  })
+
+  it('closing a failed link returns focus to the Compare button (b)', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockRejectedValue(new VerdictHttpError(503, ''))
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await within(await screen.findByRole('dialog')).findByRole('alert')
+    await closeTheModal(user)
+
+    expect(document.activeElement).toBe(compareButton())
+  })
+
+  it('closing an unknown-player link returns focus to an enabled Compare', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockRejectedValue(
+      new PlayerApiError(404, {
+        error: 'unknown_player',
+        player_id: 1,
+        sport: 'nfl',
+      }),
+    )
+
+    renderPage(`?a=${WARNER}&b=1`)
+    await within(await screen.findByRole('dialog')).findByRole('alert')
+    await closeTheModal(user)
+
+    expect(playerB()).toHaveValue('Player #1')
+    expect(compareButton()).toBeEnabled()
+    expect(document.activeElement).toBe(compareButton())
+  })
+
+  it('picking a player into one slot of a failed link never names the other slot (c)', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await within(await screen.findByRole('dialog')).findByRole('alert')
+    await closeTheModal(user)
+
+    await user.clear(playerA())
+    await pick(user, playerA(), 'McNair', /Steve McNair/)
+
+    expect(playerA()).toHaveValue('Steve McNair')
+    expect(playerB()).not.toHaveValue('Steve McNair')
+    expect(playerB()).toHaveValue(`Player #${MCNAIR}`)
+  })
+
+  it('the same player twice in a link: Compare is enabled after the close and asks again (d)', async () => {
+    const user = userEvent.setup()
+
+    renderPage(`?a=${WARNER}&b=${WARNER}`)
+    expect(
+      within(await screen.findByRole('dialog')).getByRole('alert'),
+    ).toHaveTextContent(SAME_PLAYER_COPY)
+    await closeTheModal(user)
+
+    expect(playerA()).toHaveValue(`Player #${WARNER}`)
+    expect(playerB()).toHaveValue(`Player #${WARNER}`)
+    expect(compareButton()).toBeEnabled()
+    expect(document.activeElement).toBe(compareButton())
+
+    await user.click(compareButton())
+
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      `?a=${WARNER}&b=${WARNER}`,
+    )
+    expect(
+      within(await screen.findByRole('dialog')).getByRole('alert'),
+    ).toHaveTextContent(SAME_PLAYER_COPY)
+    // The same player twice is answered here; the API is never asked.
+    expect(mockedCompare).not.toHaveBeenCalled()
+  })
+
+  it('after closing a comparison, the form does not ask for two players it already holds (e)', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await screen.findByRole('dialog', { name: 'Kurt Warner and Steve McNair' })
+    await closeTheModal(user)
+
+    expect(playerA()).toHaveValue('Kurt Warner')
+    expect(playerB()).toHaveValue('Steve McNair')
+    expect(screen.queryByText(PICK_TWO_COPY)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(pickOneMoreCopy('Kurt Warner')),
+    ).not.toBeInTheDocument()
+  })
+
+  it('after a close, the prompt follows the fields as they are cleared', async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await screen.findByRole('dialog', { name: 'Kurt Warner and Steve McNair' })
+    await closeTheModal(user)
+
+    // One player still held: the prompt asks for the other, by name.
+    await user.click(screen.getByRole('button', { name: 'Clear Player B' }))
+    expect(screen.getByText(pickOneMoreCopy('Kurt Warner'))).toBeInTheDocument()
+
+    // Nobody held: pick two.
+    await user.click(screen.getByRole('button', { name: 'Clear Player A' }))
+    expect(screen.getByText(PICK_TWO_COPY)).toBeInTheDocument()
+  })
+
+  it('one player picked by hand gets the pick-one-more prompt by name', async () => {
+    const user = userEvent.setup()
+
+    renderPage()
+    expect(screen.getByText(PICK_TWO_COPY)).toBeInTheDocument()
+
+    await pick(user, playerA(), 'Brady', /Tom Brady/)
+
+    expect(screen.getByText(pickOneMoreCopy('Tom Brady'))).toBeInTheDocument()
+    expect(screen.queryByText(PICK_TWO_COPY)).not.toBeInTheDocument()
   })
 })

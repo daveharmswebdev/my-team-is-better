@@ -86,12 +86,23 @@ type ComparisonAnswer = { key: string } & (
 type CareerAnswer = { id: number } & ({ status: 'success' } | Failure)
 
 /**
- * A player in a slot. A pick seeded from the URL has no name until the API
- * names that player; until then the field is empty and it can't be compared.
+ * A player in a slot. A pick seeded from the URL has no name until an API
+ * answer about that player names it (`nameSlots`), and an answer that fails
+ * never does. Named or not it is a pick: it counts for Compare, so a link
+ * whose comparison failed can be asked again (issue #308), and its field
+ * shows `unnamedPickText` rather than reading as blank.
  */
 interface SlotPick {
   player_id: number
   display_name: string | null
+}
+
+/**
+ * What a field shows for a pick no answer has named yet: the id the link
+ * carried, which is all the page truthfully knows about that player.
+ */
+function unnamedPickText(playerId: number): string {
+  return `Player #${playerId}`
 }
 
 /** A slot's field: a pick, or the text typed since. Typing clears the pick. */
@@ -121,6 +132,29 @@ function seedSlots(
 }
 
 /**
+ * Names the unnamed picks an API answer just named, by player id, and leaves
+ * every other slot alone. This is the only way an unnamed pick gets a name
+ * after seeding: a name picked into one field never reaches the other
+ * (issue #308).
+ */
+function nameSlots(
+  slots: Record<Slot, SlotState>,
+  answered: Record<number, string>,
+): Record<Slot, SlotState> {
+  const name = (state: SlotState): SlotState => {
+    const { pick } = state
+    if (pick === null || pick.display_name !== null) {
+      return state
+    }
+    const found = answered[pick.player_id]
+    return found === undefined
+      ? state
+      : { ...state, pick: { ...pick, display_name: found } }
+  }
+  return { a: name(slots.a), b: name(slots.b) }
+}
+
+/**
  * The key of the entry a close navigated away from (issue #310), read off
  * `location.state`, which is `any` and can hold anything a browser restored.
  */
@@ -144,7 +178,7 @@ const COMPARISON_TITLE = 'The comparison'
  * a pick clears it, and picking a suggestion changes only that field. The URL
  * (`?a=<id>&b=<id>`) is the comparison on screen, and only the Compare button
  * changes it, pushing a history entry, so a link, a reload and Back all show
- * the same comparison. Every press asks again, even for the pair on screen.
+ * the same comparison. Every press asks again, even for the pair just closed.
  * Any navigation re-seeds the fields from the URL. The same player twice, or
  * an id that can't be one, is answered here without asking the API.
  *
@@ -170,8 +204,6 @@ export function PlayerComparePage() {
     locationKey: location.key,
     slots: seedSlots({ a: pickA, b: pickB }, {}),
   }))
-  /** Bumped by every Compare press on the pair already committed. */
-  const [run, setRun] = useState(0)
   const [comparisonAnswer, setComparisonAnswer] =
     useState<ComparisonAnswer | null>(null)
   const [careerAnswer, setCareerAnswer] = useState<CareerAnswer | null>(null)
@@ -211,7 +243,10 @@ export function PlayerComparePage() {
         ? pickB
         : null
 
-  // `run` is a dependency on purpose: each press of Compare asks again.
+  // Asks whenever the URL's pair changes. Pressing Compare always changes
+  // it: Compare can only be pressed with the modal shut (the form behind an
+  // open modal is inert, issue #325), and the modal is shut exactly when the
+  // URL names no pair, so every press pushes ?a&b and asks again.
   useEffect(() => {
     if (typeof pickA !== 'number' || typeof pickB !== 'number') {
       return
@@ -226,11 +261,15 @@ export function PlayerComparePage() {
         if (cancelled) {
           return
         }
-        setComparisonAnswer({ key, status: 'success', comparison })
-        setNames((known) => ({
-          ...known,
+        const answered = {
           [comparison.a.player_id]: comparison.a.display_name,
           [comparison.b.player_id]: comparison.b.display_name,
+        }
+        setComparisonAnswer({ key, status: 'success', comparison })
+        setNames((known) => ({ ...known, ...answered }))
+        setSeeded((current) => ({
+          ...current,
+          slots: nameSlots(current.slots, answered),
         }))
       })
       .catch((error: unknown) => {
@@ -241,7 +280,7 @@ export function PlayerComparePage() {
     return () => {
       cancelled = true
     }
-  }, [pickA, pickB, run])
+  }, [pickA, pickB])
 
   useEffect(() => {
     if (loneId === null) {
@@ -253,10 +292,12 @@ export function PlayerComparePage() {
         if (cancelled) {
           return
         }
+        const answered = { [career.player_id]: career.display_name }
         setCareerAnswer({ id: loneId, status: 'success' })
-        setNames((known) => ({
-          ...known,
-          [career.player_id]: career.display_name,
+        setNames((known) => ({ ...known, ...answered }))
+        setSeeded((current) => ({
+          ...current,
+          slots: nameSlots(current.slots, answered),
         }))
       })
       .catch((error: unknown) => {
@@ -269,22 +310,20 @@ export function PlayerComparePage() {
     }
   }, [loneId])
 
-  function pickName(pick: SlotPick): string | null {
-    return pick.display_name ?? names[pick.player_id] ?? null
-  }
-
   /**
-   * A slot's player id once the field shows that player's name; `null`
-   * otherwise, so an empty field is never compared.
+   * A slot's player id whenever it holds a pick, named or not (issue #308);
+   * `null` for typed text or an empty field, which are never compared.
    */
-  function namedPick(slot: Slot): number | null {
-    const { pick } = slots[slot]
-    return pick !== null && pickName(pick) !== null ? pick.player_id : null
+  function slotPick(slot: Slot): number | null {
+    return slots[slot].pick?.player_id ?? null
   }
 
+  /** A pick's own name, or the id it holds; never another slot's name. */
   function fieldText(slot: Slot): string {
     const { pick, text } = slots[slot]
-    return pick === null ? text : (pickName(pick) ?? '')
+    return pick === null
+      ? text
+      : (pick.display_name ?? unnamedPickText(pick.player_id))
   }
 
   const searchA = usePlayerSearch(slots.a.pick === null ? slots.a.text : '')
@@ -317,20 +356,20 @@ export function PlayerComparePage() {
     updateSlot(slot, { pick: null, text: '' })
   }
 
-  const compareA = namedPick('a')
-  const compareB = namedPick('b')
+  const compareA = slotPick('a')
+  const compareB = slotPick('b')
   const canCompare = compareA !== null && compareB !== null
   const typedNotPicked = SLOTS.some(
     (slot) => slots[slot].pick === null && slots[slot].text !== '',
   )
 
-  /** Pushes a history entry for a new pair; the pair on screen asks again. */
+  /**
+   * Pushes the fields' pair to ?a&b, which asks for it. The button can only
+   * be pressed while the URL names no pair (see the comparison effect), so
+   * this is always a change of URL and always a fresh ask (issue #325).
+   */
   function handleCompare() {
     if (compareA === null || compareB === null) {
-      return
-    }
-    if (compareA === pickA && compareB === pickB) {
-      setRun((count) => count + 1)
       return
     }
     setSearchParams({ a: String(compareA), b: String(compareB) })
@@ -458,12 +497,23 @@ export function PlayerComparePage() {
         {currentCareer.message}
       </p>
     )
-  } else if (loneId !== null) {
-    prompt = (
-      <p className={styles.prompt}>{pickOneMoreCopy(names[loneId] ?? null)}</p>
-    )
   } else {
-    prompt = <p className={styles.prompt}>{PICK_TWO_COPY}</p>
+    // Otherwise the prompt follows the fields, not the URL (issue #324): a
+    // close empties the URL while the fields keep the pair, and a field
+    // holding a player must not be asked for one.
+    const held = SLOTS.flatMap((slot) => {
+      const { pick } = slots[slot]
+      return pick === null ? [] : [pick]
+    })
+    if (held.length === 1) {
+      prompt = (
+        <p className={styles.prompt}>
+          {pickOneMoreCopy(held[0]?.display_name ?? null)}
+        </p>
+      )
+    } else if (held.length === 0) {
+      prompt = <p className={styles.prompt}>{PICK_TWO_COPY}</p>
+    }
   }
 
   return (
