@@ -348,6 +348,239 @@ def test_hook_stops_blocking_after_the_retry_cap(tmp_path: Path) -> None:
     assert "malformed-return" in out["systemMessage"]
 
 
+def _transcript(tmp_path: Path, *contents: list[dict[str, Any]]) -> Path:
+    """A spoke transcript holding one assistant message per `contents` entry."""
+    path = tmp_path / "agent-transcript.jsonl"
+    lines = [
+        json.dumps({"type": "assistant", "message": {"role": "assistant", "content": content}})
+        for content in contents
+    ]
+    path.write_text("\n".join(lines) + "\n")
+    return path
+
+
+def _handback(message: str) -> list[dict[str, Any]]:
+    return [{"type": "tool_use", "name": "SubagentHandback", "input": {"message": message}}]
+
+
+def _handback_payload(transcript: Path, agent_id: str = "agent_1") -> dict[str, Any]:
+    # Observed in real transcripts (#305): a spoke that hands back through the
+    # SubagentHandback tool ends with no final text, so last_assistant_message
+    # carries no return.
+    payload = _stop_payload("", agent_id=agent_id)
+    payload["agent_transcript_path"] = str(transcript)
+    return payload
+
+
+def test_hook_validates_the_return_the_spoke_handed_back(tmp_path: Path) -> None:
+    transcript = _transcript(tmp_path, _handback(_fenced(_success())))
+    out = delegation.subagent_stop(_handback_payload(transcript), OWNERSHIP, tmp_path)
+    assert out is not None
+    assert "decision" not in out
+    assert "validated" in out["systemMessage"]
+
+
+def test_stop_hook_blocks_after_a_denied_handback_that_was_never_resent(
+    tmp_path: Path,
+) -> None:
+    # pre_handback denied the report, so nothing was delivered; the spoke then ended
+    # its turn with empty text. The shape is a live denied handback (#305).
+    data = _success()
+    del data["brief_defects"]
+    entries = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_denied",
+                        "name": "SubagentHandback",
+                        "input": {"message": _fenced(data)},
+                    }
+                ]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_denied",
+                        "is_error": True,
+                        "content": "PreToolUse:SubagentHandback hook error: Not delivered",
+                    }
+                ]
+            },
+        },
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}},
+    ]
+    transcript = tmp_path / "agent-transcript.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    out = delegation.subagent_stop(_handback_payload(transcript), OWNERSHIP, tmp_path)
+    assert out is not None
+    assert out["decision"] == "block"
+    assert "brief_defects" in out["reason"]
+
+
+def test_retries_start_over_after_a_round_ends_malformed(tmp_path: Path) -> None:
+    # A resumed spoke's next round gets its own retries, not none.
+    payload = _pre_handback_payload("no json at all", agent_id="agent_resumed")
+    for _ in range(delegation.MAX_RETURN_RETRIES):
+        _denial(delegation.pre_handback(payload, OWNERSHIP, tmp_path))
+    assert delegation.pre_handback(payload, OWNERSHIP, tmp_path) is None
+    reason = _denial(delegation.pre_handback(payload, OWNERSHIP, tmp_path))
+    assert f"retry 1 of {delegation.MAX_RETURN_RETRIES}" in reason
+
+
+def test_stop_hook_never_blocks_a_report_already_delivered(tmp_path: Path) -> None:
+    # The handback reached the coordinator before SubagentStop fired; blocking now
+    # would only keep the spoke running, so the hook reports instead.
+    data = _success()
+    del data["brief_defects"]
+    transcript = _transcript(tmp_path, _handback(_fenced(data)))
+    out = delegation.subagent_stop(_handback_payload(transcript), OWNERSHIP, tmp_path)
+    assert out is not None
+    assert "decision" not in out
+    assert "malformed-return" in out["systemMessage"]
+
+
+def _pre_handback_payload(
+    message: str, agent: str = "api-agent", agent_id: str = "agent_1"
+) -> dict[str, Any]:
+    # The fields a PreToolUse hook on SubagentHandback received in a live probe (#305).
+    return {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "SubagentHandback",
+        "tool_input": {"message": message},
+        "agent_id": agent_id,
+        "agent_type": agent,
+    }
+
+
+def _denial(out: dict[str, Any] | None) -> str:
+    assert out is not None
+    specific = out["hookSpecificOutput"]
+    assert specific["hookEventName"] == "PreToolUse"
+    assert specific["permissionDecision"] == "deny"
+    reason = specific["permissionDecisionReason"]
+    assert isinstance(reason, str)
+    return reason
+
+
+def test_pre_handback_lets_a_valid_report_through(tmp_path: Path) -> None:
+    out = delegation.pre_handback(_pre_handback_payload(_fenced(_success())), OWNERSHIP, tmp_path)
+    assert out is None
+
+
+def test_pre_handback_ignores_agents_outside_the_map(tmp_path: Path) -> None:
+    out = delegation.pre_handback(
+        _pre_handback_payload("free text", agent="general-purpose"), OWNERSHIP, tmp_path
+    )
+    assert out is None
+
+
+def test_pre_handback_denies_an_invalid_report_with_the_errors(tmp_path: Path) -> None:
+    data = _success()
+    del data["brief_defects"]
+    reason = _denial(
+        delegation.pre_handback(_pre_handback_payload(_fenced(data)), OWNERSHIP, tmp_path)
+    )
+    assert "brief_defects" in reason
+    assert "not received" in reason
+    assert "SubagentHandback" in reason
+
+
+@pytest.mark.parametrize("value", ["[]", "null", '"done"', "3"])
+def test_both_hooks_reject_a_block_that_is_not_an_object(tmp_path: Path, value: str) -> None:
+    # A crash exits 0 and fails open, so a non-object must be an error, not an assert.
+    message = f"```json\n{value}\n```"
+    _denial(delegation.pre_handback(_pre_handback_payload(message), OWNERSHIP, tmp_path))
+    out = delegation.subagent_stop(_stop_payload(message, agent_id="agent_2"), OWNERSHIP, tmp_path)
+    assert out is not None and out["decision"] == "block"
+
+
+@pytest.mark.parametrize(
+    "value", ["9" * 5000, "[" * 100_000 + "]" * 100_000], ids=["huge-int", "deep-nesting"]
+)
+def test_a_block_json_cannot_parse_is_denied_not_crashed(tmp_path: Path, value: str) -> None:
+    # json.loads raises ValueError/RecursionError here, not JSONDecodeError (#305 r3).
+    message = f"```json\n{value}\n```"
+    _denial(delegation.pre_handback(_pre_handback_payload(message), OWNERSHIP, tmp_path))
+
+
+def test_an_unreadable_transcript_falls_back_to_the_last_message(tmp_path: Path) -> None:
+    transcript = tmp_path / "agent-transcript.jsonl"
+    transcript.write_bytes(b"\xff\xfe not utf-8\n")
+    payload = _stop_payload(_fenced(_success()))
+    payload["agent_transcript_path"] = str(transcript)
+    out = delegation.subagent_stop(payload, OWNERSHIP, tmp_path)
+    assert out is not None and "validated" in out["systemMessage"]
+
+
+def test_a_corrupt_retry_counter_counts_as_a_first_attempt(tmp_path: Path) -> None:
+    (tmp_path / "agent_1.return-attempts").write_text("")
+    reason = _denial(delegation.pre_handback(_pre_handback_payload("no json"), OWNERSHIP, tmp_path))
+    assert f"retry 1 of {delegation.MAX_RETURN_RETRIES}" in reason
+
+
+def test_stop_hook_feedback_names_the_handback_tool(tmp_path: Path) -> None:
+    # Closing text isn't delivered to a caller that expects a handback.
+    out = delegation.subagent_stop(_stop_payload("no json"), OWNERSHIP, tmp_path)
+    assert out is not None and "SubagentHandback" in out["reason"]
+
+
+def test_pre_handback_lets_the_report_through_after_the_retry_cap(tmp_path: Path) -> None:
+    payload = _pre_handback_payload("no json at all", agent_id="agent_stuck")
+    for retry in range(1, delegation.MAX_RETURN_RETRIES + 1):
+        reason = _denial(delegation.pre_handback(payload, OWNERSHIP, tmp_path))
+        assert f"retry {retry} of {delegation.MAX_RETURN_RETRIES}" in reason
+    assert delegation.pre_handback(payload, OWNERSHIP, tmp_path) is None
+
+
+def test_cli_pre_handback_prints_the_denial(tmp_path: Path) -> None:
+    payload = _pre_handback_payload("no json")
+    payload["scratchpad_dir"] = str(tmp_path)  # keep the retry count out of the shared tmp
+    out = _cli("pre-handback", stdin=json.dumps(payload))
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_hook_reads_only_the_spokes_latest_output(tmp_path: Path) -> None:
+    # A spoke resumed for a later round still has its earlier, valid handback in
+    # the transcript; this round's final text is what gets checked.
+    transcript = _transcript(
+        tmp_path,
+        _handback(_fenced(_success())),
+        [{"type": "text", "text": "round two, no json"}],
+    )
+    out = delegation.subagent_stop(_handback_payload(transcript), OWNERSHIP, tmp_path)
+    assert out is not None and out["decision"] == "block"
+
+
+def test_hook_falls_back_to_the_last_message_without_a_transcript(tmp_path: Path) -> None:
+    payload = _stop_payload(_fenced(_success()))
+    payload["agent_transcript_path"] = str(tmp_path / "missing.jsonl")
+    out = delegation.subagent_stop(payload, OWNERSHIP, tmp_path)
+    assert out is not None
+    assert "validated" in out["systemMessage"]
+
+
+def test_a_valid_return_resets_the_retry_count_for_the_next_round(tmp_path: Path) -> None:
+    # The same agent_id is reused when the coordinator resumes a spoke for a later
+    # round, so one round's retries must not count against the next.
+    bad = _stop_payload("no json at all", agent_id="agent_resumed")
+    for _ in range(delegation.MAX_RETURN_RETRIES):
+        delegation.subagent_stop(bad, OWNERSHIP, tmp_path)
+    good = _stop_payload(_fenced(_success()), agent_id="agent_resumed")
+    delegation.subagent_stop(good, OWNERSHIP, tmp_path)
+    out = delegation.subagent_stop(bad, OWNERSHIP, tmp_path)
+    assert out is not None
+    assert out["decision"] == "block"
+    assert f"retry 1 of {delegation.MAX_RETURN_RETRIES}" in out["reason"]
+
+
 def test_hook_surfaces_scope_warnings_without_blocking(tmp_path: Path) -> None:
     data = _success()
     data["files_changed"].append({"path": "apps/web/src/App.tsx", "change_type": "modified"})

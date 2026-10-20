@@ -90,8 +90,9 @@ Fix every error it prints. Pass stdout **verbatim** as the Agent prompt, with
 
 ## 6. When the spoke returns
 
-The SubagentStop hook has already made the spoke fix an invalid return, up to two
-retries. Its notes go to the user, not to you, so **validate the return yourself** before
+The return hooks have already made the spoke fix an invalid return before it was
+delivered, up to two retries (`pre-handback` for a `SubagentHandback` report,
+SubagentStop for closing text). Their notes go to the user, not to you, so **validate the return yourself** before
 acting. Pipe the spoke's final message in exactly as it came back:
 
 ```bash

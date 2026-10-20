@@ -7,7 +7,8 @@ user-invocable: false
 # Spoke protocol
 
 You are a spoke. You see only your brief and this protocol; the coordinator sees only
-your final message. A hook checks that message when you stop.
+your final message. A hook checks it when you hand it back, and an invalid one is not
+delivered: you get the errors instead, so fix them and hand it back again.
 
 ## Before you change anything
 

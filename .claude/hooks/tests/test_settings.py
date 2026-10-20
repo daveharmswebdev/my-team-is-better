@@ -26,12 +26,24 @@ def _hook_commands() -> list[str]:
 
 def test_every_hook_command_runs_a_script_that_exists() -> None:
     commands = _hook_commands()
-    assert len(commands) == 3
+    assert len(commands) == 4
     for command in commands:
         scripts = re.findall(r"\.claude/hooks/([\w.-]+\.py)", command)
         assert scripts, command
         for script in scripts:
             assert (CLAUDE_DIR / "hooks" / script).is_file(), script
+
+
+def test_a_handback_is_checked_before_it_is_delivered() -> None:
+    # Only a PreToolUse deny can hold a SubagentHandback report back; SubagentStop
+    # fires after the coordinator already has it (#305).
+    groups = _settings()["hooks"]["PreToolUse"]
+    wired = [g for g in groups if g["matcher"] == "SubagentHandback"]
+    assert len(wired) == 1
+    [hook] = wired[0]["hooks"]
+    assert hook["command"].endswith(
+        'delegation.py"; [ -f "$f" ] || exit 0; exec uv run --quiet --script "$f" pre-handback'
+    )
 
 
 def test_a_missing_hook_script_is_skipped_rather_than_failing_closed() -> None:

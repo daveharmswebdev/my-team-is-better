@@ -139,13 +139,15 @@ another (#105).
 | The ruleset's required checks match `ci.yml`'s jobs | `claude-process` CI job | block (the file only; applying it to GitHub is manual) |
 | No push to `main`; no shared-stash use | PreToolUse `guard_bash.py` | block |
 | Brief shape; scope inside ownership; own scratch dir | `delegation.py render-brief` | block (the brief won't render) |
-| Return shape and its semantic rules | SubagentStop `delegation.py` sends the errors back to the spoke (2 retries); the coordinator re-checks with `delegation.py validate-return` | block; still invalid = `malformed-return` |
+| Return shape and its semantic rules | PreToolUse `delegation.py pre-handback` denies an invalid `SubagentHandback` report before it's delivered and sends the errors back to the spoke (2 retries). SubagentStop does the same for a return written as closing text. The coordinator re-checks with `delegation.py validate-return` | block; still invalid = delivered, flagged `malformed-return` |
 | Agents, ownership map and Roles table agree | `claude-process` CI job | block |
 | No merge-conflict markers land | `claude-process` CI job | block |
 
 What these don't guarantee:
 - Claude Code can't force a subagent's output format, so the return check runs after the
   fact and feeds errors back to the spoke (retry with feedback).
+- Only the PreToolUse check can hold a report back. A `SubagentHandback` report reaches
+  the coordinator before SubagentStop fires, so a stop block can't withhold it (#305).
 - A hook's notes reach the user, not the coordinator model, so `/delegate` re-validates
   every return with the CLI.
 - Writes through Bash bypass the edit guard; the return check flags `files_changed`
@@ -164,8 +166,8 @@ Use `/delegate`. In short:
    every brief the same shape and checks scope, base commit, scratch dir, concurrency
    and, for gate work, the threat model and review-round cap.
 2. **Returns are one fenced JSON block** against `.claude/schemas/return.schema.json`.
-   The SubagentStop hook makes the spoke fix an invalid one, and the coordinator validates
-   it again with `delegation.py validate-return`. Worked examples:
+   The return hooks make the spoke fix an invalid one before it's delivered, and the
+   coordinator validates it again with `delegation.py validate-return`. Worked examples:
    `.claude/schemas/examples/`.
 3. **The coordinator tells apart three outcomes:**
    - the round failed: `status: failure` with a `failure_type` and `retryable`;
