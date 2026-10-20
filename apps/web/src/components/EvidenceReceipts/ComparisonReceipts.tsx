@@ -92,16 +92,23 @@ function TeamSummary({
   )
 }
 
-function MeetingRow({ meeting }: { meeting: HeadToHeadMeetingOut }) {
+/**
+ * One head-to-head meeting as its own full-width list item (issue #250):
+ * "Home 31-30 Away" then "(Winner won)", or no winner for a tie. Each part
+ * wraps as a unit, like the common-opponent rows, so a team name never ends
+ * up one word per line at phone width.
+ */
+function MeetingLine({ meeting }: { meeting: HeadToHeadMeetingOut }) {
   return (
-    <div>
-      <dt>Result</dt>
-      <dd>
+    <li className={styles.gameline}>
+      <span className={styles.headToHeadScore}>
         {meeting.home_team} {meeting.home_points}-{meeting.away_points}{' '}
         {meeting.away_team}
-        {meeting.winner !== null ? ` (${meeting.winner} won)` : ''}
-      </dd>
-    </div>
+      </span>
+      {meeting.winner !== null && (
+        <span className={styles.gamelineOpp}> ({meeting.winner} won)</span>
+      )}
+    </li>
   )
 }
 
@@ -236,6 +243,7 @@ function verdictLine({ method, team_a, team_b }: ComparisonResultOut): string {
 export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
   const { method, team_a, team_b, head_to_head, common_opponents } = evidence
   const breakdownSupport = RATING_BREAKDOWN_BY_METHOD[method]
+  const headToHeadId = useId()
 
   return (
     <section aria-label="comparison evidence" className={styles.receipts}>
@@ -246,13 +254,15 @@ export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
         <p className={styles.ratingNote}>{breakdownSupport.explainer}</p>
       )}
 
-      <h4 className={styles.label}>Head to head</h4>
+      <h4 id={headToHeadId} className={styles.label}>
+        Head to head
+      </h4>
       {head_to_head.played ? (
-        <dl className={styles.kvGrid}>
+        <ul className={styles.list} aria-labelledby={headToHeadId}>
           {head_to_head.meetings.map((meeting) => (
-            <MeetingRow key={meeting.game_id} meeting={meeting} />
+            <MeetingLine key={meeting.game_id} meeting={meeting} />
           ))}
-        </dl>
+        </ul>
       ) : (
         <p className={styles.empty}>
           {team_a.team_name} and {team_b.team_name} did not play each other.

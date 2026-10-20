@@ -1124,5 +1124,53 @@ describe('ComparisonReceipts', () => {
 
       expect(consoleError).not.toHaveBeenCalled()
     })
+
+    /**
+     * Issue #250: the meetings used to sit inside the two-column `kvGrid`
+     * definition list, so two meetings landed side by side and, at phone
+     * width, each score line wrapped one word per line. Each meeting is now
+     * its own item in a list labelled by the "Head to head" heading.
+     */
+    it('lists each head-to-head meeting as its own item under the "Head to head" heading (issue #250)', () => {
+      render(<ComparisonReceipts evidence={vikingsVsBearsTwice} />)
+
+      const list = screen.getByRole('list', { name: 'Head to head' })
+      const items = within(list).getAllByRole('listitem')
+      expect(items).toHaveLength(2)
+      expect(items[0]).toHaveTextContent(
+        'Chicago Bears 31-30 Minnesota Vikings (Chicago Bears won)',
+      )
+      expect(items[1]).toHaveTextContent(
+        'Minnesota Vikings 23-20 Chicago Bears (Minnesota Vikings won)',
+      )
+    })
+
+    it('lists a tied head-to-head meeting with its score and no winner (issue #250)', () => {
+      const tied: ComparisonResultOut = {
+        ...vikingsVsBearsTwice,
+        head_to_head: {
+          played: true,
+          meetings: [
+            {
+              game_id: 330915003,
+              week: 2,
+              season_type: 'regular',
+              neutral_site: false,
+              home_team: 'Chicago Bears',
+              away_team: 'Minnesota Vikings',
+              home_points: 24,
+              away_points: 24,
+              winner: null,
+            },
+          ],
+        },
+      }
+      render(<ComparisonReceipts evidence={tied} />)
+
+      const list = screen.getByRole('list', { name: 'Head to head' })
+      const item = within(list).getByRole('listitem')
+      expect(item).toHaveTextContent('Chicago Bears 24-24 Minnesota Vikings')
+      expect(item.textContent).not.toContain('won')
+    })
   })
 })

@@ -361,6 +361,59 @@ export const TwoMeetingsPerSide: Story = {
   },
 }
 
+/** A phone-width frame (iPhone 12-15: 390 CSS px), so the layout is the test's own. */
+const PHONE_WIDTH_PX = 390
+
+/**
+ * Issue #250: two head-to-head meetings (every NFL division pairing) at
+ * phone width. Each meeting is its own full-width row, one under the other,
+ * and no score line wraps one word per line, which is what the old
+ * two-column `kvGrid` did here. The play function checks the rendered
+ * layout, so a regression to side-by-side meetings fails `test-storybook`.
+ */
+export const TwoMeetingsAtPhoneWidth: Story = {
+  args: TwoMeetingsPerSide.args,
+  decorators: [
+    (Story) => (
+      <div style={{ width: PHONE_WIDTH_PX }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const list = canvas.getByRole('list', { name: 'Head to head' })
+    const items = within(list).getAllByRole('listitem')
+    await expect(items).toHaveLength(2)
+    await expect(items[0]).toHaveTextContent(
+      'Minnesota Vikings 23-20 Chicago Bears (Minnesota Vikings won)',
+    )
+    await expect(items[1]).toHaveTextContent(
+      'Chicago Bears 31-30 Minnesota Vikings (Chicago Bears won)',
+    )
+
+    const listBox = list.getBoundingClientRect()
+    let previousBottom = -Infinity
+    for (const [index, item] of items.entries()) {
+      const box = item.getBoundingClientRect()
+      // Stacked, not side by side.
+      await expect(box.top).toBeGreaterThanOrEqual(previousBottom)
+      previousBottom = box.bottom
+      // Full block width.
+      await expect(Math.abs(box.width - listBox.width)).toBeLessThan(1)
+      // At most two lines for the score line: one word per line would be five.
+      const score = item.firstElementChild as HTMLElement
+      const style = getComputedStyle(score)
+      const lineHeight =
+        parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5
+      await expect(
+        score.getBoundingClientRect().height,
+        `meeting ${index + 1}'s score line wraps past two lines`,
+      ).toBeLessThanOrEqual(2 * lineHeight + 1)
+    }
+  },
+}
+
 /**
  * Demonstrates issue #31's hover-triggered rating breakdown -- hover (or Tab
  * to focus, then press Enter) either team's rating value to see the

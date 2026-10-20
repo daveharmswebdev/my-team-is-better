@@ -159,3 +159,9 @@
 .gamelineOpp {
   color: var(--ink-muted);
 }
+
+/* Issue #250: a head-to-head meeting's score line, one meeting per row. */
+.headToHeadScore {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
