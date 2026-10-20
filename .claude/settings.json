@@ -15,6 +15,16 @@
         ]
       },
       {
+        "matcher": "SubagentHandback",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$CLAUDE_PROJECT_DIR/.claude/hooks/delegation.py\"; [ -f \"$f\" ] || exit 0; exec uv run --quiet --script \"$f\" pre-handback",
+            "timeout": 60
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {

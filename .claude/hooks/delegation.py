@@ -7,13 +7,16 @@
     uv run --script .claude/hooks/delegation.py render-brief <brief.json>
     uv run --script .claude/hooks/delegation.py validate-brief <brief.json>
     uv run --script .claude/hooks/delegation.py validate-return --agent <name> <file>
+    uv run --script .claude/hooks/delegation.py pre-handback     (PreToolUse hook, stdin)
     uv run --script .claude/hooks/delegation.py subagent-stop    (SubagentStop hook, stdin)
 
 `render-brief` validates a brief against brief.schema.json and the ownership map, then
-prints the prompt to hand to the Agent tool. The SubagentStop hook validates a spoke's
-final message against return.schema.json plus the rules a schema can't express. If it
-doesn't validate, the spoke is asked to fix it, with the errors as feedback, up to
-MAX_RETURN_RETRIES times.
+prints the prompt to hand to the Agent tool. The two hooks validate a spoke's return
+against return.schema.json plus the rules a schema can't express, and ask the spoke to
+fix an invalid one, with the errors as feedback, up to MAX_RETURN_RETRIES times.
+`pre-handback` checks a SubagentHandback report before it is delivered and denies an
+invalid one; `subagent-stop` checks a return written as closing text, and reports on a
+handed-back one, which by then has already reached the coordinator (#305).
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ __all__ = [
     "ReturnCheck",
     "extract_json_block",
     "load_ownership",
+    "pre_handback",
     "render_brief",
     "subagent_stop",
     "validate_brief",
@@ -44,6 +48,7 @@ __all__ = [
 ]
 
 MAX_RETURN_RETRIES = 2
+HANDBACK_TOOL = "SubagentHandback"
 SCHEMAS_DIR = CLAUDE_DIR / "schemas"
 
 _FENCE = re.compile(r"```json[ \t]*\n(.*?)\n[ \t]*```", re.DOTALL)
@@ -272,15 +277,137 @@ def render_brief(brief: dict[str, Any], ownership: Ownership | None = None) -> s
     sections.append(
         "---\nFinish with exactly one fenced ```json block conforming to "
         "`.claude/schemas/return.schema.json`, with nothing outside it; your preloaded "
-        "spoke-protocol skill has the rules. A hook validates it when you stop and tells you "
-        "what to fix."
+        "spoke-protocol skill has the rules. A hook validates it when you hand it back and "
+        "tells you what to fix."
     )
     return "\n\n".join(sections) + "\n"
+
+
+def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
+    """The spoke's latest output, and whether it was a SubagentHandback report.
+
+    A spoke that hands back through the SubagentHandback tool ends with no closing
+    text, so `last_assistant_message` doesn't hold the report; the call's `message`
+    input in the transcript does (#305). Falls back to `last_assistant_message`
+    when the transcript can't be read.
+    """
+    fallback = payload.get("last_assistant_message")
+    fallback = fallback if isinstance(fallback, str) else ""
+    path = payload.get("agent_transcript_path")
+    try:
+        lines = Path(path).read_text().splitlines() if isinstance(path, str) else []
+    except OSError:
+        return fallback, False
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "assistant":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        for block in reversed(content if isinstance(content, list) else []):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "tool_use" and block.get("name") == HANDBACK_TOOL:
+                tool_input = block.get("input")
+                report = tool_input.get("message") if isinstance(tool_input, dict) else None
+                return (report if isinstance(report, str) else ""), True
+            if block.get("type") == "text" and str(block.get("text", "")).strip():
+                return str(block["text"]), False
+    return fallback, False
 
 
 def _state_file(state_dir: Path, agent_id: str) -> Path:
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", agent_id)
     return state_dir / f"{safe}.return-attempts"
+
+
+def _check(message: str, agent: str, ownership: Ownership) -> tuple[ReturnCheck, str]:
+    """Validate one return message; the status is meaningful only when it is valid."""
+    data, errors = extract_json_block(message)
+    if errors:
+        return ReturnCheck(errors=errors), ""
+    check = validate_return(data, agent_type=agent, ownership=ownership)
+    assert isinstance(data, dict)
+    return check, str(data.get("status"))
+
+
+def _count_attempt(state_dir: Path, agent_id: str, errors: list[str]) -> int:
+    """Count this invalid return, or clear the count after a valid one (returns 0).
+
+    The coordinator resumes a spoke for a later round under the same agent_id, so a
+    valid return resets the count rather than letting one round's retries spill into
+    the next.
+    """
+    counter = _state_file(state_dir, agent_id)
+    if not errors:
+        counter.unlink(missing_ok=True)
+        return 0
+    state_dir.mkdir(parents=True, exist_ok=True)
+    attempts = int(counter.read_text()) + 1 if counter.exists() else 1
+    counter.write_text(str(attempts))
+    return attempts
+
+
+def _retry_feedback(attempts: int, errors: list[str]) -> str:
+    return (
+        "Your return does not validate against .claude/schemas/return.schema.json "
+        f"(retry {attempts} of {MAX_RETURN_RETRIES}). Don't redo the work. Fix exactly "
+        "these problems and send the whole return again as one fenced ```json block with "
+        "nothing outside it:\n" + _bullets(errors)
+    )
+
+
+def _validated_note(agent: str, agent_id: str, check: ReturnCheck, status: str) -> str:
+    note = f"{agent} ({agent_id}) return validated against return.schema.json v2: status {status}."
+    if check.warnings:
+        note += " Scope warnings: " + "; ".join(check.warnings)
+    return note
+
+
+def _malformed_note(agent: str, agent_id: str, errors: list[str]) -> str:
+    return (
+        f"{agent} ({agent_id}): the return is still invalid after {MAX_RETURN_RETRIES} "
+        "retries. Record this round as failure_type malformed-return. Last errors: "
+        + "; ".join(errors)
+    )
+
+
+def pre_handback(
+    payload: dict[str, Any], ownership: Ownership, state_dir: Path
+) -> dict[str, Any] | None:
+    """PreToolUse on SubagentHandback: deny an invalid report before it is delivered.
+
+    This is the hook that can hold a return back. By the time SubagentStop fires, a
+    handed-back report has already reached the coordinator (#305), so a stop block
+    only keeps the spoke running. A denied handback never arrives, and the spoke
+    gets the errors as the tool's result. Past the retry cap the report goes through
+    and SubagentStop tells the coordinator it is malformed.
+    """
+    agent = payload.get("agent_type")
+    if not isinstance(agent, str) or agent not in ownership.agents:
+        return None
+    tool_input = payload.get("tool_input")
+    message = tool_input.get("message") if isinstance(tool_input, dict) else None
+    check, _ = _check(message if isinstance(message, str) else "", agent, ownership)
+    attempts = _count_attempt(state_dir, str(payload.get("agent_id") or agent), check.errors)
+    if not 0 < attempts <= MAX_RETURN_RETRIES:
+        return None
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "Not delivered: your caller has not received this report. "
+                + _retry_feedback(attempts, check.errors)
+                + f"\nThen call {HANDBACK_TOOL} again with the corrected return."
+            ),
+        }
+    }
 
 
 def subagent_stop(
@@ -289,45 +416,22 @@ def subagent_stop(
     agent = payload.get("agent_type")
     if not isinstance(agent, str) or agent not in ownership.agents:
         return None
-    message = payload.get("last_assistant_message")
-    data, errors = extract_json_block(message if isinstance(message, str) else "")
-    warnings: list[str] = []
-    if not errors:
-        check = validate_return(data, agent_type=agent, ownership=ownership)
-        errors, warnings = check.errors, check.warnings
-
+    message, handed_back = _final_output(payload)
+    check, status = _check(message, agent, ownership)
     agent_id = str(payload.get("agent_id") or agent)
-    if errors:
-        state_dir.mkdir(parents=True, exist_ok=True)
-        counter = _state_file(state_dir, agent_id)
-        attempts = int(counter.read_text()) + 1 if counter.exists() else 1
-        counter.write_text(str(attempts))
-        if attempts <= MAX_RETURN_RETRIES:
-            return {
-                "decision": "block",
-                "reason": (
-                    "Your return does not validate against .claude/schemas/return.schema.json "
-                    f"(retry {attempts} of {MAX_RETURN_RETRIES}). Don't redo the work. Fix "
-                    "exactly these problems and send the whole return again as one fenced "
-                    "```json block with nothing outside it:\n" + _bullets(errors)
-                ),
-            }
-        return {
-            "systemMessage": (
-                f"{agent} ({agent_id}): the return is still invalid after "
-                f"{MAX_RETURN_RETRIES} retries. Record this round as failure_type "
-                "malformed-return. Last errors: " + "; ".join(errors)
-            )
-        }
+    if handed_back:
+        # pre_handback already ran its retries; this report has been delivered, so
+        # blocking now would only keep the spoke running after its caller has it.
+        if check.errors:
+            return {"systemMessage": _malformed_note(agent, agent_id, check.errors)}
+        return {"systemMessage": _validated_note(agent, agent_id, check, status)}
 
-    assert isinstance(data, dict)
-    note = (
-        f"{agent} ({agent_id}) return validated against return.schema.json v2: "
-        f"status {data['status']}."
-    )
-    if warnings:
-        note += " Scope warnings: " + "; ".join(warnings)
-    return {"systemMessage": note}
+    attempts = _count_attempt(state_dir, agent_id, check.errors)
+    if attempts == 0:
+        return {"systemMessage": _validated_note(agent, agent_id, check, status)}
+    if attempts <= MAX_RETURN_RETRIES:
+        return {"decision": "block", "reason": _retry_feedback(attempts, check.errors)}
+    return {"systemMessage": _malformed_note(agent, agent_id, check.errors)}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -341,16 +445,18 @@ def main(argv: list[str] | None = None) -> int:
     validate.add_argument("--agent", required=True)
     validate.add_argument("path", help="a .json return, or a message with one ```json block")
     commands.add_parser("subagent-stop")
+    commands.add_parser("pre-handback")
     args = parser.parse_args(argv)
 
-    if args.command == "subagent-stop":
+    if args.command in ("subagent-stop", "pre-handback"):
+        hook = subagent_stop if args.command == "subagent-stop" else pre_handback
         try:
             payload = json.load(sys.stdin)
             scratch = payload.get("scratchpad_dir")
             base = Path(scratch) if isinstance(scratch, str) else Path(tempfile.gettempdir())
-            output = subagent_stop(payload, load_ownership(), base / "claude-delegation-hook")
+            output = hook(payload, load_ownership(), base / "claude-delegation-hook")
         except Exception as error:  # a broken hook must not trap a spoke
-            print(f"delegation subagent-stop: {error!r}", file=sys.stderr)
+            print(f"delegation {args.command}: {error!r}", file=sys.stderr)
             return 0
         if output is not None:
             print(json.dumps(output))
