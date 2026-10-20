@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://my-team-is-better.lol/schemas/return.schema.json",
   "title": "Spoke return, v2 (spoke -> coordinator)",
-  "description": "A spoke's final message is exactly one fenced ```json block conforming to this schema, with nothing outside the fence. Enforced, not requested: the SubagentStop hook (.claude/hooks/delegation.py) validates it, plus the semantic rules a schema can't express, and sends the errors back to the spoke to fix. After MAX_RETURN_RETRIES failed attempts it lets the spoke stop, and the coordinator records the round as malformed-return. Worked examples: .claude/schemas/examples/return.*.json.",
+  "description": "A spoke's final message is exactly one fenced ```json block conforming to this schema, with nothing outside the fence. Enforced, not requested: the hooks in .claude/hooks/delegation.py validate it, plus the semantic rules a schema can't express, and send the errors back to the spoke to fix. A SubagentHandback report is checked before it is delivered (PreToolUse pre-handback) and an invalid one is held back; a return written as closing text is checked at SubagentStop. After MAX_RETURN_RETRIES failed attempts the return is delivered as it is, and the coordinator records the round as malformed-return. Worked examples: .claude/schemas/examples/return.*.json.",
   "type": "object",
   "additionalProperties": false,
   "required": ["status", "agent", "base_sha", "findings"],
