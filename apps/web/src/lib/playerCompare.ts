@@ -27,6 +27,7 @@ import {
   recordedStatGroups,
   showsStarterRecord,
   statColumnsFor,
+  statValue,
 } from './playerStats'
 
 /** Player A's side of a comparison, or player B's. */
@@ -112,7 +113,11 @@ function statRow(column: TableStatColumn): RowSpec {
     fullLabel: column.fullLabel,
     note: column.note,
     text: (totals) => statText(totals, column.key),
-    marked: (a, b) => largerSide(a.stats[column.key], b.stats[column.key]),
+    marked: (a, b) =>
+      largerSide(
+        statValue(a.stats, column.key),
+        statValue(b.stats, column.key),
+      ),
   }
 }
 
@@ -210,7 +215,7 @@ const HEAD_TO_HEAD_PARTS: Record<StatGroup, readonly LinePart[]> = {
 
 /** "328 passing yards", "1 TD", "1.5 sacks", or "TDs not recorded". */
 function linePart(stats: PlayerStatsOut, part: LinePart): string {
-  const value = stats[part.key]
+  const value = statValue(stats, part.key)
   if (value === null) {
     return `${part.plural} ${NOT_RECORDED}`
   }

@@ -124,6 +124,21 @@ const MAX_STATS: ReadonlySet<keyof PlayerStatsOut> = new Set([
   'pt_long',
 ])
 
+/**
+ * One stat as sent, with a key missing from the payload read as `null`
+ * (#352). The type says every key is there, but an API one deploy behind
+ * the web build omits the newest ones (`rushing_first_downs` before #352
+ * landed), and a missing stat is one the source didn't send: "not
+ * recorded", never 0, never a crash.
+ */
+export function statValue(
+  stats: PlayerStatsOut,
+  key: keyof PlayerStatsOut,
+): number | null {
+  const value: number | null | undefined = stats[key]
+  return value === undefined ? null : value
+}
+
 /** One leaderboard stat cell: a value, "not recorded", or a `DASH` read as `NONE_LABEL`. */
 export type LeaderCell =
   { kind: 'value'; text: string } | { kind: 'not-recorded' } | { kind: 'none' }
@@ -170,7 +185,7 @@ export function leaderStatCell(
   if (key === 'fg_made_50_plus') {
     return valueCell(deriveKickingStats(stats).fg_made_50_plus)
   }
-  const value = stats[key]
+  const value = statValue(stats, key)
   if (value === null && MAX_STATS.has(key)) {
     return { kind: 'none' }
   }
@@ -419,6 +434,9 @@ export type TableStatColumn = StatColumn & LeaderColumnExtras
  * kicking is the kicking board's columns without its two derived ones (FG%
  * is a rate, and these tables show only what the API sent); defense keeps
  * the board's notes, so a defense column never shows without its note.
+ * Kicking and punting can share one table (a kicker who punted), where a
+ * bare "Long" or "Yards" is ambiguous, so those columns say which they are;
+ * the boards, which never mix the two, keep their own labels.
  */
 export const STAT_GROUP_COLUMNS: Record<StatGroup, readonly TableStatColumn[]> =
   {
@@ -429,10 +447,26 @@ export const STAT_GROUP_COLUMNS: Record<StatGroup, readonly TableStatColumn[]> =
       { key: 'rushing_fumbles_lost', label: 'Rushing fumbles lost' },
     ],
     receiving: RECEIVING_COLUMNS,
-    kicking: KICKING_COLUMNS.filter(isSentStatColumn),
-    punting: PUNTING_COLUMNS,
+    kicking: relabel(KICKING_COLUMNS.filter(isSentStatColumn), {
+      fg_long: 'FG long',
+    }),
+    punting: relabel(PUNTING_COLUMNS, {
+      pt_yards: 'Punt yards',
+      pt_net_yards: 'Net punt yards',
+    }),
     defense: DEFENSE_COLUMNS.filter(isSentStatColumn),
   }
+
+/** Board columns with some labels replaced, for a table that mixes groups. */
+function relabel(
+  columns: readonly TableStatColumn[],
+  labels: Partial<Record<keyof PlayerStatsOut, string>>,
+): TableStatColumn[] {
+  return columns.map((column) => {
+    const label = labels[column.key]
+    return label === undefined ? column : { ...column, label }
+  })
+}
 
 /** Whether a board column shows a stat the API sends, not one the board derives. */
 function isSentStatColumn(column: LeaderStatColumn): column is TableStatColumn {
@@ -443,9 +477,9 @@ function isSentStatColumn(column: LeaderStatColumn): column is TableStatColumn {
  * The stats that put a group on a player's table when one of them is a
  * recorded, non-zero number. Beyond each group's own columns: `targets`
  * (a target he never caught is still a receiving stat) and `pat_att`.
- * Defense leaves out solo tackles: quarterbacks, receivers and kickers make
- * one after a turnover or on a return (Kurt Warner's 1999), so a solo
- * tackle alone counts only for a player who recorded nothing else.
+ * Defense counts every one of its columns, solo tackles included, since the
+ * defense board ranks anyone with a solo tackle and his page must show it --
+ * except that `recordedStatGroups` drops a passer's lone solo tackles.
  */
 const GROUP_TRIGGERS: Record<StatGroup, readonly (keyof PlayerStatsOut)[]> = {
   passing: PASSING_COLUMNS.map((column) => column.key),
@@ -456,10 +490,13 @@ const GROUP_TRIGGERS: Record<StatGroup, readonly (keyof PlayerStatsOut)[]> = {
     'pat_att',
   ],
   punting: PUNTING_COLUMNS.map((column) => column.key),
-  defense: STAT_GROUP_COLUMNS.defense
-    .map((column) => column.key)
-    .filter((key) => key !== 'def_tackles_solo'),
+  defense: STAT_GROUP_COLUMNS.defense.map((column) => column.key),
 }
+
+/** The defense stats beyond solo tackles: any of them is defense, passer or not. */
+const DEFENSE_PLAYS = GROUP_TRIGGERS.defense.filter(
+  (key) => key !== 'def_tackles_solo',
+)
 
 /** What a player with nothing recorded gets: the quarterback columns, as before #352. */
 const FALLBACK_GROUPS: readonly StatGroup[] = ['passing', 'rushing']
@@ -470,7 +507,7 @@ function recordedIn(
 ): boolean {
   return stats.some((line) =>
     keys.some((key) => {
-      const value = line[key]
+      const value = statValue(line, key)
       return value !== null && value !== 0
     }),
   )
@@ -481,22 +518,22 @@ function recordedIn(
  * every stat line given (issue #352). A group shows when one of its stats is
  * a recorded, non-zero number; `null` (not tracked) and 0 never put a group
  * on the table, though inside a shown group a `null` still reads "not
- * recorded". Solo tackles alone mean defense only for a player with nothing
- * else, and a player with nothing at all gets passing and rushing.
+ * recorded". Any defense stat means defense, solo tackles included (the
+ * defense board ranks on them), except a passer's solo tackles alone: the
+ * tackle a quarterback makes after his own interception (Kurt Warner's
+ * 1999) is not a defensive career. A player with nothing at all gets
+ * passing and rushing.
  */
 export function recordedStatGroups(
   stats: readonly PlayerStatsOut[],
 ): StatGroup[] {
+  const passed = recordedIn(stats, GROUP_TRIGGERS.passing)
   const groups = STAT_GROUPS.filter((group) =>
-    recordedIn(stats, GROUP_TRIGGERS[group]),
+    group === 'defense' && passed
+      ? recordedIn(stats, DEFENSE_PLAYS)
+      : recordedIn(stats, GROUP_TRIGGERS[group]),
   )
-  if (groups.length > 0) {
-    return groups
-  }
-  if (recordedIn(stats, ['def_tackles_solo'])) {
-    return ['defense']
-  }
-  return [...FALLBACK_GROUPS]
+  return groups.length > 0 ? groups : [...FALLBACK_GROUPS]
 }
 
 /**

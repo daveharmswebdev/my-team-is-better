@@ -628,6 +628,13 @@ describe('the career and compare columns (issue #352)', () => {
     'rushing_fumbles_lost',
   ]
   const RECEIVING_KEYS = ['receptions', 'receiving_yards', 'receiving_tds']
+  const DEFENSE_KEYS = [
+    'def_sacks',
+    'def_interceptions',
+    'def_tackles_solo',
+    'def_fumbles_forced',
+    'def_pass_defended',
+  ]
 
   it('gives a quarterback passing and rushing, the passing board in order', () => {
     expect(recordedStatGroups([KURT_WARNER_REGULAR.stats])).toEqual([
@@ -651,14 +658,17 @@ describe('the career and compare columns (issue #352)', () => {
     )
   })
 
-  it('gives a back rushing, with first downs and fumbles lost, then receiving', () => {
+  it('gives a back rushing, with first downs and fumbles lost, then receiving, and defense for his solo tackles', () => {
+    expect(EDGERRIN_JAMES.stats.def_tackles_solo).toBe(3)
     expect(recordedStatGroups([EDGERRIN_JAMES.stats])).toEqual([
       'rushing',
       'receiving',
+      'defense',
     ])
     expect(keysFor(EDGERRIN_JAMES.stats)).toEqual([
       ...RUSHING_KEYS,
       ...RECEIVING_KEYS,
+      ...DEFENSE_KEYS,
     ])
   })
 
@@ -682,16 +692,25 @@ describe('the career and compare columns (issue #352)', () => {
     expect(recordedStatGroups([OLINDO_MARE.stats])).toEqual([
       'kicking',
       'punting',
+      'defense',
     ])
   })
 
   it('gives a punter punting', () => {
-    expect(recordedStatGroups([CHRIS_GARDOCKI.stats])).toEqual(['punting'])
-    expect(keysFor(CHRIS_GARDOCKI.stats)).toEqual([
+    expect(
+      recordedStatGroups([{ ...CHRIS_GARDOCKI.stats, def_tackles_solo: 0 }]),
+    ).toEqual(['punting'])
+    expect(keysFor({ ...CHRIS_GARDOCKI.stats, def_tackles_solo: 0 })).toEqual([
       'pt_att',
       'pt_yards',
       'pt_net_yards',
       'pt_inside_20',
+    ])
+    // His one solo tackle (on a return) puts him on the defense board, so
+    // his page shows it.
+    expect(recordedStatGroups([CHRIS_GARDOCKI.stats])).toEqual([
+      'punting',
+      'defense',
     ])
   })
 
@@ -706,11 +725,75 @@ describe('the career and compare columns (issue #352)', () => {
     ])
   })
 
-  it('gives a defender with nothing but solo tackles defense, and a receiver with one only receiving', () => {
+  it('gives a defender with nothing but solo tackles defense, and a receiver on the defense board for a tackle defense too', () => {
     const [safety, receiver] = LEADERS_BY_DEF_SACKS_TAIL.rows
     expect(recordedStatGroups([safety!.stats])).toEqual(['defense'])
     expect(receiver!.stats.def_tackles_solo).toBe(1)
-    expect(recordedStatGroups([receiver!.stats])).toEqual(['receiving'])
+    expect(recordedStatGroups([receiver!.stats])).toEqual([
+      'receiving',
+      'defense',
+    ])
+  })
+
+  /**
+   * Round 2 of #352: the defense board ranks anyone with a solo tackle, so
+   * Fred McCrary (16 solo tackles, 37 receptions, nothing else on defense)
+   * must find a Solo tackles column on his page. Only a passer's tackle --
+   * the one after his own interception -- stays off his table.
+   */
+  it('gives a player with solo tackles and receptions receiving and defense (Fred McCrary)', () => {
+    const stats = {
+      ...CRIS_CARTER.stats,
+      receptions: 37,
+      receiving_yards: 201,
+      receiving_tds: 1,
+      def_tackles_solo: 16,
+    }
+    expect(recordedStatGroups([stats])).toEqual(['receiving', 'defense'])
+    expect(keysFor(stats)).toContain('def_tackles_solo')
+  })
+
+  it('keeps a solo tackle off the table of a player who passed', () => {
+    expect(
+      recordedStatGroups([
+        { ...KURT_WARNER_REGULAR.stats, def_tackles_solo: 3 },
+      ]),
+    ).toEqual(['passing', 'rushing'])
+    // A sack or interception is still defense, passer or not.
+    expect(
+      recordedStatGroups([
+        { ...KURT_WARNER_REGULAR.stats, def_interceptions: 1 },
+      ]),
+    ).toContain('defense')
+  })
+
+  it('treats a stat missing from the payload like null: not recorded, never a group, never a throw', () => {
+    // An API that hasn't deployed the two #352 fields yet sends neither key.
+    const partial: Partial<PlayerStatsOut> = { ...EDGERRIN_JAMES.stats }
+    delete partial.rushing_first_downs
+    delete partial.rushing_fumbles_lost
+    const stats = partial as PlayerStatsOut
+    expect('rushing_first_downs' in stats).toBe(false)
+    expect(() => statColumnsFor([stats])).not.toThrow()
+    expect(recordedStatGroups([stats])).toEqual([
+      'rushing',
+      'receiving',
+      'defense',
+    ])
+    expect(leaderStatCell(stats, 'rushing_first_downs')).toEqual({
+      kind: 'not-recorded',
+    })
+    expect(leaderStatCell(stats, 'rushing_fumbles_lost')).toEqual({
+      kind: 'not-recorded',
+    })
+    expect(
+      recordedStatGroups([
+        {
+          ...UNRECORDED_STATS,
+          carries: undefined,
+        } as unknown as PlayerStatsOut,
+      ]),
+    ).toEqual(['passing', 'rushing'])
   })
 
   it('shows a group either player recorded, for a comparison', () => {
@@ -771,19 +854,40 @@ describe('the career and compare columns (issue #352)', () => {
     expect(STAT_GROUP_COLUMNS.receiving).toEqual(
       LEADER_BOARD_COLUMNS.receiving.stats,
     )
-    expect(STAT_GROUP_COLUMNS.punting).toEqual(
-      LEADER_BOARD_COLUMNS.punting.stats,
-    )
     expect(STAT_GROUP_COLUMNS.defense).toEqual(
       LEADER_BOARD_COLUMNS.defense.stats,
     )
-    // The kicking board's own columns, without its two derived ones: FG% is
-    // a rate, and these tables show only what the API sent.
-    expect(STAT_GROUP_COLUMNS.kicking).toEqual(
-      LEADER_BOARD_COLUMNS.kicking.stats.filter(
-        (column) => column.key !== 'fg_pct' && column.key !== 'fg_made_50_plus',
-      ),
+    // The kicking board's own stats, without its two derived ones (FG% is a
+    // rate, and these tables show only what the API sent). Kicking and
+    // punting can share a table, so each says which it is.
+    expect(STAT_GROUP_COLUMNS.kicking).toEqual([
+      { key: 'fg_made', label: 'FG made' },
+      { key: 'fg_att', label: 'FG att' },
+      { key: 'fg_long', label: 'FG long' },
+      { key: 'pat_made', label: 'XP made' },
+    ])
+    expect(STAT_GROUP_COLUMNS.punting).toEqual([
+      { key: 'pt_att', label: 'Punts' },
+      { key: 'pt_yards', label: 'Punt yards' },
+      { key: 'pt_net_yards', label: 'Net punt yards' },
+      { key: 'pt_inside_20', label: 'Inside 20' },
+    ])
+  })
+
+  it('gives every column of every group a label no other group uses', () => {
+    const labels = Object.values(STAT_GROUP_COLUMNS).flatMap((columns) =>
+      columns.map((column) => column.label),
     )
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it("leaves the kicking and punting boards' own labels as they were", () => {
+    expect(
+      LEADER_BOARD_COLUMNS.punting.stats.map((column) => column.label),
+    ).toEqual(['Punts', 'Yards', 'Net yards', 'Inside 20'])
+    expect(
+      LEADER_BOARD_COLUMNS.kicking.stats.map((column) => column.label),
+    ).toEqual(['FG made', 'FG att', 'FG%', '50+', 'Long', 'XP made'])
   })
 
   it('adds the two new rushing stats to no board', () => {

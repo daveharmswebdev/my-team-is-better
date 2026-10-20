@@ -56,6 +56,7 @@ export const NonPassingLine: Story = {
         ...game,
         a_stats: {
           ...EDGERRIN_JAMES.stats,
+          def_tackles_solo: 0,
           carries: 18,
           rushing_yards: 97,
           rushing_tds: 1,

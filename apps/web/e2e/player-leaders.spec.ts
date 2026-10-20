@@ -629,7 +629,13 @@ test("Tyreek Hill's name on the receiving board opens his receiving career, with
   const regular = page.getByRole('table', {
     name: 'Tyreek Hill, regular season',
   })
-  await expect(regular.locator('thead th')).toHaveText([
+  await expect(
+    regular.getByRole('columnheader', { name: 'Receptions' }),
+  ).toBeVisible()
+  // Rushing, receiving, then defense for his 5 solo tackles (#352 round 2).
+  expect(
+    (await regular.locator('thead th').allTextContents()).slice(0, 11),
+  ).toEqual([
     'Season',
     'Teams',
     'Games',
@@ -647,9 +653,18 @@ test("Tyreek Hill's name on the receiving board opens his receiving career, with
   await expect(line).toContainText('1,799')
   await expect(line).toContainText('119')
 
+  await expect(
+    regular.getByRole('columnheader', { name: 'Solo tackles' }),
+  ).toBeVisible()
+
   // No carry in the playoffs, so no rushing columns there either.
   const playoffs = page.getByRole('table', { name: 'Tyreek Hill, playoffs' })
-  await expect(playoffs.locator('thead th')).toHaveText([
+  await expect(
+    playoffs.getByRole('columnheader', { name: 'Receptions' }),
+  ).toBeVisible()
+  expect(
+    (await playoffs.locator('thead th').allTextContents()).slice(0, 6),
+  ).toEqual([
     'Season',
     'Teams',
     'Games',
@@ -663,6 +678,37 @@ test("Tyreek Hill's name on the receiving board opens his receiving career, with
     await expect(page.getByRole('columnheader', { name: gone })).toHaveCount(0)
   }
   await expect(page.getByText(/Starter records follow/)).toHaveCount(0)
+})
+
+// Round 2 of #352: the defense board ranks anyone with a solo tackle, so a
+// back who reached it on tackles alone sees them on his page. On the
+// fixture, Fred McCrary (RB, 1999) is #844 by solo tackles: 16 of them, 37
+// catches for 201 yards, and no other defensive stat.
+test("Fred McCrary's name on the defense board by solo tackles opens a career with his Solo tackles column", async ({
+  page,
+}) => {
+  await page.goto(
+    '/nfl/leaders?category=defense&season_type=regular&sort=def_tackles_solo&offset=850',
+  )
+
+  await page.getByRole('link', { name: 'Fred McCrary' }).click()
+
+  await expect(page).toHaveURL(/\/nfl\/players\/2215351959$/)
+  const regular = page.getByRole('table', {
+    name: 'Fred McCrary, regular season',
+  })
+  await expect(
+    regular.getByRole('columnheader', { name: 'Solo tackles' }),
+  ).toBeVisible()
+  await expect(
+    regular.getByRole('columnheader', { name: 'Receptions' }),
+  ).toBeVisible()
+  const line = regular.locator('tbody tr').first()
+  await expect(line).toContainText('16')
+  await expect(line).toContainText('201')
+  await expect(
+    page.getByRole('columnheader', { name: 'Passing yards' }),
+  ).toHaveCount(0)
 })
 
 test("Olindo Mare's name on the kicking board opens his kicking career", async ({
@@ -680,7 +726,7 @@ test("Olindo Mare's name on the kicking board opens his kicking career", async (
     'Games',
     'FG made',
     'FG att',
-    'Long',
+    'FG long',
     'XP made',
   ])
   const regular = page.getByRole('table', {
@@ -690,6 +736,17 @@ test("Olindo Mare's name on the kicking board opens his kicking career", async (
   await expect(
     regular.getByRole('columnheader', { name: 'Punts' }),
   ).toBeVisible()
+  // Kicking and punting share this table, so no column is a bare "Long" or "Yards".
+  for (const label of ['FG long', 'Punt yards', 'Net punt yards']) {
+    await expect(
+      regular.getByRole('columnheader', { name: label, exact: true }),
+    ).toBeVisible()
+  }
+  for (const label of ['Long', 'Yards', 'Net yards']) {
+    await expect(
+      regular.getByRole('columnheader', { name: label, exact: true }),
+    ).toHaveCount(0)
+  }
   await expect(regular.locator('tbody tr').first()).toContainText('39')
   await expect(
     page.getByRole('columnheader', { name: 'Passing yards' }),

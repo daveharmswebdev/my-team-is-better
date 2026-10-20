@@ -163,7 +163,7 @@ describe('comparisonRows (issue #301)', () => {
  * passed or started.
  */
 describe('comparisonRows for non-quarterbacks (issue #352)', () => {
-  it('gives a receiver and a back the rushing and receiving rows, and no passing or record row', () => {
+  it('gives a receiver and a back the rushing, receiving and (for their solo tackles) defense rows, and no passing or record row', () => {
     const rows = comparisonRows(
       HARRISON_VS_JAMES.a.regular_season,
       HARRISON_VS_JAMES.b.regular_season,
@@ -179,6 +179,11 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
       'Receptions',
       'Receiving yards',
       'Receiving TDs',
+      'Sacks',
+      'INT',
+      'Solo tackles',
+      'FF',
+      'PD',
     ])
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Receiving yards']).toMatchObject({
@@ -193,7 +198,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
     })
   })
 
-  it('gives a kicker and a punter the kicking and punting rows, a missing longest field goal as a dash, unmarked', () => {
+  it('gives a kicker and a punter the kicking, punting and (for their solo tackles) defense rows, a missing longest field goal as a dash, unmarked', () => {
     const rows = comparisonRows(
       MARE_VS_GOWIN.a.regular_season,
       MARE_VS_GOWIN.b.regular_season,
@@ -203,16 +208,27 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
       'Games',
       'FG made',
       'FG att',
-      'Long',
+      'FG long',
       'XP made',
       'Punts',
-      'Yards',
-      'Net yards',
+      'Punt yards',
+      'Net punt yards',
       'Inside 20',
+      'Sacks',
+      'INT',
+      'Solo tackles',
+      'FF',
+      'PD',
     ])
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
-    expect(byLabel['Long']).toMatchObject({ a: '54', b: DASH, marked: null })
+    expect(byLabel['FG long']).toMatchObject({ a: '54', b: DASH, marked: null })
     expect(byLabel['Punts']).toMatchObject({ a: '1', b: '81', marked: 'b' })
+    expect(byLabel['Solo tackles']).toMatchObject({
+      a: '3',
+      b: '4',
+      marked: 'b',
+      note: 'unofficial',
+    })
   })
 
   it('keeps the rows of the player who has totals when the other has none', () => {
@@ -222,7 +238,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
       'Games',
       'FG made',
       'FG att',
-      'Long',
+      'FG long',
       'XP made',
     ])
   })
@@ -254,6 +270,7 @@ describe('headToHeadStatLine (issue #352)', () => {
     expect(
       headToHeadStatLine('Wildcat Starter', {
         ...EDGERRIN_JAMES.stats,
+        def_tackles_solo: 0,
         carries: 18,
         rushing_yards: 97,
         rushing_tds: 1,

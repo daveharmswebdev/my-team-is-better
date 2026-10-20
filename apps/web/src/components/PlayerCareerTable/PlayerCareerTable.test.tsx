@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
+import type { PlayerStatsOut } from '../../lib/api/types'
 import {
   CAREER_WITH_NULL_STATS,
   EDGERRIN_JAMES_CAREER,
@@ -251,7 +252,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     expect(cellUnder(row, 'Rushing fumbles lost')).toHaveTextContent(/^2$/)
   })
 
-  it('gives a receiver his receiving and rushing columns, and no passing column or starter record', () => {
+  it('gives a receiver his rushing, receiving and defense columns, and no passing column or starter record', () => {
     const [regular] = MARVIN_HARRISON_CAREER.seasons
     render(
       <PlayerCareerTable
@@ -262,7 +263,10 @@ describe('PlayerCareerTable (issue #296)', () => {
     )
 
     expect(
-      screen.getAllByRole('columnheader').map((header) => header.textContent),
+      screen
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent)
+        .slice(0, 11),
     ).toEqual([
       'Season',
       'Teams',
@@ -276,6 +280,10 @@ describe('PlayerCareerTable (issue #296)', () => {
       'Receiving yards',
       'Receiving TDs',
     ])
+    // His solo tackles put him on the defense board, so defense follows.
+    expect(
+      screen.getByRole('columnheader', { name: 'Solo tackles' }),
+    ).toBeInTheDocument()
     const row = screen.getByRole('rowheader', { name: '1999' })
       .parentElement as HTMLElement
     expect(cellUnder(row, 'Receptions')).toHaveTextContent(/^115$/)
@@ -284,7 +292,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     expect(cellUnder(row, 'Carries')).toHaveTextContent(/^1$/)
   })
 
-  it('gives a kicker his kicking columns, and punting when he punted', () => {
+  it('gives a kicker his kicking columns, punting when he punted, and defense for his solo tackles', () => {
     const [, postseason] = OLINDO_MARE_CAREER.seasons
     render(
       <PlayerCareerTable
@@ -295,20 +303,27 @@ describe('PlayerCareerTable (issue #296)', () => {
     )
 
     expect(
-      screen.getAllByRole('columnheader').map((header) => header.textContent),
+      screen
+        .getAllByRole('columnheader')
+        .map((header) => header.textContent)
+        .slice(0, 11),
     ).toEqual([
       'Season',
       'Teams',
       'Games',
       'FG made',
       'FG att',
-      'Long',
+      'FG long',
       'XP made',
       'Punts',
-      'Yards',
-      'Net yards',
+      'Punt yards',
+      'Net punt yards',
       'Inside 20',
     ])
+    // His solo tackles put him on the defense board, so defense follows.
+    expect(
+      screen.getByRole('columnheader', { name: 'Solo tackles' }),
+    ).toBeInTheDocument()
     const [regularRow, postseasonRow] = screen
       .getAllByRole('rowheader')
       .map((header) => header.parentElement as HTMLElement) as [
@@ -316,10 +331,57 @@ describe('PlayerCareerTable (issue #296)', () => {
       HTMLElement,
     ]
     expect(cellUnder(regularRow, 'FG made')).toHaveTextContent(/^39$/)
-    expect(cellUnder(regularRow, 'Long')).toHaveTextContent(/^54$/)
+    expect(cellUnder(regularRow, 'FG long')).toHaveTextContent(/^54$/)
     expect(cellUnder(regularRow, 'Punts')).toHaveTextContent(/^1$/)
     expect(postseason!.stats.pt_att).toBe(0)
     expect(cellUnder(postseasonRow, 'Punts')).toHaveTextContent(/^0$/)
+  })
+
+  it('names each kicking and punting column unambiguously when both share the table', () => {
+    render(
+      <PlayerCareerTable
+        caption="Olindo Mare"
+        lines={OLINDO_MARE_CAREER.seasons}
+        totals={null}
+      />,
+    )
+
+    const headers = screen
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent)
+    expect(headers).toEqual(
+      expect.arrayContaining(['FG long', 'Punt yards', 'Net punt yards']),
+    )
+    for (const bare of ['Long', 'Yards', 'Net yards']) {
+      expect(headers).not.toContain(bare)
+    }
+    expect(new Set(headers).size).toBe(headers.length)
+  })
+
+  it('renders a line whose payload lacks the two new rushing fields, reading them "not recorded"', () => {
+    const [regular] = EDGERRIN_JAMES_CAREER.seasons
+    // An API that hasn't deployed the two #352 fields yet sends neither key.
+    const stats: Partial<PlayerStatsOut> = { ...regular!.stats }
+    delete stats.rushing_first_downs
+    delete stats.rushing_fumbles_lost
+    const line = { ...regular!, stats: stats as PlayerStatsOut }
+    render(
+      <PlayerCareerTable
+        caption="Edgerrin James"
+        lines={[line]}
+        totals={null}
+      />,
+    )
+
+    const row = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    expect(cellUnder(row, 'Rushing first downs')).toHaveTextContent(
+      /^not recorded$/,
+    )
+    expect(cellUnder(row, 'Rushing fumbles lost')).toHaveTextContent(
+      /^not recorded$/,
+    )
+    expect(cellUnder(row, 'Carries')).toHaveTextContent(/^369$/)
   })
 
   it('reads a missing longest field goal as "none", not 0 and not "not recorded"', () => {
@@ -334,7 +396,7 @@ describe('PlayerCareerTable (issue #296)', () => {
     const [row] = screen
       .getAllByRole('rowheader')
       .map((header) => header.parentElement as HTMLElement)
-    const long = cellUnder(row!, 'Long')
+    const long = cellUnder(row!, 'FG long')
     expect(long).toHaveTextContent('none')
     expect(long).not.toHaveTextContent(/0|not recorded/)
   })
