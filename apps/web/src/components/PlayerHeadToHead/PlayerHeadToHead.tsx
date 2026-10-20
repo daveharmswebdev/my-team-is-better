@@ -1,11 +1,11 @@
-import type { PlayerHeadToHeadOut, PlayerStatsOut } from '../../lib/api/types'
+import type { PlayerHeadToHeadOut } from '../../lib/api/types'
 import {
   GAMES_LIST_LABEL,
   formatGameWhen,
   headToHeadRecordCopy,
+  headToHeadStatLine,
   neverMetCopy,
 } from '../../lib/playerCompare'
-import { NOT_RECORDED, formatStat } from '../../lib/playerStats'
 import styles from './PlayerHeadToHead.module.css'
 
 export interface PlayerHeadToHeadProps {
@@ -15,35 +15,12 @@ export interface PlayerHeadToHeadProps {
   headToHead: PlayerHeadToHeadOut
 }
 
-/** "328 passing yards", "1 TD", or "TDs not recorded". */
-function statPart(
-  value: number | null,
-  singular: string,
-  plural: string,
-): string {
-  if (value === null) {
-    return `${plural} ${NOT_RECORDED}`
-  }
-  return `${formatStat(value)} ${value === 1 ? singular : plural}`
-}
-
-/** A starter's passing line in one game; no stat line at all is "not recorded". */
-function passingLine(name: string, stats: PlayerStatsOut | null): string {
-  if (stats === null) {
-    return `${name}: ${NOT_RECORDED}`
-  }
-  return `${name}: ${[
-    statPart(stats.passing_yards, 'passing yard', 'passing yards'),
-    statPart(stats.passing_tds, 'TD', 'TDs'),
-    statPart(stats.passing_interceptions, 'INT', 'INTs'),
-  ].join(', ')}`
-}
-
 /**
  * Two players' games against each other as opposing starting quarterbacks,
  * of one season type (issue #301): `a`'s record against `b`, then each game
- * in the API's chronological order with both teams' points and each QB's
- * passing line. Games neither started, or started for the same team, are not
+ * in the API's chronological order with both teams' points and each
+ * starter's line: the stat groups he recorded in that game, by the career
+ * table's rule (issue #352, `headToHeadStatLine`). Games neither started, or started for the same team, are not
  * in the API's list, and nothing here adds them.
  */
 export function PlayerHeadToHead({
@@ -79,8 +56,12 @@ export function PlayerHeadToHead({
             <p className={styles.score}>
               {`${game.a_team} ${game.a_points}, ${game.b_team} ${game.b_points}`}
             </p>
-            <p className={styles.line}>{passingLine(aName, game.a_stats)}</p>
-            <p className={styles.line}>{passingLine(bName, game.b_stats)}</p>
+            <p className={styles.line}>
+              {headToHeadStatLine(aName, game.a_stats)}
+            </p>
+            <p className={styles.line}>
+              {headToHeadStatLine(bName, game.b_stats)}
+            </p>
           </li>
         ))}
       </ol>

@@ -12,6 +12,7 @@ import {
   CAREER_WITH_NULL_STATS,
   DATA_SOURCES,
   KURT_WARNER_CAREER,
+  MARVIN_HARRISON_CAREER,
 } from '../../lib/playerFixtures'
 import {
   PLAYER_NOT_FOUND_COPY,
@@ -144,6 +145,25 @@ describe('PlayerCareerPage (issue #296)', () => {
     expect(
       screen.getByRole('table', { name: 'Kurt Warner, playoffs' }),
     ).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
+  })
+
+  it("shows a receiver's receiving columns, and no passing column or starter-record note (#352)", async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(MARVIN_HARRISON_CAREER)
+
+    renderPage('/nfl/players/2009851825')
+
+    const regular = await screen.findByRole('table', {
+      name: 'Marvin Harrison, regular season',
+    })
+    const headers = within(regular)
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent)
+    expect(headers).toContain('Receptions')
+    expect(headers).toContain('Receiving yards')
+    expect(headers).not.toContain('Passing yards')
+    expect(headers).not.toContain('Starter record')
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+    expect(regular).not.toHaveAccessibleDescription()
   })
 
   it('shows no sack columns (#298)', async () => {

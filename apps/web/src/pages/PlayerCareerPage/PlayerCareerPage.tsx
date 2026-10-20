@@ -18,6 +18,7 @@ import {
   PLAYER_NOT_FOUND_COPY,
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
+  showsStarterRecord,
 } from '../../lib/playerStats'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
 import styles from './PlayerCareerPage.module.css'
@@ -145,6 +146,9 @@ function Career({
     ['regular', career.regular_season],
     ['postseason', career.postseason],
   ]
+  // The note explains the starter record, so it shows only with one: a
+  // receiver's page has no record column for it to describe (#352).
+  const showsRecordNote = showsStarterRecord(career.seasons)
   return (
     <>
       <header className={styles.header}>
@@ -160,9 +164,11 @@ function Career({
         </Link>
       </p>
 
-      <p id={noteId} className={styles.note}>
-        {STARTER_RECORD_NOTE}
-      </p>
+      {showsRecordNote && (
+        <p id={noteId} className={styles.note}>
+          {STARTER_RECORD_NOTE}
+        </p>
+      )}
 
       {sections.map(([seasonType, totals]) => {
         // Kept in the API's order: filtering by season type, not sorting.
@@ -187,7 +193,7 @@ function Career({
                 caption={`${career.display_name}, ${label.toLowerCase()}`}
                 lines={lines}
                 totals={totals}
-                describedBy={noteId}
+                describedBy={showsRecordNote ? noteId : undefined}
               />
             )}
           </section>

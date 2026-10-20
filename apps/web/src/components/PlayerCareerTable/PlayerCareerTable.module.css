@@ -90,3 +90,37 @@
   font-weight: 400;
   color: var(--ink-muted);
 }
+
+/* An abbreviated header ("INT", issue #352): its title names it in full. */
+.abbr {
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
+/* The marker pairing a header with its note under the table (issue #352). */
+.marker {
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--leather);
+}
+
+/* A founder's column note (#316), under the table whose headers it covers. */
+.note {
+  margin: var(--sp-2) 0 0;
+  max-width: 48rem;
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+}
+
+/* Read by assistive tech in place of a visible dash or abbreviation. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

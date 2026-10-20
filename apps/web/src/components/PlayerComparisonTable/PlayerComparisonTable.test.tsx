@@ -3,10 +3,17 @@ import { describe, expect, it } from 'vitest'
 import type { PlayerCareerTotalsOut } from '../../lib/api/types'
 import {
   CAREER_WITH_NULL_STATS,
+  HARRISON_VS_JAMES,
   KURT_WARNER_CAREER,
+  MARE_VS_GOWIN,
   STEVE_MCNAIR_CAREER,
+  TJ_WATT_CAREER,
 } from '../../lib/playerFixtures'
 import { MARK_SCREEN_READER_TEXT } from '../../lib/playerCompare'
+import {
+  DEFENSE_EARLY_ERA_NOTE,
+  DEFENSE_UNOFFICIAL_NOTE,
+} from '../../lib/playerStats'
 import { PlayerComparisonTable } from './PlayerComparisonTable'
 import type { PlayerComparisonTableProps } from './PlayerComparisonTable'
 
@@ -68,6 +75,8 @@ describe('PlayerComparisonTable (issue #301)', () => {
       'Carries',
       'Rushing yards',
       'Rushing TDs',
+      'Rushing first downs',
+      'Rushing fumbles lost',
     ])
     expect(table).not.toHaveTextContent(/sack/i)
   })
@@ -147,35 +156,15 @@ describe('PlayerComparisonTable (issue #301)', () => {
   })
 
   /**
-   * Issue #314: the API now publishes six receiving stats, and the leaders
-   * page has a receiving board. Non-QB compare pages are out of epic #311's
-   * scope, so this table's rows are exactly what they were.
+   * Issue #352: the rows are the stat groups either player recorded, so two
+   * receivers, or a kicker and a punter, are compared on their own stats.
    */
-  it('keeps its rows exactly as they were, with no receiving stat, when the totals carry receiving numbers', () => {
-    const withReceiving = (
-      totals: PlayerCareerTotalsOut,
-    ): PlayerCareerTotalsOut => ({
-      ...totals,
-      stats: {
-        ...totals.stats,
-        receptions: 7771,
-        targets: 7772,
-        receiving_yards: 7773,
-        receiving_tds: 7774,
-        receiving_first_downs: 7775,
-        receiving_fumbles_lost: 7776,
-      },
-    })
+  it('compares a receiver and a back on rushing and receiving, with no passing or record row', () => {
     const table = renderTable(
-      withReceiving(WARNER_REGULAR),
-      withReceiving(MCNAIR_REGULAR),
+      HARRISON_VS_JAMES.a.regular_season,
+      HARRISON_VS_JAMES.b.regular_season,
     )
 
-    expect(
-      within(table)
-        .getAllByRole('columnheader')
-        .map((header) => header.textContent),
-    ).toEqual(['Total', 'Kurt Warner', 'Steve McNair'])
     expect(
       within(table)
         .getAllByRole('rowheader')
@@ -183,17 +172,68 @@ describe('PlayerComparisonTable (issue #301)', () => {
     ).toEqual([
       'Seasons',
       'Games',
-      'Starter record',
-      'Completions',
-      'Attempts',
-      'Passing yards',
-      'Passing TDs',
-      'Interceptions',
       'Carries',
       'Rushing yards',
       'Rushing TDs',
+      'Rushing first downs',
+      'Rushing fumbles lost',
+      'Receptions',
+      'Receiving yards',
+      'Receiving TDs',
     ])
-    expect(table).not.toHaveTextContent(/recei|target|777\d|7,77\d/i)
+    const [harrison, james] = cellsOf(table, 'Receptions')
+    expect(harrison).toHaveTextContent('115')
+    expect(isMarked(harrison)).toBe(true)
+    expect(james).toHaveTextContent('62')
+    expect(isMarked(james)).toBe(false)
+  })
+
+  it('compares a kicker and a punter on kicking and punting, a missing longest field goal read as "none"', () => {
+    const table = renderTable(
+      MARE_VS_GOWIN.a.regular_season,
+      MARE_VS_GOWIN.b.regular_season,
+    )
+
+    expect(
+      within(table)
+        .getAllByRole('rowheader')
+        .map((header) => header.textContent),
+    ).toEqual([
+      'Seasons',
+      'Games',
+      'FG made',
+      'FG att',
+      'Long',
+      'XP made',
+      'Punts',
+      'Yards',
+      'Net yards',
+      'Inside 20',
+    ])
+    const [mare, gowin] = cellsOf(table, 'Long')
+    expect(mare).toHaveTextContent('54')
+    expect(gowin).toHaveTextContent('none')
+    expect(gowin).not.toHaveTextContent(/0|not recorded/)
+    expect(isMarked(mare)).toBe(false)
+    expect(isMarked(cellsOf(table, 'Punts')[1])).toBe(true)
+  })
+
+  it('describes each defense row a note covers by that note', () => {
+    const watt = TJ_WATT_CAREER.regular_season!
+    renderTable(watt, {
+      ...watt,
+      stats: { ...watt.stats, def_sacks: 17.5 },
+    })
+
+    expect(
+      screen.getByRole('rowheader', { name: 'Sacks' }),
+    ).toHaveAccessibleDescription(DEFENSE_EARLY_ERA_NOTE)
+    expect(
+      screen.getByRole('rowheader', { name: 'Passes defended' }),
+    ).toHaveAccessibleDescription(DEFENSE_UNOFFICIAL_NOTE)
+    const [a, b] = cellsOf(screen.getByRole('table'), 'Sacks')
+    expect(a).toHaveTextContent('19.0')
+    expect(b).toHaveTextContent('17.5')
   })
 
   it('sits in its own focusable scroll region', () => {

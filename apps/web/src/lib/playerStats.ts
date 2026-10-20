@@ -16,6 +16,7 @@ import type {
   PlayerLeaderSort,
   PlayerSeasonType,
   PlayerStatsOut,
+  StarterRecordOut,
 } from './api/types'
 import {
   PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
@@ -180,19 +181,32 @@ export function leaderStatCell(
 }
 
 /**
- * The stat columns both player tables show, in order. Deliberately without
- * `sacks_suffered` and `sack_yards_lost`: the stored sack yards are negative
- * against the column's name (#298), so neither is shown in v1.
+ * The passing stats, in order. Deliberately without `sacks_suffered` and
+ * `sack_yards_lost`: the stored sack yards are negative against the
+ * column's name (#298), so neither is shown in v1.
  */
-export const STAT_COLUMNS: readonly StatColumn[] = [
+const PASSING_COLUMNS: readonly StatColumn[] = [
   { key: 'completions', label: 'Completions' },
   { key: 'attempts', label: 'Attempts' },
   { key: 'passing_yards', label: 'Passing yards' },
   { key: 'passing_tds', label: 'Passing TDs' },
   { key: 'passing_interceptions', label: 'Interceptions' },
+]
+
+/** The rushing board's three columns, and the rushing group's first three. */
+const RUSHING_BOARD_COLUMNS: readonly StatColumn[] = [
   { key: 'carries', label: 'Carries' },
   { key: 'rushing_yards', label: 'Rushing yards' },
   { key: 'rushing_tds', label: 'Rushing TDs' },
+]
+
+/**
+ * The passing board's columns: passing, then the board-sized rushing three.
+ * Without `sacks_suffered` and `sack_yards_lost` (#298).
+ */
+export const STAT_COLUMNS: readonly StatColumn[] = [
+  ...PASSING_COLUMNS,
+  ...RUSHING_BOARD_COLUMNS,
 ]
 
 export const SEASON_TYPE_LABEL: Record<PlayerSeasonType, string> = {
@@ -238,21 +252,12 @@ export const CATEGORY_LABEL: Record<PlayerLeaderCategory, string> = {
   defense: 'Defense',
 }
 
-/** The stat keys the rushing board shows; their labels and order come from `STAT_COLUMNS`. */
-const RUSHING_STAT_KEYS: readonly (keyof PlayerStatsOut)[] = [
-  'carries',
-  'rushing_yards',
-  'rushing_tds',
-]
-
 /**
- * The receiving board's columns (issue #314), the rushing board's shape.
- * Deliberately its own list and not part of `STAT_COLUMNS`: the career and
- * compare tables read `STAT_COLUMNS`, and non-QB career and compare pages are
- * outside epic #311, so those tables show exactly what they did. `targets` is
+ * The receiving board's columns (issue #314), the rushing board's shape, and
+ * the receiving group of the career and compare tables (#352). `targets` is
  * left out everywhere: the source publishes it as 0 for 2003-2008 (#345), so
- * a career total spanning those years undercounts. First downs and fumbles
- * lost are mirrored in the type but not shown in v1.
+ * a career total spanning those years undercounts. Receiving first downs and
+ * fumbles lost are mirrored in the type but not shown in v1.
  */
 const RECEIVING_COLUMNS: readonly StatColumn[] = [
   { key: 'receptions', label: 'Receptions' },
@@ -285,8 +290,8 @@ const PUNTING_COLUMNS: readonly StatColumn[] = [
 
 /**
  * The defense board's columns (issue #317), in the founder's order (not the
- * API's sort order). Its own list, never part of `STAT_COLUMNS`: career and
- * compare pages stay QB-only (#352). Each column that #316 found can run
+ * API's sort order), and the defense group of the career and compare tables
+ * (#352), notes and all. Each column that #316 found can run
  * short of the official total, or that the league doesn't keep officially,
  * carries the note that says so; INT matched every official season leader
  * 1999-2025, so it carries none. QB hits, tackles for loss, assisted tackles
@@ -351,12 +356,7 @@ export interface LeaderBoardColumns {
  */
 export const LEADER_BOARD_COLUMNS = {
   passing: { showsRecord: true, stats: STAT_COLUMNS },
-  rushing: {
-    showsRecord: false,
-    stats: STAT_COLUMNS.filter((column) =>
-      RUSHING_STAT_KEYS.includes(column.key),
-    ),
-  },
+  rushing: { showsRecord: false, stats: RUSHING_BOARD_COLUMNS },
   receiving: { showsRecord: false, stats: RECEIVING_COLUMNS },
   kicking: { showsRecord: false, stats: KICKING_COLUMNS },
   punting: { showsRecord: false, stats: PUNTING_COLUMNS },
@@ -379,13 +379,145 @@ export function leaderBoardColumns(
 export function leaderColumnNotes(
   category: PlayerLeaderCategory,
 ): readonly LeaderColumnNote[] {
+  return statColumnNotes(leaderBoardColumns(category).stats)
+}
+
+/** The notes some columns carry, once each, in the order their first column appears. */
+export function statColumnNotes(
+  columns: readonly LeaderColumnExtras[],
+): readonly LeaderColumnNote[] {
   const notes: LeaderColumnNote[] = []
-  for (const column of leaderBoardColumns(category).stats) {
+  for (const column of columns) {
     if (column.note !== undefined && !notes.includes(column.note)) {
       notes.push(column.note)
     }
   }
   return notes
+}
+
+/**
+ * A group of stats the career and compare tables show together (issue
+ * #352), in the order the groups appear.
+ */
+export const STAT_GROUPS = [
+  'passing',
+  'rushing',
+  'receiving',
+  'kicking',
+  'punting',
+  'defense',
+] as const
+
+export type StatGroup = (typeof STAT_GROUPS)[number]
+
+/** A career or compare column: a stat as sent, with a board column's extras. */
+export type TableStatColumn = StatColumn & LeaderColumnExtras
+
+/**
+ * Each group's columns, labelled as the leaders boards label them (#352).
+ * Rushing is the rushing board's three plus first downs and fumbles lost;
+ * kicking is the kicking board's columns without its two derived ones (FG%
+ * is a rate, and these tables show only what the API sent); defense keeps
+ * the board's notes, so a defense column never shows without its note.
+ */
+export const STAT_GROUP_COLUMNS: Record<StatGroup, readonly TableStatColumn[]> =
+  {
+    passing: PASSING_COLUMNS,
+    rushing: [
+      ...RUSHING_BOARD_COLUMNS,
+      { key: 'rushing_first_downs', label: 'Rushing first downs' },
+      { key: 'rushing_fumbles_lost', label: 'Rushing fumbles lost' },
+    ],
+    receiving: RECEIVING_COLUMNS,
+    kicking: KICKING_COLUMNS.filter(isSentStatColumn),
+    punting: PUNTING_COLUMNS,
+    defense: DEFENSE_COLUMNS.filter(isSentStatColumn),
+  }
+
+/** Whether a board column shows a stat the API sends, not one the board derives. */
+function isSentStatColumn(column: LeaderStatColumn): column is TableStatColumn {
+  return column.key !== 'fg_pct' && column.key !== 'fg_made_50_plus'
+}
+
+/**
+ * The stats that put a group on a player's table when one of them is a
+ * recorded, non-zero number. Beyond each group's own columns: `targets`
+ * (a target he never caught is still a receiving stat) and `pat_att`.
+ * Defense leaves out solo tackles: quarterbacks, receivers and kickers make
+ * one after a turnover or on a return (Kurt Warner's 1999), so a solo
+ * tackle alone counts only for a player who recorded nothing else.
+ */
+const GROUP_TRIGGERS: Record<StatGroup, readonly (keyof PlayerStatsOut)[]> = {
+  passing: PASSING_COLUMNS.map((column) => column.key),
+  rushing: STAT_GROUP_COLUMNS.rushing.map((column) => column.key),
+  receiving: [...RECEIVING_COLUMNS.map((column) => column.key), 'targets'],
+  kicking: [
+    ...STAT_GROUP_COLUMNS.kicking.map((column) => column.key),
+    'pat_att',
+  ],
+  punting: PUNTING_COLUMNS.map((column) => column.key),
+  defense: STAT_GROUP_COLUMNS.defense
+    .map((column) => column.key)
+    .filter((key) => key !== 'def_tackles_solo'),
+}
+
+/** What a player with nothing recorded gets: the quarterback columns, as before #352. */
+const FALLBACK_GROUPS: readonly StatGroup[] = ['passing', 'rushing']
+
+function recordedIn(
+  stats: readonly PlayerStatsOut[],
+  keys: readonly (keyof PlayerStatsOut)[],
+): boolean {
+  return stats.some((line) =>
+    keys.some((key) => {
+      const value = line[key]
+      return value !== null && value !== 0
+    }),
+  )
+}
+
+/**
+ * The stat groups a player -- or either of two players -- recorded, across
+ * every stat line given (issue #352). A group shows when one of its stats is
+ * a recorded, non-zero number; `null` (not tracked) and 0 never put a group
+ * on the table, though inside a shown group a `null` still reads "not
+ * recorded". Solo tackles alone mean defense only for a player with nothing
+ * else, and a player with nothing at all gets passing and rushing.
+ */
+export function recordedStatGroups(
+  stats: readonly PlayerStatsOut[],
+): StatGroup[] {
+  const groups = STAT_GROUPS.filter((group) =>
+    recordedIn(stats, GROUP_TRIGGERS[group]),
+  )
+  if (groups.length > 0) {
+    return groups
+  }
+  if (recordedIn(stats, ['def_tackles_solo'])) {
+    return ['defense']
+  }
+  return [...FALLBACK_GROUPS]
+}
+
+/**
+ * Whether a career or compare table shows the starter record (issue #352):
+ * for anyone with passing on the table, as the passing board does, or who
+ * started a game at quarterback. A receiver's 0-0-0 is noise.
+ */
+export function showsStarterRecord(
+  lines: readonly { stats: PlayerStatsOut; record: StarterRecordOut }[],
+): boolean {
+  return (
+    recordedStatGroups(lines.map((line) => line.stats)).includes('passing') ||
+    lines.some((line) => line.record.starts > 0)
+  )
+}
+
+/** The career or compare columns for these stat lines, group by group (#352). */
+export function statColumnsFor(
+  stats: readonly PlayerStatsOut[],
+): TableStatColumn[] {
+  return recordedStatGroups(stats).flatMap((group) => STAT_GROUP_COLUMNS[group])
 }
 
 /**

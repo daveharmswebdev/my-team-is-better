@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { PlayerHeadToHeadOut } from '../../lib/api/types'
 import {
+  EDGERRIN_JAMES,
   HEAD_TO_HEAD_WITH_UNRECORDED_STATS,
   NEVER_MET_COMPARISON,
   WARNER_VS_MCNAIR,
@@ -41,10 +42,14 @@ describe('PlayerHeadToHead (issue #301)', () => {
       item.getByText('St. Louis Rams 21, Tennessee Titans 24'),
     ).toBeInTheDocument()
     expect(
-      item.getByText('Kurt Warner: 328 passing yards, 3 TDs, 0 INTs'),
+      item.getByText(
+        'Kurt Warner: 328 passing yards, 3 TDs, 0 INTs; 2 carries, 22 rushing yards, 0 rushing TDs',
+      ),
     ).toBeInTheDocument()
     expect(
-      item.getByText('Steve McNair: 186 passing yards, 2 TDs, 0 INTs'),
+      item.getByText(
+        'Steve McNair: 186 passing yards, 2 TDs, 0 INTs; 12 carries, 36 rushing yards, 1 rushing TD',
+      ),
     ).toBeInTheDocument()
   })
 
@@ -59,7 +64,9 @@ describe('PlayerHeadToHead (issue #301)', () => {
       within(list).getByText('St. Louis Rams 23, Tennessee Titans 16'),
     ).toBeInTheDocument()
     expect(
-      within(list).getByText('Steve McNair: 214 passing yards, 0 TDs, 0 INTs'),
+      within(list).getByText(
+        'Steve McNair: 214 passing yards, 0 TDs, 0 INTs; 8 carries, 64 rushing yards, 0 rushing TDs',
+      ),
     ).toBeInTheDocument()
   })
 
@@ -73,7 +80,7 @@ describe('PlayerHeadToHead (issue #301)', () => {
     expect(first).not.toHaveTextContent(/Kurt Warner: 0/)
     expect(
       within(second!).getByText(
-        'Steve McNair: 186 passing yards, TDs not recorded, 0 INTs',
+        'Steve McNair: 186 passing yards, TDs not recorded, 0 INTs; 12 carries, 36 rushing yards, 1 rushing TD',
       ),
     ).toBeInTheDocument()
   })
@@ -89,6 +96,40 @@ describe('PlayerHeadToHead (issue #301)', () => {
     expect(
       screen.getByText("Kurt Warner's record against Steve McNair: 1-0-1"),
     ).toBeInTheDocument()
+  })
+
+  /**
+   * Issue #352: each line picks its stats by the career table's rule, so a
+   * starter who never threw a pass in the game shows what he did record.
+   */
+  it("gives a starter who didn't pass his rushing and receiving line, and no passing", () => {
+    const headToHead = WARNER_VS_MCNAIR.regular_season_head_to_head
+    const [game] = headToHead.games
+    renderHeadToHead({
+      ...headToHead,
+      games: [
+        {
+          ...game!,
+          a_stats: {
+            ...EDGERRIN_JAMES.stats,
+            carries: 18,
+            rushing_yards: 97,
+            rushing_tds: 1,
+            receptions: 1,
+            receiving_yards: 12,
+            receiving_tds: 0,
+          },
+        },
+      ],
+    })
+
+    const item = within(screen.getByRole('listitem'))
+    expect(
+      item.getByText(
+        'Kurt Warner: 18 carries, 97 rushing yards, 1 rushing TD; 1 reception, 12 receiving yards, 0 receiving TDs',
+      ),
+    ).toBeInTheDocument()
+    expect(item.getByText(/^Kurt Warner:/)).not.toHaveTextContent(/passing/)
   })
 
   it('says plainly when the two never started against each other', () => {

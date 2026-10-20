@@ -1,7 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import {
   CAREER_WITH_NULL_STATS,
+  EDGERRIN_JAMES_CAREER,
   KURT_WARNER_CAREER,
+  MARVIN_HARRISON_CAREER,
+  OLINDO_MARE_CAREER,
+  TJ_WATT_CAREER,
+  TOBY_GOWIN_CAREER,
   WARNER_1999_POSTSEASON,
   WARNER_1999_REGULAR,
 } from '../../lib/playerFixtures'
@@ -58,5 +63,50 @@ export const SeveralSeasons: Story = {
       ...KURT_WARNER_CAREER.regular_season!,
       seasons: 2,
     },
+  },
+}
+
+/** A receiver (#352): receiving, and rushing for his one carry; no passing, no starter record. */
+export const Receiver: Story = {
+  args: {
+    caption: 'Marvin Harrison, regular season',
+    lines: MARVIN_HARRISON_CAREER.seasons.slice(0, 1),
+    totals: MARVIN_HARRISON_CAREER.regular_season,
+  },
+}
+
+/** A back (#352): rushing, with first downs and fumbles lost, then receiving. */
+export const RunningBack: Story = {
+  args: {
+    caption: 'Edgerrin James, regular season',
+    lines: EDGERRIN_JAMES_CAREER.seasons.slice(0, 1),
+    totals: EDGERRIN_JAMES_CAREER.regular_season,
+  },
+}
+
+/** A kicker who punted once (#352): kicking, then punting. */
+export const Kicker: Story = {
+  args: {
+    caption: 'Olindo Mare, regular season',
+    lines: OLINDO_MARE_CAREER.seasons.slice(0, 1),
+    totals: OLINDO_MARE_CAREER.regular_season,
+  },
+}
+
+/** A punter who never made a field goal (#352): his longest reads as a dash, "none" to assistive tech. */
+export const Punter: Story = {
+  args: {
+    caption: 'Toby Gowin, regular season',
+    lines: TOBY_GOWIN_CAREER.seasons.slice(0, 1),
+    totals: TOBY_GOWIN_CAREER.regular_season,
+  },
+}
+
+/** A defender (#352): the defense columns, with the founder's notes (#316) under the table. */
+export const Defender: Story = {
+  args: {
+    caption: 'T.J. Watt, regular season',
+    lines: TJ_WATT_CAREER.seasons,
+    totals: TJ_WATT_CAREER.regular_season,
   },
 }

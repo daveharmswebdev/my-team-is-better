@@ -20,6 +20,7 @@ import {
   BRADY_VS_MANNING,
   BRADY_VS_QUINN,
   DATA_SOURCES,
+  HARRISON_VS_JAMES,
   KURT_WARNER_CAREER,
   NEVER_MET_COMPARISON,
   SEARCH_BRADY,
@@ -36,7 +37,10 @@ import {
   SAME_PLAYER_COPY,
   pickOneMoreCopy,
 } from '../../lib/playerCompare'
-import { PLAYER_NOT_FOUND_COPY } from '../../lib/playerStats'
+import {
+  PLAYER_NOT_FOUND_COPY,
+  STARTER_RECORD_NOTE,
+} from '../../lib/playerStats'
 import { PlayerComparePage } from './PlayerComparePage'
 
 vi.mock('../../lib/api/client', async () => {
@@ -238,6 +242,25 @@ describe('PlayerComparePage (issue #301)', () => {
     expect(
       screen.queryByText(/\b(leads?|winner|tally|wins the row)\b/i),
     ).not.toBeInTheDocument()
+  })
+
+  it('compares a receiver and a back on their own stats, with no starter-record note (#352)', async () => {
+    mockedCompare.mockResolvedValue(HARRISON_VS_JAMES)
+
+    renderPage('?a=2009851825&b=2425879833')
+
+    const regular = await screen.findByRole('table', {
+      name: 'Marvin Harrison and Edgerrin James, regular season',
+    })
+    const [harrison, james] = cellsOf(regular, 'Receiving yards')
+    expect(harrison).toHaveTextContent('1,663')
+    expect(marked(harrison)).toBe(true)
+    expect(james).toHaveTextContent('586')
+    expect(
+      within(regular).queryByRole('rowheader', { name: 'Passing yards' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+    expect(regular).not.toHaveAccessibleDescription()
   })
 
   it("links each player to the player's career page and discloses Warner's undercounted game", async () => {

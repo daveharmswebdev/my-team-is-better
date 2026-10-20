@@ -2,11 +2,20 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import {
   CAREER_WITH_NULL_STATS,
+  EDGERRIN_JAMES_CAREER,
   KURT_WARNER_CAREER,
+  MARVIN_HARRISON_CAREER,
+  OLINDO_MARE_CAREER,
+  TJ_WATT_CAREER,
+  TOBY_GOWIN_CAREER,
   WARNER_1999_POSTSEASON,
   WARNER_1999_REGULAR,
 } from '../../lib/playerFixtures'
-import { undercountNote } from '../../lib/playerStats'
+import {
+  DEFENSE_EARLY_ERA_NOTE,
+  DEFENSE_UNOFFICIAL_NOTE,
+  undercountNote,
+} from '../../lib/playerStats'
 import { PlayerCareerTable } from './PlayerCareerTable'
 
 /** The cell of `row` under the column whose header reads `name`. */
@@ -193,21 +202,17 @@ describe('PlayerCareerTable (issue #296)', () => {
   })
 
   /**
-   * Issue #314: the API now publishes six receiving stats on every line, and
-   * the leaders page has a receiving board. Non-QB career pages are out of
-   * epic #311's scope, so this table's columns are exactly what they were.
+   * Issue #352: the columns are the stat groups the player recorded. A
+   * quarterback keeps passing and rushing, now with rushing first downs and
+   * fumbles lost; one who also caught a pass gets receiving too.
    */
-  it('keeps its columns exactly as they were, with no receiving stat, when a line carries receiving numbers', () => {
+  it('gives a quarterback passing and rushing, and receiving when he caught a pass', () => {
     const line = {
       ...WARNER_1999_REGULAR,
       stats: {
         ...WARNER_1999_REGULAR.stats,
-        receptions: 7771,
-        targets: 7772,
-        receiving_yards: 7773,
-        receiving_tds: 7774,
-        receiving_first_downs: 7775,
-        receiving_fumbles_lost: 7776,
+        receptions: 1,
+        receiving_yards: 9,
       },
     }
     render(
@@ -234,7 +239,151 @@ describe('PlayerCareerTable (issue #296)', () => {
       'Carries',
       'Rushing yards',
       'Rushing TDs',
+      'Rushing first downs',
+      'Rushing fumbles lost',
+      'Receptions',
+      'Receiving yards',
+      'Receiving TDs',
     ])
-    expect(screen.getByRole('table')).not.toHaveTextContent(/777\d|7,77\d/)
+    const row = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    expect(cellUnder(row, 'Rushing first downs')).toHaveTextContent(/^5$/)
+    expect(cellUnder(row, 'Rushing fumbles lost')).toHaveTextContent(/^2$/)
+  })
+
+  it('gives a receiver his receiving and rushing columns, and no passing column or starter record', () => {
+    const [regular] = MARVIN_HARRISON_CAREER.seasons
+    render(
+      <PlayerCareerTable
+        caption="Marvin Harrison, regular season"
+        lines={[regular!]}
+        totals={MARVIN_HARRISON_CAREER.regular_season}
+      />,
+    )
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Season',
+      'Teams',
+      'Games',
+      'Carries',
+      'Rushing yards',
+      'Rushing TDs',
+      'Rushing first downs',
+      'Rushing fumbles lost',
+      'Receptions',
+      'Receiving yards',
+      'Receiving TDs',
+    ])
+    const row = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    expect(cellUnder(row, 'Receptions')).toHaveTextContent(/^115$/)
+    expect(cellUnder(row, 'Receiving yards')).toHaveTextContent(/^1,663$/)
+    expect(cellUnder(row, 'Receiving TDs')).toHaveTextContent(/^12$/)
+    expect(cellUnder(row, 'Carries')).toHaveTextContent(/^1$/)
+  })
+
+  it('gives a kicker his kicking columns, and punting when he punted', () => {
+    const [, postseason] = OLINDO_MARE_CAREER.seasons
+    render(
+      <PlayerCareerTable
+        caption="Olindo Mare"
+        lines={OLINDO_MARE_CAREER.seasons}
+        totals={null}
+      />,
+    )
+
+    expect(
+      screen.getAllByRole('columnheader').map((header) => header.textContent),
+    ).toEqual([
+      'Season',
+      'Teams',
+      'Games',
+      'FG made',
+      'FG att',
+      'Long',
+      'XP made',
+      'Punts',
+      'Yards',
+      'Net yards',
+      'Inside 20',
+    ])
+    const [regularRow, postseasonRow] = screen
+      .getAllByRole('rowheader')
+      .map((header) => header.parentElement as HTMLElement) as [
+      HTMLElement,
+      HTMLElement,
+    ]
+    expect(cellUnder(regularRow, 'FG made')).toHaveTextContent(/^39$/)
+    expect(cellUnder(regularRow, 'Long')).toHaveTextContent(/^54$/)
+    expect(cellUnder(regularRow, 'Punts')).toHaveTextContent(/^1$/)
+    expect(postseason!.stats.pt_att).toBe(0)
+    expect(cellUnder(postseasonRow, 'Punts')).toHaveTextContent(/^0$/)
+  })
+
+  it('reads a missing longest field goal as "none", not 0 and not "not recorded"', () => {
+    render(
+      <PlayerCareerTable
+        caption="Toby Gowin"
+        lines={TOBY_GOWIN_CAREER.seasons}
+        totals={null}
+      />,
+    )
+
+    const [row] = screen
+      .getAllByRole('rowheader')
+      .map((header) => header.parentElement as HTMLElement)
+    const long = cellUnder(row!, 'Long')
+    expect(long).toHaveTextContent('none')
+    expect(long).not.toHaveTextContent(/0|not recorded/)
+  })
+
+  it('gives a defender the defense columns, each covered header described by its note', () => {
+    render(
+      <PlayerCareerTable
+        caption="T.J. Watt, regular season"
+        lines={TJ_WATT_CAREER.seasons}
+        totals={TJ_WATT_CAREER.regular_season}
+      />,
+    )
+
+    expect(
+      screen.getByRole('columnheader', { name: 'Sacks' }),
+    ).toHaveAccessibleDescription(DEFENSE_EARLY_ERA_NOTE)
+    expect(
+      screen.getByRole('columnheader', { name: 'Solo tackles' }),
+    ).toHaveAccessibleDescription(DEFENSE_UNOFFICIAL_NOTE)
+    expect(
+      screen.getByRole('columnheader', { name: 'Interceptions' }),
+    ).not.toHaveAccessibleDescription()
+    const row = screen.getByRole('rowheader', { name: '2023' })
+      .parentElement as HTMLElement
+    expect(within(row).getByText('19.0')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('columnheader', { name: /passing|carries/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('reads a stat an era didn\'t track as "not recorded" in a shown column, never 0', () => {
+    const [regular] = EDGERRIN_JAMES_CAREER.seasons
+    const line = {
+      ...regular!,
+      stats: { ...regular!.stats, rushing_fumbles_lost: null },
+    }
+    render(
+      <PlayerCareerTable
+        caption="Edgerrin James"
+        lines={[line]}
+        totals={null}
+      />,
+    )
+
+    const row = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    expect(cellUnder(row, 'Rushing fumbles lost')).toHaveTextContent(
+      /^not recorded$/,
+    )
+    expect(cellUnder(row, 'Rushing first downs')).toHaveTextContent(/^80$/)
   })
 })

@@ -215,6 +215,29 @@ test('changing Player B and pressing Compare again puts Kurt Warner next to Peyt
   await expect(compare).toBeDisabled()
 })
 
+// Issue #352: two receivers are compared on the stats they have. On the
+// fixture, Tyreek Hill's 2023 is 1,799 receiving yards to CeeDee Lamb's
+// 1,749; neither threw a pass or started at quarterback.
+test('a link to two receivers compares their receiving, with no passing or record row', async ({
+  page,
+}) => {
+  await page.goto('/nfl/compare?a=2052934910&b=2170634393')
+
+  const dialog = comparisonModal(page, 'Tyreek Hill and CeeDee Lamb')
+  const regular = dialog.getByRole('table', {
+    name: 'Tyreek Hill and CeeDee Lamb, regular season',
+  })
+  const yards = valueCells(regular, 'Receiving yards')
+  await expect(yards.nth(0)).toContainText('1,799')
+  await expect(yards.nth(0)).toContainText('(larger number)')
+  await expect(yards.nth(1)).toHaveText('1,749')
+  for (const gone of ['Passing yards', 'Completions', 'Starter record']) {
+    await expect(
+      regular.getByRole('rowheader', { name: gone, exact: true }),
+    ).toHaveCount(0)
+  }
+})
+
 test('the Primary nav reaches the compare page', async ({ page }) => {
   await page.goto('/')
   await page

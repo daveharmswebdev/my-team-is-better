@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import {
+  EDGERRIN_JAMES,
   HEAD_TO_HEAD_WITH_UNRECORDED_STATS,
   NEVER_MET_COMPARISON,
   WARNER_VS_MCNAIR,
@@ -38,5 +39,31 @@ export const NeverMet: Story = {
   args: {
     bName: 'Unrecorded Player',
     headToHead: NEVER_MET_COMPARISON.regular_season_head_to_head,
+  },
+}
+
+const WEEK_8 = WARNER_VS_MCNAIR.regular_season_head_to_head
+
+/**
+ * Invented (#352): a starter who never threw a pass in the game. His line
+ * shows the rushing and receiving he did record, and no passing.
+ */
+export const NonPassingLine: Story = {
+  args: {
+    headToHead: {
+      ...WEEK_8,
+      games: WEEK_8.games.map((game) => ({
+        ...game,
+        a_stats: {
+          ...EDGERRIN_JAMES.stats,
+          carries: 18,
+          rushing_yards: 97,
+          rushing_tds: 1,
+          receptions: 1,
+          receiving_yards: 12,
+          receiving_tds: 0,
+        },
+      })),
+    },
   },
 }
