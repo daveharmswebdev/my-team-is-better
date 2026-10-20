@@ -736,10 +736,11 @@ class UnknownPlayerError(ValueError):
 #     numbers with `b`'s. Marking the larger number in a row is presentation
 #     in apps/web, and there is no tally, winner or rate stat.
 #   * Search matches `display_name` case-insensitively as a substring of the
-#     stripped query, among players who qualify for a leaderboard in either
-#     season type (a pass attempt or a QB start). Order: regular-season career
-#     passing yards descending with None last, then `display_name`, then
-#     `player_id`.
+#     stripped query, among players who qualify for any leaderboard category
+#     (`players._sql.QUALIFYING`) in either season type (founder decision,
+#     #371; until then only the passing rule). Order: regular-season career
+#     games descending with None last, then `display_name`, then `player_id`
+#     (#371; it was regular-season passing yards, which buried non-QBs).
 # ---------------------------------------------------------------------------
 
 PLAYER_SEARCH_MAX_LIMIT = 20
