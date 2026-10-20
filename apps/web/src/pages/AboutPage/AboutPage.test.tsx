@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CATALOG_TIMEOUT_MS,
@@ -380,6 +380,14 @@ describe('AboutPage', () => {
     /** The elements `scrollIntoView` was called on, in order. */
     let scrolledInto: Element[]
 
+    // Issue #303: the scroll runs in a passive effect, which React may flush
+    // after `findByRole` has already seen the articles. The positive tests
+    // therefore `waitFor` the scroll; the negative ones re-render first,
+    // because React flushes a previous render's effects before it processes
+    // a new update, so an empty `scrolledInto` after that is not vacuous.
+    // (The effect is keyed on `state.status`, so the re-render can't run it
+    // a second time.)
+
     beforeEach(() => {
       scrolledInto = []
       // jsdom has no `scrollIntoView`; the page feature-detects it.
@@ -443,7 +451,9 @@ describe('AboutPage', () => {
       expect(scrolledInto).toEqual([])
 
       const eloHeading = await screen.findByRole('heading', { name: 'Elo' })
-      expect(scrolledInto).toEqual([eloHeading.closest('article')])
+      await waitFor(() => {
+        expect(scrolledInto).toEqual([eloHeading.closest('article')])
+      })
     })
 
     it('scrolls the Keener article into view once the credits resolve when the hash is #keener', async () => {
@@ -458,15 +468,18 @@ describe('AboutPage', () => {
       const keenerHeading = await screen.findByRole('heading', {
         name: "Keener's method",
       })
-      expect(scrolledInto).toEqual([keenerHeading.closest('article')])
+      await waitFor(() => {
+        expect(scrolledInto).toEqual([keenerHeading.closest('article')])
+      })
     })
 
     it('scrolls nothing when there is no hash', async () => {
       mockedFetchCredits.mockResolvedValue(credits)
 
-      render(<AboutPage />)
+      const { rerender } = render(<AboutPage />)
 
       await screen.findByRole('heading', { name: 'Elo' })
+      rerender(<AboutPage />)
       expect(scrolledInto).toEqual([])
     })
 
@@ -474,9 +487,10 @@ describe('AboutPage', () => {
       window.location.hash = '#colley'
       mockedFetchCredits.mockResolvedValue(credits)
 
-      render(<AboutPage />)
+      const { rerender } = render(<AboutPage />)
 
       await screen.findByRole('heading', { name: 'Elo' })
+      rerender(<AboutPage />)
       expect(scrolledInto).toEqual([])
     })
 
@@ -486,9 +500,10 @@ describe('AboutPage', () => {
       window.location.hash = '#100%'
       mockedFetchCredits.mockResolvedValue(credits)
 
-      render(<AboutPage />)
+      const { rerender } = render(<AboutPage />)
 
       await screen.findByRole('heading', { name: 'Elo' })
+      rerender(<AboutPage />)
       expect(screen.getByRole('heading', { name: 'Elo' })).toBeInTheDocument()
       expect(scrolledInto).toEqual([])
     })
