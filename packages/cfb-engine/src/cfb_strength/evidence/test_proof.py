@@ -1575,6 +1575,101 @@ def test_stale_db_error_propagates_through_build_comparison(tmp_path: Path) -> N
         build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener", sport="cfb")
 
 
+# Issue #300: `games.conference_championship` is the latest column evidence
+# reads. A db built before it and opened read-only (apps/api, the MCP
+# server) is stale in the same sense as a pre-#183 one, so it fails the same
+# way: `StaleDatabaseError`, never a bare "no such column".
+
+
+def _db_without_title_game_column(tmp_path: Path) -> Path:
+    """A current-schema, fully rated db with the #300 column then dropped:
+    what a pre-#300 build looks like to a reader that never migrates it.
+    The ledger tables stay, so the only staleness is the column."""
+    db_path = _make_db(tmp_path)
+    c = get_conn(db_path)
+    _build_fixture(c)
+    c.commit()
+    # SQLite's DROP COLUMN can't re-parse schema.sql's commented DDL for this
+    # last column, so rebuild the table without it (the documented recipe).
+    kept = [
+        row["name"]
+        for row in c.execute("PRAGMA table_info(games)")
+        if row["name"] != "conference_championship"
+    ]
+    assert len(kept) > 1
+    c.execute("PRAGMA foreign_keys = OFF")
+    c.execute(f"CREATE TABLE games_pre_300 AS SELECT {', '.join(kept)} FROM games")
+    c.execute("DROP TABLE games")
+    c.execute("ALTER TABLE games_pre_300 RENAME TO games")
+    c.commit()
+    c.close()
+    return db_path
+
+
+@pytest.mark.parametrize("sport", ["cfb", "nfl"])
+def test_db_without_title_game_column_raises_stale_database_error(
+    tmp_path: Path, sport: Sport
+) -> None:
+    conn = get_conn(_db_without_title_game_column(tmp_path), read_only=True)
+    name = "Alpha State" if sport == "cfb" else "Delta Squad"
+
+    with pytest.raises(proof.StaleDatabaseError) as excinfo:
+        build_team_case(conn, YEAR, name, method=METHOD, sport=sport)
+
+    assert not isinstance(excinfo.value, sqlite3.OperationalError)
+    assert excinfo.value.missing_columns == ("games.conference_championship",)
+    assert excinfo.value.missing_tables == ()
+    message = str(excinfo.value)
+    assert "games.conference_championship" in message
+    assert "#300" in message
+    assert "cfb doctor" in message
+    assert "cfb ingest" in message
+    # Not the ledger's story: no ledger table is missing here.
+    assert "#183" not in message
+
+
+def test_db_without_title_game_column_raises_through_build_comparison(tmp_path: Path) -> None:
+    conn = get_conn(_db_without_title_game_column(tmp_path), read_only=True)
+
+    with pytest.raises(proof.StaleDatabaseError) as excinfo:
+        build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb")
+
+    assert excinfo.value.missing_columns == ("games.conference_championship",)
+
+
+def test_title_game_conference_is_read_from_the_flag_not_the_week_or_conference(
+    conn: sqlite3.Connection,
+) -> None:
+    """Two games in the same conference, same week, both 'regular': only the
+    flagged one names its conference (home_conference). The unflagged one is
+    None even though it has conferences set, so nothing is derived from
+    week or conference."""
+    conn.execute(
+        "UPDATE games SET home_conference = 'SEC', away_conference = 'SEC', week = 14 "
+        "WHERE id IN (1, 3) AND sport = 'cfb'"
+    )
+    conn.execute("UPDATE games SET conference_championship = 1 WHERE id = 3 AND sport = 'cfb'")
+    conn.commit()
+
+    case = build_team_case(conn, YEAR, "Alpha State", method=METHOD, sport="cfb")
+
+    by_id = {g.game_id: g.title_game_conference for g in case.games}
+    assert by_id == {1: None, 3: "SEC"}
+
+
+def test_flagged_title_game_without_a_conference_is_a_corrupt_row(
+    conn: sqlite3.Connection,
+) -> None:
+    """A flagged game with no home_conference can't be named. Returning None
+    would silently relabel a title game as an ordinary one, so it raises,
+    naming the row."""
+    conn.execute("UPDATE games SET conference_championship = 1 WHERE id = 3 AND sport = 'cfb'")
+    conn.commit()
+
+    with pytest.raises(ValueError, match="games row 3"):
+        build_team_case(conn, YEAR, "Alpha State", method=METHOD, sport="cfb")
+
+
 # ---------------------------------------------------------------------------
 # (i) issue #294 -- every listed game says where THIS TEAM played it, so a
 # narrator's "at Auburn" is checkable. `venue` is this team's side, not the
