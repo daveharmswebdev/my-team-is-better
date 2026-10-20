@@ -23,6 +23,12 @@ Open pull requests:
 Claimed issues (label `in-progress`):
 !`gh issue list --state open --label in-progress --limit 30 --json number,title --template '{{range .}}#{{.number}} {{.title}}{{"\n"}}{{end}}'`
 
+Founder reports (label `founder`), which outrank everything else:
+!`gh issue list --state open --label founder --limit 30 --json number,title --template '{{range .}}#{{.number}} {{.title}}{{"\n"}}{{end}}'`
+
+The board (github.com/users/daveharmswebdev/projects/4), as status / kind / priority:
+!`gh project item-list 4 --owner daveharmswebdev --limit 200 --format json --jq '.items[] | select(.status != "Done") | "#\(.content.number) \(.status // "-") / \(.kind // "UNTRIAGED") / \(.priority // "-") :: \(.title)"'`
+
 Open issues:
 !`gh issue list --state open --limit 150 --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'`
 
@@ -62,7 +68,12 @@ apps/api/src/api/models.py, apps/web/src/lib/api/types.ts, docs/ARCHITECTURE.md,
 
 **Landed recently:** #n title — what it flagged, and whether that is tracked
 
-**Open work, unclaimed:** by cluster; mark design-flaw clusters; include labels
+**Founder's board:** `founder` reports first, then any board item showing UNTRIAGED
+(a founder report with no Kind yet: triage it before other work), then Product items
+(Kind Bug/Feature/Epic) at P0–P1, then anything in `Needs founder`. One line each.
+
+**Open work, unclaimed:** by cluster; mark design-flaw clusters; include labels and
+board priority. Summarise `Engineering` P3 items as a count, not a list.
 
 **Untracked gaps:** each with evidence (file:line or PR #) — recommend filing via /triage
 

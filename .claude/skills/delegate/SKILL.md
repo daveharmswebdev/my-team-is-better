@@ -21,6 +21,7 @@ issue normally means one implementation spoke, then reviewer and validator.
 gh issue view <n> --json labels,comments   # already claimed? then pick other work
 gh label create in-progress --color FBCA04 --description "Claimed by a running coordinator session" 2>/dev/null || true
 gh issue edit <n> --add-label in-progress
+uv run .claude/hooks/board.py <n> --status "In Progress"
 gh issue comment <n> --body "Claimed: worktree <path>, branch <branch>. Expected to touch: <files>."
 ```
 

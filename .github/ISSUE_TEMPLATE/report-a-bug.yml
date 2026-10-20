@@ -1,0 +1,25 @@
+name: Report a bug
+description: Something on the site is wrong or broken. It lands on the Product board, ahead of everything that isn't triaged yet.
+labels: ["bug", "founder"]
+projects: ["daveharmswebdev/4"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What went wrong?
+      description: What you saw, and what you expected instead. A sentence is enough.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where?
+      description: The page URL or the question you asked, if you have it.
+  - type: dropdown
+    id: severity
+    attributes:
+      label: How bad is it?
+      options:
+        - It's wrong or broken for users, fix it next
+        - Annoying, fix it soon
+        - Minor, whenever

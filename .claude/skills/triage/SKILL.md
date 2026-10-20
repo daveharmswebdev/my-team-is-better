@@ -40,9 +40,25 @@ one pass and report what you did.
      `accessibility`, plus the area label (`area:api`, `area:web`, `area:engine`). Add
      `epic` only to an umbrella issue.
    - Never add `in-progress` (that's a claim) or a milestone.
+5. **Put it on the board.** Every new issue goes on the project board
+   (github.com/users/daveharmswebdev/projects/4), which is how the founder sees the
+   tracker:
+   ```bash
+   uv run .claude/hooks/board.py <n> --kind Engineering --priority P3
+   ```
+   - **Kind defaults to `Engineering`**: test gaps, lint and type-check rules, process,
+     docs, refactors, internal hygiene. These stay out of the founder's Product view.
+     Use `Bug` or `Feature` only when someone *using the site* would notice the
+     problem or the change, and `Epic` for an umbrella.
+   - **Priority defaults to `P3`.** `P2` needs a concrete reason (users hit it, it
+     costs money, it blocks planned work). `P0` and `P1` are the founder's call:
+     `board.py` refuses them without `--founder-approved`; propose them in your report.
+   - The tracker's failure mode is volume, not missed findings. Before filing a P3
+     Engineering issue, ask whether anyone will ever pick it up; if not, a sentence in
+     the PR description is enough.
 
 ## Report
 
-| Finding (category — summary) | Result |
-|---|---|
-| … | #n new / #n existing (commented or linked) / cluster #epic |
+| Finding (category — summary) | Result | Board |
+|---|---|---|
+| … | #n new / #n existing (commented or linked) / cluster #epic | Kind, Priority |
