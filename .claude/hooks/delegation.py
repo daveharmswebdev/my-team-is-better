@@ -284,12 +284,13 @@ def render_brief(brief: dict[str, Any], ownership: Ownership | None = None) -> s
 
 
 def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
-    """The spoke's latest output, and whether it was a SubagentHandback report.
+    """The spoke's latest output, and whether it was a delivered SubagentHandback report.
 
     A spoke that hands back through the SubagentHandback tool ends with no closing
     text, so `last_assistant_message` doesn't hold the report; the call's `message`
-    input in the transcript does (#305). Falls back to `last_assistant_message`
-    when the transcript can't be read.
+    input in the transcript does (#305). A handback whose tool result is an error
+    was denied by `pre_handback` and never delivered. Falls back to
+    `last_assistant_message` when the transcript can't be read.
     """
     fallback = payload.get("last_assistant_message")
     fallback = fallback if isinstance(fallback, str) else ""
@@ -298,24 +299,32 @@ def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
         lines = Path(path).read_text().splitlines() if isinstance(path, str) else []
     except OSError:
         return fallback, False
+    failed_calls: set[str] = set()  # tool results come after their calls in the file
     for line in reversed(lines):
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if not isinstance(entry, dict) or entry.get("type") != "assistant":
-            continue
-        message = entry.get("message")
+        message = entry.get("message") if isinstance(entry, dict) else None
         if not isinstance(message, dict):
             continue
         content = message.get("content")
-        for block in reversed(content if isinstance(content, list) else []):
-            if not isinstance(block, dict):
-                continue
+        blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+        if entry.get("type") == "user":
+            failed_calls |= {
+                str(b.get("tool_use_id"))
+                for b in blocks
+                if b.get("type") == "tool_result" and b.get("is_error") is True
+            }
+            continue
+        if entry.get("type") != "assistant":
+            continue
+        for block in reversed(blocks):
             if block.get("type") == "tool_use" and block.get("name") == HANDBACK_TOOL:
                 tool_input = block.get("input")
                 report = tool_input.get("message") if isinstance(tool_input, dict) else None
-                return (report if isinstance(report, str) else ""), True
+                delivered = str(block.get("id")) not in failed_calls
+                return (report if isinstance(report, str) else ""), delivered
             if block.get("type") == "text" and str(block.get("text", "")).strip():
                 return str(block["text"]), False
     return fallback, False
@@ -339,9 +348,9 @@ def _check(message: str, agent: str, ownership: Ownership) -> tuple[ReturnCheck,
 def _count_attempt(state_dir: Path, agent_id: str, errors: list[str]) -> int:
     """Count this invalid return, or clear the count after a valid one (returns 0).
 
-    The coordinator resumes a spoke for a later round under the same agent_id, so a
-    valid return resets the count rather than letting one round's retries spill into
-    the next.
+    The coordinator resumes a spoke for a later round under the same agent_id, so the
+    count is cleared whenever a round ends, valid or past the cap, rather than letting
+    one round's retries spill into the next.
     """
     counter = _state_file(state_dir, agent_id)
     if not errors:
@@ -349,7 +358,10 @@ def _count_attempt(state_dir: Path, agent_id: str, errors: list[str]) -> int:
         return 0
     state_dir.mkdir(parents=True, exist_ok=True)
     attempts = int(counter.read_text()) + 1 if counter.exists() else 1
-    counter.write_text(str(attempts))
+    if attempts > MAX_RETURN_RETRIES:
+        counter.unlink(missing_ok=True)
+    else:
+        counter.write_text(str(attempts))
     return attempts
 
 
@@ -385,8 +397,9 @@ def pre_handback(
     This is the hook that can hold a return back. By the time SubagentStop fires, a
     handed-back report has already reached the coordinator (#305), so a stop block
     only keeps the spoke running. A denied handback never arrives, and the spoke
-    gets the errors as the tool's result. Past the retry cap the report goes through
-    and SubagentStop tells the coordinator it is malformed.
+    gets the errors as the tool's result. Past the retry cap the report goes through,
+    and SubagentStop posts a malformed-return note (to the user; the coordinator's
+    own validate-return re-check is what catches it).
     """
     agent = payload.get("agent_type")
     if not isinstance(agent, str) or agent not in ownership.agents:

@@ -380,6 +380,60 @@ def test_hook_validates_the_return_the_spoke_handed_back(tmp_path: Path) -> None
     assert "validated" in out["systemMessage"]
 
 
+def test_stop_hook_blocks_after_a_denied_handback_that_was_never_resent(
+    tmp_path: Path,
+) -> None:
+    # pre_handback denied the report, so nothing was delivered; the spoke then ended
+    # its turn with empty text. The shape is a live denied handback (#305).
+    data = _success()
+    del data["brief_defects"]
+    entries = [
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_denied",
+                        "name": "SubagentHandback",
+                        "input": {"message": _fenced(data)},
+                    }
+                ]
+            },
+        },
+        {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_denied",
+                        "is_error": True,
+                        "content": "PreToolUse:SubagentHandback hook error: Not delivered",
+                    }
+                ]
+            },
+        },
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": ""}]}},
+    ]
+    transcript = tmp_path / "agent-transcript.jsonl"
+    transcript.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    out = delegation.subagent_stop(_handback_payload(transcript), OWNERSHIP, tmp_path)
+    assert out is not None
+    assert out["decision"] == "block"
+    assert "brief_defects" in out["reason"]
+
+
+def test_retries_start_over_after_a_round_ends_malformed(tmp_path: Path) -> None:
+    # A resumed spoke's next round gets its own retries, not none.
+    payload = _pre_handback_payload("no json at all", agent_id="agent_resumed")
+    for _ in range(delegation.MAX_RETURN_RETRIES):
+        _denial(delegation.pre_handback(payload, OWNERSHIP, tmp_path))
+    assert delegation.pre_handback(payload, OWNERSHIP, tmp_path) is None
+    reason = _denial(delegation.pre_handback(payload, OWNERSHIP, tmp_path))
+    assert f"retry 1 of {delegation.MAX_RETURN_RETRIES}" in reason
+
+
 def test_stop_hook_never_blocks_a_report_already_delivered(tmp_path: Path) -> None:
     # The handback reached the coordinator before SubagentStop fired; blocking now
     # would only keep the spoke running, so the hook reports instead.
