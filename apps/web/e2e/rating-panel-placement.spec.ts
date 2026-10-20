@@ -245,7 +245,7 @@ const MEASURE_LEDGER = `(() => {
     dialog: box(dialog),
     dialogScrolls: dialog.scrollHeight > dialog.clientHeight + 1,
     rule: box(byText('The rule — same for every team')),
-    footer: box(byText('After ${GAMES_2005} games: 1,933.2').parentElement),
+    footer: box(byText('After ${GAMES_2005} games: 1,926.7').parentElement),
     listView,
     listOverflowY: getComputedStyle(list).overflowY,
     listClientHeight: list.clientHeight,
@@ -268,7 +268,7 @@ for (const { viewport, triggerTops } of LAYOUTS) {
         page,
       }) => {
         const trigger = await askForThe2005Champion(page, 'elo')
-        await expect(trigger).toHaveText('1,933')
+        await expect(trigger).toHaveText('1,927')
         await placeTriggerAt(page, viewport, trigger, triggerTop)
 
         await trigger.hover()
