@@ -378,17 +378,24 @@ test('closing the comparison returns to the filled-in form, drops the query, and
 
 // Issue #308: a link whose comparison fails keeps its pair. The fields say
 // which players the link named, closing puts focus on an enabled Compare,
-// and pressing it asks for the same pair again, with no reload.
+// and pressing it asks for the same pair again, with no reload. The retry
+// is held until the test has seen it loading: the first failure's line must
+// not stand in for the retry's answer while it is out (round 2).
 test('a link whose comparison failed can be asked again after closing it', async ({
   page,
 }) => {
   let failNext = true
+  let releaseRetry: () => void = () => {}
+  const retryReleased = new Promise<void>((resolve) => {
+    releaseRetry = resolve
+  })
   await page.route('**/api/players/compare**', async (route) => {
     if (failNext) {
       failNext = false
       await route.abort('failed')
       return
     }
+    await retryReleased
     await route.continue()
   })
   await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
@@ -411,6 +418,14 @@ test('a link whose comparison failed can be asked again after closing it', async
   await expect(page).toHaveURL(
     new RegExp(`/nfl/compare\\?${WARNER_VS_MCNAIR_SEARCH}$`),
   )
+  // The retry is still out: loading, not the first failure's line.
+  const reopened = page.getByRole('dialog')
+  await expect(reopened.getByRole('status')).toHaveText(
+    'Loading the comparison\u2026',
+  )
+  await expect(reopened.getByRole('alert')).toHaveCount(0)
+  releaseRetry()
+
   await expect(
     comparisonModal(page, 'Kurt Warner and Steve McNair').getByRole('table', {
       name: 'Kurt Warner and Steve McNair, regular season',

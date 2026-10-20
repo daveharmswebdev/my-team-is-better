@@ -212,6 +212,8 @@ export function PlayerComparePage() {
   const pickHintId = `${noteId}-pick-hint`
   /** Where focus goes when the comparison closes: the Compare button. */
   const compareButtonRef = useRef<HTMLButtonElement>(null)
+  /** Holds the fields, for when Compare can't take focus after a close. */
+  const pickersRef = useRef<HTMLDivElement>(null)
   /** Raised by a close, lowered once focus has actually moved (see below). */
   const focusCompareRef = useRef(false)
 
@@ -243,10 +245,20 @@ export function PlayerComparePage() {
         ? pickB
         : null
 
+  // The answer belongs to one ask, and an ask ends when the URL stops naming
+  // a pair to fetch (a close, or Back to the form): drop it then, so the next
+  // ask of the same pair shows loading until its own request settles rather
+  // than the last ask's error or table (issue #308). Matching on the pair's
+  // key alone can't tell two asks of the same pair apart.
+  if (comparisonKey === null && comparisonAnswer !== null) {
+    setComparisonAnswer(null)
+  }
+
   // Asks whenever the URL's pair changes. Pressing Compare always changes
   // it: Compare can only be pressed with the modal shut (the form behind an
   // open modal is inert, issue #325), and the modal is shut exactly when the
-  // URL names no pair, so every press pushes ?a&b and asks again.
+  // URL names no pair, so every press pushes ?a&b and asks again -- and the
+  // answer was dropped when the pair left the URL, so it shows loading.
   useEffect(() => {
     if (typeof pickA !== 'number' || typeof pickB !== 'number') {
       return
@@ -407,8 +419,10 @@ export function PlayerComparePage() {
   const askedPair = pickA !== null && pickB !== null
 
   /**
-   * Returns focus to the Compare button after a close, once the modal is
-   * really gone. It has to wait for that: what opens the modal is the URL,
+   * Returns focus to the form after a close, once the modal is really gone:
+   * to Compare, or -- when Compare is disabled, as after a link whose id
+   * can't be a player, and so can't take focus -- to the first field that
+   * still needs a pick. Never left on the page itself. It has to wait for that: what opens the modal is the URL,
    * and react-router applies a navigation in a transition, so the commit
    * right after `closeComparison` can still have it open -- and focusing
    * something outside an open modal only makes it pull focus back to its own
@@ -417,7 +431,15 @@ export function PlayerComparePage() {
   useEffect(() => {
     if (focusCompareRef.current && !askedPair) {
       focusCompareRef.current = false
-      compareButtonRef.current?.focus()
+      if (canCompare) {
+        compareButtonRef.current?.focus()
+      } else {
+        const index = SLOTS.findIndex((slot) => slots[slot].pick === null)
+        pickersRef.current
+          ?.querySelectorAll('input')
+          .item(Math.max(index, 0))
+          ?.focus()
+      }
     }
   })
 
@@ -530,7 +552,7 @@ export function PlayerComparePage() {
         started at quarterback against each other.
       </p>
 
-      <div className={styles.pickers}>
+      <div ref={pickersRef} className={styles.pickers}>
         <PlayerCombobox
           label="Player A"
           value={fieldText('a')}

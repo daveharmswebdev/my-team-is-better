@@ -1030,4 +1030,94 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
     expect(screen.getByText(pickOneMoreCopy('Tom Brady'))).toBeInTheDocument()
     expect(screen.queryByText(PICK_TWO_COPY)).not.toBeInTheDocument()
   })
+
+  /** A request the test settles by hand, to look at the page while it's out. */
+  function heldRequest() {
+    let resolve: (comparison: PlayerComparisonOut) => void = () => {}
+    let reject: (error: unknown) => void = () => {}
+    const promise = new Promise<PlayerComparisonOut>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  it('retrying a failed link shows the loading state until the retry settles, then its own answer (f)', async () => {
+    const user = userEvent.setup()
+    const retry = heldRequest()
+    mockedCompare
+      .mockRejectedValueOnce(new VerdictNetworkError(NETWORK_ERROR_COPY))
+      .mockReturnValueOnce(retry.promise)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await within(await screen.findByRole('dialog')).findByRole('alert')
+    await closeTheModal(user)
+
+    await user.click(compareButton())
+    await waitFor(() => {
+      expect(mockedCompare).toHaveBeenCalledTimes(2)
+    })
+
+    // While the retry is out, the old failure is not its answer.
+    const reopened = await screen.findByRole('dialog')
+    expect(within(reopened).getByRole('status')).toHaveTextContent(
+      'Loading the comparison',
+    )
+    expect(within(reopened).queryByRole('alert')).not.toBeInTheDocument()
+
+    // The retry fails the same way: its own failure shows.
+    retry.reject(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    expect(
+      await within(screen.getByRole('dialog')).findByRole('alert'),
+    ).toHaveTextContent(NETWORK_ERROR_COPY)
+    expect(
+      within(screen.getByRole('dialog')).queryByRole('status'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('re-asking after closing a comparison shows the loading state, not the closed table (g)', async () => {
+    const user = userEvent.setup()
+    const again = heldRequest()
+    mockedCompare
+      .mockResolvedValueOnce(WARNER_VS_MCNAIR)
+      .mockReturnValueOnce(again.promise)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await screen.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    })
+    await closeTheModal(user)
+
+    await user.click(compareButton())
+    await waitFor(() => {
+      expect(mockedCompare).toHaveBeenCalledTimes(2)
+    })
+
+    const reopened = await screen.findByRole('dialog')
+    expect(within(reopened).getByRole('status')).toHaveTextContent(
+      'Loading the comparison',
+    )
+    expect(within(reopened).queryByRole('table')).not.toBeInTheDocument()
+
+    again.resolve(WARNER_VS_MCNAIR)
+    expect(
+      await screen.findByRole('table', {
+        name: 'Kurt Warner and Steve McNair, regular season',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('closing a link with an id that cannot be one puts focus on a control, never the page (h)', async () => {
+    const user = userEvent.setup()
+    mockedCareer.mockResolvedValue(KURT_WARNER_CAREER)
+
+    renderPage(`?a=abc&b=${WARNER}`)
+    await within(await screen.findByRole('dialog')).findByRole('alert')
+    await closeTheModal(user)
+
+    // Compare can't take focus with a slot empty; the empty field can.
+    expect(compareButton()).toBeDisabled()
+    expect(document.activeElement).not.toBe(document.body)
+    expect(document.activeElement).toBe(playerA())
+  })
 })
