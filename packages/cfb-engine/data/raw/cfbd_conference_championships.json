@@ -1,0 +1,1625 @@
+{
+  "description": "Curated list of FBS conference championship games, 1998-2025 (issue #300). CFBD files these as season_type 'regular' from 2001 on (postseason in 1998-2000) and names them in `notes` only from 2022, so no field of the record says which games are title games. Each entry names one CFBD game id with the season, season type and home/away team names exactly as CFBD reports them, the CFBD conference name and a source. Ingest (cfb_strength/ingest/conference_championships.py) stores conference_championship=1 for exactly these ids and raises unless each entry matches its record. season_type is never changed.",
+  "championships": [
+    {
+      "id": 62354,
+      "season": 1998,
+      "season_type": "postseason",
+      "home_team": "Marshall",
+      "away_team": "Toledo",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 1998 MAC Championship Game"
+    },
+    {
+      "id": 62355,
+      "season": 1998,
+      "season_type": "postseason",
+      "home_team": "Air Force",
+      "away_team": "BYU",
+      "conference": "Western Athletic",
+      "source": "Wikipedia: 1998 WAC Championship Game"
+    },
+    {
+      "id": 62358,
+      "season": 1998,
+      "season_type": "postseason",
+      "home_team": "Tennessee",
+      "away_team": "Mississippi State",
+      "conference": "SEC",
+      "source": "Wikipedia: 1998 SEC Championship Game"
+    },
+    {
+      "id": 62359,
+      "season": 1998,
+      "season_type": "postseason",
+      "home_team": "Texas A&M",
+      "away_team": "Kansas State",
+      "conference": "Big 12",
+      "source": "Wikipedia: 1998 Big 12 Championship Game"
+    },
+    {
+      "id": 63040,
+      "season": 1999,
+      "season_type": "postseason",
+      "home_team": "Marshall",
+      "away_team": "Western Michigan",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 1999 MAC Championship Game"
+    },
+    {
+      "id": 63044,
+      "season": 1999,
+      "season_type": "postseason",
+      "home_team": "Nebraska",
+      "away_team": "Texas",
+      "conference": "Big 12",
+      "source": "Wikipedia: 1999 Big 12 Championship Game"
+    },
+    {
+      "id": 63041,
+      "season": 1999,
+      "season_type": "postseason",
+      "home_team": "Alabama",
+      "away_team": "Florida",
+      "conference": "SEC",
+      "source": "Wikipedia: 1999 SEC Championship Game"
+    },
+    {
+      "id": 63741,
+      "season": 2000,
+      "season_type": "postseason",
+      "home_team": "Marshall",
+      "away_team": "Western Michigan",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2000 MAC Championship Game"
+    },
+    {
+      "id": 63740,
+      "season": 2000,
+      "season_type": "postseason",
+      "home_team": "Florida",
+      "away_team": "Auburn",
+      "conference": "SEC",
+      "source": "Wikipedia: 2000 SEC Championship Game"
+    },
+    {
+      "id": 63744,
+      "season": 2000,
+      "season_type": "postseason",
+      "home_team": "Oklahoma",
+      "away_team": "Kansas State",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2000 Big 12 Championship Game"
+    },
+    {
+      "id": 213420099,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Tennessee",
+      "conference": "SEC",
+      "source": "Wikipedia: 2001 SEC Championship Game"
+    },
+    {
+      "id": 213350251,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Colorado",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2001 Big 12 Championship Game"
+    },
+    {
+      "id": 213342649,
+      "season": 2001,
+      "season_type": "regular",
+      "home_team": "Toledo",
+      "away_team": "Marshall",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2001 MAC Championship Game"
+    },
+    {
+      "id": 223410008,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Arkansas",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2002 SEC Championship Game"
+    },
+    {
+      "id": 223410038,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Colorado",
+      "away_team": "Oklahoma",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2002 Big 12 Championship Game"
+    },
+    {
+      "id": 223410276,
+      "season": 2002,
+      "season_type": "regular",
+      "home_team": "Marshall",
+      "away_team": "Toledo",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2002 MAC Championship Game"
+    },
+    {
+      "id": 233400061,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "LSU",
+      "conference": "SEC",
+      "source": "Wikipedia: 2003 SEC Championship Game"
+    },
+    {
+      "id": 233400201,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Kansas State",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2003 Big 12 Championship Game"
+    },
+    {
+      "id": 233380189,
+      "season": 2003,
+      "season_type": "regular",
+      "home_team": "Bowling Green",
+      "away_team": "Miami (OH)",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2003 MAC Championship Game"
+    },
+    {
+      "id": 243390002,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Tennessee",
+      "away_team": "Auburn",
+      "conference": "SEC",
+      "source": "Wikipedia: 2004 SEC Championship Game"
+    },
+    {
+      "id": 243390038,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Colorado",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2004 Big 12 Championship Game"
+    },
+    {
+      "id": 243370193,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Miami (OH)",
+      "away_team": "Toledo",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2004 MAC Championship Game"
+    },
+    {
+      "id": 253370099,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2005 SEC Championship Game"
+    },
+    {
+      "id": 253370251,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Colorado",
+      "away_team": "Texas",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2005 Big 12 Championship Game"
+    },
+    {
+      "id": 253370259,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Florida State",
+      "away_team": "Virginia Tech",
+      "conference": "ACC",
+      "source": "Wikipedia: 2005 ACC Championship Game"
+    },
+    {
+      "id": 253352459,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Northern Illinois",
+      "away_team": "Akron",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2005 MAC Championship Game"
+    },
+    {
+      "id": 253372116,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "UCF",
+      "away_team": "Tulsa",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2005 Conference USA Championship Game"
+    },
+    {
+      "id": 263360057,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Arkansas",
+      "conference": "SEC",
+      "source": "Wikipedia: 2006 SEC Championship Game"
+    },
+    {
+      "id": 263360201,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Nebraska",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2006 Big 12 Championship Game"
+    },
+    {
+      "id": 263360059,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Georgia Tech",
+      "away_team": "Wake Forest",
+      "conference": "ACC",
+      "source": "Wikipedia: 2006 ACC Championship Game"
+    },
+    {
+      "id": 263340195,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Ohio",
+      "away_team": "Central Michigan",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2006 MAC Championship Game"
+    },
+    {
+      "id": 263350248,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Houston",
+      "away_team": "Southern Miss",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2006 Conference USA Championship Game"
+    },
+    {
+      "id": 273350099,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Tennessee",
+      "conference": "SEC",
+      "source": "Wikipedia: 2007 SEC Championship Game"
+    },
+    {
+      "id": 273350142,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Missouri",
+      "away_team": "Oklahoma",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2007 Big 12 Championship Game"
+    },
+    {
+      "id": 273350103,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Boston College",
+      "away_team": "Virginia Tech",
+      "conference": "ACC",
+      "source": "Wikipedia: 2007 ACC Championship Game"
+    },
+    {
+      "id": 273352117,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Central Michigan",
+      "away_team": "Miami (OH)",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2007 MAC Championship Game"
+    },
+    {
+      "id": 273352116,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "UCF",
+      "away_team": "Tulsa",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2007 Conference USA Championship Game"
+    },
+    {
+      "id": 283410057,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Alabama",
+      "conference": "SEC",
+      "source": "Wikipedia: 2008 SEC Championship Game"
+    },
+    {
+      "id": 283410201,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Missouri",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2008 Big 12 Championship Game"
+    },
+    {
+      "id": 283410259,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Virginia Tech",
+      "away_team": "Boston College",
+      "conference": "ACC",
+      "source": "Wikipedia: 2008 ACC Championship Game"
+    },
+    {
+      "id": 283402084,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Buffalo",
+      "away_team": "Ball State",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2008 MAC Championship Game"
+    },
+    {
+      "id": 283410202,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Tulsa",
+      "away_team": "East Carolina",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2008 Conference USA Championship Game"
+    },
+    {
+      "id": 293390333,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Alabama",
+      "away_team": "Florida",
+      "conference": "SEC",
+      "source": "Wikipedia: 2009 SEC Championship Game"
+    },
+    {
+      "id": 293390158,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Nebraska",
+      "away_team": "Texas",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2009 Big 12 Championship Game"
+    },
+    {
+      "id": 293390228,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Clemson",
+      "away_team": "Georgia Tech",
+      "conference": "ACC",
+      "source": "Wikipedia: 2009 ACC Championship Game"
+    },
+    {
+      "id": 293382117,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Central Michigan",
+      "away_team": "Ohio",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2009 MAC Championship Game"
+    },
+    {
+      "id": 293390151,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "East Carolina",
+      "away_team": "Houston",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2009 Conference USA Championship Game"
+    },
+    {
+      "id": 303382579,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "South Carolina",
+      "away_team": "Auburn",
+      "conference": "SEC",
+      "source": "Wikipedia: 2010 SEC Championship Game"
+    },
+    {
+      "id": 303380158,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Nebraska",
+      "away_team": "Oklahoma",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2010 Big 12 Championship Game"
+    },
+    {
+      "id": 303380259,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Virginia Tech",
+      "away_team": "Florida State",
+      "conference": "ACC",
+      "source": "Wikipedia: 2010 ACC Championship Game"
+    },
+    {
+      "id": 303370193,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Miami (OH)",
+      "away_team": "Northern Illinois",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2010 MAC Championship Game"
+    },
+    {
+      "id": 303382116,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "UCF",
+      "away_team": "SMU",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2010 Conference USA Championship Game"
+    },
+    {
+      "id": 313370099,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2011 SEC Championship Game"
+    },
+    {
+      "id": 313370228,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Clemson",
+      "away_team": "Virginia Tech",
+      "conference": "ACC",
+      "source": "Wikipedia: 2011 ACC Championship Game"
+    },
+    {
+      "id": 313362459,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Northern Illinois",
+      "away_team": "Ohio",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2011 MAC Championship Game"
+    },
+    {
+      "id": 313370248,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Houston",
+      "away_team": "Southern Miss",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2011 Conference USA Championship Game"
+    },
+    {
+      "id": 313370127,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Michigan State",
+      "away_team": "Wisconsin",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2011 Big Ten Football Championship Game"
+    },
+    {
+      "id": 313362483,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Oregon",
+      "away_team": "UCLA",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2011 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 323360061,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "Alabama",
+      "conference": "SEC",
+      "source": "Wikipedia: 2012 SEC Championship Game"
+    },
+    {
+      "id": 323360059,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Georgia Tech",
+      "away_team": "Florida State",
+      "conference": "ACC",
+      "source": "Wikipedia: 2012 ACC Championship Game"
+    },
+    {
+      "id": 323352309,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Kent State",
+      "away_team": "Northern Illinois",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2012 MAC Championship Game"
+    },
+    {
+      "id": 323360202,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Tulsa",
+      "away_team": "UCF",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2012 Conference USA Championship Game"
+    },
+    {
+      "id": 323360275,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Wisconsin",
+      "away_team": "Nebraska",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2012 Big Ten Football Championship Game"
+    },
+    {
+      "id": 323350024,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Stanford",
+      "away_team": "UCLA",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2012 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 333410002,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Auburn",
+      "away_team": "Missouri",
+      "conference": "SEC",
+      "source": "Wikipedia: 2013 SEC Championship Game"
+    },
+    {
+      "id": 333410052,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Florida State",
+      "away_team": "Duke",
+      "conference": "ACC",
+      "source": "Wikipedia: 2013 ACC Championship Game"
+    },
+    {
+      "id": 333402459,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Northern Illinois",
+      "away_team": "Bowling Green",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2013 MAC Championship Game"
+    },
+    {
+      "id": 333410242,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Rice",
+      "away_team": "Marshall",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2013 Conference USA Championship Game"
+    },
+    {
+      "id": 333410127,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Michigan State",
+      "away_team": "Ohio State",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2013 Big Ten Football Championship Game"
+    },
+    {
+      "id": 333410009,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Arizona State",
+      "away_team": "Stanford",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2013 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 333410278,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Fresno State",
+      "away_team": "Utah State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2013 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 400609098,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Missouri",
+      "away_team": "Alabama",
+      "conference": "SEC",
+      "source": "Wikipedia: 2014 SEC Championship Game"
+    },
+    {
+      "id": 400608167,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Georgia Tech",
+      "away_team": "Florida State",
+      "conference": "ACC",
+      "source": "Wikipedia: 2014 ACC Championship Game"
+    },
+    {
+      "id": 400609055,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Bowling Green",
+      "away_team": "Northern Illinois",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2014 MAC Championship Game"
+    },
+    {
+      "id": 400609077,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Marshall",
+      "away_team": "Louisiana Tech",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2014 Conference USA Championship Game"
+    },
+    {
+      "id": 400609096,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Ohio State",
+      "away_team": "Wisconsin",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2014 Big Ten Football Championship Game"
+    },
+    {
+      "id": 400609076,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Oregon",
+      "away_team": "Arizona",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2014 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 400609154,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "Fresno State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2014 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 400852681,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Alabama",
+      "away_team": "Florida",
+      "conference": "SEC",
+      "source": "Wikipedia: 2015 SEC Championship Game"
+    },
+    {
+      "id": 400852676,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Clemson",
+      "away_team": "North Carolina",
+      "conference": "ACC",
+      "source": "Wikipedia: 2015 ACC Championship Game"
+    },
+    {
+      "id": 400852680,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Northern Illinois",
+      "away_team": "Bowling Green",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2015 MAC Championship Game"
+    },
+    {
+      "id": 400852672,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Western Kentucky",
+      "away_team": "Southern Miss",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2015 Conference USA Championship Game"
+    },
+    {
+      "id": 400852682,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Iowa",
+      "away_team": "Michigan State",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2015 Big Ten Football Championship Game"
+    },
+    {
+      "id": 400852677,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Stanford",
+      "away_team": "USC",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2015 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 400852675,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "San Diego State",
+      "away_team": "Air Force",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2015 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 400852678,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Houston",
+      "away_team": "Temple",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2015 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 400926943,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Alabama",
+      "conference": "SEC",
+      "source": "Wikipedia: 2016 SEC Championship Game"
+    },
+    {
+      "id": 400926944,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Virginia Tech",
+      "away_team": "Clemson",
+      "conference": "ACC",
+      "source": "Wikipedia: 2016 ACC Championship Game"
+    },
+    {
+      "id": 400926941,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Ohio",
+      "away_team": "Western Michigan",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2016 MAC Championship Game"
+    },
+    {
+      "id": 400926948,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Western Kentucky",
+      "away_team": "Louisiana Tech",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2016 Conference USA Championship Game"
+    },
+    {
+      "id": 400926946,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Penn State",
+      "away_team": "Wisconsin",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2016 Big Ten Football Championship Game"
+    },
+    {
+      "id": 400926942,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Washington",
+      "away_team": "Colorado",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2016 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 400926949,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Wyoming",
+      "away_team": "San Diego State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2016 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 400926947,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Navy",
+      "away_team": "Temple",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2016 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 400955153,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Auburn",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2017 SEC Championship Game"
+    },
+    {
+      "id": 400955157,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "TCU",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2017 Big 12 Championship Game"
+    },
+    {
+      "id": 400955155,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Clemson",
+      "away_team": "Miami",
+      "conference": "ACC",
+      "source": "Wikipedia: 2017 ACC Championship Game"
+    },
+    {
+      "id": 400955150,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Toledo",
+      "away_team": "Akron",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2017 MAC Championship Game"
+    },
+    {
+      "id": 400955152,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Florida Atlantic",
+      "away_team": "North Texas",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2017 Conference USA Championship Game"
+    },
+    {
+      "id": 400955156,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Wisconsin",
+      "away_team": "Ohio State",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2017 Big Ten Football Championship Game"
+    },
+    {
+      "id": 400955149,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "USC",
+      "away_team": "Stanford",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2017 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 400955154,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "Fresno State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2017 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 400955151,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "UCF",
+      "away_team": "Memphis",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2017 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401056696,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Buffalo",
+      "away_team": "Northern Illinois",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2018 MAC Championship Game"
+    },
+    {
+      "id": 401056704,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Washington",
+      "away_team": "Utah",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2018 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 401056698,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Texas",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2018 Big 12 Championship Game"
+    },
+    {
+      "id": 401056701,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Louisiana",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2018 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401056703,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Middle Tennessee",
+      "away_team": "UAB",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2018 Conference USA Championship Game"
+    },
+    {
+      "id": 401056699,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "UCF",
+      "away_team": "Memphis",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2018 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401056705,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "Alabama",
+      "conference": "SEC",
+      "source": "Wikipedia: 2018 SEC Championship Game"
+    },
+    {
+      "id": 401056700,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "Fresno State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2018 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401056697,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Pittsburgh",
+      "away_team": "Clemson",
+      "conference": "ACC",
+      "source": "Wikipedia: 2018 ACC Championship Game"
+    },
+    {
+      "id": 401056702,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Ohio State",
+      "away_team": "Northwestern",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2018 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401132973,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Oregon",
+      "away_team": "Utah",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2019 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 401132982,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Central Michigan",
+      "away_team": "Miami (OH)",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2019 MAC Championship Game"
+    },
+    {
+      "id": 401132984,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Louisiana",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2019 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401132974,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Oklahoma",
+      "away_team": "Baylor",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2019 Big 12 Championship Game"
+    },
+    {
+      "id": 401132980,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Florida Atlantic",
+      "away_team": "UAB",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2019 Conference USA Championship Game"
+    },
+    {
+      "id": 401132976,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Memphis",
+      "away_team": "Cincinnati",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2019 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401132979,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "Hawai'i",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2019 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401132981,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "LSU",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2019 SEC Championship Game"
+    },
+    {
+      "id": 401132975,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Clemson",
+      "away_team": "Virginia",
+      "conference": "ACC",
+      "source": "Wikipedia: 2019 ACC Championship Game"
+    },
+    {
+      "id": 401132983,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Wisconsin",
+      "away_team": "Ohio State",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2019 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401249854,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Buffalo",
+      "away_team": "Ball State",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2020 MAC Championship Game"
+    },
+    {
+      "id": 401247349,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Ohio State",
+      "away_team": "Northwestern",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2020 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401262060,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Iowa State",
+      "away_team": "Oklahoma",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2020 Big 12 Championship Game"
+    },
+    {
+      "id": 401256001,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Notre Dame",
+      "away_team": "Clemson",
+      "conference": "ACC",
+      "source": "Wikipedia: 2020 ACC Championship Game"
+    },
+    {
+      "id": 401249043,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "San José State",
+      "away_team": "Boise State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2020 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401237074,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Florida",
+      "away_team": "Alabama",
+      "conference": "SEC",
+      "source": "Wikipedia: 2020 SEC Championship Game"
+    },
+    {
+      "id": 401249434,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "USC",
+      "away_team": "Oregon",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2020 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 401264085,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Cincinnati",
+      "away_team": "Tulsa",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2020 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401240101,
+      "season": 2020,
+      "season_type": "regular",
+      "home_team": "Marshall",
+      "away_team": "UAB",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2020 Conference USA Championship Game"
+    },
+    {
+      "id": 401282156,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "UTSA",
+      "away_team": "Western Kentucky",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2021 Conference USA Championship Game"
+    },
+    {
+      "id": 401331159,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Utah",
+      "away_team": "Oregon",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2021 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 401287953,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Oklahoma State",
+      "away_team": "Baylor",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2021 Big 12 Championship Game"
+    },
+    {
+      "id": 401331160,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Northern Illinois",
+      "away_team": "Kent State",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2021 MAC Championship Game"
+    },
+    {
+      "id": 401310676,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "San Diego State",
+      "away_team": "Utah State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2021 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401331161,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Louisiana",
+      "away_team": "App State",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2021 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401282154,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Alabama",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2021 SEC Championship Game"
+    },
+    {
+      "id": 401331162,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Cincinnati",
+      "away_team": "Houston",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2021 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401331163,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Wake Forest",
+      "away_team": "Pittsburgh",
+      "conference": "ACC",
+      "source": "Wikipedia: 2021 ACC Championship Game"
+    },
+    {
+      "id": 401331447,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Iowa",
+      "away_team": "Michigan",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2021 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401437032,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "UTSA",
+      "away_team": "North Texas",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2022 Conference USA Championship Game"
+    },
+    {
+      "id": 401437035,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "USC",
+      "away_team": "Utah",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2022 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 401437033,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Ohio",
+      "away_team": "Toledo",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2022 MAC Championship Game"
+    },
+    {
+      "id": 401437030,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "TCU",
+      "away_team": "Kansas State",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2022 Big 12 Championship Game"
+    },
+    {
+      "id": 401437037,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Troy",
+      "away_team": "Coastal Carolina",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2022 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401437008,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Tulane",
+      "away_team": "UCF",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2022 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401437034,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "Fresno State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2022 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401437036,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Georgia",
+      "away_team": "LSU",
+      "conference": "SEC",
+      "source": "Wikipedia: 2022 SEC Championship Game"
+    },
+    {
+      "id": 401437009,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "North Carolina",
+      "away_team": "Clemson",
+      "conference": "ACC",
+      "source": "Wikipedia: 2022 ACC Championship Game"
+    },
+    {
+      "id": 401437031,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Michigan",
+      "away_team": "Purdue",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2022 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401539476,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Liberty",
+      "away_team": "New Mexico State",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2023 Conference USA Championship Game"
+    },
+    {
+      "id": 401539475,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Washington",
+      "away_team": "Oregon",
+      "conference": "Pac-12",
+      "source": "Wikipedia: 2023 Pac-12 Football Championship Game"
+    },
+    {
+      "id": 401539481,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Toledo",
+      "away_team": "Miami (OH)",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2023 MAC Championship Game"
+    },
+    {
+      "id": 401539479,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Oklahoma State",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2023 Big 12 Championship Game"
+    },
+    {
+      "id": 401539482,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "UNLV",
+      "away_team": "Boise State",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2023 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401539483,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Alabama",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2023 SEC Championship Game"
+    },
+    {
+      "id": 401539477,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Tulane",
+      "away_team": "SMU",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2023 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401539484,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Troy",
+      "away_team": "App State",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2023 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401539478,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Florida State",
+      "away_team": "Louisville",
+      "conference": "ACC",
+      "source": "Wikipedia: 2023 ACC Championship Game"
+    },
+    {
+      "id": 401539480,
+      "season": 2023,
+      "season_type": "regular",
+      "home_team": "Iowa",
+      "away_team": "Michigan",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2023 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401673466,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Western Kentucky",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2024 Conference USA Championship Game"
+    },
+    {
+      "id": 401673468,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "UNLV",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2024 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401673462,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Army",
+      "away_team": "Tulane",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2024 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401673465,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Arizona State",
+      "away_team": "Iowa State",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2024 Big 12 Championship Game"
+    },
+    {
+      "id": 401673467,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Miami (OH)",
+      "away_team": "Ohio",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2024 MAC Championship Game"
+    },
+    {
+      "id": 401673469,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Texas",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2024 SEC Championship Game"
+    },
+    {
+      "id": 401673470,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Louisiana",
+      "away_team": "Marshall",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2024 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401673464,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Oregon",
+      "away_team": "Penn State",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2024 Big Ten Football Championship Game"
+    },
+    {
+      "id": 401673463,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "SMU",
+      "away_team": "Clemson",
+      "conference": "ACC",
+      "source": "Wikipedia: 2024 ACC Championship Game"
+    },
+    {
+      "id": 401777325,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Kennesaw State",
+      "conference": "Conference USA",
+      "source": "Wikipedia: 2025 Conference USA Championship Game"
+    },
+    {
+      "id": 401777352,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Troy",
+      "conference": "Sun Belt",
+      "source": "Wikipedia: 2025 Sun Belt Conference Football Championship Game"
+    },
+    {
+      "id": 401777326,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Boise State",
+      "away_team": "UNLV",
+      "conference": "Mountain West",
+      "source": "Wikipedia: 2025 Mountain West Conference Football Championship Game"
+    },
+    {
+      "id": 401777324,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Tulane",
+      "away_team": "North Texas",
+      "conference": "American Athletic",
+      "source": "Wikipedia: 2025 American Athletic Conference Football Championship Game"
+    },
+    {
+      "id": 401777327,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Texas Tech",
+      "away_team": "BYU",
+      "conference": "Big 12",
+      "source": "Wikipedia: 2025 Big 12 Championship Game"
+    },
+    {
+      "id": 401777329,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Western Michigan",
+      "away_team": "Miami (OH)",
+      "conference": "Mid-American",
+      "source": "Wikipedia: 2025 MAC Championship Game"
+    },
+    {
+      "id": 401777351,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Alabama",
+      "away_team": "Georgia",
+      "conference": "SEC",
+      "source": "Wikipedia: 2025 SEC Championship Game"
+    },
+    {
+      "id": 401777328,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Virginia",
+      "away_team": "Duke",
+      "conference": "ACC",
+      "source": "Wikipedia: 2025 ACC Championship Game"
+    },
+    {
+      "id": 401777353,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Ohio State",
+      "away_team": "Indiana",
+      "conference": "Big Ten",
+      "source": "Wikipedia: 2025 Big Ten Football Championship Game"
+    }
+  ]
+}

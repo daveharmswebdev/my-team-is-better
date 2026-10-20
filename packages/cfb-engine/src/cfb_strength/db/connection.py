@@ -194,6 +194,22 @@ def _migrate_team_alias_columns(conn: sqlite3.Connection) -> list[str]:
     return added
 
 
+def _migrate_games_conference_championship_column(conn: sqlite3.Connection) -> list[str]:
+    """Add `games.conference_championship` (issue #300) to a pre-existing db.
+
+    Existing rows backfill to 0, which is wrong only for the title games a
+    season held, and only until that season is re-ingested: the flag comes
+    from ingest, not from anything the migration could derive. Production
+    always builds from an empty db, so it never sees the stale window.
+    """
+    if not _has_column(conn, "games", "conference_championship"):
+        conn.execute(
+            "ALTER TABLE games ADD COLUMN conference_championship INTEGER NOT NULL DEFAULT 0"
+        )
+        return ["games.conference_championship"]
+    return []
+
+
 def _migrate_ratings_ties_column(conn: sqlite3.Connection) -> list[str]:
     """Add `ratings.ties` (issue #83) to a pre-existing db.
 
@@ -278,6 +294,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     added = [
         *_migrate_sport_columns(conn),
         *_migrate_team_alias_columns(conn),
+        *_migrate_games_conference_championship_column(conn),
         *_migrate_ratings_ties_column(conn),
         *_migrate_elo_ledger_floor_column(conn),
         *_migrate_player_stat_columns(conn),

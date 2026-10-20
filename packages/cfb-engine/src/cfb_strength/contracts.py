@@ -93,6 +93,13 @@ class GameRow:
     # since CFBD ids are already the row's real integer primary key.
     sport: Sport = "cfb"
     source_id: str | None = None
+    # Issue #300: True for a conference title game. CFBD labels those
+    # season_type "regular" from 2001 on, and season_type keeps CFBD's label
+    # (the NCAA counts them as regular season too), so without this flag the
+    # last "regular" game of a title-game team reads as its regular-season
+    # finale. Set by CFB ingest; defaults False so the nflverse path, which
+    # has no conference title games, constructs GameRow unchanged.
+    conference_championship: bool = False
 
     def __post_init__(self) -> None:
         _require_known_sport(self.sport, "GameRow")

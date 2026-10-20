@@ -63,7 +63,12 @@ CREATE TABLE IF NOT EXISTS games (
     venue TEXT,
     raw_json TEXT NOT NULL,
     sport TEXT NOT NULL DEFAULT 'cfb',
-    source_id TEXT
+    source_id TEXT,
+    -- Issue #300: 1 for a conference title game. CFBD files those as
+    -- season_type 'regular' from 2001 on (postseason in 1998-2000), and
+    -- season_type keeps CFBD's label, so this is the only field that tells a
+    -- title game from the regular-season finale. Always 0 for NFL rows.
+    conference_championship INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_games_season ON games(season);
 CREATE INDEX IF NOT EXISTS idx_games_home ON games(home_team_id);
