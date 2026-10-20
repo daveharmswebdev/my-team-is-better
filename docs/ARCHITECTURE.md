@@ -604,8 +604,10 @@ Single `render.yaml` blueprint:
   live service.
 - **Postgres** — Render managed instance, **entry-level paid plan
   (Basic-256mb, ~$6–7/mo) from day one**. Today it holds only the persona
-  narration cache; accounts and history are deferred (#201). Its Blueprint
-  declaration has drifted (#53).
+  narration cache; accounts and history are deferred (#201). It was created
+  in the dashboard and later adopted into `render.yaml` (#53), which also
+  supplies the API's `DATABASE_URL` through `fromDatabase`. The IP allow list
+  is still set in the dashboard, not the Blueprint.
 
 **Two Render tier facts that drove both paid-plan decisions, verified
 against current pricing and policy:**
@@ -624,7 +626,8 @@ Environment variables:
 
 - `ANTHROPIC_API_KEY`: the narrator's Claude calls (runtime).
 - `CFBD_API_KEY`: build-time ingest only, not needed at runtime.
-- `DATABASE_URL`: Postgres, for the persona narration cache.
+- `DATABASE_URL`: Postgres, for the persona narration cache (set by the
+  Blueprint from the database entry, not by hand).
 - `CORS_ALLOWED_ORIGINS`: the web origins allowed to call the API.
 - `VITE_API_BASE_URL`: web build time; where the SPA finds the API.
 - `APP_TEST_MODE`: the API uses an in-memory cache and a stub narrator
