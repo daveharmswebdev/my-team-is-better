@@ -1,0 +1,43 @@
+/* The route-level fallback (issue #268), sized like a page's `.wrap`. */
+.wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-4) var(--sp-16);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--sp-6);
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.75rem, 6vw, 2.5rem);
+  color: var(--ink);
+}
+
+.body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  max-width: 60ch;
+}
+
+.link {
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.link:hover {
+  color: var(--leather);
+}
