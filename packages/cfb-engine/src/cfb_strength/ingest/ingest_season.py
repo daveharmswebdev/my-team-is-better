@@ -50,6 +50,11 @@ from cfb_strength.config import DB_PATH, RAW_DIR, SEASON_TYPES
 from cfb_strength.contracts import GameRow, TeamRow
 from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.ingest.client import CFBDClientError, get_games, get_teams
+from cfb_strength.ingest.conference_championships import (
+    ConferenceChampionship,
+    apply_conference_championships,
+    load_conference_championships,
+)
 from cfb_strength.ingest.neutral_site_overrides import (
     NeutralSiteOverride,
     apply_neutral_site_overrides,
@@ -170,12 +175,12 @@ def _write_games(conn: Any, game_rows: list[GameRow]) -> None:
                 id, season, week, season_type, start_date, neutral_site,
                 completed, home_team_id, away_team_id, home_team, away_team,
                 home_points, away_points, home_conference, away_conference,
-                venue, raw_json
+                venue, raw_json, conference_championship
             ) VALUES (
                 :id, :season, :week, :season_type, :start_date, :neutral_site,
                 :completed, :home_team_id, :away_team_id, :home_team, :away_team,
                 :home_points, :away_points, :home_conference, :away_conference,
-                :venue, :raw_json
+                :venue, :raw_json, :conference_championship
             )
             ON CONFLICT(id) DO UPDATE SET
                 season = excluded.season,
@@ -193,7 +198,8 @@ def _write_games(conn: Any, game_rows: list[GameRow]) -> None:
                 home_conference = excluded.home_conference,
                 away_conference = excluded.away_conference,
                 venue = excluded.venue,
-                raw_json = excluded.raw_json
+                raw_json = excluded.raw_json,
+                conference_championship = excluded.conference_championship
             """,
             {
                 "id": gr.id,
@@ -213,6 +219,7 @@ def _write_games(conn: Any, game_rows: list[GameRow]) -> None:
                 "away_conference": gr.away_conference,
                 "venue": gr.venue,
                 "raw_json": gr.raw_json,
+                "conference_championship": gr.conference_championship,
             },
         )
 
@@ -317,15 +324,20 @@ def ingest_one(
     *,
     force: bool = False,
     neutral_site_overrides: Sequence[NeutralSiteOverride] | None = None,
+    conference_championships: Sequence[ConferenceChampionship] | None = None,
 ) -> IngestResult:
     """Fetch (cache-first), normalize, and write one year/season-type batch.
 
     `neutral_site_overrides` defaults to the committed
-    `data/raw/cfbd_neutral_site_overrides.json` (issue #343). A test that
-    feeds a hand-picked payload passes its own, possibly empty, set.
+    `data/raw/cfbd_neutral_site_overrides.json` (issue #343), and
+    `conference_championships` to the committed
+    `data/raw/cfbd_conference_championships.json` (issue #300). A test that
+    feeds a hand-picked payload passes its own, possibly empty, sets.
     """
     if neutral_site_overrides is None:
         neutral_site_overrides = load_neutral_site_overrides()
+    if conference_championships is None:
+        conference_championships = load_conference_championships()
     games_raw, fetched_live = get_games(year, season_type, force=force)
 
     # Issue #125: CFBD lists some real games twice under two game ids. This
@@ -352,6 +364,20 @@ def ingest_one(
     # is written. See `neutral_site_overrides`.
     game_rows = apply_neutral_site_overrides(
         game_rows, season=year, season_type=season_type, overrides=neutral_site_overrides
+    )
+
+    # Issue #300: CFBD files conference title games as season_type 'regular'
+    # from 2001 and names them in `notes` only from 2022. The committed list
+    # names each one by id; only those rows get conference_championship=True,
+    # and season_type stays as CFBD reports it. Same failure rules as the
+    # neutral-site overrides: a listed id this batch should hold but doesn't,
+    # or whose teams differ, raises before anything is written. See
+    # `conference_championships`.
+    game_rows = apply_conference_championships(
+        game_rows,
+        season=year,
+        season_type=season_type,
+        championships=conference_championships,
     )
 
     team_rows: dict[int, TeamRow] = {}

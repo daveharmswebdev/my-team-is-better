@@ -217,9 +217,10 @@ def _ingest_records(
     """Run the real `ingest_one` for one regular-season batch, with the
     cache read swapped for `records` so no test depends on `data/raw/`.
 
-    No neutral-site overrides (#343): `records` is a hand-picked slice of a
-    season, so the committed override file's 2004 games aren't in it, and
-    ingest would rightly refuse an override whose game is missing."""
+    No neutral-site overrides (#343) and no title-game list (#300):
+    `records` is a hand-picked slice of a season, so the committed files'
+    games aren't in it, and ingest would rightly refuse a listed game that
+    is missing."""
 
     def _fake_get_games(
         year: int, season_type: str, *, force: bool = False
@@ -229,7 +230,7 @@ def _ingest_records(
 
     monkeypatch.setattr("cfb_strength.ingest.ingest_season.get_games", _fake_get_games)
     conn = get_conn(db_path)
-    ingest_one(conn, season, "regular", neutral_site_overrides=())
+    ingest_one(conn, season, "regular", neutral_site_overrides=(), conference_championships=())
     return conn
 
 
@@ -512,7 +513,8 @@ def _ingest_batch(
 
     monkeypatch.setattr("cfb_strength.ingest.ingest_season.get_games", _fake_get_games)
     conn = get_conn(db_path)
-    return conn, ingest_one(conn, season, "regular")
+    # A hand-picked slice holds none of the listed title games (#300).
+    return conn, ingest_one(conn, season, "regular", conference_championships=())
 
 
 def _points(conn: sqlite3.Connection, game_id: int) -> tuple[object, object, object]:
