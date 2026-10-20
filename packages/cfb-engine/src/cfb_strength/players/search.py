@@ -16,12 +16,14 @@ from cfb_strength.players._sql import lines_cte, totals_select
 # The same per-(player, season_type) totals a leaderboard ranks, folded to one
 # row per player: qualifying in either season type, the season span across
 # both, and regular-season career passing yards for the order (None when that
-# total is None or the player has no regular-season line).
+# total is None or the player has no regular-season line). Only the players
+# whose name matches are aggregated at all (#368); the WHERE below restates
+# the match on the joined row.
 #
 # The caller's text reaches SQLite only as the bound `:pattern`, with LIKE's
 # wildcards and the escape character escaped, so `%` and `_` match themselves.
 _SEARCH_SQL = f"""
-{lines_cte(by_player=False, by_season_type=False)},
+{lines_cte(by_player=False, by_season_type=False, by_name=True)},
 totals AS ({totals_select()})
 SELECT p.id AS player_id, p.display_name, p.position,
        MIN(t.first_season) AS first_season,

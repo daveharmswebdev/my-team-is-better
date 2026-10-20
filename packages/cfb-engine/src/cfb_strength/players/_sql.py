@@ -118,25 +118,46 @@ def stat_total(column: str) -> str:
     return null_aware_sum(column)
 
 
-def lines_cte(*, by_player: bool, by_season_type: bool) -> str:
+# `name_matches`: the players in `:sport` whose `display_name` matches the
+# bound LIKE `:pattern`, case-insensitively, with `\` as the escape character.
+# One CTE read by both the season-row and the start filter, so `players` is
+# scanned for the pattern once, not once per filter.
+_NAME_MATCHES_CTE = """name_matches AS MATERIALIZED (
+        SELECT id FROM players
+        WHERE sport = :sport AND lower(display_name) LIKE lower(:pattern) ESCAPE '\\'
+    ),
+    """
+
+
+def lines_cte(*, by_player: bool, by_season_type: bool, by_name: bool = False) -> str:
     """`WITH ... lines AS (...)`: one row per (player, season, season_type)
     with a season row or a QB start, scoped to `:sport` and optionally to
-    `:player_id` and `:season_type`. A line with no season row carries NULL
-    for `games` and every stat, and `has_season_row` 0 (1 otherwise), which
-    tells it apart from a season row of NULL stats (`sparse_sum`)."""
+    `:player_id`, `:season_type` and the players whose name matches `:pattern`.
+    A line with no season row carries NULL for `games` and every stat, and
+    `has_season_row` 0 (1 otherwise), which tells it apart from a season row
+    of NULL stats (`sparse_sum`).
+
+    `by_name` narrows the lines before anything aggregates them, so a name
+    search costs what its matching players cost, not a whole leaderboard
+    (#368). Every total is per player, so dropping other players' lines
+    changes no matching player's row."""
     starter_filters = ["s.sport = :sport", "g.sport = :sport", "s.position = 'QB'"]
     row_filters = ["sport = :sport"]
     if by_player:
         starter_filters.append("s.player_id = :player_id")
         row_filters.append("player_id = :player_id")
+    if by_name:
+        starter_filters.append("s.player_id IN (SELECT id FROM name_matches)")
+        row_filters.append("player_id IN (SELECT id FROM name_matches)")
     if by_season_type:
         starter_filters.append("g.season_type = :season_type")
         row_filters.append("season_type = :season_type")
     else:
         starter_filters.append("g.season_type IN ('regular', 'postseason')")
     stats = ", ".join(f"r.{c}" for c in STAT_COLUMNS)
+    name_matches = _NAME_MATCHES_CTE if by_name else ""
     return f"""
-    WITH starts AS (
+    WITH {name_matches}starts AS (
         SELECT s.player_id, g.season, g.season_type,
                COUNT(*) AS start_rows,
                SUM(CASE WHEN {_COUNTED} AND {_MINE} > {_THEIRS} THEN 1 ELSE 0 END) AS wins,
