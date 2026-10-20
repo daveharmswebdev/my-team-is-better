@@ -3,6 +3,7 @@ import {
   PlayerApiError,
   SERVER_ERROR_COPY,
   VerdictHttpError,
+  VerdictNetworkError,
   fetchPlayerComparison,
   searchPlayers,
 } from './client'
@@ -55,7 +56,7 @@ describe('player comparison and search client (issue #301)', () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rows: [] }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await searchPlayers('Mc Nair', 5)
+    await searchPlayers('Mc Nair', { limit: 5 })
 
     const [url] = fetchMock.mock.calls[0] as [string]
     const parsed = new URL(url)
@@ -65,6 +66,36 @@ describe('player comparison and search client (issue #301)', () => {
       limit: '5',
       sport: 'nfl',
     })
+  })
+
+  it("aborts the search's fetch when the caller's signal aborts (#370)", async () => {
+    let fetchSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        fetchSignal = init?.signal ?? undefined
+        // Hangs until aborted, then rejects the way fetch does.
+        return new Promise<Response>((_resolve, reject) => {
+          fetchSignal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        })
+      }),
+    )
+    const caller = new AbortController()
+
+    const result = searchPlayers('mc', { signal: caller.signal }).catch(
+      (caught: unknown) => caught,
+    )
+    expect(fetchSignal?.aborted).toBe(false)
+    caller.abort()
+
+    expect(fetchSignal?.aborted).toBe(true)
+    const error = await result
+    // A caller abort is an AbortError, never the network or 5xx copy.
+    expect(error).toBeInstanceOf(DOMException)
+    expect((error as DOMException).name).toBe('AbortError')
+    expect(error).not.toBeInstanceOf(VerdictNetworkError)
   })
 
   it.each([

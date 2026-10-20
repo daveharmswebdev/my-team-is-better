@@ -394,7 +394,9 @@ describe('PlayerComparePage (issue #301)', () => {
     )
     await user.click(compareButton())
 
-    expect(mockedSearch).toHaveBeenCalledWith('McNair')
+    expect(mockedSearch).toHaveBeenCalledWith('McNair', {
+      signal: expect.any(AbortSignal) as AbortSignal,
+    })
     expect(screen.getByTestId('location')).toHaveTextContent(
       `?a=${WARNER}&b=${MCNAIR}`,
     )
@@ -418,7 +420,9 @@ describe('PlayerComparePage (issue #301)', () => {
 
     await user.type(playerA(), 'c')
     await waitFor(() => {
-      expect(mockedSearch).toHaveBeenCalledWith('m c')
+      expect(mockedSearch).toHaveBeenCalledWith('m c', {
+        signal: expect.any(AbortSignal) as AbortSignal,
+      })
     })
     expect(mockedSearch).toHaveBeenCalledTimes(1)
   })

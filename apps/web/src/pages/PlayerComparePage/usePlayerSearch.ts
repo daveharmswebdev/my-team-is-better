@@ -38,9 +38,14 @@ export function usePlayerSearch(text: string): PlayerSearchState {
     if (!eligible) {
       return
     }
+    // `cancelled` drops any answer once the text moves on; `controller` also
+    // aborts the request itself, so a burst of typing has at most one search
+    // in flight (issue #370). An aborted search's rejection lands after
+    // `cancelled` is set, so it never becomes an error.
     let cancelled = false
+    const controller = new AbortController()
     const timer = setTimeout(() => {
-      searchPlayers(query).then(
+      searchPlayers(query, { signal: controller.signal }).then(
         (result) => {
           if (!cancelled) {
             setAnswer({ query, status: 'done', rows: result.rows })
@@ -56,6 +61,7 @@ export function usePlayerSearch(text: string): PlayerSearchState {
     return () => {
       cancelled = true
       clearTimeout(timer)
+      controller.abort()
     }
   }, [query, eligible])
 
