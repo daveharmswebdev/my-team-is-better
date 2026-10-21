@@ -409,6 +409,9 @@ def test_the_issue_repro_is_rejected(catalog: tuple[TeamRecord, ...]) -> None:
         ("They opened their season by beating Georgia {s}.", "opened their season"),
         ("They opened up the season by beating Georgia {s}.", "opened up the season"),
         ("Opening its season, they beat Georgia {s}.", "Opening its season"),
+        # "one" is not a number word (it is prose), so "week one" is caught here
+        ("They beat Georgia {s} in week one.", "week one"),
+        ("They beat Georgia {s} in Week-One.", "Week-One"),
         ("They beat Georgia {s} in the TITLE GAME.", "TITLE GAME"),
     ],
 )
