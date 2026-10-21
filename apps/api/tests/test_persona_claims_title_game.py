@@ -358,3 +358,119 @@ def test_a_game_the_block_does_not_flag_is_no_title_game(
     block = cfb_team_case_block(2005, "Texas")
     claim = _when("w", "Texas", "Colorado", "W", week=7)
     assert rendered("{w}", [claim], block, catalog) == "in week 7"
+
+
+# ---------------------------------------------------------------------------
+# grounding (#382): a game-timing phrase typed by hand is rejected
+#
+# Only a `when` claim knows which game was the title game, the finale or the
+# opener. Typed by hand, the timing can pin a score to the wrong game: 2017
+# Auburn beat Georgia 40-17 in week 11 and lost the SEC title game 7-28.
+# ---------------------------------------------------------------------------
+
+
+_WHEN_CLAIM = "`when` claim"
+
+
+def _auburn_beat_georgia() -> list[dict[str, object]]:
+    return [game_claim("s", "game_score", "Auburn", "Georgia", "W", week=11)]
+
+
+def test_the_issue_repro_is_rejected(catalog: tuple[TeamRecord, ...]) -> None:
+    # The week-11 win, typed as if it were the SEC title game (Auburn lost that one).
+    block = cfb_team_case_block(2017, "Auburn")
+    claims = _auburn_beat_georgia()
+    assert rendered("They beat Georgia {s}.", claims, block, catalog) == (
+        "They beat Georgia 40-17."
+    )
+    errors = rejected("They beat Georgia {s} in the SEC title game.", claims, block, catalog)
+    assert_an_error_says(errors, '"title game"', _WHEN_CLAIM)
+
+
+@pytest.mark.parametrize(
+    ("text", "phrase"),
+    [
+        ("They beat Georgia {s} in the SEC title game.", "title game"),
+        ("They beat Georgia {s} in the conference title game.", "title game"),
+        ("They beat Georgia {s} in the SEC title-game rematch.", "title-game"),
+        ("They beat Georgia {s} in the championship game.", "championship game"),
+        ("They beat Georgia {s} in the conference championship game.", "championship game"),
+        ("They beat Georgia {s} in the national championship game.", "championship game"),
+        ("They beat Georgia {s} in the regular-season finale.", "finale"),
+        ("They beat Georgia {s} in the season finale.", "finale"),
+        ("They beat Georgia {s} in the Finale.", "Finale"),
+        ("They beat Georgia {s} in the opener.", "opener"),
+        ("They beat Georgia {s} in the season opener.", "opener"),
+        ("They beat Georgia {s} in the season-opener.", "opener"),
+        ("They beat Georgia {s} in the home-opener.", "opener"),
+        ("They beat Georgia {s} to open the season.", "open the season"),
+        ("They opened the season by beating Georgia {s}.", "opened the season"),
+        # A determiner or "up" between is the same phrase (#382 review round 1)
+        ("They opened their season by beating Georgia {s}.", "opened their season"),
+        ("They opened up the season by beating Georgia {s}.", "opened up the season"),
+        ("Opening its season, they beat Georgia {s}.", "Opening its season"),
+        # "one" is not a number word (it is prose), so "week one" is caught here
+        ("They beat Georgia {s} in week one.", "week one"),
+        ("They beat Georgia {s} in Week-One.", "Week-One"),
+        ("They beat Georgia {s} in the TITLE GAME.", "TITLE GAME"),
+    ],
+)
+def test_a_typed_timing_phrase_is_rejected(
+    catalog: tuple[TeamRecord, ...], text: str, phrase: str
+) -> None:
+    block = cfb_team_case_block(2017, "Auburn")
+    errors = rejected(text, _auburn_beat_georgia(), block, catalog)
+    assert_an_error_says(errors, f'"{phrase}"', _WHEN_CLAIM, "leave the timing out")
+
+
+@pytest.mark.parametrize(
+    ("opponent", "result", "extra", "expected"),
+    [
+        ("Georgia", "L", {"week": 14}, "in the SEC title game"),
+        ("Alabama", "W", {}, "in the regular-season finale"),
+        ("Georgia Southern", "W", {}, "to open the season"),
+    ],
+)
+def test_a_when_placeholder_printing_the_timing_passes(
+    catalog: tuple[TeamRecord, ...],
+    opponent: str,
+    result: str,
+    extra: dict[str, object],
+    expected: str,
+) -> None:
+    block = cfb_team_case_block(2017, "Auburn")
+    claims = [
+        game_claim("s", "game_score", "Auburn", opponent, result, **extra),
+        _when("w", "Auburn", opponent, result, **extra),
+    ]
+    out = rendered("That one went {s} {w}, and it was no eye-opener.", claims, block, catalog)
+    assert out.endswith(f" {expected}, and it was no eye-opener.")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "That loss was an eye-opener.",
+        "That loss was an eye opener.",
+        "They won the SEC title.",
+        "The postseason was theirs.",
+        "Championship-caliber defense.",
+        "They played for a championship and a title.",
+        "They opened with a bang and closed the season strong.",
+        "Down the stretch they went to a bowl.",
+    ],
+)
+def test_ordinary_prose_about_titles_and_seasons_passes(
+    catalog: tuple[TeamRecord, ...], text: str
+) -> None:
+    block = cfb_team_case_block(2017, "Auburn")
+    assert rendered(text, [], block, catalog) == text
+
+
+@pytest.mark.parametrize(
+    "text", ["They beat Georgia {s} in week 11.", "They beat Georgia {s} in week eleven."]
+)
+def test_a_typed_week_points_to_a_when_claim(catalog: tuple[TeamRecord, ...], text: str) -> None:
+    block = cfb_team_case_block(2017, "Auburn")
+    errors = rejected(text, _auburn_beat_georgia(), block, catalog)
+    assert_an_error_says(errors, '"week', _WHEN_CLAIM, "leave the timing out")

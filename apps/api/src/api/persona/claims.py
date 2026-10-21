@@ -21,7 +21,14 @@ Alabama"). This module:
    doesn't hold, no name typed again right after a placeholder that already
    prints it). A number or ordinal inside a conference name or game phase
    ("Big Ten", "second half") is rejected like any other, with an error saying
-   the block holds no such detail.
+   the block holds no such detail. Since #382 a game's timing typed by hand
+   ("title game", "championship game", "finale", "opener", "open(ed) the
+   season") is rejected too, with an error pointing to a `when` claim: only
+   the block knows which game was the title game, so a typed one can pin a
+   score to the wrong game (2017 Auburn beat Georgia in week 11 and lost to
+   it in the SEC title game). The check runs on the placeholder-masked text,
+   so a `when` placeholder printing "in the SEC title game" passes. A typed
+   week ("week 11") is rejected as a number, with the same pointer.
 
 A name is typed "beside" its own record, rating or rank placeholder, after
 it, when only whitespace, brackets, commas, colons, semicolons, dashes or
@@ -93,7 +100,12 @@ before it ("Longhorns fans") is not caught, nor is a singular ("Longhorn") or a
 nickname the catalog doesn't hold ("Bama");
 Unicode look-alikes and non-English number words are deliberate evasion, out
 of scope; a prose verb that contradicts a claim's result ("beat {g1}" with an
-L) is #291's prompt and #293's measurement, not a check here.
+L) is #291's prompt and #293's measurement, not a check here. Timing words
+other than those above pass (#382, coordinator decision): a bare "title" or
+"championship" ("won the SEC title", "championship-caliber"), "postseason",
+"bowl", "eye-opener", "opened with", "to close the season", "to end the
+season", "down the stretch", and paraphrase ("the game for the conference
+crown"); the smoke eval's `timing_venue_flags` measures that broader set.
 
 Pure: no IO, no database, no network, no logging. Since #291
 `api.persona.narrate` calls it on every narration, and `GROUNDING_VERSION`
@@ -120,7 +132,7 @@ TOOL_NAME: Final = "submit_narration"
 # These rules' version in the narration cache key (`api.persona.cache`,
 # issue #291): bump it when a change could accept or reject a narration
 # differently, so narrations checked under the old rules miss.
-GROUNDING_VERSION: Final = "claims-v1"
+GROUNDING_VERSION: Final = "claims-v2"
 
 # The claim cap (founder decisions on #291, 2026-09-15). The good 2017 Alabama
 # spike narration used five claims with two scores; a 2019 narration with
@@ -228,6 +240,31 @@ _NO_DETAIL_RE: Final = re.compile(
     rf"\bBig\s+(?:Ten|Twelve|12)\b|\bPac\s*[{_DASHES}]\s*(?:12|10)\b"
     r"|\b(?:second\s+half|third\s+quarter|fourth\s+quarter)\b",
     re.IGNORECASE,
+)
+# A game's week typed into the prose ("week 11", "week eleven"): its number is
+# rejected like any other, and this only picks an error that points to a
+# `when` claim (#382).
+_WEEK_RE: Final = re.compile(
+    rf"\bweeks?\s*[{_DASHES}]?\s*(?:\d+|(?:{'|'.join(_NUMBER_WORDS)})\b)",
+    re.IGNORECASE,
+)
+# When a game was played, typed by hand (#382): only a `when` claim knows which
+# game was the title game, the finale or the opener, so these are rejected
+# outright. "eye-opener" / "eye opener" is prose.
+_TIMING_RE: Final = re.compile(
+    rf"\b(?:(?:title|championship)(?:\s+|\s*[{_DASHES}]\s*)games?"
+    r"|finales?"
+    rf"|(?<!eye[{_DASHES}\s])openers?"
+    r"|open(?:s|ed|ing)?\s+(?:up\s+)?(?:the|their|its)\s+season"
+    # "one" isn't a number word, so no number rule catches "week one".
+    rf"|week\s*[{_DASHES}]?\s*one)\b",
+    re.IGNORECASE,
+)
+_TIMING_ERROR: Final = (
+    "the FACT BLOCK records when a game was played only through a `when` claim on "
+    'that game, which prints "in the <conference> title game", "in the regular-season '
+    'finale", "to open the season", "in the postseason" or "in week N"; use a `when` '
+    "claim or leave the timing out"
 )
 _THE: Final = ("the", "The")
 _WORD_CHAR_RE: Final = re.compile(r"\w")
@@ -1262,6 +1299,8 @@ def _check_prose(
     break_ends = [match.end() for match in breaks]
     no_detail = [(m.start(), m.end(), m.group(0)) for m in _NO_DETAIL_RE.finditer(masked)]
     no_detail_starts = [start for start, _, _ in no_detail]
+    weeks = [(m.start(), m.end(), m.group(0)) for m in _WEEK_RE.finditer(masked)]
+    week_starts = [start for start, _, _ in weeks]
     holdings_by_sentence: dict[tuple[int, int], str] = {}
 
     def holdings(start: int, end: int) -> str:
@@ -1285,6 +1324,13 @@ def _check_prose(
                     "conference prints only through a `when` claim on its title game, and "
                     "the FACT BLOCK holds no in-game detail, so leave it out of the prose"
                 )
+        at = bisect.bisect_right(week_starts, match.start()) - 1
+        if at >= 0:
+            _, end, phrase = weeks[at]
+            if match.end() <= end:
+                return f"the prose {what} {_quote(match.group(0))} in {_quote(phrase)}; " + (
+                    _TIMING_ERROR
+                )
         return (
             f"the prose {what} {_quote(match.group(0))}; {rule}. "
             f"{holdings(match.start(), match.end())}"
@@ -1301,6 +1347,10 @@ def _check_prose(
         errors.append(typed("spells out the number", match, every_number))
     for match in _ORDINAL_RE.finditer(masked):
         errors.append(typed("uses the ordinal", match, "a rank must come from a rank claim"))
+    # On the masked text, so a `when` placeholder that prints "in the SEC
+    # title game" is never mistaken for one typed by hand (#382).
+    for match in _TIMING_RE.finditer(masked):
+        errors.append(f"the prose types the game timing {_quote(match.group(0))}; {_TIMING_ERROR}")
 
     placeholder_ending = {match.end(): match.group(1) for match in placeholders}
     # Where a team name ends: a mascot word right after one is a nickname.

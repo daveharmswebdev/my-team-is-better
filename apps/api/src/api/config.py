@@ -118,7 +118,8 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # block, so rule 1, rule 5 and the worked examples were rewritten. The tool
 # schema's description strings are prompt-facing too, so changing them moves
 # this version as well. The cache key's grounding version moved with it, to
-# `api.persona.claims.GROUNDING_VERSION` ("claims-v1").
+# `api.persona.claims.GROUNDING_VERSION` ("claims-v1"; "claims-v2" since #382,
+# which rejects a game-timing phrase typed by hand: a grounding change only).
 # persona-v12 (issue #300): the prompt changed -- the `when` claim kind's
 # enumeration gained "in the regular-season finale" and "in the Big 12 title
 # game", which the validator renders now that every game row in the fact

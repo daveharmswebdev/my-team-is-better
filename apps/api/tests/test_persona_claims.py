@@ -1283,4 +1283,4 @@ def test_the_tool_description_states_both_limits() -> None:
 
 
 def test_the_claims_grounding_version() -> None:
-    assert GROUNDING_VERSION == "claims-v1"
+    assert GROUNDING_VERSION == "claims-v2"

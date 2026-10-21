@@ -220,7 +220,8 @@ def test_prompt_version_is_past_the_typed_score_prompt() -> None:
     the version means prompt wording only, and the wording changed, so
     narrations cached under `persona-v10` were written under the old rules and
     would keep being served unless the version moves (the cache key's
-    grounding version moved too, to `claims-v1`)."""
+    grounding version moved too, to `claims-v1`; #382 moved it on to
+    `claims-v2`)."""
     config = _reimport_config()
 
     assert config.PROMPT_VERSION == "persona-v12"  # type: ignore[attr-defined]  # _reimport_config() -> object
