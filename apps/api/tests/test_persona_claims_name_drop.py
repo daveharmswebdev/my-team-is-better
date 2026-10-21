@@ -223,8 +223,12 @@ def test_lsu_2019_name_after_its_record_is_still_rejected(
     }
     outcome = check_and_render(tool_input, cfb_team_case_block(2019, "LSU"), catalog)
     assert outcome.text is None
-    assert outcome.errors == (
-        '{rec} already prints the name "LSU"; delete the "LSU" typed beside it',
+    # Since #382 the hand-typed "to open the season" is rejected as well: true
+    # of Georgia Southern here, but only a `when` claim may say it.
+    assert len(outcome.errors) == 2
+    assert outcome.errors[0].startswith('the prose types the game timing "open the season"; ')
+    assert outcome.errors[1] == (
+        '{rec} already prints the name "LSU"; delete the "LSU" typed beside it'
     )
 
 

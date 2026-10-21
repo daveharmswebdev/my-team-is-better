@@ -567,7 +567,7 @@ def test_the_longest_name_wins_for_a_team_outside_the_block(
     [
         # Texas A&M and Florida State are in the block; Texas and Florida are not
         "Texas A&M hung around.",
-        "Florida State was the opener.",
+        "Florida State showed up.",
     ],
 )
 def test_the_longest_name_wins_for_a_block_team(
