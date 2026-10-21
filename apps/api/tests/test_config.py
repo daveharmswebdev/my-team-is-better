@@ -221,7 +221,7 @@ def test_prompt_version_is_past_the_typed_score_prompt() -> None:
     narrations cached under `persona-v10` were written under the old rules and
     would keep being served unless the version moves (the cache key's
     grounding version moved too, to `claims-v1`; #382 moved it on to
-    `claims-v2`)."""
+    `claims-v2`, and #318 and #319 to `claims-v3`)."""
     config = _reimport_config()
 
     assert config.PROMPT_VERSION == "persona-v12"  # type: ignore[attr-defined]  # _reimport_config() -> object

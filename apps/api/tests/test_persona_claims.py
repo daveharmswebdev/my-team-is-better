@@ -41,6 +41,7 @@ from fixtures.claim_blocks import (
     nfl_tie_comparison_block,
     rejected,
     rendered,
+    rendered_value,
 )
 from fixtures.method_fixture import METHODS, make_method_fixture_db
 from fixtures.sport_fixture import make_sport_fixture_db
@@ -413,7 +414,7 @@ def test_count_on_a_team_case_is_ap_style(
     alabama_2017: str, catalog: tuple[TeamRecord, ...], claim: dict[str, object], expected: str
 ) -> None:
     full: dict[str, object] = {"id": "c", "kind": "count", **claim}
-    assert rendered("{c}", [full], alabama_2017, catalog) == expected
+    assert rendered_value("{c}", [full], alabama_2017, catalog) == expected
 
 
 def test_count_of_meetings_counts_a_rematch(
@@ -426,7 +427,7 @@ def test_count_of_meetings_counts_a_rematch(
         "team": "Texas",
         "opponent": "Colorado",
     }
-    assert rendered("{c}", [claim], texas_2005, catalog) == "two"
+    assert rendered_value("{c}", [claim], texas_2005, catalog) == "two"
 
 
 def test_auburn_2017_facts_the_meeting_tests_rely_on(
@@ -484,7 +485,7 @@ def test_count_of_meetings_renders_on_the_team_case_that_holds_every_game(
         "team": "Auburn",
         "opponent": "Georgia",
     }
-    assert rendered("{c}", [claim], auburn_2017, catalog) == "two"
+    assert rendered_value("{c}", [claim], auburn_2017, catalog) == "two"
 
 
 @pytest.mark.parametrize(
@@ -512,7 +513,7 @@ def test_count_of_meetings_renders_on_a_comparison_for_a_pair_it_fully_holds(
         "team": team,
         "opponent": opponent,
     }
-    assert rendered("{c}", [claim], alabama_auburn_2017, catalog) == expected
+    assert rendered_value("{c}", [claim], alabama_auburn_2017, catalog) == expected
 
 
 def test_a_result_the_comparison_does_not_hold_lists_its_meetings_without_one_only_game(
@@ -561,7 +562,7 @@ def test_count_on_a_comparison(
     expected: str,
 ) -> None:
     full: dict[str, object] = {"id": "c", "kind": "count", **claim}
-    assert rendered("{c}", [full], kilo_lima, nfl_catalog) == expected
+    assert rendered_value("{c}", [full], kilo_lima, nfl_catalog) == expected
 
 
 @pytest.mark.parametrize(
@@ -680,7 +681,7 @@ def test_when_from_the_opponent_side_has_no_season_position(
     # The block holds Alabama's games[], not Auburn's, so Auburn's side of the
     # Iron Bowl is only "week 13".
     claim = _game("w", "when", "Auburn", "Alabama", "W")
-    assert rendered("{w}", [claim], alabama_2017, catalog) == "in week 13"
+    assert rendered_value("{w}", [claim], alabama_2017, catalog) == "in week 13"
 
 
 def test_when_on_a_comparison(
@@ -694,9 +695,9 @@ def test_when_on_a_comparison(
         _game("a", "when", KILO_KINGS, MIKE_MUSTANGS, "W", week=4),
         _game("b", "when", LIMA_LIONS, KILO_KINGS, "W"),
     ]
-    assert rendered("{a}; {b}.", claims, kilo_lima, nfl_catalog) == "in week 4; in week 1."
+    assert rendered_value("{a}; {b}.", claims, kilo_lima, nfl_catalog) == "in week 4; in week 1."
     postseason = _game("p", "when", "USC", "Texas", "L")
-    assert rendered("{p}", [postseason], texas_usc_2005, catalog) == "in the postseason"
+    assert rendered_value("{p}", [postseason], texas_usc_2005, catalog) == "in the postseason"
 
 
 def test_when_for_a_week_the_block_does_not_hold_is_rejected(
@@ -720,23 +721,23 @@ def test_where_at_a_neutral_site(
     alabama_2017: str, catalog: tuple[TeamRecord, ...], texas_usc_2005: str
 ) -> None:
     claim = _game("v", "where", "Alabama", "Georgia", "W")
-    assert rendered("{v}", [claim], alabama_2017, catalog) == "at a neutral site"
+    assert rendered_value("{v}", [claim], alabama_2017, catalog) == "at a neutral site"
     h2h = _game("v", "where", "USC", "Texas", "L")
-    assert rendered("{v}", [h2h], texas_usc_2005, catalog) == "at a neutral site"
+    assert rendered_value("{v}", [h2h], texas_usc_2005, catalog) == "at a neutral site"
 
 
 def test_where_at_home(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
     """A home game says so since #294; before it, only a neutral site could
     be rendered at all."""
     claim = _game("v", "where", "Alabama", "Tennessee", "W")
-    assert rendered("{v}", [claim], alabama_2017, catalog) == "at home"
+    assert rendered_value("{v}", [claim], alabama_2017, catalog) == "at home"
 
 
 def test_where_on_the_road(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
     """An away game is "on the road", the narrator's register, not "away"
     (founder's voice call on #294); and it composes after a score."""
     claim = _game("v", "where", "Alabama", "Auburn", "L")
-    assert rendered("{v}", [claim], alabama_2017, catalog) == "on the road"
+    assert rendered_value("{v}", [claim], alabama_2017, catalog) == "on the road"
     score = _game("s", "game_score", "Alabama", "Auburn", "L")
     assert (
         rendered("Alabama lost {s} {v}.", [score, claim], alabama_2017, catalog)
@@ -751,11 +752,11 @@ def test_where_renders_the_side_of_the_team_the_claim_names(
     "on the road" from Alabama's side and "at home" from Auburn's."""
     alabama = _game("v", "where", "Alabama", "Auburn", "L")
     auburn = _game("v", "where", "Auburn", "Alabama", "W")
-    assert rendered("{v}", [alabama], alabama_2017, catalog) == "on the road"
-    assert rendered("{v}", [auburn], auburn_2017, catalog) == "at home"
+    assert rendered_value("{v}", [alabama], alabama_2017, catalog) == "on the road"
+    assert rendered_value("{v}", [auburn], auburn_2017, catalog) == "at home"
     # ... including the mirrored row the block indexes for the opponent, which
     # is the only place Auburn's side of the game exists in Alabama's block.
-    assert rendered("{v}", [auburn], alabama_2017, catalog) == "at home"
+    assert rendered_value("{v}", [auburn], alabama_2017, catalog) == "at home"
 
 
 def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
@@ -782,17 +783,17 @@ def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
     # Houston: a neutral site from either side, though Colorado is listed home.
     away = _game("v", "where", "Colorado", "Texas", "L", week=14, season_type="regular")
     title = _game("v", "where", "Texas", "Colorado", "W", week=14, season_type="regular")
-    assert rendered("{v}", [home], texas_colorado_2005, catalog) == "at home"
-    assert rendered("{v}", [away], texas_colorado_2005, catalog) == "at a neutral site"
-    assert rendered("{v}", [title], texas_colorado_2005, catalog) == "at a neutral site"
+    assert rendered_value("{v}", [home], texas_colorado_2005, catalog) == "at home"
+    assert rendered_value("{v}", [away], texas_colorado_2005, catalog) == "at a neutral site"
+    assert rendered_value("{v}", [title], texas_colorado_2005, catalog) == "at a neutral site"
     mirrored = _game("v", "where", "Colorado", "Texas", "L", week=7)
-    assert rendered("{v}", [mirrored], texas_colorado_2005, catalog) == "on the road"
+    assert rendered_value("{v}", [mirrored], texas_colorado_2005, catalog) == "on the road"
 
     # A neutral meeting reads the same from either side.
     (neutral,) = _row(texas_usc_2005, "head_to_head", "meetings")
     assert neutral["neutral_site"] is True
     usc = _game("v", "where", "USC", "Texas", "L")
-    assert rendered("{v}", [usc], texas_usc_2005, catalog) == "at a neutral site"
+    assert rendered_value("{v}", [usc], texas_usc_2005, catalog) == "at a neutral site"
 
 
 def test_where_for_a_common_opponent_meeting_renders_that_sides_own_venue(
@@ -817,8 +818,8 @@ def test_where_for_a_common_opponent_meeting_renders_that_sides_own_venue(
 
     alabama = _game("v", "where", "Alabama", "Mississippi State", "W")
     auburn = _game("v", "where", "Auburn", "Mississippi State", "W")
-    assert rendered("{v}", [alabama], alabama_auburn_2017, catalog) == "on the road"
-    assert rendered("{v}", [auburn], alabama_auburn_2017, catalog) == "at home"
+    assert rendered_value("{v}", [alabama], alabama_auburn_2017, catalog) == "on the road"
+    assert rendered_value("{v}", [auburn], alabama_auburn_2017, catalog) == "at home"
 
 
 def test_where_for_a_common_opponent_meeting_no_other_row_holds(
@@ -828,9 +829,9 @@ def test_where_for_a_common_opponent_meeting_no_other_row_holds(
     common_opponents; before #294 nothing in the block said where it was
     played."""
     kilo = _game("v", "where", KILO_KINGS, MIKE_MUSTANGS, "T", week=2)
-    assert rendered("{v}", [kilo], kilo_lima, nfl_catalog) == "at home"
+    assert rendered_value("{v}", [kilo], kilo_lima, nfl_catalog) == "at home"
     lima = _game("v", "where", LIMA_LIONS, MIKE_MUSTANGS, "W")
-    assert rendered("{v}", [lima], kilo_lima, nfl_catalog) == "at home"
+    assert rendered_value("{v}", [lima], kilo_lima, nfl_catalog) == "at home"
 
 
 # ---------------------------------------------------------------------------
@@ -1065,7 +1066,7 @@ def test_check_and_render_is_pure_on_the_block(
     claim = _game("w", "when", "Alabama", "Auburn", "L")
     first = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
     second = check_and_render({"text": "{w}", "claims": [claim]}, alabama_2017, catalog)
-    assert first == second == ClaimOutcome(errors=(), text="in the regular-season finale")
+    assert first == second == ClaimOutcome(errors=(), text="In the regular-season finale")
     assert _row(alabama_2017, "games") == before
 
 
@@ -1147,7 +1148,7 @@ def test_when_keeps_the_opener_and_the_postseason(
 ) -> None:
     block = cfb_team_case_block(year, team)
     claim = _game("w", "when", team, opponent, result, **extra)
-    assert rendered("{w}", [claim], block, catalog) == expected
+    assert rendered_value("{w}", [claim], block, catalog) == expected
 
 
 def test_each_measured_block_has_exactly_one_finale(catalog: tuple[TeamRecord, ...]) -> None:
@@ -1283,4 +1284,4 @@ def test_the_tool_description_states_both_limits() -> None:
 
 
 def test_the_claims_grounding_version() -> None:
-    assert GROUNDING_VERSION == "claims-v2"
+    assert GROUNDING_VERSION == "claims-v3"
