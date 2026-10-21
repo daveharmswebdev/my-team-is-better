@@ -255,7 +255,7 @@ _TIMING_RE: Final = re.compile(
     rf"\b(?:(?:title|championship)(?:\s+|\s*[{_DASHES}]\s*)games?"
     r"|finales?"
     rf"|(?<!eye[{_DASHES}\s])openers?"
-    r"|open(?:s|ed|ing)?\s+the\s+season)\b",
+    r"|open(?:s|ed|ing)?\s+(?:up\s+)?(?:the|their|its)\s+season)\b",
     re.IGNORECASE,
 )
 _TIMING_ERROR: Final = (

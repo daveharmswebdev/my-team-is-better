@@ -308,7 +308,7 @@ Two consequences worth knowing:
 
 - **The cache key carries the checker's version.** `api.persona.cache` keys on
   `(sport, method, PROMPT_VERSION, sha256(fact block), GROUNDING_VERSION)`, and
-  `GROUNDING_VERSION` is `api.persona.claims`'s (`claims-v1`) since #291. A
+  `GROUNDING_VERSION` is `api.persona.claims`'s (`claims-v2` since #382). A
   tightening of what the validator accepts invalidates exactly the rows checked
   under the old rules (#145).
 - **Timing and venue are rendered, never typed** (founder decision, option C,

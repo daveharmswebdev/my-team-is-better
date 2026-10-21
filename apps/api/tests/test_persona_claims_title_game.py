@@ -405,6 +405,10 @@ def test_the_issue_repro_is_rejected(catalog: tuple[TeamRecord, ...]) -> None:
         ("They beat Georgia {s} in the home-opener.", "opener"),
         ("They beat Georgia {s} to open the season.", "open the season"),
         ("They opened the season by beating Georgia {s}.", "opened the season"),
+        # A determiner or "up" between is the same phrase (#382 review round 1)
+        ("They opened their season by beating Georgia {s}.", "opened their season"),
+        ("They opened up the season by beating Georgia {s}.", "opened up the season"),
+        ("Opening its season, they beat Georgia {s}.", "Opening its season"),
         ("They beat Georgia {s} in the TITLE GAME.", "TITLE GAME"),
     ],
 )
