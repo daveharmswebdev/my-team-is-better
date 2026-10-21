@@ -36,6 +36,7 @@ from fixtures.claim_blocks import (
     game_claim,
     rejected,
     rendered,
+    rendered_value,
 )
 
 from api.models import (
@@ -225,7 +226,7 @@ def test_when_on_2017_auburn(
 ) -> None:
     block = cfb_team_case_block(2017, "Auburn")
     claim = _when("w", "Auburn", opponent, result, **extra)
-    assert rendered("{w}", [claim], block, catalog) == expected
+    assert rendered_value("{w}", [claim], block, catalog) == expected
 
 
 def test_a_title_game_reads_the_same_from_the_opponents_side(
@@ -235,7 +236,7 @@ def test_a_title_game_reads_the_same_from_the_opponents_side(
     # still the title game from Colorado's side.
     block = cfb_team_case_block(2005, "Texas")
     claim = _when("w", "Colorado", "Texas", "L", week=14)
-    assert rendered("{w}", [claim], block, catalog) == "in the Big 12 title game"
+    assert rendered_value("{w}", [claim], block, catalog) == "in the Big 12 title game"
 
 
 def test_the_finale_is_only_the_subjects_own(catalog: tuple[TeamRecord, ...]) -> None:
@@ -243,7 +244,7 @@ def test_the_finale_is_only_the_subjects_own(catalog: tuple[TeamRecord, ...]) ->
     # Texas A&M, so it can't say that was Texas A&M's finale.
     block = cfb_team_case_block(2005, "Texas")
     claim = _when("w", "Texas A&M", "Texas", "L")
-    assert rendered("{w}", [claim], block, catalog) == "in week 13"
+    assert rendered_value("{w}", [claim], block, catalog) == "in week 13"
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +258,10 @@ def test_a_head_to_head_title_game_on_a_comparison(catalog: tuple[TeamRecord, ..
         _when("t", "Texas", "Colorado", "W", week=14),
         _when("s", "Texas", "Colorado", "W", week=7),
     ]
-    assert rendered("{t}; {s}.", claims, block, catalog) == "in the Big 12 title game; in week 7."
+    assert (
+        rendered_value("{t}; {s}.", claims, block, catalog)
+        == "in the Big 12 title game; in week 7."
+    )
 
 
 def test_a_comparison_has_no_finale(catalog: tuple[TeamRecord, ...]) -> None:
@@ -265,7 +269,7 @@ def test_a_comparison_has_no_finale(catalog: tuple[TeamRecord, ...]) -> None:
     # game (Texas A&M, a common opponent here) prints its week.
     block = cfb_comparison_block(2005, "Texas", "Colorado")
     claim = _when("w", "Texas", "Texas A&M", "W")
-    assert rendered("{w}", [claim], block, catalog) == "in week 13"
+    assert rendered_value("{w}", [claim], block, catalog) == "in week 13"
 
 
 def test_a_common_opponent_title_game_on_a_comparison(catalog: tuple[TeamRecord, ...]) -> None:
@@ -274,7 +278,9 @@ def test_a_common_opponent_title_game_on_a_comparison(catalog: tuple[TeamRecord,
         _when("t", "Auburn", "Georgia", "L", week=14),
         _when("s", "Auburn", "Georgia", "W", week=11),
     ]
-    assert rendered("{t}; {s}.", claims, block, catalog) == "in the SEC title game; in week 11."
+    assert (
+        rendered_value("{t}; {s}.", claims, block, catalog) == "in the SEC title game; in week 11."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +311,7 @@ def test_a_postseason_filed_title_game_prints_the_title_game(
         _when("b", "Texas", "USC", "W"),
         _when("f", "Texas", "Texas A&M", "W"),
     ]
-    assert rendered("{t}; {b}; {f}.", claims, block, catalog) == (
+    assert rendered_value("{t}; {b}; {f}.", claims, block, catalog) == (
         "in the Big 12 title game; in the postseason; in the regular-season finale."
     )
 
@@ -357,7 +363,7 @@ def test_a_game_the_block_does_not_flag_is_no_title_game(
     # `when` on it prints only what the block records.
     block = cfb_team_case_block(2005, "Texas")
     claim = _when("w", "Texas", "Colorado", "W", week=7)
-    assert rendered("{w}", [claim], block, catalog) == "in week 7"
+    assert rendered_value("{w}", [claim], block, catalog) == "in week 7"
 
 
 # ---------------------------------------------------------------------------

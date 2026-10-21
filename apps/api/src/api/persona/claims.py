@@ -132,7 +132,7 @@ TOOL_NAME: Final = "submit_narration"
 # These rules' version in the narration cache key (`api.persona.cache`,
 # issue #291): bump it when a change could accept or reject a narration
 # differently, so narrations checked under the old rules miss.
-GROUNDING_VERSION: Final = "claims-v2"
+GROUNDING_VERSION: Final = "claims-v3"
 
 # The claim cap (founder decisions on #291, 2026-09-15). The good 2017 Alabama
 # spike narration used five claims with two scores; a 2019 narration with
@@ -410,6 +410,7 @@ def check_and_render(
     extra_names = tuple(sorted(set(block.teams) - {record.name for record in records}))
     index = _catalog_index(records, extra_names)
     name_re = _name_re(records, extra_names, frozenset(block.teams))
+    alias_re = _outside_alias_re(records, extra_names, frozenset(block.teams))
     if not isinstance(tool_input, dict):
         return ClaimOutcome(
             errors=(
@@ -522,20 +523,31 @@ def check_and_render(
             errors.append("the text contains a NUL character")
         else:
             prose_errors, bare_at = _check_prose(
-                text, name_claims, rank_claims, pair_claims, block, index, name_re
+                text, name_claims, rank_claims, pair_claims, block, index, name_re, alias_re
             )
             errors.extend(prose_errors)
 
     if errors or not isinstance(text, str):
         return ClaimOutcome(errors=tuple(dict.fromkeys(errors)), text=None)
 
+    # Where a sentence starts: the text's first non-space character and the
+    # end of every sentence break (#319).
+    sentence_starts = {len(text) - len(text.lstrip())} | {
+        match.end() for match in _SENTENCE_BREAK_RE.finditer(text)
+    }
+
     def show(match: re.Match[str]) -> str:
         claim_id = match.group(1)
         figure = rendered[claim_id]
         team = name_claims.get(claim_id)
-        if team is None or match.start() in bare_at:
-            return figure
-        return f"{figure} {team}" if claim_id in rank_claims else f"{team} {figure}"
+        if team is not None and match.start() not in bare_at:
+            figure = f"{figure} {team}" if claim_id in rank_claims else f"{team} {figure}"
+        # A sentence never opens lowercase: "legit. three quality wins" and
+        # "in the postseason" print "Three", "In" there (#319). Only the
+        # placeholder's own text, never the prose typed around it.
+        if match.start() in sentence_starts and figure[:1].islower():
+            figure = figure[0].upper() + figure[1:]
+        return figure
 
     return ClaimOutcome(errors=(), text=_PLACEHOLDER_RE.sub(show, text))
 
@@ -1263,6 +1275,28 @@ def _name_re(
     return _longest_first(alternatives)
 
 
+@lru_cache(maxsize=32)
+def _outside_alias_re(
+    catalog: tuple[TeamRecord, ...],
+    extra_names: tuple[str, ...],
+    block_teams: frozenset[str],
+) -> re.Pattern[str] | None:
+    """The catalog aliases of teams outside the block, exactly as the catalog
+    spells them ("USA" for South Alabama), or None when there are none.
+
+    `_name_re` leaves these out, so they stay prose to the prose check and
+    raise no error (coordinator decision 4 on #290). The name-drop walk still
+    needs them (#318): "Alabama's rival USA went {rec}" has another team
+    between the figure and Alabama, so the figure must keep its name."""
+    index = _catalog_index(catalog, extra_names)
+    alternatives = [
+        (alias, re.escape(alias))
+        for alias, teams in index.alias_teams.items()
+        if not any(team in block_teams for team in teams)
+    ]
+    return _longest_first(alternatives) if alternatives else None
+
+
 def _capitalized(name: str) -> str:
     """A pattern for `name` with its first character uppercase, the rest in any case."""
     return re.escape(name[0].upper()) + f"(?i:{re.escape(name[1:])})"
@@ -1281,10 +1315,12 @@ def _check_prose(
     block: _Block,
     index: _CatalogIndex,
     name_re: re.Pattern[str],
+    alias_re: re.Pattern[str] | None,
 ) -> tuple[list[str], set[int]]:
     """The errors in the prose outside the placeholders, and the offsets of
     the record, rating and rank placeholders that render without their team's
-    name (`_bare_offsets`)."""
+    name (`_bare_offsets`). `alias_re` (`_outside_alias_re`) only feeds that
+    walk: it never adds an error."""
     placeholders = list(_PLACEHOLDER_RE.finditer(text))
     masked = _PLACEHOLDER_RE.sub(lambda match: _MASK * len(match.group(0)), text)
     errors: list[str] = []
@@ -1359,9 +1395,11 @@ def _check_prose(
     name_ends = {match.end() for match in placeholders if match.group(1) in rank_claims}
     # Block team names typed in the prose, by offset, for the name-drop rule.
     typed_teams: list[tuple[int, str]] = []
+    name_spans: list[tuple[int, int]] = []
     names_masked = masked
     for match in name_re.finditer(masked):
         names_masked = _mask_span(names_masked, match.start(), match.end())
+        name_spans.append((match.start(), match.end()))
         found = match.group(0)
         names = index.names_by_fold.get(found.casefold())
         if names is not None:
@@ -1406,8 +1444,43 @@ def _check_prose(
                 continue
             errors.append(_nickname_error(form, "a nickname", teams, block))
 
-    bare_at = _bare_offsets(placeholders, typed_teams, name_claims, pair_claims, break_ends)
+    walk_teams = _with_outside_aliases(masked, typed_teams, name_spans, alias_re, index)
+    bare_at = _bare_offsets(placeholders, walk_teams, name_claims, pair_claims, break_ends)
     return errors, bare_at
+
+
+def _with_outside_aliases(
+    masked: str,
+    typed_teams: Sequence[tuple[int, str]],
+    name_spans: Sequence[tuple[int, int]],
+    alias_re: re.Pattern[str] | None,
+    index: _CatalogIndex,
+) -> list[tuple[int, str]]:
+    """`typed_teams` plus every alias of a team outside the block typed in
+    the prose, as a reference to that team, for the name-drop walk (#318).
+
+    On the masked text, so an alias is never found inside a placeholder. An
+    alias that coincides with or sits inside a matched name ("South Alabama")
+    is that name's business. One that holds a name inside it
+    ("Alabama-Birmingham", around the block's "Alabama") replaces that name in
+    the walk: the reader sees UAB there, not Alabama."""
+    if alias_re is None:
+        return list(typed_teams)
+    found: list[tuple[int, int, str]] = []
+    for match in alias_re.finditer(masked):
+        start, end = match.span()
+        overlapping = [(s, e) for s, e in name_spans if s < end and start < e]
+        if any(not (start <= s and e <= end) or (s, e) == (start, end) for s, e in overlapping):
+            continue
+        found.append((start, end, index.alias_teams[match.group(0)][0]))
+    if not found:
+        return list(typed_teams)
+    kept = [
+        (offset, team)
+        for offset, team in typed_teams
+        if not any(start <= offset < end for start, end, _ in found)
+    ]
+    return sorted(kept + [(start, team) for start, _, team in found])
 
 
 def _bare_offsets(

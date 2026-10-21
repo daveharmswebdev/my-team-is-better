@@ -158,6 +158,21 @@ def rendered(
     return outcome.text
 
 
+def rendered_value(
+    text: str,
+    claims: list[dict[str, object]],
+    block: str,
+    catalog: Sequence[TeamRecord],
+) -> str:
+    """`rendered`, with `text` placed mid-sentence: a placeholder that opens
+    the text prints capitalized (#319), and the tests that pin a value ("in
+    week 13", "two") pin it as it reads inside a sentence."""
+    lead = "and "
+    out = rendered(lead + text, claims, block, catalog)
+    assert out.startswith(lead), out
+    return out[len(lead) :]
+
+
 def rejected(
     text: str,
     claims: list[dict[str, object]],
