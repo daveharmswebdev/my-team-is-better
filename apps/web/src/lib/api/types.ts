@@ -37,6 +37,14 @@ export interface OpponentResultOut {
   venue: GameVenue
   /** Kept because the API still publishes it; no component reads it today. */
   neutral_site: boolean
+  /**
+   * Issue #349: whether `venue` can be stated as fact. CFBD's venue data is
+   * unreliable before 2008 (founder, #343), so a CFB game before 2008 is
+   * reliable only when it is on #359's curated override list; every NFL game
+   * and every CFB game from 2008 on is reliable. Display only: when false,
+   * don't print "at X" or "(neutral)".
+   */
+  venue_reliable: boolean
 }
 
 export interface OpponentCreditOut {
@@ -83,6 +91,8 @@ export interface EloGameStepOut {
   /** Signed, this team's. */
   shift: number
   rating_after: number
+  /** Issue #349: whether `venue` can be stated as fact; see `OpponentResultOut.venue_reliable`. */
+  venue_reliable: boolean
 }
 
 /**
@@ -157,6 +167,8 @@ export interface HeadToHeadMeetingOut {
   home_points: number
   away_points: number
   winner: string | null
+  /** Issue #349: whether `neutral_site` can be stated as fact; see `OpponentResultOut.venue_reliable`. */
+  venue_reliable: boolean
 }
 
 export interface HeadToHeadOut {
@@ -183,6 +195,8 @@ export interface CommonOpponentMeetingOut {
    * in the engine contract: `'neutral'` already says it, for both teams.
    */
   venue: GameVenue
+  /** Issue #349: that side's `OpponentResultOut.venue_reliable`, copied. */
+  venue_reliable: boolean
 }
 
 /**

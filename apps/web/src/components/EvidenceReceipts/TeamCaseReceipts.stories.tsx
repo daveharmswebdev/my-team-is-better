@@ -18,6 +18,7 @@ const qualityWin = {
   week: 5,
   season_type: 'regular',
   venue: 'home' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -33,6 +34,7 @@ const openerWin = {
   week: 1,
   season_type: 'regular',
   venue: 'away' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -48,6 +50,7 @@ const midseasonWin = {
   week: 10,
   season_type: 'regular',
   venue: 'home' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -63,6 +66,7 @@ const lateSeasonWin = {
   week: 12,
   season_type: 'regular',
   venue: 'neutral' as const,
+  venue_reliable: true,
   neutral_site: true,
 }
 
@@ -80,6 +84,7 @@ const bowlWin = {
   week: 1,
   season_type: 'postseason',
   venue: 'neutral' as const,
+  venue_reliable: true,
   neutral_site: true,
 }
 
@@ -147,6 +152,7 @@ const worstLoss = {
   week: 8,
   season_type: 'regular',
   venue: 'away' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -177,6 +183,7 @@ const tiedGame = {
   week: 7,
   season_type: 'regular',
   venue: 'away' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -209,6 +216,7 @@ const coloradoWeek7 = {
   week: 7,
   season_type: 'regular',
   venue: 'home' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -221,6 +229,7 @@ const coloradoTitleGame = {
   // The title game was at a neutral site, so the venue moves with the flag:
   // the API cannot send one without the other (issue #294).
   venue: 'neutral' as const,
+  venue_reliable: true,
   neutral_site: true,
 }
 

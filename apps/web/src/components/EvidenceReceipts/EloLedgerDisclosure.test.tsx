@@ -440,4 +440,93 @@ describe('EloLedgerDisclosure', () => {
       '/about#elo',
     )
   })
+
+  // Issue #349 (founder decision on #343): CFBD's venue data is unreliable
+  // before 2008, so a step whose `venue_reliable` is false names its opponent
+  // with a plain "vs" -- no "at", no "(neutral)" -- while the worked step
+  // keeps the engine's own home-field adjustment, which is real math.
+  describe('venue_reliable (issue #349)', () => {
+    function withReliability(venueReliable: boolean): EloLedgerOut {
+      return {
+        ...TEXAS_ELO.elo_ledger,
+        steps: TEXAS_ELO.elo_ledger.steps.map((step) => ({
+          ...step,
+          venue_reliable: venueReliable,
+        })),
+      }
+    }
+
+    it('a reliable step reads exactly as before at home, away and a neutral site', async () => {
+      mockMatchMedia(false)
+      renderTexas(withReliability(true))
+      const { dialog } = await openOnDesktop()
+      const items = gameItems(dialog)
+
+      expect(TEXAS_ELO.elo_ledger.steps.map((step) => step.venue)).toEqual([
+        'home',
+        'away',
+        'neutral',
+        'away',
+        'neutral',
+      ])
+      TEXAS_ROWS.forEach((row, index) => {
+        const item = items[index] as HTMLElement
+        expect(within(item).getByText(row.header)).toBeInTheDocument()
+      })
+    })
+
+    it('an unreliable away step reads "vs X", never "at X"', async () => {
+      mockMatchMedia(false)
+      renderTexas(withReliability(false))
+      const { dialog } = await openOnDesktop()
+      const items = gameItems(dialog)
+
+      const away = items[1] as HTMLElement
+      expect(
+        within(away).getByText('Wk 4 · vs Texas Tech · W 52–17'),
+      ).toBeInTheDocument()
+      expect(within(away).queryByText(/at Texas Tech/)).not.toBeInTheDocument()
+
+      const awayTie = items[3] as HTMLElement
+      expect(
+        within(awayTie).getByText('Wk 6 · vs Baylor · T 21–21'),
+      ).toBeInTheDocument()
+    })
+
+    it('an unreliable neutral step drops "(neutral)"', async () => {
+      mockMatchMedia(false)
+      renderTexas(withReliability(false))
+      const { dialog } = await openOnDesktop()
+      const items = gameItems(dialog)
+
+      expect(
+        within(items[2] as HTMLElement).getByText(
+          'Wk 5 · vs Oklahoma · W 45–12',
+        ),
+      ).toBeInTheDocument()
+      expect(
+        within(items[4] as HTMLElement).getByText(
+          'Postseason · vs USC · W 41–38',
+        ),
+      ).toBeInTheDocument()
+      expect(within(dialog).queryByText(/\(neutral\)/)).not.toBeInTheDocument()
+    })
+
+    it('an unreliable home step still reads "vs X", and every worked step keeps its home-field figure', async () => {
+      mockMatchMedia(false)
+      renderTexas(withReliability(false))
+      const { dialog } = await openOnDesktop()
+      const items = gameItems(dialog)
+
+      expect(
+        within(items[0] as HTMLElement).getByText(
+          'Wk 2 · vs Ohio State · W 25–22',
+        ),
+      ).toBeInTheDocument()
+      TEXAS_ROWS.forEach((row, index) => {
+        const item = items[index] as HTMLElement
+        expect(within(item).getByText(row.work)).toBeInTheDocument()
+      })
+    })
+  })
 })
