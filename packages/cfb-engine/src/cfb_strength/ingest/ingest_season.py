@@ -55,6 +55,11 @@ from cfb_strength.ingest.conference_championships import (
     apply_conference_championships,
     load_conference_championships,
 )
+from cfb_strength.ingest.fcs_playoff_games import (
+    FcsPlayoffGame,
+    apply_fcs_playoff_games,
+    load_fcs_playoff_games,
+)
 from cfb_strength.ingest.neutral_site_overrides import (
     NeutralSiteOverride,
     apply_neutral_site_overrides,
@@ -325,19 +330,24 @@ def ingest_one(
     force: bool = False,
     neutral_site_overrides: Sequence[NeutralSiteOverride] | None = None,
     conference_championships: Sequence[ConferenceChampionship] | None = None,
+    fcs_playoff_games: Sequence[FcsPlayoffGame] | None = None,
 ) -> IngestResult:
     """Fetch (cache-first), normalize, and write one year/season-type batch.
 
     `neutral_site_overrides` defaults to the committed
     `data/raw/cfbd_neutral_site_overrides.json` (issue #343), and
     `conference_championships` to the committed
-    `data/raw/cfbd_conference_championships.json` (issue #300). A test that
+    `data/raw/cfbd_conference_championships.json` (issue #300), and
+    `fcs_playoff_games` to the committed `data/raw/cfbd_fcs_playoff_games.json`
+    (issue #379). A test that
     feeds a hand-picked payload passes its own, possibly empty, sets.
     """
     if neutral_site_overrides is None:
         neutral_site_overrides = load_neutral_site_overrides()
     if conference_championships is None:
         conference_championships = load_conference_championships()
+    if fcs_playoff_games is None:
+        fcs_playoff_games = load_fcs_playoff_games()
     games_raw, fetched_live = get_games(year, season_type, force=force)
 
     # Issue #125: CFBD lists some real games twice under two game ids. This
@@ -378,6 +388,18 @@ def ingest_one(
         season=year,
         season_type=season_type,
         championships=conference_championships,
+    )
+
+    # Issue #379: CFBD files most FCS playoff games as season_type 'regular'
+    # (the 2013 first round is regular week 14). The committed list names
+    # every FCS playoff game in the cache by id; only those rows become
+    # 'postseason', week and raw_json stay as CFBD reports them, and a listed
+    # game CFBD already files as postseason is left alone. Same failure rules
+    # as the lists above: a listed id this batch should hold but doesn't, or
+    # whose teams differ, raises before anything is written. See
+    # `fcs_playoff_games`.
+    game_rows = apply_fcs_playoff_games(
+        game_rows, season=year, season_type=season_type, games=fcs_playoff_games
     )
 
     team_rows: dict[int, TeamRow] = {}

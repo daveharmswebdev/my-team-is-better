@@ -159,13 +159,26 @@ def _load_games(
     ``CASE season_type WHEN 'regular' THEN 0 ELSE 1 END``
         Regular season before postseason. Sorting `season_type`
         alphabetically would put 'postseason' first.
-    ``week IS NULL, week`` / ``start_date IS NULL, start_date``
-        The `x IS NULL` terms are deliberate and must stay. Both columns
+    ``CASE WHEN season_type = 'regular' THEN week END IS NULL, ...``
+        The regular season replays week-first. The `CASE` yields NULL for
+        every postseason row, so these two terms are constant inside the
+        postseason and leave it to the date terms below.
+    ``start_date IS NULL, start_date``
+        Within a regular-season week, and as the *primary* key inside the
+        postseason. The postseason is ordered by date because its week
+        numbers aren't chronological (#379): CFBD gives relabelled FCS
+        playoff rounds weeks 13-16 but the FCS semifinals and final
+        postseason week 1, so a week-first order replayed 2019 North Dakota
+        State's final before its second round.
+    ``week IS NULL, week``
+        Breaks postseason ties on an equal (or missing) date; a no-op for
+        the regular season, already ordered by week.
+
+        Every `x IS NULL` term is deliberate and must stay. Both columns
         are nullable, and SQLite sorts NULLs **first** in an ASC sort --
-        which would place an undated bowl game ahead of that same
-        postseason's week-1 games. These terms push unknowns last, the more
-        chronologically plausible reading of "we don't know when this
-        happened."
+        which would place an undated bowl game ahead of every dated one.
+        These terms push unknowns last, the more chronologically plausible
+        reading of "we don't know when this happened."
     ``id``
         `games.id` is an INTEGER PRIMARY KEY: never null, always unique. It
         leaves no ties for the query planner to break arbitrarily, which is
@@ -191,8 +204,10 @@ def _load_games(
           AND away_points IS NOT NULL
         ORDER BY season,
                  CASE season_type WHEN 'regular' THEN 0 ELSE 1 END,
-                 week IS NULL, week,
+                 CASE WHEN season_type = 'regular' THEN week END IS NULL,
+                 CASE WHEN season_type = 'regular' THEN week END,
                  start_date IS NULL, start_date,
+                 week IS NULL, week,
                  id
         """,
         (year, sport),

@@ -1,0 +1,3478 @@
+{
+  "description": "Curated list of FCS (I-AA) playoff games in the committed CFBD cache (issue #379). CFBD files most of them as season_type 'regular' (the 2013 first round is regular week 14) and marks only part of each bracket in notes, so no field of the record says which games are playoff games. Each entry names one CFBD game id with the season, CFBD's season type, the home/away team names exactly as CFBD reports them, the bracket round and a provenance note. Ingest (cfb_strength/ingest/fcs_playoff_games.py) stores season_type='postseason' for exactly these ids, keeps week and raw_json as CFBD reports them, and raises unless each entry matches its record. The list was built from the notes markers plus FCS-vs-FCS games after each season's regular-season finale, and checked by bracket structure (tests/test_fcs_playoff_games_data.py); `seasons` records each season's bracket size and whether the cache holds all of it. Conference title games, the SWAC title game, the Celebration Bowl, the Gridiron Classic and Division II/III playoff games are not listed.",
+  "seasons": [
+    {
+      "season": 1998,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "No FCS (I-AA) playoff game is in the CFBD cache for this season: its last FCS games are the regular-season finales."
+    },
+    {
+      "season": 1999,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "No FCS (I-AA) playoff game is in the CFBD cache for this season: its last FCS games are the regular-season finales."
+    },
+    {
+      "season": 2000,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "No FCS (I-AA) playoff game is in the CFBD cache for this season: its last FCS games are the regular-season finales."
+    },
+    {
+      "season": 2001,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "No FCS (I-AA) playoff game is in the CFBD cache for this season: its last FCS games are the regular-season finales."
+    },
+    {
+      "season": 2002,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "No FCS (I-AA) playoff game is in the CFBD cache for this season: its last FCS games are the regular-season finales."
+    },
+    {
+      "season": 2003,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "No FCS (I-AA) playoff game is in the CFBD cache for this season: its last FCS games are the regular-season finales."
+    },
+    {
+      "season": 2004,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the cache holds only the first round (8 of 8, notes 'IAA PLAYOFFS'); the quarterfinals, semifinals and final are absent."
+    },
+    {
+      "season": 2005,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round and quarterfinals (12 games); the semifinals and final are absent."
+    },
+    {
+      "season": 2006,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round and quarterfinals (12 games; the New Hampshire-Massachusetts quarterfinal has empty notes); the semifinals and final are absent."
+    },
+    {
+      "season": 2007,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round and quarterfinals (12 games); the semifinals and final are absent."
+    },
+    {
+      "season": 2008,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the cache holds only the first round (8 of 8); the quarterfinals, semifinals and final are absent."
+    },
+    {
+      "season": 2009,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round and quarterfinals (12 games); the semifinals and final are absent."
+    },
+    {
+      "season": 2010,
+      "bracket_teams": 20,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round (4) and second round (8); the quarterfinals, semifinals and final are absent."
+    },
+    {
+      "season": 2011,
+      "bracket_teams": 20,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round (4) and second round (8); the quarterfinals, semifinals and final are absent."
+    },
+    {
+      "season": 2012,
+      "bracket_teams": 20,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round (4) and 7 of 8 second-round games (Stony Brook's second-round game is absent); the quarterfinals, semifinals and final are absent."
+    },
+    {
+      "season": 2013,
+      "bracket_teams": 24,
+      "complete": false,
+      "note": "Incomplete: the cache holds the first round (8, regular week 14), the semifinals and the final (11 games); the second round and quarterfinals are absent."
+    },
+    {
+      "season": 2014,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2015,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2016,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2017,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2018,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2019,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2020,
+      "bracket_teams": 16,
+      "complete": false,
+      "note": "Incomplete: the spring-2021 bracket (16 teams) is mostly absent. Postseason week 20 holds 4 of its games: James Madison's first round, quarterfinal and semifinal, and the Sam Houston-South Dakota State final."
+    },
+    {
+      "season": 2021,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2022,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2023,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2024,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    },
+    {
+      "season": 2025,
+      "bracket_teams": 24,
+      "complete": true,
+      "note": "Complete: all 23 games of the 24-team bracket are in the cache."
+    }
+  ],
+  "games": [
+    {
+      "id": 243322729,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "William & Mary",
+      "away_team": "Hampton",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243320231,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Furman",
+      "away_team": "Jacksonville State",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243322329,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Lehigh",
+      "away_team": "James Madison",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243322534,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Western Kentucky",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243320149,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Northwestern State",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243320079,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "Eastern Washington",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243320048,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Delaware",
+      "away_team": "Lafayette",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 243320290,
+      "season": 2004,
+      "season_type": "regular",
+      "home_team": "Georgia Southern",
+      "away_team": "New Hampshire",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253300160,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Colgate",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253300231,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Furman",
+      "away_team": "Nicholls",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253302026,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Lafayette",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253302197,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Eastern Illinois",
+      "away_team": "Southern Illinois",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253300149,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Cal Poly",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253300326,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Texas State",
+      "away_team": "Georgia Southern",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253302261,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Hampton",
+      "away_team": "Richmond",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253302460,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Eastern Washington",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253370160,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Northern Iowa",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253372026,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Southern Illinois",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253370326,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Texas State",
+      "away_team": "Cal Poly",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 253370257,
+      "season": 2005,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Furman",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 263290113,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Massachusetts",
+      "away_team": "Lafayette",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263292261,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Hampton",
+      "away_team": "New Hampshire",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263290147,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Furman",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263292197,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Eastern Illinois",
+      "away_team": "Illinois State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263290149,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "McNeese",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263290079,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "UT Martin",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263292026,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Coastal Carolina",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263292754,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Youngstown State",
+      "away_team": "James Madison",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263360113,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Massachusetts",
+      "away_team": "New Hampshire",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 263360149,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Southern Illinois",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263362026,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Montana State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 263362754,
+      "season": 2006,
+      "season_type": "regular",
+      "home_team": "Youngstown State",
+      "away_team": "Illinois State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 273270048,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Delaware",
+      "away_team": "Delaware State",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273282026,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "James Madison",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273280113,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Massachusetts",
+      "away_team": "Fordham",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273280149,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Wofford",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273280079,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "Eastern Illinois",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273280257,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Eastern Kentucky",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273282460,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "New Hampshire",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273282377,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "McNeese",
+      "away_team": "Eastern Washington",
+      "round": "first round",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273352026,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Eastern Washington",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273352460,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Delaware",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273350079,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "Massachusetts",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 273352747,
+      "season": 2007,
+      "season_type": "regular",
+      "home_team": "Wofford",
+      "away_team": "Richmond",
+      "round": "quarterfinal",
+      "source": "CFBD notes: IAA PLAYOFFS"
+    },
+    {
+      "id": 283342026,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "South Carolina State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISON I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283340222,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Colgate",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283340257,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Eastern Kentucky",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283340079,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "New Hampshire",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283340149,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Texas State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283340256,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Wofford",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283342460,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Maine",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 283340013,
+      "season": 2008,
+      "season_type": "regular",
+      "home_team": "Cal Poly",
+      "away_team": "Weber State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293320222,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Holy Cross",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293322026,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "South Carolina State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293322729,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "William & Mary",
+      "away_team": "Weber State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293320257,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Elon",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293320149,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "South Dakota State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293320079,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "Eastern Illinois",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293322377,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "McNeese",
+      "away_team": "New Hampshire",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293322617,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Stephen F. Austin",
+      "away_team": "Eastern Washington",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 293390079,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Southern Illinois",
+      "away_team": "William & Mary",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 293390149,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Stephen F. Austin",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 293390222,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "New Hampshire",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 293390257,
+      "season": 2009,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "App State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP"
+    },
+    {
+      "id": 303312460,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Lehigh",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 303310324,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Coastal Carolina",
+      "away_team": "Western Illinois",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 303310290,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Georgia Southern",
+      "away_team": "South Carolina State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 303312449,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Robert Morris",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 303382026,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Western Illinois",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303380055,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Wofford",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303380048,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Delaware",
+      "away_team": "Lehigh",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303382065,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Bethune-Cookman",
+      "away_team": "New Hampshire",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303382729,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "William & Mary",
+      "away_team": "Georgia Southern",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303380147,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "North Dakota State",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303382617,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Stephen F. Austin",
+      "away_team": "Villanova",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 303380331,
+      "season": 2010,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Southeast Missouri State",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313302198,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Eastern Kentucky",
+      "away_team": "James Madison",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 313300295,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Old Dominion",
+      "away_team": "Norfolk State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 313302619,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Stony Brook",
+      "away_team": "UAlbany",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 313302635,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Tennessee Tech",
+      "away_team": "Central Arkansas",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 313370290,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Georgia Southern",
+      "away_team": "Old Dominion",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313370149,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Central Arkansas",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313372026,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Maine",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313370147,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "New Hampshire",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313372534,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Stony Brook",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313370119,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Towson",
+      "away_team": "Lehigh",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313372449,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "James Madison",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 313372460,
+      "season": 2011,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Wofford",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323292681,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Wagner",
+      "away_team": "Colgate",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 323292065,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Bethune-Cookman",
+      "away_team": "Coastal Carolina",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 323292571,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Eastern Illinois",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 323292619,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Stony Brook",
+      "away_team": "Villanova",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 323362026,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "App State",
+      "away_team": "Illinois State",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323362747,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Wofford",
+      "away_team": "New Hampshire",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323360290,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Georgia Southern",
+      "away_team": "Central Arkansas",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323360295,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Old Dominion",
+      "away_team": "Coastal Carolina",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323362449,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "South Dakota State",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323362534,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Cal Poly",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 323360331,
+      "season": 2012,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Wagner",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 333340160,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Lafayette",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333342569,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "South Carolina State",
+      "away_team": "Furman",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333342086,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Butler",
+      "away_team": "Tennessee State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333340324,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Coastal Carolina",
+      "away_team": "Bethune-Cookman",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333342230,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Fordham",
+      "away_team": "Sacred Heart",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333342534,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Southern Utah",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333342464,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Northern Arizona",
+      "away_team": "South Dakota State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333340055,
+      "season": 2013,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Samford",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 333542449,
+      "season": 2013,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "New Hampshire",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 333550331,
+      "season": 2013,
+      "season_type": "postseason",
+      "home_team": "Eastern Washington",
+      "away_team": "Towson",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 340042449,
+      "season": 2013,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Towson",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 400608347,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Fordham",
+      "away_team": "Sacred Heart",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608348,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Eastern Kentucky",
+      "away_team": "Indiana State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608353,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Morgan State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608351,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "SE Louisiana",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608350,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "San Diego",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608352,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Liberty",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608354,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "South Dakota State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400608349,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Stephen F. Austin",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400609086,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Chattanooga",
+      "away_team": "Indiana State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609085,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Fordham",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609087,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Coastal Carolina",
+      "away_team": "Richmond",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609095,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Sam Houston",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609108,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Illinois State",
+      "away_team": "Northern Iowa",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609100,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "South Dakota State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609099,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Liberty",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400609097,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Montana",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400610137,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Chattanooga",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400610140,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Coastal Carolina",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400610138,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Sam Houston",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400610141,
+      "season": 2014,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Illinois State",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400610895,
+      "season": 2014,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Sam Houston",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400610897,
+      "season": 2014,
+      "season_type": "postseason",
+      "home_team": "New Hampshire",
+      "away_team": "Illinois State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400749714,
+      "season": 2014,
+      "season_type": "postseason",
+      "home_team": "Illinois State",
+      "away_team": "North Dakota State",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 400853515,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Dayton",
+      "away_team": "Western Illinois",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853508,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Chattanooga",
+      "away_team": "Fordham",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853509,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Coastal Carolina",
+      "away_team": "The Citadel",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853512,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "South Dakota State",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853511,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Southern Utah",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853510,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Colgate",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853514,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "William & Mary",
+      "away_team": "Duquesne",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400853513,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Eastern Illinois",
+      "round": "first round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 400854531,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "William & Mary",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854528,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Colgate",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854488,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Charleston Southern",
+      "away_team": "The Citadel",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854429,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Illinois State",
+      "away_team": "Western Illinois",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854451,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Chattanooga",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854530,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Montana",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854529,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "McNeese",
+      "away_team": "Sam Houston",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400854548,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Portland State",
+      "away_team": "Northern Iowa",
+      "round": "second round",
+      "source": "CFBD notes: NCAA DIVISION I FOOTBALL CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 400855895,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Illinois State",
+      "away_team": "Richmond",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400855896,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Charleston Southern",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400855897,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Colgate",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400855898,
+      "season": 2015,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Northern Iowa",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400856848,
+      "season": 2015,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Richmond",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400856849,
+      "season": 2015,
+      "season_type": "postseason",
+      "home_team": "Jacksonville State",
+      "away_team": "Sam Houston",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400857728,
+      "season": 2015,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Jacksonville State",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 400926627,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Chattanooga",
+      "away_team": "Weber State",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926628,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Lehigh",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926626,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Saint Francis",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926622,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Wofford",
+      "away_team": "Charleston Southern",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926623,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "North Carolina A&T",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926624,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Central Arkansas",
+      "away_team": "Illinois State",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926621,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Youngstown State",
+      "away_team": "Samford",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400926625,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Cal Poly",
+      "away_team": "San Diego",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927134,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "New Hampshire",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927143,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Youngstown State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927133,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Chattanooga",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927132,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Villanova",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927201,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "San Diego",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927137,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Central Arkansas",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927135,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "The Citadel",
+      "away_team": "Wofford",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400927136,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "North Dakota",
+      "away_team": "Richmond",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400928061,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Sam Houston",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400928064,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "South Dakota State",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400928062,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Youngstown State",
+      "away_team": "Wofford",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400928063,
+      "season": 2016,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Richmond",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400928522,
+      "season": 2016,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "James Madison",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400928523,
+      "season": 2016,
+      "season_type": "postseason",
+      "home_team": "Eastern Washington",
+      "away_team": "Youngstown State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 400930788,
+      "season": 2016,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "Youngstown State",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 401001213,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Elon",
+      "away_team": "Furman",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001207,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Stony Brook",
+      "away_team": "Lehigh",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001210,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Central Connecticut",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001211,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Kennesaw State",
+      "away_team": "Samford",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001208,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Weber State",
+      "away_team": "Western Illinois",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001212,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Nicholls",
+      "away_team": "South Dakota",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001209,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Monmouth",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401001214,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Northern Arizona",
+      "away_team": "San Diego",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002482,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "Kennesaw State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002470,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Wofford",
+      "away_team": "Furman",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002481,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Stony Brook",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002469,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Central Arkansas",
+      "away_team": "New Hampshire",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002487,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Northern Iowa",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002488,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "South Dakota",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002496,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "San Diego",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002486,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Southern Utah",
+      "away_team": "Weber State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002978,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Weber State",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002979,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Wofford",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002980,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "New Hampshire",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401002981,
+      "season": 2017,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Kennesaw State",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401003810,
+      "season": 2017,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Sam Houston",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401003826,
+      "season": 2017,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "South Dakota State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401004846,
+      "season": 2017,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "North Dakota State",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 401100037,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Towson",
+      "away_team": "Duquesne",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100038,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Wofford",
+      "away_team": "Elon",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100042,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Southeast Missouri State",
+      "away_team": "Stony Brook",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100036,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Delaware",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100035,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Incarnate Word",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100039,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Nicholls",
+      "away_team": "San Diego",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100040,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "Lamar",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100041,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Jacksonville State",
+      "away_team": "East Tennessee State",
+      "round": "first round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100049,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Maine",
+      "away_team": "Jacksonville State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100044,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Colgate",
+      "away_team": "James Madison",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100046,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Kennesaw State",
+      "away_team": "Wofford",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100045,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Duquesne",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100043,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Montana State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100050,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Weber State",
+      "away_team": "Southeast Missouri State",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100047,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Nicholls",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401100048,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "UC Davis",
+      "away_team": "Northern Iowa",
+      "round": "second round",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401101697,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Weber State",
+      "away_team": "Maine",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401101694,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Colgate",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401101695,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Kennesaw State",
+      "away_team": "South Dakota State",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401101696,
+      "season": 2018,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "UC Davis",
+      "round": "quarterfinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401102913,
+      "season": 2018,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "South Dakota State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401102914,
+      "season": 2018,
+      "season_type": "postseason",
+      "home_team": "Eastern Washington",
+      "away_team": "Maine",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401104373,
+      "season": 2018,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Eastern Washington",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 401186000,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Monmouth",
+      "away_team": "Holy Cross",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185996,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Austin Peay",
+      "away_team": "Furman",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185995,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "UAlbany",
+      "away_team": "Central Connecticut",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185999,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Northern Iowa",
+      "away_team": "San Diego",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185994,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Southeast Missouri State",
+      "away_team": "Illinois State",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185997,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Wofford",
+      "away_team": "Kennesaw State",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185998,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "SE Louisiana",
+      "away_team": "Villanova",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401185993,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Nicholls",
+      "away_team": "North Dakota",
+      "round": "first round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - FIRST ROUND"
+    },
+    {
+      "id": 401187253,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Monmouth",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187277,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Northern Iowa",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187315,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Weber State",
+      "away_team": "Kennesaw State",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187316,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "SE Louisiana",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187252,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "UAlbany",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187276,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Central Arkansas",
+      "away_team": "Illinois State",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187313,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Nicholls",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401187314,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Sacramento State",
+      "away_team": "Austin Peay",
+      "round": "second round",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - SECOND ROUND"
+    },
+    {
+      "id": 401188397,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "James Madison",
+      "away_team": "Northern Iowa",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - QUARTERFINALS"
+    },
+    {
+      "id": 401188398,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Austin Peay",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - QUARTERFINALS"
+    },
+    {
+      "id": 401188399,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "Weber State",
+      "away_team": "Montana",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - QUARTERFINALS"
+    },
+    {
+      "id": 401188396,
+      "season": 2019,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Illinois State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS CHAMPIONSHIP - QUARTERFINALS"
+    },
+    {
+      "id": 401189293,
+      "season": 2019,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Montana State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401189294,
+      "season": 2019,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "Weber State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401198013,
+      "season": 2019,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "James Madison",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 401321794,
+      "season": 2020,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "VMI",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401322680,
+      "season": 2020,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "North Dakota",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401324093,
+      "season": 2020,
+      "season_type": "postseason",
+      "home_team": "Sam Houston",
+      "away_team": "James Madison",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401325471,
+      "season": 2020,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "Sam Houston",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 401389032,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Holy Cross",
+      "away_team": "Sacred Heart",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389036,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Kennesaw State",
+      "away_team": "Davidson",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389033,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "UC Davis",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389030,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Incarnate Word",
+      "away_team": "Stephen F. Austin",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389031,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Missouri State",
+      "away_team": "UT Martin",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389035,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Eastern Washington",
+      "away_team": "Northern Iowa",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389037,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "South Dakota",
+      "away_team": "Southern Illinois",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389034,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "SE Louisiana",
+      "away_team": "Florida A&M",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401389821,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Holy Cross",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389822,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Eastern Washington",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389820,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "East Tennessee State",
+      "away_team": "Kennesaw State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389870,
+      "season": 2021,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "SE Louisiana",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389818,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Incarnate Word",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389850,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Southern Illinois",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389819,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "UT Martin",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401389823,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Sacramento State",
+      "away_team": "South Dakota State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401391130,
+      "season": 2021,
+      "season_type": "postseason",
+      "home_team": "James Madison",
+      "away_team": "Montana",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401391131,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "East Tennessee State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401391133,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "South Dakota State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401391132,
+      "season": 2021,
+      "season_type": "regular",
+      "home_team": "Sam Houston",
+      "away_team": "Montana State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401391353,
+      "season": 2021,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "James Madison",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401391354,
+      "season": 2021,
+      "season_type": "postseason",
+      "home_team": "Montana State",
+      "away_team": "South Dakota State",
+      "round": "semifinal",
+      "source": "CFBD notes empty; placed by bracket structure (its teams link to adjacent listed rounds)"
+    },
+    {
+      "id": 401391352,
+      "season": 2021,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Montana State",
+      "round": "final",
+      "source": "CFBD notes empty; the season's last FCS game, between the two semifinal winners"
+    },
+    {
+      "id": 401505436,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Furman",
+      "away_team": "Elon",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505437,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Davidson",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505430,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Delaware",
+      "away_team": "Saint Francis",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505431,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "Fordham",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505433,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Weber State",
+      "away_team": "North Dakota",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505432,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Eastern Kentucky",
+      "away_team": "Gardner-Webb",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505435,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "SE Louisiana",
+      "away_team": "Idaho",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401505434,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Southeast Missouri State",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401506610,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Holy Cross",
+      "away_team": "New Hampshire",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506630,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "William & Mary",
+      "away_team": "Gardner-Webb",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506571,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Incarnate Word",
+      "away_team": "Furman",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506655,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Samford",
+      "away_team": "SE Louisiana",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506611,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Weber State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506578,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Delaware",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506690,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Montana",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401506577,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Sacramento State",
+      "away_team": "Richmond",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401507650,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Samford",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401507670,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "William & Mary",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401507652,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "Sacramento State",
+      "away_team": "Incarnate Word",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401507651,
+      "season": 2022,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Holy Cross",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401508850,
+      "season": 2022,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Incarnate Word",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401508851,
+      "season": 2022,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "Montana State",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401445817,
+      "season": 2022,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "North Dakota State",
+      "round": "final",
+      "source": "CFBD notes: FCS Championship"
+    },
+    {
+      "id": 401614603,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "North Dakota",
+      "away_team": "Sacramento State",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614616,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Delaware",
+      "away_team": "Lafayette",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614601,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Richmond",
+      "away_team": "North Carolina Central",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614599,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Mercer",
+      "away_team": "Gardner-Webb",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614615,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Austin Peay",
+      "away_team": "Chattanooga",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614602,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Southern Illinois",
+      "away_team": "Nicholls",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614604,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "Drake",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401614600,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Youngstown State",
+      "away_team": "Duquesne",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401615939,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Villanova",
+      "away_team": "Youngstown State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615860,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "UAlbany",
+      "away_team": "Richmond",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615901,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Furman",
+      "away_team": "Chattanooga",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615819,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "South Dakota",
+      "away_team": "Sacramento State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615899,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "Mercer",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615900,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Montana State",
+      "away_team": "North Dakota State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615859,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Montana",
+      "away_team": "Delaware",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401615879,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Idaho",
+      "away_team": "Southern Illinois",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401617310,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Montana",
+      "away_team": "Furman",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401617307,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "Villanova",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401617308,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "South Dakota",
+      "away_team": "North Dakota State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401617309,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Idaho",
+      "away_team": "UAlbany",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401618179,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "UAlbany",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401618099,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "Montana",
+      "away_team": "North Dakota State",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401555031,
+      "season": 2023,
+      "season_type": "postseason",
+      "home_team": "South Dakota State",
+      "away_team": "Montana",
+      "round": "final",
+      "source": "CFBD notes: FCS Championship"
+    },
+    {
+      "id": 401729737,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Rhode Island",
+      "away_team": "Central Connecticut",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729731,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Southeast Missouri State",
+      "away_team": "Illinois State",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729729,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "New Hampshire",
+      "away_team": "UT Martin",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729736,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Eastern Kentucky",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729730,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Richmond",
+      "away_team": "Lehigh",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729738,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Abilene Christian",
+      "away_team": "Northern Arizona",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729732,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Tarleton State",
+      "away_team": "Drake",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729734,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "Tennessee State",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401729750,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Montana",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729754,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Incarnate Word",
+      "away_team": "Villanova",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729756,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Mercer",
+      "away_team": "Rhode Island",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729743,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "UT Martin",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729752,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "South Dakota",
+      "away_team": "Tarleton State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729745,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Abilene Christian",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729753,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "UC Davis",
+      "away_team": "Illinois State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729759,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Idaho",
+      "away_team": "Lehigh",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401729780,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Idaho",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401729781,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "Incarnate Word",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401729785,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Mercer",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401729783,
+      "season": 2024,
+      "season_type": "regular",
+      "home_team": "South Dakota",
+      "away_team": "UC Davis",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401729786,
+      "season": 2024,
+      "season_type": "postseason",
+      "home_team": "North Dakota State",
+      "away_team": "South Dakota State",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401729787,
+      "season": 2024,
+      "season_type": "postseason",
+      "home_team": "Montana State",
+      "away_team": "South Dakota",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401680057,
+      "season": 2024,
+      "season_type": "postseason",
+      "home_team": "Montana State",
+      "away_team": "North Dakota State",
+      "round": "final",
+      "source": "CFBD notes: FCS Championship"
+    },
+    {
+      "id": 401833975,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Youngstown State",
+      "away_team": "Yale",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836102,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Rhode Island",
+      "away_team": "Central Connecticut",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836055,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Villanova",
+      "away_team": "Harvard",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836115,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Tennessee Tech",
+      "away_team": "North Dakota",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836116,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "South Dakota State",
+      "away_team": "New Hampshire",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836195,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "South Dakota",
+      "away_team": "Drake",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401833969,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Abilene Christian",
+      "away_team": "Lamar",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836095,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "SE Louisiana",
+      "away_team": "Illinois State",
+      "round": "first round",
+      "source": "CFBD notes: FCS Championship - First Round"
+    },
+    {
+      "id": 401836218,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Mercer",
+      "away_team": "South Dakota",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401833978,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Lehigh",
+      "away_team": "Villanova",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401836217,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Tarleton State",
+      "away_team": "North Dakota",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401836198,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "North Dakota State",
+      "away_team": "Illinois State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401836197,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "South Dakota State",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401836196,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Yale",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401836216,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Stephen F. Austin",
+      "away_team": "Abilene Christian",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401833977,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "UC Davis",
+      "away_team": "Rhode Island",
+      "round": "second round",
+      "source": "CFBD notes: FCS Championship - Second Round"
+    },
+    {
+      "id": 401833985,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Montana State",
+      "away_team": "Stephen F. Austin",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401833986,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Tarleton State",
+      "away_team": "Villanova",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401833987,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "Montana",
+      "away_team": "South Dakota",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401836219,
+      "season": 2025,
+      "season_type": "regular",
+      "home_team": "UC Davis",
+      "away_team": "Illinois State",
+      "round": "quarterfinal",
+      "source": "CFBD notes: FCS Championship - Quarterfinals"
+    },
+    {
+      "id": 401833989,
+      "season": 2025,
+      "season_type": "postseason",
+      "home_team": "Montana State",
+      "away_team": "Montana",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401833990,
+      "season": 2025,
+      "season_type": "postseason",
+      "home_team": "Villanova",
+      "away_team": "Illinois State",
+      "round": "semifinal",
+      "source": "CFBD notes: FCS Championship - Semifinals"
+    },
+    {
+      "id": 401833680,
+      "season": 2025,
+      "season_type": "postseason",
+      "home_team": "Montana State",
+      "away_team": "Illinois State",
+      "round": "final",
+      "source": "CFBD notes: FCS Championship"
+    }
+  ]
+}
