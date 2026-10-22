@@ -531,10 +531,26 @@ def _title_game_conference(game: sqlite3.Row) -> str | None:
     return str(conference)
 
 
+# Issue #379: the order both game lists are shown in, and the same key list
+# the ratings walk replays games in (`compute_ratings`, minus `season`, which
+# is fixed per query here), so display and walk agree. Regular season first,
+# by week; inside the postseason, by `start_date` before `week`, because CFBD
+# labels relabelled FCS playoff rounds weeks 13-16 but the FCS semifinals and
+# final postseason week 1. `id` last keeps it a deterministic total order.
+# A constant, never user input, so formatting it into the SQL is safe.
+_CHRONOLOGICAL_ORDER = """
+            CASE season_type WHEN 'regular' THEN 0 ELSE 1 END,
+            CASE WHEN season_type = 'regular' THEN week END IS NULL,
+            CASE WHEN season_type = 'regular' THEN week END,
+            start_date IS NULL, start_date,
+            week IS NULL, week,
+            id"""
+
+
 def _team_games(conn: sqlite3.Connection, year: int, team_id: int, sport: str) -> list[sqlite3.Row]:
     _require_title_game_column(conn)
     return conn.execute(
-        """
+        f"""
         SELECT id, week, season_type, neutral_site,
                home_team_id, away_team_id, home_team, away_team,
                home_points, away_points,
@@ -542,9 +558,7 @@ def _team_games(conn: sqlite3.Connection, year: int, team_id: int, sport: str) -
         FROM games
         WHERE season = ? AND sport = ? AND completed = 1
           AND (home_team_id = ? OR away_team_id = ?)
-        ORDER BY
-            CASE season_type WHEN 'regular' THEN 0 ELSE 1 END,
-            week
+        ORDER BY {_CHRONOLOGICAL_ORDER}
         """,
         (year, sport, team_id, team_id),
     ).fetchall()
@@ -710,7 +724,7 @@ def build_comparison(
     # Head-to-head: any completed game this season between the two teams.
     # build_team_case has already run `_require_title_game_column` above.
     h2h_games = conn.execute(
-        """
+        f"""
         SELECT id, week, season_type, neutral_site, home_team_id, away_team_id,
                home_team, away_team, home_points, away_points,
                conference_championship, home_conference
@@ -718,7 +732,7 @@ def build_comparison(
         WHERE season = ? AND sport = ? AND completed = 1
           AND ((home_team_id = ? AND away_team_id = ?)
             OR (home_team_id = ? AND away_team_id = ?))
-        ORDER BY CASE season_type WHEN 'regular' THEN 0 ELSE 1 END, week
+        ORDER BY {_CHRONOLOGICAL_ORDER}
         """,
         (year, sport, case_a.team_id, case_b.team_id, case_b.team_id, case_a.team_id),
     ).fetchall()
@@ -757,7 +771,8 @@ def build_comparison(
     # Common opponents: any team both A and B played this season (excluding
     # each other), with EVERY meeting each side had against that opponent
     # (issue #130). `TeamCase.games` is already chronological (regular season
-    # by week, then postseason -- `_team_games`' ORDER BY), so appending per
+    # by week, then postseason by date -- `_team_games`' ORDER BY,
+    # `_CHRONOLOGICAL_ORDER`, issue #379), so appending per
     # opponent id in that order keeps each list chronological. Before #130
     # this was a dict overwrite that kept only the last meeting per side.
     a_by_opp = _meetings_by_opponent(case_a.games)
