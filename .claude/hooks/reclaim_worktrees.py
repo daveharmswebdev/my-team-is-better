@@ -17,6 +17,7 @@ worktree are considered; a coordinator's own worktrees (`issue-349`, ...) never 
 One is kept, with the reason printed, when any of these holds:
 
 - it is the worktree this command runs in, or it is locked;
+- its directory is gone (`prunable`): `git worktree prune` is the fix, not this;
 - `git status --porcelain` is non-empty (a spoke's unreturned work);
 - it was touched within `--min-age-hours` (default 24). A spoke that has just started
   sits clean at its base commit, which main already contains, so its age is the only
@@ -31,8 +32,10 @@ passes. A branch with any change main lacks, or one that conflicts with main, fa
 including a change main later reverted. Every error is in the keep direction. Main
 is `origin/main`, so fetch first. A stale ref can only keep more.
 
-Before a branch is deleted, its tip is saved under `refs/archive/worktree-agent/<branch>`,
-so its commits stay reachable, the same as the founder's 2026-10-19 cleanup.
+Only a `worktree-agent-*` branch is ever deleted. An `agent-*` worktree holding any
+other branch (a fork's `issue-339-...`) loses the worktree, and the branch stays. Before
+a branch is deleted, its tip is saved under `refs/archive/worktree-agent/<branch>`, so
+its commits stay reachable, the same as the founder's 2026-10-19 cleanup.
 """
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ DEFAULT_MIN_AGE_HOURS = 24.0
 
 CURRENT = "the worktree this command runs in"
 LOCKED = "locked"
+PRUNABLE = "directory missing; run git worktree prune"
 DIRTY = "uncommitted changes"
 RECENT = "touched too recently"
 NOT_IN_MAIN = "has work that isn't in main"
@@ -139,6 +143,8 @@ def survey(
             reason = CURRENT
         elif "locked" in record:
             reason = LOCKED
+        elif "prunable" in record or not path.is_dir():
+            reason = PRUNABLE
         elif _out(path, "--no-optional-locks", "status", "--porcelain"):
             reason = DIRTY
         else:
@@ -168,7 +174,7 @@ def reclaim(repo: Path, entry: Entry) -> None:
     a dirty worktree, a second check behind the survey's."""
     if entry.path is not None:
         _git(repo, "worktree", "remove", str(entry.path))
-    if entry.branch is not None:
+    if entry.branch is not None and entry.branch.startswith(BRANCH_PREFIX):
         tip = _out(repo, "rev-parse", f"refs/heads/{entry.branch}")
         _git(repo, "update-ref", f"{ARCHIVE_PREFIX}{entry.branch}", tip)
         _git(repo, "branch", "-D", entry.branch)

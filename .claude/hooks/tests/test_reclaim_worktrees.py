@@ -114,6 +114,44 @@ def test_recent_worktree_is_kept(repo: Path) -> None:
     assert by_name(rw.survey(repo))["agent-d"].reason == rw.RECENT
 
 
+def test_fresh_spoke_on_an_old_base_is_kept(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review of #387: a spoke started just now on a base commit days old. The commit
+    # time says "old", so the new worktree's own reflog entry is what keeps it.
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "@1700000000 +0000")
+    commit_file(repo, "old.txt", "old\n", "an old base")
+    publish_main(repo)
+    monkeypatch.delenv("GIT_COMMITTER_DATE")
+    add_spoke(repo, "agent-fresh")
+
+    assert by_name(rw.survey(repo))["agent-fresh"].reason == rw.RECENT
+
+
+def test_prunable_worktree_is_kept_without_aborting(repo: Path) -> None:
+    # Its directory is gone but git still lists it; the survey reports it and goes on.
+    gone = add_spoke(repo, "agent-gone")
+    wt = add_spoke(repo, "agent-a")
+    commit_file(wt, "a.txt", "a\n", "spoke a")
+    squash_onto_main(repo, "a.txt", "a\n")
+    subprocess.run(["rm", "-rf", str(gone)], check=True)
+
+    entries = by_name(rw.survey(repo, now=LATER))
+    assert entries["agent-gone"].reason == rw.PRUNABLE
+    assert entries["agent-a"].reason is None
+
+
+def test_apply_keeps_a_non_spoke_branch_checked_out_in_an_agent_worktree(repo: Path) -> None:
+    # A fork's agent-* worktree can hold a coordinator branch (issue-339-...); only
+    # the worktree goes, the branch stays.
+    wt = add_spoke(repo, "agent-k", branch="issue-999-pr-branch")
+    commit_file(wt, "k.txt", "k\n", "spoke k")
+    squash_onto_main(repo, "k.txt", "k\n")
+
+    assert rw.main(["--repo", str(repo), "--apply"], now=LATER) == 0
+
+    assert not wt.exists()
+    assert git(repo, "branch", "--list", "issue-999-pr-branch")
+
+
 def test_age_ignores_git_housekeeping_mtimes(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Found on the real repo: `git status` rewrites a worktree's index and gc rewrites
     # reflog files, so their mtimes said every parked spoke was "recent".
