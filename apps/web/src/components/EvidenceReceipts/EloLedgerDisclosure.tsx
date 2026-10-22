@@ -54,7 +54,10 @@ const RESULT_VALUE: Record<GameResult, string> = { W: '1', T: '½', L: '0' }
 /**
  * One game, as a fan would name it: "Wk 2 · vs Ohio State · W 25–22",
  * "at X" away, "vs X (neutral)" at a neutral site, and "Postseason" in place
- * of the week for a postseason game.
+ * of the week for a postseason game. A step whose venue can't be vouched for
+ * (`venue_reliable` false: CFB before 2008, off #359's override list; issue
+ * #349) reads a plain "vs X" whatever its venue -- the worked step still shows
+ * the engine's own home-field adjustment, because that is the math it ran.
  */
 function gameLabel(step: EloGameStepOut): string {
   const when =
@@ -63,8 +66,9 @@ function gameLabel(step: EloGameStepOut): string {
       : step.week !== null
         ? `Wk ${step.week}`
         : null
-  const where =
-    step.venue === 'away'
+  const where = !step.venue_reliable
+    ? `vs ${step.opponent_name}`
+    : step.venue === 'away'
       ? `at ${step.opponent_name}`
       : step.venue === 'neutral'
         ? `vs ${step.opponent_name} (neutral)`

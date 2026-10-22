@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 import type { EloLedgerOut } from '../../lib/api/types'
 import { EloLedgerDisclosure } from './EloLedgerDisclosure'
-import { TEXAS_ELO } from './eloLedgerFixture'
+import { TEXAS_ELO, TEXAS_ELO_UNRELIABLE_VENUES } from './eloLedgerFixture'
 
 function touchMatchMediaStub(query: string): MediaQueryList {
   return {
@@ -115,6 +115,28 @@ export const LongSeason: Story = {
       within(dialog).getByText('The rule — same for every team'),
     ).toBeVisible()
     await expectOnlyTheListScrolls(dialog)
+  },
+}
+
+/**
+ * A pre-2008 CFB season (issue #349): CFBD's venue data can't be vouched for,
+ * so every game reads a plain "vs X" -- no "at", no "(neutral)" -- while each
+ * worked step keeps the home-field adjustment the engine actually applied.
+ */
+export const UnreliableVenues: Story = {
+  args: { ledger: TEXAS_ELO_UNRELIABLE_VENUES.elo_ledger },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.hover(canvas.getByRole('button', { name: '1,661' }))
+    const dialog = await canvas.findByRole('dialog')
+    await expect(
+      within(dialog).getByText('Wk 4 · vs Texas Tech · W 52–17'),
+    ).toBeVisible()
+    await expect(
+      within(dialog).getByText('Postseason · vs USC · W 41–38'),
+    ).toBeVisible()
+    await expect(within(dialog).queryByText(/\(neutral\)/)).toBeNull()
+    await expect(within(dialog).queryByText(/ · at /)).toBeNull()
   },
 }
 

@@ -11,6 +11,13 @@ import fixture from './eloLedgerFixture.json'
  * Elo functions produced with the CFB constants -- never hand-edit them, and
  * never recompute them in TypeScript. This module only narrows the JSON's
  * string fields to their literal unions, throwing rather than casting.
+ *
+ * `venue_reliable` (issue #349) is not in the JSON: the engine's Elo functions
+ * leave it at the contract's default, `True`, and only evidence derives it
+ * from the season. So `TEXAS_ELO` and `USC_ELO` are ledgers whose venues the
+ * API vouches for, and `TEXAS_ELO_UNRELIABLE_VENUES` is the same ledger with
+ * every venue unvouched -- what a pre-2008 CFB season off #359's override list
+ * sends. The numbers are identical either way: reliability is display only.
  */
 
 export interface EloFixtureTeam {
@@ -23,7 +30,7 @@ export interface EloFixtureTeam {
   elo_ledger: EloLedgerOut
 }
 
-type RawStep = Omit<EloGameStepOut, 'venue' | 'result'> & {
+type RawStep = Omit<EloGameStepOut, 'venue' | 'result' | 'venue_reliable'> & {
   venue: string
   result: string
 }
@@ -61,6 +68,7 @@ function team(team_name: string, raw: RawTeam): EloFixtureTeam {
         ...step,
         venue: venue(step.venue),
         result: result(step.result),
+        venue_reliable: true,
       })),
     },
   }
@@ -71,3 +79,19 @@ export const TEXAS_ELO: EloFixtureTeam = team('Texas', fixture.Texas)
 
 /** USC 2005: 1-1. */
 export const USC_ELO: EloFixtureTeam = team('USC', fixture.USC)
+
+/**
+ * Texas 2005's ledger as a pre-2008 CFB season sends it (issue #349): the same
+ * engine numbers, home-field adjustments included, with no venue the API can
+ * vouch for.
+ */
+export const TEXAS_ELO_UNRELIABLE_VENUES: EloFixtureTeam = {
+  ...TEXAS_ELO,
+  elo_ledger: {
+    ...TEXAS_ELO.elo_ledger,
+    steps: TEXAS_ELO.elo_ledger.steps.map((step) => ({
+      ...step,
+      venue_reliable: false,
+    })),
+  },
+}
