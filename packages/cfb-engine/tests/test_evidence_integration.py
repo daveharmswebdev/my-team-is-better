@@ -18,6 +18,7 @@ from __future__ import annotations
 import itertools
 import sqlite3
 import typing
+from collections import Counter
 from dataclasses import dataclass
 
 import pytest
@@ -1108,3 +1109,301 @@ def test_every_nfl_evidence_row_has_no_title_game_conference(
     for common in comparison.common_opponents:
         for m in [*common.team_a_meetings, *common.team_b_meetings]:
             assert m.title_game_conference is None, (common.opponent_name, m)
+
+
+# ---------------------------------------------------------------------------
+# Issue #349: `venue_reliable` on every per-game shape evidence builds.
+#
+# The rule (contracts.py, `OpponentResult.venue_reliable`): a game's venue is
+# reliable iff the sport is not CFB, or the season is 2008 or later, or the
+# game is one of #359's curated neutral-site overrides -- recognisable as
+# `games.neutral_site = 1` while CFBD's own `raw_json` `neutralSite` is false.
+# Before 2008 a game CFBD itself flags neutral is NOT reliable (founder, #343).
+#
+# Real 2005 games, as the committed fixture stores them:
+#   253370251  Colorado vs Texas, Big 12 title game at Reliant: override -> True
+#   252810251  Texas vs Oklahoma, Red River at the Cotton Bowl: override -> True
+#   252530194  Texas at Ohio State, week 2: pre-2008, not an override -> False
+#   252880251  Colorado at Texas, week 7: pre-2008, not an override -> False
+#   252530248  Houston vs Sam Houston at Robertson, CFBD-flagged neutral -> False
+#   260040030  Texas vs USC, Rose Bowl, CFBD-flagged neutral -> False
+# ---------------------------------------------------------------------------
+
+BIG12_TITLE_2005 = 253370251
+RED_RIVER_2005 = 252810251
+TEXAS_AT_OHIO_STATE_2005 = 252530194
+COLORADO_AT_TEXAS_2005 = 252880251
+HOUSTON_SAM_HOUSTON_2005 = 252530248
+ROSE_BOWL_2005 = 260040030
+
+
+@pytest.fixture
+def venue_conn(regression_conn: sqlite3.Connection) -> sqlite3.Connection:
+    """The CFB fixture with keener and elo computed for 2005 and 2013."""
+    for year in (2005, 2013):
+        for method in ("keener", "elo"):
+            compute_and_store(regression_conn, year, method)
+    return regression_conn
+
+
+def _reliable_by_game_id(case: TeamCase) -> dict[int, bool]:
+    return {g.game_id: g.venue_reliable for g in case.games}
+
+
+def _reliable_by_step_opponent(case: TeamCase) -> dict[tuple[str, str | None], bool]:
+    """(opponent name, start_date) -> the ledger step's venue_reliable."""
+    assert case.elo_ledger is not None
+    return {(s.opponent_name, s.start_date): s.venue_reliable for s in case.elo_ledger.steps}
+
+
+def test_fixture_holds_the_measured_override_and_cfbd_flagged_counts(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    """The brief's measured premise: 22 pre-2008 overrides, 662 pre-2008
+    games CFBD itself flags neutral. If ingest's override list changes these,
+    the expectations below need a second look."""
+    overrides, cfbd_flagged = venue_conn.execute(
+        """
+        SELECT
+          SUM(neutral_site = 1 AND NOT json_extract(raw_json, '$.neutralSite')),
+          SUM(json_extract(raw_json, '$.neutralSite') = 1)
+        FROM games WHERE sport = 'cfb' AND season < 2008
+        """
+    ).fetchone()
+    assert (overrides, cfbd_flagged) == (22, 662)
+
+
+def test_team_case_games_carry_venue_reliable_per_the_rule(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    texas = _reliable_by_game_id(build_team_case(venue_conn, 2005, "Texas"))
+    assert texas[BIG12_TITLE_2005] is True
+    assert texas[RED_RIVER_2005] is True
+    assert texas[TEXAS_AT_OHIO_STATE_2005] is False
+    assert texas[COLORADO_AT_TEXAS_2005] is False
+    assert texas[ROSE_BOWL_2005] is False
+
+    colorado = _reliable_by_game_id(build_team_case(venue_conn, 2005, "Colorado"))
+    assert colorado[BIG12_TITLE_2005] is True
+    assert colorado[COLORADO_AT_TEXAS_2005] is False
+
+    ohio_state = _reliable_by_game_id(build_team_case(venue_conn, 2005, "Ohio State"))
+    assert ohio_state[TEXAS_AT_OHIO_STATE_2005] is False
+
+    houston = _reliable_by_game_id(build_team_case(venue_conn, 2005, "Houston"))
+    assert houston[HOUSTON_SAM_HOUSTON_2005] is False
+
+
+def test_houston_vs_sam_houston_2005_cfbd_flagged_neutral_is_not_reliable(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    """CFBD flags this game neutral although it was at Houston's own Robertson
+    Stadium: the reason the pre-2008 flag is not trusted. Neither the listed
+    game nor the Elo step (which needs a game lookup) may state it."""
+    houston = build_team_case(venue_conn, 2005, "Houston", method="elo")
+    game = next(g for g in houston.games if g.game_id == HOUSTON_SAM_HOUSTON_2005)
+    assert (game.venue, game.venue_reliable) == ("neutral", False)
+    assert houston.elo_ledger is not None
+    steps = [s for s in houston.elo_ledger.steps if s.opponent_name == "Sam Houston"]
+    assert [(s.venue, s.venue_reliable) for s in steps] == [("neutral", False)]
+
+
+def test_quality_wins_and_worst_loss_carry_venue_reliable(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    texas = build_team_case(venue_conn, 2005, "Texas")
+    wins = {q.game_id: q.venue_reliable for q in texas.quality_wins}
+    assert wins[RED_RIVER_2005] is True
+    assert wins[TEXAS_AT_OHIO_STATE_2005] is False
+    assert wins[ROSE_BOWL_2005] is False
+
+    colorado = build_team_case(venue_conn, 2005, "Colorado")
+    assert colorado.worst_loss is not None
+    assert colorado.worst_loss.opponent_name == "Iowa State"
+    assert colorado.worst_loss.venue_reliable is False
+
+    usc = build_team_case(venue_conn, 2005, "USC")
+    assert usc.worst_loss is not None
+    assert usc.worst_loss.game_id == ROSE_BOWL_2005
+    assert usc.worst_loss.venue_reliable is False
+
+
+def test_head_to_head_meetings_carry_venue_reliable(venue_conn: sqlite3.Connection) -> None:
+    comparison = build_comparison(venue_conn, 2005, "Texas", "Colorado")
+    by_id = {m.game_id: m.venue_reliable for m in comparison.head_to_head.meetings}
+    assert by_id == {COLORADO_AT_TEXAS_2005: False, BIG12_TITLE_2005: True}
+
+
+def test_common_opponent_meetings_copy_each_sides_venue_reliable(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    """Colorado and Oklahoma both played Texas: Colorado twice (at Texas, not
+    reliable; the Big 12 title game, an override), Oklahoma once (Red River,
+    an override)."""
+    comparison = build_comparison(venue_conn, 2005, "Colorado", "Oklahoma")
+    texas = next(c for c in comparison.common_opponents if c.opponent_name == "Texas")
+    assert [(m.game_id, m.venue_reliable) for m in texas.team_a_meetings] == [
+        (COLORADO_AT_TEXAS_2005, False),
+        (BIG12_TITLE_2005, True),
+    ]
+    assert [(m.game_id, m.venue_reliable) for m in texas.team_b_meetings] == [
+        (RED_RIVER_2005, True),
+    ]
+
+
+def test_elo_ledger_steps_carry_venue_reliable(venue_conn: sqlite3.Connection) -> None:
+    """Steps carry no game id. A neutral pre-2008 CFB step is matched to its
+    game (override or CFBD-flagged); any other pre-2008 CFB step is not
+    reliable without a lookup."""
+    texas = build_team_case(venue_conn, 2005, "Texas", method="elo")
+    steps = _reliable_by_step_opponent(texas)
+    assert steps[("Colorado", "2005-12-03T18:00:00.000Z")] is True  # Big 12 title
+    assert steps[("Oklahoma", "2005-10-08T17:00:00.000Z")] is True  # Red River
+    assert steps[("Ohio State", "2005-09-11T00:00:00.000Z")] is False
+    assert steps[("Colorado", "2005-10-15T19:30:00.000Z")] is False
+    assert steps[("USC", "2006-01-05T01:00:00.000Z")] is False  # Rose Bowl
+
+    houston = build_team_case(venue_conn, 2005, "Houston", method="elo")
+    assert houston.elo_ledger is not None
+    sam_houston = [s for s in houston.elo_ledger.steps if s.opponent_name == "Sam Houston"]
+    assert [(s.venue, s.venue_reliable) for s in sam_houston] == [("neutral", False)]
+
+
+def test_ledger_step_agrees_with_its_listed_game_for_every_2005_team(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    """Every step's venue_reliable equals the same game's OpponentResult value
+    (matched on opponent and venue), so the two paths cannot disagree."""
+    schools = [
+        row["school"]
+        for row in venue_conn.execute(
+            "SELECT t.school FROM ratings r JOIN teams t ON t.id = r.team_id "
+            "WHERE r.year = 2005 AND r.method = 'elo' AND r.sport = 'cfb'"
+        )
+    ]
+    seen = {True: 0, False: 0}
+    for school in schools:
+        elo_case = build_team_case(venue_conn, 2005, school, method="elo")
+        assert elo_case.elo_ledger is not None
+        listed = [(g.opponent_team_id, g.venue, g.venue_reliable) for g in elo_case.games]
+        stepped = [
+            (s.opponent_team_id, s.venue, s.venue_reliable) for s in elo_case.elo_ledger.steps
+        ]
+        # Every step is one of the listed games (the walk may skip some).
+        assert not Counter(stepped) - Counter(listed), school
+        for _, _, reliable in stepped:
+            seen[reliable] += 1
+    assert seen[True] > 0 and seen[False] > 0
+
+
+def test_cfbd_flagged_neutral_pre_2008_game_is_unreliable_on_every_shape(
+    venue_conn: sqlite3.Connection,
+) -> None:
+    """The 2005 Rose Bowl, which CFBD flags neutral itself, on every shape
+    that carries it: both team cases' games, Texas's quality win, USC's worst
+    loss, the head-to-head meeting, a common-opponent meeting (Texas vs Notre
+    Dame, who both played USC) and both teams' Elo steps."""
+    texas = build_team_case(venue_conn, 2005, "Texas")
+    usc = build_team_case(venue_conn, 2005, "USC")
+    assert _reliable_by_game_id(texas)[ROSE_BOWL_2005] is False
+    assert _reliable_by_game_id(usc)[ROSE_BOWL_2005] is False
+    rose_win = next(q for q in texas.quality_wins if q.game_id == ROSE_BOWL_2005)
+    assert rose_win.venue == "neutral"
+    assert rose_win.venue_reliable is False
+    assert usc.worst_loss is not None and usc.worst_loss.game_id == ROSE_BOWL_2005
+    assert usc.worst_loss.venue_reliable is False
+
+    h2h = build_comparison(venue_conn, 2005, "Texas", "USC").head_to_head.meetings
+    assert [(m.game_id, m.neutral_site, m.venue_reliable) for m in h2h] == [
+        (ROSE_BOWL_2005, True, False)
+    ]
+
+    vs_nd = build_comparison(venue_conn, 2005, "Texas", "Notre Dame")
+    common_usc = next(c for c in vs_nd.common_opponents if c.opponent_name == "USC")
+    assert [(m.game_id, m.venue_reliable) for m in common_usc.team_a_meetings] == [
+        (ROSE_BOWL_2005, False)
+    ]
+
+    for school, opponent in (("Texas", "USC"), ("USC", "Texas")):
+        case = build_team_case(venue_conn, 2005, school, method="elo")
+        assert case.elo_ledger is not None
+        rose = [
+            s
+            for s in case.elo_ledger.steps
+            if s.opponent_name == opponent and s.season_type == "postseason"
+        ]
+        assert [(s.venue, s.venue_reliable) for s in rose] == [("neutral", False)]
+
+
+def test_every_2013_cfb_shape_is_venue_reliable(venue_conn: sqlite3.Connection) -> None:
+    """2008 on, CFBD's flag is trusted: every game, quality win, worst loss
+    and ledger step of every rated 2013 team is reliable, neutral or not."""
+    schools = [
+        row["school"]
+        for row in venue_conn.execute(
+            "SELECT t.school FROM ratings r JOIN teams t ON t.id = r.team_id "
+            "WHERE r.year = 2013 AND r.method = 'elo' AND r.sport = 'cfb'"
+        )
+    ]
+    venues: set[str] = set()
+    for school in schools:
+        case = build_team_case(venue_conn, 2013, school, method="elo")
+        assert all(g.venue_reliable for g in case.games), school
+        assert all(q.venue_reliable for q in case.quality_wins), school
+        assert case.worst_loss is None or case.worst_loss.venue_reliable, school
+        assert case.elo_ledger is not None
+        assert all(s.venue_reliable for s in case.elo_ledger.steps), school
+        venues.update(g.venue for g in case.games)
+    assert venues == {"home", "away", "neutral"}
+
+    comparison = build_comparison(venue_conn, 2013, "Auburn", "Alabama")
+    assert comparison.head_to_head.meetings
+    assert all(m.venue_reliable for m in comparison.head_to_head.meetings)
+    assert comparison.common_opponents
+    for common in comparison.common_opponents:
+        for m in [*common.team_a_meetings, *common.team_b_meetings]:
+            assert m.venue_reliable, (common.opponent_name, m)
+
+
+def test_every_nfl_shape_is_venue_reliable_in_every_fixture_season(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    """The rule is CFB-only: NFL games are reliable in every season,
+    pre-2008 included, and so is every ledger step and meeting."""
+    conn = nfl_regression_conn
+    seasons = [
+        int(r[0])
+        for r in conn.execute("SELECT DISTINCT season FROM games WHERE sport = 'nfl' ORDER BY 1")
+    ]
+    assert seasons and min(seasons) < 2008
+    neutral_seen = 0
+    for year in seasons:
+        compute_and_store(conn, year, "elo", sport="nfl")
+        schools = [
+            row["school"]
+            for row in conn.execute(
+                "SELECT t.school FROM ratings r JOIN teams t ON t.id = r.team_id "
+                "WHERE r.year = ? AND r.method = 'elo' AND r.sport = 'nfl'",
+                (year,),
+            )
+        ]
+        for school in schools:
+            case = build_team_case(conn, year, school, method="elo", sport="nfl")
+            assert case.games
+            assert all(g.venue_reliable for g in case.games), (year, school)
+            assert all(q.venue_reliable for q in case.quality_wins), (year, school)
+            assert case.worst_loss is None or case.worst_loss.venue_reliable
+            assert case.elo_ledger is not None
+            assert all(s.venue_reliable for s in case.elo_ledger.steps), (year, school)
+            neutral_seen += sum(g.venue == "neutral" for g in case.games)
+    assert neutral_seen > 0
+
+    comparison = build_comparison(
+        conn, 2004, "Green Bay Packers", "Minnesota Vikings", method="elo", sport="nfl"
+    )
+    assert comparison.head_to_head.meetings
+    assert all(m.venue_reliable for m in comparison.head_to_head.meetings)
+    assert comparison.common_opponents
+    for common in comparison.common_opponents:
+        for m in [*common.team_a_meetings, *common.team_b_meetings]:
+            assert m.venue_reliable, (common.opponent_name, m)

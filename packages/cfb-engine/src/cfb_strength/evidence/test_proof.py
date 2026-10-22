@@ -17,6 +17,7 @@ import dataclasses
 import sqlite3
 import typing
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -85,6 +86,8 @@ def _insert_game(
     completed: bool = True,
     sport: str = "cfb",
     neutral_site: bool = False,
+    raw_json: str = "{}",
+    start_date: str | None = None,
 ) -> None:
     conn.execute(
         """
@@ -92,13 +95,14 @@ def _insert_game(
             id, season, week, season_type, start_date, neutral_site, completed,
             home_team_id, away_team_id, home_team, away_team,
             home_points, away_points, home_conference, away_conference, venue, raw_json, sport
-        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, '{}', ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)
         """,
         (
             game_id,
             year,
             week,
             season_type,
+            start_date,
             1 if neutral_site else 0,
             1 if completed else 0,
             home_id,
@@ -107,6 +111,7 @@ def _insert_game(
             away_team,
             home_points,
             away_points,
+            raw_json,
             sport,
         ),
     )
@@ -1815,3 +1820,239 @@ def test_common_opponent_meeting_venue_projects_each_sides_own_result(
             build_team_case(conn, REMATCH_YEAR, side, method=METHOD, sport=sport)
         )
         assert [venues[m.game_id] for m in meetings] == [m.venue for m in meetings]
+
+
+# ---------------------------------------------------------------------------
+# (k) issue #349 -- `venue_reliable`: a game's venue is reliable iff the sport
+# is not CFB, or the season is 2008 or later, or it is one of #359's curated
+# neutral-site overrides (`games.neutral_site = 1` while CFBD's own raw
+# `neutralSite` is false). The real-data twin is the #349 section of
+# tests/test_evidence_integration.py.
+# ---------------------------------------------------------------------------
+
+_VR_HOST, _VR_VISITOR = 41, 42
+_VR_NAMES = {_VR_HOST: "Hotel Host", _VR_VISITOR: "India Visitor"}
+_VR_GAME = 4100
+_VR_START = "2007-11-24T20:00:00.000Z"
+
+
+def _build_venue_pair(
+    conn: sqlite3.Connection,
+    sport: str,
+    year: int,
+    neutral_site: bool,
+    raw_json: str,
+    method: str = METHOD,
+) -> None:
+    """Two rated teams of `sport` in `year` and the single game between them.
+    Ids 41/42 and the names collide with nothing in the base fixture."""
+    for tid, name in _VR_NAMES.items():
+        _insert_team(conn, tid, name, classification="fbs" if sport == "cfb" else None, sport=sport)
+    _insert_game(
+        conn,
+        _VR_GAME,
+        year,
+        _VR_HOST,
+        _VR_VISITOR,
+        _VR_NAMES[_VR_HOST],
+        _VR_NAMES[_VR_VISITOR],
+        24,
+        17,
+        sport=sport,
+        neutral_site=neutral_site,
+        raw_json=raw_json,
+        start_date=_VR_START,
+    )
+    _insert_rating(conn, year, method, _VR_HOST, 1.2, 1, 1, 0, sport=sport)
+    _insert_rating(conn, year, method, _VR_VISITOR, 0.8, 2, 0, 1, sport=sport)
+    conn.commit()
+
+
+_OVERRIDE = '{"neutralSite": false}'
+_CFBD_NEUTRAL = '{"neutralSite": true}'
+_VENUE_RELIABLE_CASES = [
+    pytest.param("cfb", 2007, True, _OVERRIDE, True, id="cfb-pre2008-override"),
+    pytest.param("cfb", 2007, True, _CFBD_NEUTRAL, False, id="cfb-pre2008-cfbd-flagged-neutral"),
+    pytest.param("cfb", 2007, True, "{}", False, id="cfb-pre2008-neutral-no-cfbd-flag"),
+    pytest.param("cfb", 2007, False, _OVERRIDE, False, id="cfb-pre2008-home-away"),
+    pytest.param("cfb", 2008, True, _CFBD_NEUTRAL, True, id="cfb-2008-cfbd-flagged-neutral"),
+    pytest.param("cfb", 2008, False, _OVERRIDE, True, id="cfb-2008-home-away"),
+    pytest.param("nfl", 2007, True, "{}", True, id="nfl-pre2008-neutral"),
+    pytest.param("nfl", 2001, False, "{}", True, id="nfl-pre2008-home-away"),
+]
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "neutral_site", "raw_json", "expected"), _VENUE_RELIABLE_CASES
+)
+def test_venue_reliable_rule_on_games_and_head_to_head(
+    conn: sqlite3.Connection,
+    sport: Sport,
+    year: int,
+    neutral_site: bool,
+    raw_json: str,
+    expected: bool,
+) -> None:
+    """Every corner of the rule, from both teams' cases (games, the host's
+    quality win, the visitor's worst loss) and the head-to-head meeting."""
+    _build_venue_pair(conn, sport, year, neutral_site, raw_json)
+    host = build_team_case(conn, year, "Hotel Host", method=METHOD, sport=sport)
+    visitor = build_team_case(conn, year, "India Visitor", method=METHOD, sport=sport)
+
+    assert [g.venue_reliable for g in host.games] == [expected]
+    assert [g.venue_reliable for g in visitor.games] == [expected]
+    assert [q.venue_reliable for q in host.quality_wins] == [expected]
+    assert visitor.worst_loss is not None
+    assert visitor.worst_loss.venue_reliable is expected
+
+    comparison = build_comparison(
+        conn, year, "Hotel Host", "India Visitor", method=METHOD, sport=sport
+    )
+    assert [m.venue_reliable for m in comparison.head_to_head.meetings] == [expected]
+
+
+def test_common_opponent_meeting_copies_its_sides_venue_reliable(
+    conn: sqlite3.Connection,
+) -> None:
+    """Two 2007 CFB teams share an opponent: one met it at an override site,
+    the other at a CFBD-flagged one. Each side's meeting carries its own."""
+    _build_venue_pair(conn, "cfb", 2007, True, _OVERRIDE)
+    _insert_team(conn, 43, "Juliet Third", classification="fbs", sport="cfb")
+    _insert_game(
+        conn,
+        4101,
+        2007,
+        43,
+        _VR_VISITOR,
+        "Juliet Third",
+        "India Visitor",
+        10,
+        3,
+        week=2,
+        neutral_site=True,
+        raw_json=_CFBD_NEUTRAL,
+    )
+    _insert_rating(conn, 2007, METHOD, 43, 0.5, 3, 1, 0, sport="cfb")
+    conn.commit()
+
+    comparison = build_comparison(conn, 2007, "Hotel Host", "Juliet Third", method=METHOD)
+    (india,) = comparison.common_opponents
+    assert [(m.game_id, m.venue_reliable) for m in india.team_a_meetings] == [(_VR_GAME, True)]
+    assert [(m.game_id, m.venue_reliable) for m in india.team_b_meetings] == [(4101, False)]
+
+
+def _vr_step(venue: Literal["home", "away", "neutral"], start_date: str | None) -> EloGameStep:
+    return dataclasses.replace(
+        _BRAVO_STEP_2,
+        game_number=1,
+        opponent_team_id=_VR_VISITOR,
+        venue=venue,
+        opponent_name=_VR_NAMES[_VR_VISITOR],
+        start_date=start_date,
+    )
+
+
+def _build_venue_ledger(
+    conn: sqlite3.Connection,
+    sport: str,
+    year: int,
+    neutral_site: bool,
+    raw_json: str,
+    step: EloGameStep,
+) -> None:
+    _build_venue_pair(conn, sport, year, neutral_site, raw_json, method="elo")
+    _insert_ledger_config(conn, year, "elo", sport, **_ELO_CONFIG)
+    _insert_ledger_step(conn, year, "elo", sport, _VR_HOST, step)
+    conn.commit()
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "neutral_site", "raw_json", "expected"), _VENUE_RELIABLE_CASES
+)
+def test_elo_step_venue_reliable_matches_its_game(
+    conn: sqlite3.Connection,
+    sport: Sport,
+    year: int,
+    neutral_site: bool,
+    raw_json: str,
+    expected: bool,
+) -> None:
+    """A step carries no game id; its value must equal the listed game's."""
+    step = _vr_step("neutral" if neutral_site else "home", _VR_START)
+    _build_venue_ledger(conn, sport, year, neutral_site, raw_json, step)
+
+    case = build_team_case(conn, year, "Hotel Host", method="elo", sport=sport)
+
+    assert case.elo_ledger is not None
+    assert [s.venue_reliable for s in case.elo_ledger.steps] == [expected]
+    assert [g.venue_reliable for g in case.games] == [expected]
+    # Everything else on the step is still copied exactly as stored.
+    assert case.elo_ledger.steps[0] == dataclasses.replace(step, venue_reliable=expected)
+
+
+def test_elo_step_lookup_is_scoped_to_the_steps_own_date(conn: sqlite3.Connection) -> None:
+    """A pre-2008 neutral CFB step is matched on season, team pair AND
+    start_date: a second, CFBD-flagged meeting of the same pair the same
+    season must not decide the override step's value."""
+    step = _vr_step("neutral", _VR_START)
+    _build_venue_ledger(conn, "cfb", 2007, True, _OVERRIDE, step)
+    _insert_game(
+        conn,
+        4102,
+        2007,
+        _VR_VISITOR,
+        _VR_HOST,
+        _VR_NAMES[_VR_VISITOR],
+        _VR_NAMES[_VR_HOST],
+        7,
+        28,
+        week=3,
+        neutral_site=True,
+        raw_json=_CFBD_NEUTRAL,
+        start_date="2007-09-15T20:00:00.000Z",
+    )
+    conn.commit()
+
+    case = build_team_case(conn, 2007, "Hotel Host", method="elo")
+
+    assert case.elo_ledger is not None
+    assert [s.venue_reliable for s in case.elo_ledger.steps] == [True]
+
+
+def test_pre_2008_neutral_cfb_step_without_its_game_is_a_corrupt_ledger(
+    conn: sqlite3.Connection,
+) -> None:
+    """The step names a date no game between the pair was played on. Guessing
+    either value would present an unchecked venue as fact or hedge a real
+    override, so the read fails loudly like every other corrupt-ledger case."""
+    step = _vr_step("neutral", "2007-12-01T20:00:00.000Z")
+    _build_venue_ledger(conn, "cfb", 2007, True, _OVERRIDE, step)
+
+    with pytest.raises(ValueError, match="elo_ledger_steps"):
+        build_team_case(conn, 2007, "Hotel Host", method="elo")
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "venue", "expected"),
+    [
+        pytest.param("cfb", 2007, "home", False, id="cfb-pre2008-home"),
+        pytest.param("cfb", 2008, "neutral", True, id="cfb-2008-neutral"),
+        pytest.param("nfl", 2007, "neutral", True, id="nfl-pre2008-neutral"),
+    ],
+)
+def test_elo_step_needs_no_game_lookup_outside_pre_2008_neutral_cfb(
+    conn: sqlite3.Connection,
+    sport: Sport,
+    year: int,
+    venue: Literal["home", "away", "neutral"],
+    expected: bool,
+) -> None:
+    """Only a pre-2008 neutral CFB step can be an override, so only that step
+    is looked up: these steps name a date with no game and still resolve."""
+    step = _vr_step(venue, "1999-01-01T00:00:00.000Z")
+    _build_venue_ledger(conn, sport, year, venue == "neutral", _OVERRIDE, step)
+
+    case = build_team_case(conn, year, "Hotel Host", method="elo", sport=sport)
+
+    assert case.elo_ledger is not None
+    assert [s.venue_reliable for s in case.elo_ledger.steps] == [expected]
