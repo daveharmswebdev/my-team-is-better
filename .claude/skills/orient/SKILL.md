@@ -3,7 +3,7 @@ name: orient
 description: Reconstruct this repo's current state at the start of a session or after /clear — what other concurrent sessions have in flight, what just landed and what it flagged, open and claimed issues, untracked gaps, and which files are at collision risk. Run it before starting any work.
 context: fork
 agent: general-purpose
-allowed-tools: Bash(git *) Bash(gh *) Read Grep Glob
+allowed-tools: Bash(git *) Bash(gh *) Bash(uv run --quiet .claude/hooks/reclaim_worktrees.py) Read Grep Glob
 ---
 
 You are orienting a coordinator session that is about to start work on this repo. Its
@@ -16,6 +16,9 @@ comment, commit or push.
 Branch and position: !`git status -sb --ahead-behind`
 
 Worktrees, one per running or parked session: !`git worktree list`
+
+Spoke worktrees whose work is already in main (a dry run; "reclaim" rows are parked,
+not in flight, and `/ship` removes them): !`uv run --quiet .claude/hooks/reclaim_worktrees.py`
 
 Open pull requests:
 !`gh pr list --state open --limit 30 --json number,title,headRefName,isDraft --template '{{range .}}#{{.number}} {{.headRefName}} draft={{.isDraft}} :: {{.title}}{{"\n"}}{{end}}'`

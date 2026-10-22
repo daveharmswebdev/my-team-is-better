@@ -78,6 +78,12 @@ Add the attribution lines your session's instructions give you.
 - `gh issue edit <n> --remove-label in-progress` for each issue it touched. A closed
   issue moves to Done on the board by itself; one that stays open goes back with
   `uv run .claude/hooks/board.py <n> --status Todo`.
+- **Reclaim finished spoke worktrees** (#339):
+  `git fetch --quiet origin && uv run .claude/hooks/reclaim_worktrees.py --apply`.
+  It removes only clean `agent-*` worktrees and orphan `worktree-agent-*` branches whose
+  work is already in `origin/main` and that are more than a day old. It archives each
+  branch tip under `refs/archive/worktree-agent/` first. This round's own spokes are too
+  new, so a later `/ship` collects them.
 - **Verify the deploys.** Don't assume auto-deploy fired; it has stalled before. Use the
   Render MCP (`list_services`, then `list_deploys`) for `my-team-is-better-api` and
   `my-team-is-better-web`:

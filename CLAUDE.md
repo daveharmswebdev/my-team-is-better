@@ -49,6 +49,11 @@ Three or four coordinator sessions usually run in parallel, each in its own git 
 - **Spoke worktrees branch from your `HEAD`** (`worktree.baseRef: "head"` in
   `.claude/settings.json`). Commit contract changes before delegating; uncommitted work
   isn't carried over.
+- **Spoke worktrees are reclaimed by whoever ships.** `/ship` runs
+  `.claude/hooks/reclaim_worktrees.py --apply` after every merge. It removes clean
+  `agent-*` worktrees and branches whose work is in main and that are over a day old,
+  and `/orient` shows the candidates as a dry run (#339). Your own coordinator
+  worktrees (`issue-*`) are yours to remove.
 - **Every spoke gets its own scratch directory** (the brief's `scratch_dir`, checked).
 - **Picking up a process change** (this file, `.claude/`): merge `main` into your branch.
   Agent definitions, skills and hook settings reload live. CLAUDE.md and rules load at
