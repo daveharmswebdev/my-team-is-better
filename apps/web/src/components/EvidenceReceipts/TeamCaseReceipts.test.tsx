@@ -20,6 +20,7 @@ const baseOpponent = {
   week: 5,
   season_type: 'regular',
   venue: 'home' as const,
+  venue_reliable: true,
   neutral_site: false,
 }
 
@@ -36,6 +37,7 @@ const lsuGame = {
   season_type: 'regular',
   // A mix of sides across the fixture: all-'home' rows could not catch a swap.
   venue: 'away' as const,
+  venue_reliable: true,
 }
 
 const tennesseeGame = {
@@ -66,6 +68,7 @@ const bowlGame = {
   week: 1,
   season_type: 'postseason',
   venue: 'away' as const,
+  venue_reliable: true,
 }
 
 const evidence: TeamCaseOut = {
@@ -131,6 +134,7 @@ const tiedGame = {
   week: 7,
   season_type: 'regular',
   venue: 'away' as const,
+  venue_reliable: true,
 }
 
 const tiedSeason: TeamCaseOut = {
@@ -567,6 +571,7 @@ describe('TeamCaseReceipts', () => {
       week: 14,
       // Neutral site, so the venue moves with the flag (issue #294).
       venue: 'neutral' as const,
+      venue_reliable: true,
       neutral_site: true,
     }
     const rematchSeason: TeamCaseOut = {

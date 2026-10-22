@@ -1008,6 +1008,14 @@ class EloGameStep:
     shift: float
     rating_after: float
     week: int | None = None
+    # Issue #349: whether `venue` can be stated as fact. CFBD's neutral flag
+    # is unreliable before 2008 (founder, #343), so a CFB game before 2008 is
+    # reliable only when it is on #359's curated override list; every NFL game
+    # and every CFB game from 2008 on is reliable. Display and narration only:
+    # Elo's home-field adjustment still uses the stored flag. Computed once in
+    # evidence; defaults True so construction sites outside evidence stay
+    # valid.
+    venue_reliable: bool = True
     season_type: str = "regular"
     start_date: str | None = None
     opponent_name: str = ""
@@ -1191,6 +1199,14 @@ class OpponentResult:
     # a title game from the regular-season finale. Defaults None so every
     # construction site outside evidence stays valid.
     title_game_conference: str | None = None
+    # Issue #349: whether `venue` can be stated as fact. CFBD's neutral flag
+    # is unreliable before 2008 (founder, #343), so a CFB game before 2008 is
+    # reliable only when it is on #359's curated override list; every NFL game
+    # and every CFB game from 2008 on is reliable. Display and narration only:
+    # Elo's home-field adjustment still uses the stored flag. Computed once in
+    # evidence; defaults True so construction sites outside evidence stay
+    # valid.
+    venue_reliable: bool = True
 
     def __post_init__(self) -> None:
         if self.neutral_site != (self.venue == "neutral"):
@@ -1255,6 +1271,9 @@ class HeadToHeadMeeting:
     winner: str | None
     # Issue #300 -- see `OpponentResult.title_game_conference`.
     title_game_conference: str | None = None
+    # Issue #349 -- see `OpponentResult.venue_reliable`. Here it qualifies
+    # `neutral_site` and which side is `home_team`.
+    venue_reliable: bool = True
 
 
 @dataclass(frozen=True)
@@ -1289,6 +1308,8 @@ class CommonOpponentMeeting:
     # Issue #300 -- that side's `OpponentResult.title_game_conference`,
     # copied like `venue`.
     title_game_conference: str | None = None
+    # Issue #349 -- that side's `OpponentResult.venue_reliable`, copied.
+    venue_reliable: bool = True
 
 
 @dataclass(frozen=True)

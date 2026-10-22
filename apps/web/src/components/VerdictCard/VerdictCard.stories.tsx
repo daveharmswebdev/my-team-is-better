@@ -47,6 +47,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
         week: 5,
         season_type: 'regular',
         venue: 'away',
+        venue_reliable: true,
         neutral_site: false,
       },
     ],
@@ -134,6 +135,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
             week: 3,
             season_type: 'regular',
             venue: 'away',
+            venue_reliable: true,
           },
         ],
         team_b_meetings: [
@@ -145,6 +147,7 @@ const comparisonEnvelope: ComparisonEnvelope = {
             week: 11,
             season_type: 'regular',
             venue: 'home',
+            venue_reliable: true,
           },
         ],
       },

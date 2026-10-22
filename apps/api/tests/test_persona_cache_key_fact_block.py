@@ -15,7 +15,7 @@ exactly the affected entries.
 
 Since issue #291 the rules that decide what may be served are the typed-claim
 validator's, so the version is `api.persona.claims.GROUNDING_VERSION`
-(`claims-v3` since #318 and #319), not the lexical checker's `grounding-v2`, which production
+(`claims-v4` since #349), not the lexical checker's `grounding-v2`, which production
 stopped calling in #291 and #292 deleted.
 
 Both service entry points are driven end to end with `InMemoryNarrationCache`
@@ -243,7 +243,7 @@ def test_service_writes_under_the_key_built_from_the_production_fact_block(
 
 def test_the_service_keys_on_the_claims_grounding_version() -> None:
     keyed_on = vars(service)["GROUNDING_VERSION"]
-    assert GROUNDING_VERSION == "claims-v3"
+    assert GROUNDING_VERSION == "claims-v4"
     assert keyed_on == claims.GROUNDING_VERSION
     # "grounding-v2" was the lexical checker's version, the string this key
     # carried before #291. #292 deleted that module, so the literal is quoted

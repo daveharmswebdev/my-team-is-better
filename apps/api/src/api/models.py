@@ -200,6 +200,13 @@ class OpponentResultOut(BaseModel):
     # reaches the persona fact block, where a `when` claim reads it. Always
     # None for the NFL.
     title_game_conference: str | None
+    # Issue #349: whether `venue` can be trusted -- see
+    # `cfb_strength.contracts.OpponentResult.venue_reliable`. False for a CFB
+    # game before 2008 unless it is one of #359's curated neutral sites
+    # (founder decision on #343). Copied from the engine, never derived here.
+    # The persona fact block carries it, and a `where` claim on a row with it
+    # false is rejected.
+    venue_reliable: bool
 
     @classmethod
     def from_dataclass(cls, o: OpponentResult) -> OpponentResultOut:
@@ -217,6 +224,7 @@ class OpponentResultOut(BaseModel):
             venue=o.venue,
             neutral_site=o.neutral_site,
             title_game_conference=o.title_game_conference,
+            venue_reliable=o.venue_reliable,
         )
 
 
@@ -285,6 +293,8 @@ class EloGameStepOut(BaseModel):
     mov_multiplier: float
     shift: float
     rating_after: float
+    # Issue #349 -- see `OpponentResultOut.venue_reliable`.
+    venue_reliable: bool
 
     @classmethod
     def from_dataclass(cls, step: EloGameStep) -> EloGameStepOut:
@@ -307,6 +317,7 @@ class EloGameStepOut(BaseModel):
             mov_multiplier=step.mov_multiplier,
             shift=step.shift,
             rating_after=step.rating_after,
+            venue_reliable=step.venue_reliable,
         )
 
 
@@ -450,6 +461,9 @@ class HeadToHeadMeetingOut(BaseModel):
     winner: str | None
     # Issue #300 -- see `OpponentResultOut.title_game_conference`.
     title_game_conference: str | None
+    # Issue #349 -- see `OpponentResultOut.venue_reliable`. It qualifies
+    # `neutral_site` and the home/away listing alike.
+    venue_reliable: bool
 
     @classmethod
     def from_dataclass(cls, meeting: HeadToHeadMeeting) -> HeadToHeadMeetingOut:
@@ -464,6 +478,7 @@ class HeadToHeadMeetingOut(BaseModel):
             away_points=meeting.away_points,
             winner=meeting.winner,
             title_game_conference=meeting.title_game_conference,
+            venue_reliable=meeting.venue_reliable,
         )
 
 
@@ -501,6 +516,8 @@ class CommonOpponentMeetingOut(BaseModel):
     venue: Literal["home", "away", "neutral"]
     # Issue #300 -- see `OpponentResultOut.title_game_conference`.
     title_game_conference: str | None
+    # Issue #349 -- see `OpponentResultOut.venue_reliable`.
+    venue_reliable: bool
 
     @classmethod
     def from_dataclass(cls, meeting: CommonOpponentMeeting) -> CommonOpponentMeetingOut:
@@ -513,6 +530,7 @@ class CommonOpponentMeetingOut(BaseModel):
             season_type=meeting.season_type,
             venue=meeting.venue,
             title_game_conference=meeting.title_game_conference,
+            venue_reliable=meeting.venue_reliable,
         )
 
 

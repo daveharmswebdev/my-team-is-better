@@ -84,6 +84,7 @@ const evidence: ComparisonResultOut = {
         week: 6,
         season_type: 'regular',
         venue: 'home',
+        venue_reliable: true,
         neutral_site: false,
       },
     ],
@@ -132,6 +133,7 @@ const evidence: ComparisonResultOut = {
         home_points: 21,
         away_points: 14,
         winner: 'Ohio State',
+        venue_reliable: true,
       },
     ],
   },
@@ -149,6 +151,7 @@ const evidence: ComparisonResultOut = {
           week: 12,
           season_type: 'regular',
           venue: 'home',
+          venue_reliable: true,
         },
       ],
       team_b_meetings: [
@@ -160,6 +163,7 @@ const evidence: ComparisonResultOut = {
           week: 10,
           season_type: 'regular',
           venue: 'away',
+          venue_reliable: true,
         },
       ],
     },
@@ -186,6 +190,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       week: 8,
       season_type: 'regular',
       venue: 'away',
+      venue_reliable: true,
     },
     {
       game_id: 331124009,
@@ -195,6 +200,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       week: 12,
       season_type: 'regular',
       venue: 'home',
+      venue_reliable: true,
     },
   ],
   team_b_meetings: [
@@ -206,6 +212,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       week: 9,
       season_type: 'regular',
       venue: 'away',
+      venue_reliable: true,
     },
     {
       game_id: 331229009,
@@ -215,6 +222,7 @@ const GREEN_BAY_TWICE: CommonOpponentOut = {
       week: 17,
       season_type: 'regular',
       venue: 'home',
+      venue_reliable: true,
     },
   ],
 }
@@ -689,6 +697,7 @@ describe('ComparisonReceipts', () => {
                   week: 12,
                   season_type: 'regular',
                   venue: 'home',
+                  venue_reliable: true,
                 },
               ],
               team_b_meetings: [
@@ -700,6 +709,7 @@ describe('ComparisonReceipts', () => {
                   week: 10,
                   season_type: 'regular',
                   venue: 'away',
+                  venue_reliable: true,
                 },
               ],
             },
@@ -1067,6 +1077,7 @@ describe('ComparisonReceipts', () => {
             home_points: 31,
             away_points: 30,
             winner: 'Chicago Bears',
+            venue_reliable: true,
           },
           {
             game_id: 331201016,
@@ -1078,6 +1089,7 @@ describe('ComparisonReceipts', () => {
             home_points: 23,
             away_points: 20,
             winner: 'Minnesota Vikings',
+            venue_reliable: true,
           },
         ],
       },
@@ -1161,6 +1173,7 @@ describe('ComparisonReceipts', () => {
               home_points: 24,
               away_points: 24,
               winner: null,
+              venue_reliable: true,
             },
           ],
         },

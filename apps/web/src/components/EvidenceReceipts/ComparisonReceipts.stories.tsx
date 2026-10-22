@@ -92,6 +92,7 @@ const evidence: ComparisonResultOut = {
           week: 12,
           season_type: 'regular',
           venue: 'home',
+          venue_reliable: true,
         },
       ],
       team_b_meetings: [
@@ -103,6 +104,7 @@ const evidence: ComparisonResultOut = {
           week: 10,
           season_type: 'regular',
           venue: 'away',
+          venue_reliable: true,
         },
       ],
     },
@@ -119,6 +121,7 @@ const evidence: ComparisonResultOut = {
           week: 15,
           season_type: 'regular',
           venue: 'away',
+          venue_reliable: true,
         },
       ],
       team_b_meetings: [
@@ -130,6 +133,7 @@ const evidence: ComparisonResultOut = {
           week: 9,
           season_type: 'regular',
           venue: 'home',
+          venue_reliable: true,
         },
       ],
     },
@@ -174,6 +178,7 @@ export const HeadToHeadPlayed: Story = {
             home_points: 21,
             away_points: 14,
             winner: 'Ohio State',
+            venue_reliable: true,
           },
         ],
       },
@@ -214,6 +219,7 @@ export const CommonOpponentTie: Story = {
               week: 12,
               season_type: 'regular',
               venue: 'home',
+              venue_reliable: true,
             },
           ],
           team_b_meetings: [
@@ -225,6 +231,7 @@ export const CommonOpponentTie: Story = {
               week: 10,
               season_type: 'regular',
               venue: 'away',
+              venue_reliable: true,
             },
           ],
         },
@@ -281,6 +288,7 @@ export const TwoMeetingsPerSide: Story = {
             home_points: 23,
             away_points: 20,
             winner: 'Minnesota Vikings',
+            venue_reliable: true,
           },
           {
             game_id: 330915003,
@@ -292,6 +300,7 @@ export const TwoMeetingsPerSide: Story = {
             home_points: 31,
             away_points: 30,
             winner: 'Chicago Bears',
+            venue_reliable: true,
           },
         ],
       },
@@ -309,6 +318,7 @@ export const TwoMeetingsPerSide: Story = {
               week: 8,
               season_type: 'regular',
               venue: 'away',
+              venue_reliable: true,
             },
             {
               game_id: 331124009,
@@ -318,6 +328,7 @@ export const TwoMeetingsPerSide: Story = {
               week: 12,
               season_type: 'regular',
               venue: 'home',
+              venue_reliable: true,
             },
           ],
           team_b_meetings: [
@@ -329,6 +340,7 @@ export const TwoMeetingsPerSide: Story = {
               week: 9,
               season_type: 'regular',
               venue: 'away',
+              venue_reliable: true,
             },
             {
               game_id: 331229009,
@@ -338,6 +350,7 @@ export const TwoMeetingsPerSide: Story = {
               week: 17,
               season_type: 'regular',
               venue: 'home',
+              venue_reliable: true,
             },
           ],
         },
