@@ -43,6 +43,7 @@ from cfb_strength.ingest.conference_championships import (
     ConferenceChampionshipError,
     load_conference_championships,
 )
+from cfb_strength.ingest.fcs_playoff_games import load_fcs_playoff_games
 from cfb_strength.ingest.ingest_season import ingest_one
 from cfb_strength.ingest.nflverse import ingest_season as nfl_ingest
 from cfb_strength.ingest.nflverse.normalize import build_team_lookup
@@ -175,9 +176,18 @@ def test_exactly_the_listed_games_of_a_batch_are_flagged(
         r["id"] for r in conn.execute("SELECT id FROM games WHERE conference_championship = 1")
     }
     assert flagged == expected
-    assert (
-        conn.execute("SELECT COUNT(*) FROM games WHERE season_type != 'regular'").fetchone()[0] == 0
-    )
+    # The title-game flag never changes season_type. The only games of the
+    # batch stored as postseason are the listed FCS playoff games (#379).
+    fcs_playoff = {
+        g.game_id
+        for g in load_fcs_playoff_games()
+        if (g.season, g.season_type) == (2005, "regular")
+    }
+    relabelled = {
+        r["id"] for r in conn.execute("SELECT id FROM games WHERE season_type != 'regular'")
+    }
+    assert relabelled == fcs_playoff
+    assert relabelled.isdisjoint(flagged)
 
 
 def test_the_rescheduled_2001_auburn_lsu_game_is_not_flagged(
