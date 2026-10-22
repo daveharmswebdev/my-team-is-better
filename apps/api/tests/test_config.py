@@ -221,10 +221,12 @@ def test_prompt_version_is_past_the_typed_score_prompt() -> None:
     narrations cached under `persona-v10` were written under the old rules and
     would keep being served unless the version moves (the cache key's
     grounding version moved too, to `claims-v1`; #382 moved it on to
-    `claims-v2`, and #318 and #319 to `claims-v3`)."""
+    `claims-v2`, and #318 and #319 to `claims-v3`). persona-v13 (#349): the
+    `where` rule now offers "at home" and "on the road" too, only on a row
+    with `venue_reliable` true."""
     config = _reimport_config()
 
-    assert config.PROMPT_VERSION == "persona-v12"  # type: ignore[attr-defined]  # _reimport_config() -> object
+    assert config.PROMPT_VERSION == "persona-v13"  # type: ignore[attr-defined]  # _reimport_config() -> object
 
 
 def test_config_exposes_contested_years() -> None:

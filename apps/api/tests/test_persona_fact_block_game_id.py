@@ -51,6 +51,11 @@ null. A `when` claim reads it to print "in the Big 12 title game" and to tell
 the regular-season finale from a title game (founder decision on #300). It
 is a name, not a figure the grounding check accepts: the prose may still not
 type "Big 12" itself, only a `when` placeholder prints it.
+
+`venue_reliable` (issue #349) is in the block on purpose as well, on every
+game row: a boolean, so it adds no number. A `where` claim on a row with it
+false is rejected (founder decision on #343: CFBD's venue data is unreliable
+for CFB before 2008).
 """
 
 from __future__ import annotations
@@ -196,6 +201,7 @@ def test_team_case_fact_block_keeps_the_games_with_their_other_fields(
             "venue",
             "neutral_site",
             "title_game_conference",
+            "venue_reliable",
         }
 
 
@@ -240,6 +246,7 @@ def test_comparison_fact_block_texas_usc_has_no_game_id_anywhere(
         "away_points",
         "winner",
         "title_game_conference",
+        "venue_reliable",
     }
     assert len(parsed["team_a"]["quality_wins"]) == 4
     assert parsed["team_b"]["worst_loss"]["opponent_name"] == "Texas"
@@ -279,6 +286,7 @@ def test_comparison_fact_block_texas_colorado_common_opponents_have_no_game_id(
                     "season_type",
                     "venue",
                     "title_game_conference",
+                    "venue_reliable",
                 }
 
 
@@ -329,6 +337,7 @@ def test_team_case_fact_block_publishes_venue_for_every_game_row(
         "venue",
         "neutral_site",
         "title_game_conference",
+        "venue_reliable",
     }
     # `venue` and `neutral_site` agree wherever both are published; the
     # engine contract rejects a disagreeing pair.

@@ -130,7 +130,14 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # block carries the engine's `title_game_conference`. The fact block changed
 # with it, which the #145 key already misses on; the wording change is what
 # moves this.
-PROMPT_VERSION = "persona-v12"
+# persona-v13 (issue #349): the prompt changed -- the `where` rule now offers
+# "at home" and "on the road" as well as "at a neutral site", and only for a
+# game whose row has `venue_reliable` true (founder decision on #343: CFBD's
+# venue data is unreliable for CFB before 2008); for any other game the
+# narrator says nothing about where it was played. The validator rejects a
+# `where` claim on an unreliable row, and the fact block gained the flag,
+# which the #145 key already misses on; the wording change is what moves this.
+PROMPT_VERSION = "persona-v13"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

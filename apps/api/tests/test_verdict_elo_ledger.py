@@ -89,6 +89,7 @@ STEP_FIELDS = [
     "mov_multiplier",
     "shift",
     "rating_after",
+    "venue_reliable",
 ]
 RESULT_SCORE = {"W": 1.0, "T": 0.5, "L": 0.0}
 TOLERANCE = 1e-9

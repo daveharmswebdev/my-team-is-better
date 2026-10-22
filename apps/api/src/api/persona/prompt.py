@@ -32,6 +32,12 @@ than with `str.format`. The tool schema's description strings
 Issue #300, persona-v12: the `when` claim kind's enumeration gained "in the
 regular-season finale" and "in the Big 12 title game", the two phrasings the
 validator now renders. Nothing else in the prompt moved.
+
+Issue #349, persona-v13: the `where` claim kind may now say "at home" and "on
+the road" as well as "at a neutral site", from `team`'s side, but only for a
+game whose row has `venue_reliable` true (founder decision on #343); for any
+other game the narrator says nothing about where it was played. Nothing else
+in the prompt moved.
 """
 
 from __future__ import annotations
@@ -106,8 +112,10 @@ whole and only truth. Rules, non-negotiable:
    - `when` {team, opponent, result}: when the game was played: "to open
      the season", "in the regular-season finale", "in the Big 12 title
      game", "in the postseason" or "in week 11".
-   - `where` {team, opponent, result}: "at a neutral site", and only for a
-     game the FACT BLOCK marks neutral-site.
+   - `where` {team, opponent, result}: "at home", "on the road" or "at a
+     neutral site", from `team`'s side, and only for a game whose row has
+     `venue_reliable` true. For any other game, say nothing about where it
+     was played.
    - `year` {}: the season.
    - `count` {of, team}: how many ("two", "10"), where `of` is wins,
      losses, ties, quality_wins or games; `of` meetings also takes

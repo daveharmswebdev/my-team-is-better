@@ -76,8 +76,12 @@ on #199: they print only what the block records ("in the postseason", "to
 open the season" for the first game of a team case's games[], "in week 11",
 "at a neutral site"). Since #294 every game row in the block carries a
 team-relative `venue`, so `where` also prints "at home" and "on the road" --
-the narrator's register for an away game -- and there is no longer a game
-whose venue the block fails to record. Since #300 every game row also carries
+the narrator's register for an away game. Since #349 every game row also
+carries the engine's `venue_reliable` (founder decision on #343: CFBD's venue
+data is unreliable for CFB before 2008, so a pre-2008 CFB game outside #359's
+curated neutral sites is false), and `where` rejects a claim on a game whose
+row has it false, whatever its `venue` says; the narrator is told to say
+nothing about where that game was played. Since #300 every game row also carries
 `title_game_conference`, so `when` prints "in the Big 12 title game" for a
 conference title game and "in the regular-season finale" for the last
 season_type 'regular' game of a team case's games[] that isn't one (founder
@@ -575,6 +579,9 @@ class _Game:
     # The conference whose title game this was (#300), or None. The same from
     # either side, so `mirrored()` keeps it.
     title_game_conference: str | None
+    # Whether the block's `venue` for this game can be trusted (#349). The
+    # game's, not a side's, so `mirrored()` keeps it.
+    venue_reliable: bool
 
     @property
     def key(self) -> tuple[str, str, int | None, str]:
@@ -736,6 +743,7 @@ def _parse_comparison(data: Any, block: _Block) -> None:
                 # it for the away team.
                 venue="neutral" if meeting["neutral_site"] else "home",
                 title_game_conference=_conference(meeting["title_game_conference"]),
+                venue_reliable=_flag(meeting["venue_reliable"]),
             )
         )
     for common in data["common_opponents"]:
@@ -757,6 +765,7 @@ def _parse_comparison(data: Any, block: _Block) -> None:
                         season_type=str(meeting["season_type"]),
                         venue=_venue(meeting["venue"]),
                         title_game_conference=_conference(meeting["title_game_conference"]),
+                        venue_reliable=_flag(meeting["venue_reliable"]),
                     )
                 )
     block.common_opponents = len(data["common_opponents"])
@@ -806,6 +815,7 @@ def _parse_row(team: str, row: Any, block: _Block) -> _Game:
         season_type=str(row["season_type"]),
         venue=_venue(row["venue"]),
         title_game_conference=_conference(row["title_game_conference"]),
+        venue_reliable=_flag(row["venue_reliable"]),
     )
     block.add_game(game)
     return game
@@ -817,6 +827,15 @@ def _week(value: Any) -> int | None:
 
 def _conference(value: Any) -> str | None:
     return None if value is None else str(value)
+
+
+def _flag(value: Any) -> bool:
+    """A boolean field of a game row. The block is this server's own dump of
+    models whose field is a `bool`, so anything else isn't a production fact
+    block -- `_parse_block` turns this into that error."""
+    if not isinstance(value, bool):
+        raise ValueError(f"not a boolean: {value!r}")
+    return value
 
 
 def _venue(value: Any) -> Venue:
@@ -1113,9 +1132,18 @@ def _finale(games: Sequence[_Game]) -> _Game | None:
 
 
 def _where(where: str, game: _Game) -> tuple[str | None, list[str]]:
-    # Never rejects since #294: every row in the block carries a venue, so
-    # there is no game whose venue the block fails to record. `where` is kept
-    # in the resolver's (value, errors) shape, which it shares with `_when`.
+    # Every row in the block carries a venue (#294), but since #349 it is
+    # stated only for a game the block marks `venue_reliable`: CFBD's venue
+    # data before 2008 is wrong often enough (founder decision on #343) that
+    # the block's word for it isn't enough. The rejection asks the narrator to
+    # drop the claim rather than retry it, and not to say it in prose either.
+    if not game.venue_reliable:
+        return None, [
+            f"{where}: the fact block marks {game.team} vs {game.opponent} ({game.label}) "
+            "venue_reliable false, so it can't say where that game was played; remove this "
+            "claim and its placeholder, and don't say where the game was played in your own "
+            "words. A game_score or when claim on it is fine."
+        ]
     return _WHERE_PHRASE[game.venue], []
 
 

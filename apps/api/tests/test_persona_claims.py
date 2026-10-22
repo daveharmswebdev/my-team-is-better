@@ -718,12 +718,14 @@ def test_when_for_a_game_the_block_does_not_hold_is_rejected(
 
 
 def test_where_at_a_neutral_site(
-    alabama_2017: str, catalog: tuple[TeamRecord, ...], texas_usc_2005: str
+    alabama_2017: str, catalog: tuple[TeamRecord, ...], texas_colorado_2005: str
 ) -> None:
     claim = _game("v", "where", "Alabama", "Georgia", "W")
     assert rendered_value("{v}", [claim], alabama_2017, catalog) == "at a neutral site"
-    h2h = _game("v", "where", "USC", "Texas", "L")
-    assert rendered_value("{v}", [h2h], texas_usc_2005, catalog) == "at a neutral site"
+    # The 2005 Big 12 title game: before 2008, but one of #359's curated
+    # neutral sites, so its venue is reliable (#349).
+    h2h = _game("v", "where", "Texas", "Colorado", "W", week=14, season_type="regular")
+    assert rendered_value("{v}", [h2h], texas_colorado_2005, catalog) == "at a neutral site"
 
 
 def test_where_at_home(alabama_2017: str, catalog: tuple[TeamRecord, ...]) -> None:
@@ -760,40 +762,37 @@ def test_where_renders_the_side_of_the_team_the_claim_names(
 
 
 def test_where_for_a_head_to_head_meeting_renders_from_the_home_teams_side(
-    texas_colorado_2005: str, texas_usc_2005: str, catalog: tuple[TeamRecord, ...]
+    texas_colorado_2005: str, catalog: tuple[TeamRecord, ...]
 ) -> None:
     """A head-to-head meeting row is home/away-oriented (`home_team` /
     `away_team` / `neutral_site`), not team-relative, so its venue is read
     from the home team's side and mirrored for the away team."""
-    # Neither 2005 Texas-Colorado meeting is a quality win or a worst loss on
-    # either side, so head_to_head is the only row in the block that holds it.
-    meetings = _row(texas_colorado_2005, "head_to_head", "meetings")
-    assert [(m["home_team"], m["week"], m["neutral_site"]) for m in meetings] == [
-        ("Texas", 7, False),
-        ("Colorado", 14, True),
-    ]
+    # 2017 USC 27, Texas 24 (2OT) at the Coliseum: the meeting is in neither
+    # side's quality wins or worst loss, so head_to_head is the only row in
+    # the block that holds it, and its venue is reliable (2008 or later).
+    usc_texas_2017 = cfb_comparison_block(2017, "USC", "Texas")
+    meetings = _row(usc_texas_2017, "head_to_head", "meetings")
+    assert [
+        (m["home_team"], m["week"], m["neutral_site"], m["venue_reliable"]) for m in meetings
+    ] == [("USC", 3, False, True)]
     for side in ("team_a", "team_b"):
-        rows = _row(texas_colorado_2005, side, "quality_wins")
-        worst = _row(texas_colorado_2005, side, "worst_loss")
-        assert all(row["opponent_name"] not in ("Texas", "Colorado") for row in rows)
-        assert worst is None or worst["opponent_name"] not in ("Texas", "Colorado")
+        rows = _row(usc_texas_2017, side, "quality_wins")
+        worst = _row(usc_texas_2017, side, "worst_loss")
+        assert all(row["opponent_name"] not in ("USC", "Texas") for row in rows)
+        assert worst is None or worst["opponent_name"] not in ("USC", "Texas")
 
-    home = _game("v", "where", "Texas", "Colorado", "W", week=7)
-    # Week 14 is the 2005 Big 12 Championship, played at Reliant Stadium in
-    # Houston: a neutral site from either side, though Colorado is listed home.
+    home = _game("v", "where", "USC", "Texas", "W")
+    road = _game("v", "where", "Texas", "USC", "L")
+    assert rendered_value("{v}", [home], usc_texas_2017, catalog) == "at home"
+    assert rendered_value("{v}", [road], usc_texas_2017, catalog) == "on the road"
+
+    # Week 14 of 2005 is the Big 12 Championship, played at Reliant Stadium in
+    # Houston: a neutral site from either side, though Colorado is listed
+    # home, and one of #359's curated neutral sites, so reliable before 2008.
     away = _game("v", "where", "Colorado", "Texas", "L", week=14, season_type="regular")
     title = _game("v", "where", "Texas", "Colorado", "W", week=14, season_type="regular")
-    assert rendered_value("{v}", [home], texas_colorado_2005, catalog) == "at home"
     assert rendered_value("{v}", [away], texas_colorado_2005, catalog) == "at a neutral site"
     assert rendered_value("{v}", [title], texas_colorado_2005, catalog) == "at a neutral site"
-    mirrored = _game("v", "where", "Colorado", "Texas", "L", week=7)
-    assert rendered_value("{v}", [mirrored], texas_colorado_2005, catalog) == "on the road"
-
-    # A neutral meeting reads the same from either side.
-    (neutral,) = _row(texas_usc_2005, "head_to_head", "meetings")
-    assert neutral["neutral_site"] is True
-    usc = _game("v", "where", "USC", "Texas", "L")
-    assert rendered_value("{v}", [usc], texas_usc_2005, catalog) == "at a neutral site"
 
 
 def test_where_for_a_common_opponent_meeting_renders_that_sides_own_venue(
