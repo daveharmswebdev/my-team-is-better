@@ -137,6 +137,7 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
         "season_type": "regular",
         "venue": "home",
         "title_game_conference": None,
+        "venue_reliable": True,
     }
     assert rematch == {
         "game_id": 108,
@@ -147,6 +148,7 @@ def test_comparison_carries_every_meeting_with_a_common_opponent(
         "season_type": "regular",
         "venue": "home",
         "title_game_conference": None,
+        "venue_reliable": True,
     }
 
     assert len(common["team_b_meetings"]) == 1

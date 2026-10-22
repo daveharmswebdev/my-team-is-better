@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from fixtures.claim_blocks import cfb_catalog, cfb_team_case_block
 
+from api.config import PROMPT_VERSION
 from api.persona.claims import check_and_render
 from api.persona.prompt import (
     _ALLEGIANCE_CLAUSE_NO_TEAM,
@@ -70,8 +71,10 @@ whole and only truth. Rules, non-negotiable:
    - `when` {team, opponent, result}: when the game was played: "to open
      the season", "in the regular-season finale", "in the Big 12 title
      game", "in the postseason" or "in week 11".
-   - `where` {team, opponent, result}: "at a neutral site", and only for a
-     game the FACT BLOCK marks neutral-site.
+   - `where` {team, opponent, result}: "at home", "on the road" or "at a
+     neutral site", from `team`'s side, and only for a game whose row has
+     `venue_reliable` true. For any other game, say nothing about where it
+     was played.
    - `year` {}: the season.
    - `count` {of, team}: how many ("two", "10"), where `of` is wins,
      losses, ties, quality_wins or games; `of` meetings also takes
@@ -221,6 +224,23 @@ def test_the_no_team_prompt_is_persona_v11_byte_for_byte() -> None:
 
 def test_the_with_team_prompt_is_persona_v11_byte_for_byte() -> None:
     assert build_system_prompt("Alabama") == _expected("Alabama")
+
+
+def test_the_where_rule_is_persona_v13_s() -> None:
+    """Issue #349 (persona-v13): a `where` claim may say home, road or
+    neutral, but only on a row the fact block marks `venue_reliable`; the
+    rule no longer says a where claim means a neutral site only."""
+    rule = (
+        '   - `where` {team, opponent, result}: "at home", "on the road" or "at a\n'
+        "     neutral site\", from `team`'s side, and only for a game whose row has\n"
+        "     `venue_reliable` true. For any other game, say nothing about where it\n"
+        "     was played.\n"
+    )
+    for user_team in ("Alabama", None):
+        prompt = build_system_prompt(user_team)
+        assert prompt.count(rule) == 1
+        assert "neutral-site" not in prompt
+    assert PROMPT_VERSION == "persona-v13"
 
 
 def test_the_voice_rules_2_to_4_and_the_length_line_are_persona_v10_s() -> None:

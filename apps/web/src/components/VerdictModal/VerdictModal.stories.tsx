@@ -48,6 +48,7 @@ function game(index: number, opponent: string): OpponentResultOut {
           ? 'home'
           : 'away',
     neutral_site: index === OPPONENTS.length - 1,
+    venue_reliable: true,
   }
 }
 

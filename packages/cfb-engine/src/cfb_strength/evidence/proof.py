@@ -88,6 +88,19 @@ ELO_LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
 # otherwise fail with a bare `sqlite3.OperationalError: no such column`.
 TITLE_GAME_COLUMN = "conference_championship"
 
+# Issue #349: the first CFB season whose venue (CFBD's neutral-site flag) is
+# stated as fact. Before it, the founder trusts only #359's curated overrides
+# (#343). See `_venue_reliable`, the one place the rule lives.
+RELIABLE_CFB_VENUE_SINCE = 2008
+
+# CFBD's own neutral-site flag, read from the stored payload rather than the
+# `neutral_site` column, which #359's overrides may have rewritten. Guarded by
+# json_valid so a non-JSON payload reads as "no CFBD flag" instead of raising
+# from sqlite. Every games query that feeds `_venue_reliable` selects this.
+CFBD_NEUTRAL_SITE_SQL = (
+    "CASE WHEN json_valid(raw_json) THEN json_extract(raw_json, '$.neutralSite') END"
+)
+
 
 class StaleDatabaseError(RuntimeError):
     """Raised by evidence functions when the database predates the schema
@@ -398,6 +411,7 @@ def _elo_ledger(
                 season_type=str(row["season_type"]),
                 start_date=str(row["start_date"]) if row["start_date"] is not None else None,
                 opponent_name=str(row["opponent_name"]),
+                venue_reliable=_step_venue_reliable(conn, row, year, team_id, sport, scope),
             )
         )
 
@@ -411,6 +425,53 @@ def _elo_ledger(
         mov_denom_floor_fraction=float(config["mov_denom_floor_fraction"]),
         steps=steps,
     )
+
+
+def _step_venue_reliable(
+    conn: sqlite3.Connection,
+    step: sqlite3.Row,
+    year: int,
+    team_id: int,
+    sport: str,
+    scope: str,
+) -> bool:
+    """`_venue_reliable` for one stored Elo ledger step (issue #349).
+
+    A step carries no game id. Only a pre-2008 neutral CFB step can be an
+    override, so only that step looks its game up: on season, the team pair
+    (either side home) and start_date -- unique for every step in the
+    committed fixtures. Every other step is decided by the rule from the
+    step's own venue, with no query: a non-neutral step is never an override.
+
+    Raises ValueError when the lookup finds no game or more than one, like the
+    other corrupt-ledger cases in `_elo_ledger`: hedging a real override, or
+    stating an unchecked venue as fact, would both misreport the evidence.
+    """
+    if step["venue"] != "neutral":
+        return _venue_reliable(sport, year, False, None)
+    if _venue_reliable(sport, year, False, None):
+        # The sport or season makes every game reliable; no lookup needed.
+        return True
+    opponent_team_id = int(step["opponent_team_id"])
+    games = conn.execute(
+        f"""
+        SELECT id, season, sport, neutral_site,
+               {CFBD_NEUTRAL_SITE_SQL} AS cfbd_neutral_site
+        FROM games
+        WHERE season = ? AND sport = ? AND start_date = ?
+          AND ((home_team_id = ? AND away_team_id = ?)
+            OR (home_team_id = ? AND away_team_id = ?))
+        """,
+        (year, sport, step["start_date"], team_id, opponent_team_id, opponent_team_id, team_id),
+    ).fetchall()
+    if len(games) != 1:
+        raise ValueError(
+            f"corrupt Elo ledger: elo_ledger_steps step {step['game_number']} for "
+            f"team_id={team_id} ({scope}) matches {len(games)} games rows against "
+            f"opponent_team_id={opponent_team_id} on start_date={step['start_date']!r}, "
+            "so whether its neutral venue is a curated override cannot be told"
+        )
+    return _game_venue_reliable(games[0])
 
 
 def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: Sport) -> None:
@@ -547,11 +608,44 @@ _CHRONOLOGICAL_ORDER = """
             id"""
 
 
+def _venue_reliable(
+    sport: str, season: int, neutral_site: object, cfbd_neutral_site: object
+) -> bool:
+    """Issue #349: whether a game's venue can be stated as fact -- the single
+    rule every `venue_reliable` field in this module comes from.
+
+    Reliable iff the sport is not CFB, or the season is 2008 or later, or the
+    game is one of #359's curated neutral-site overrides. An override is
+    recognisable without a schema change: ingest rewrites `neutral_site` and
+    leaves `raw_json` untouched, so it is `neutral_site = 1` while CFBD's own
+    flag is false. Before 2008 a game CFBD itself flags neutral is therefore
+    NOT reliable (founder, #343), and neither is any home/away game; nor is a
+    neutral game whose payload carries no CFBD flag, since nothing then shows
+    it was curated.
+
+    `neutral_site` is the stored column and `cfbd_neutral_site` the payload's
+    flag (`CFBD_NEUTRAL_SITE_SQL`), both as sqlite returns them. Display and
+    narration only: Elo's home-field adjustment keeps using the stored flag.
+    """
+    if sport != "cfb" or season >= RELIABLE_CFB_VENUE_SINCE:
+        return True
+    return bool(neutral_site) and cfbd_neutral_site is not None and not cfbd_neutral_site
+
+
+def _game_venue_reliable(game: sqlite3.Row) -> bool:
+    """`_venue_reliable` for a games row selected with `season`, `sport`,
+    `neutral_site` and `cfbd_neutral_site`."""
+    return _venue_reliable(
+        str(game["sport"]), int(game["season"]), game["neutral_site"], game["cfbd_neutral_site"]
+    )
+
+
 def _team_games(conn: sqlite3.Connection, year: int, team_id: int, sport: str) -> list[sqlite3.Row]:
     _require_title_game_column(conn)
     return conn.execute(
         f"""
-        SELECT id, week, season_type, neutral_site,
+        SELECT id, season, sport, week, season_type, neutral_site,
+               {CFBD_NEUTRAL_SITE_SQL} AS cfbd_neutral_site,
                home_team_id, away_team_id, home_team, away_team,
                home_points, away_points,
                conference_championship, home_conference
@@ -614,6 +708,7 @@ def _opponent_result(
         venue=venue,
         neutral_site=neutral_site,
         title_game_conference=_title_game_conference(game),
+        venue_reliable=_game_venue_reliable(game),
     )
 
 
@@ -725,7 +820,9 @@ def build_comparison(
     # build_team_case has already run `_require_title_game_column` above.
     h2h_games = conn.execute(
         f"""
-        SELECT id, week, season_type, neutral_site, home_team_id, away_team_id,
+        SELECT id, season, sport, week, season_type, neutral_site,
+               {CFBD_NEUTRAL_SITE_SQL} AS cfbd_neutral_site,
+               home_team_id, away_team_id,
                home_team, away_team, home_points, away_points,
                conference_championship, home_conference
         FROM games
@@ -764,6 +861,7 @@ def build_comparison(
                     away_points=g["away_points"],
                     winner=winner,
                     title_game_conference=_title_game_conference(g),
+                    venue_reliable=_game_venue_reliable(g),
                 )
             )
     head_to_head = HeadToHead(played=bool(meetings), meetings=meetings)
@@ -833,6 +931,7 @@ def _meetings_by_opponent(
                 season_type=g.season_type,
                 venue=g.venue,
                 title_game_conference=g.title_game_conference,
+                venue_reliable=g.venue_reliable,
             )
         )
     return by_opp
