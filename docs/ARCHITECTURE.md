@@ -308,16 +308,20 @@ Two consequences worth knowing:
 
 - **The cache key carries the checker's version.** `api.persona.cache` keys on
   `(sport, method, PROMPT_VERSION, sha256(fact block), GROUNDING_VERSION)`, and
-  `GROUNDING_VERSION` is `api.persona.claims`'s (`claims-v2` since #382). A
+  `GROUNDING_VERSION` is `api.persona.claims`'s (`claims-v5` since #388). A
   tightening of what the validator accepts invalidates exactly the rows checked
   under the old rules (#145).
 - **Timing and venue are rendered, never typed** (founder decision, option C,
   2026-09-15): `when` renders from the game's position in the date-ordered list
-  and `where` from the game row, with no production word list policing the
-  narrator's phrasing. A rate detector in the persona eval measures how often
-  narrator-typed timing or venue wording still appears; it never blocks a
-  response. Home/away on evidence rows (#294) is what will let `where` say "at
-  home" or "on the road" rather than only flagging a neutral site.
+  and `where` from the game row (home, away or neutral since #294, and only on
+  a row whose venue is reliable since #349). The validator also rejects the
+  commonest hand-typed forms in prose, outside a placeholder: timing phrases
+  such as "title game", "finale" or "opener" (#382), and venue phrases such as
+  "on the road", "at home", "a road win" or "the home crowd" (#388). Those
+  lists are kept narrow so that idioms ("on the road to a title", "brought it
+  home") still pass. A broader rate detector in the persona eval measures how
+  often narrator-typed timing or venue wording still appears; it never blocks
+  a response.
 
 ### 4.4 Error handling as persona copy (Domain 2.2, 5.3)
 
