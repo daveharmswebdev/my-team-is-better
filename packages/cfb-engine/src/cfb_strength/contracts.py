@@ -1349,7 +1349,9 @@ class ComparisonResult:
 
 class AmbiguousTeamError(ValueError):
     """Raised by evidence.resolve_team when a query has no unique, confident
-    match: more than one team matches, or one does but too weakly to resolve.
+    match: more than one team matches, one does but too weakly to resolve, or
+    the best match has a runner-up too close behind it ("TUSA": Tulsa 0.889,
+    UTSA 0.75).
 
     `candidates` is always non-empty -- "too many matches", never "none". A
     zero-match query is `UnknownTeamError` below; the two were conflated
@@ -1392,7 +1394,8 @@ class UnknownTeamError(ValueError):
     **Deliberately carries no suggestion list.** The first cut of #100 added
     one, built from a looser `difflib` pass over the rated names, and it
     could not work: `resolve_team`'s fuzzy stage already resolves or offers
-    (as `AmbiguousTeamError`) anything scoring >= 0.6, so this branch is
+    (as `AmbiguousTeamError`) anything scoring >= 0.6 (the better of its
+    case-sensitive and lowercased difflib ratios), so this branch is
     reached only when *nothing* does (or the query names an unrated team
     exactly), and the remaining [cutoff, 0.6) window holds noise rather than
     near-misses. Real typos never arrive here at all ("Alabma"/"Alabama"

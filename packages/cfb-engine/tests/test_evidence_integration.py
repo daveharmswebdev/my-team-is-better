@@ -391,7 +391,7 @@ def test_invented_name_with_one_weak_lookalike_asks_instead_of_resolving(
 
 @pytest.mark.parametrize("query", ["Alabma", "alabma", "ALABMA"])
 def test_a_real_typo_resolves_in_any_case(rated_conn: sqlite3.Connection, query: str) -> None:
-    """The fuzzy stage compares lowercased strings: "alabma" scores 0.9231
+    """The fuzzy score includes the lowercased ratio: "alabma" scores 0.9231
     against "alabama" whatever the caller's casing."""
     alabama = resolve_team(rated_conn, 2005, "Alabama", method="keener")
     assert resolve_team(rated_conn, 2005, query, method="keener") == alabama
