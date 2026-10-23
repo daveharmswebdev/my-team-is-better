@@ -44,7 +44,7 @@ QUALITY_WIN_RANK_THRESHOLD = 25
 # name scores the better of two difflib ratios against the query: as typed
 # (case-sensitive) and with both lowercased. Lowercasing alone loses typos
 # difflib's greedy matching blocks only line up with the capitals in place
-# ("Maimi" is 0.8 against "Miami", 0.6 as "maimi"/"miami"); case-sensitive
+# ("Maimi" is 0.8 against "Miami", 0.4 as "maimi"/"miami"); case-sensitive
 # alone makes "ALABMA" miss "Alabama".
 #
 # - FUZZY_MATCH_CUTOFF: a name scoring below this is not a match at all, and
