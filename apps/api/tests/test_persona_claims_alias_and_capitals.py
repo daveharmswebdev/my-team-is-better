@@ -176,4 +176,4 @@ def test_the_typed_prose_is_never_capitalized(
 def test_the_grounding_version_moved_for_both_fixes() -> None:
     """Both fixes change the rendered text of an accepted submission, so
     narrations rendered under claims-v2 must miss the cache."""
-    assert GROUNDING_VERSION == "claims-v4"
+    assert GROUNDING_VERSION == "claims-v5"

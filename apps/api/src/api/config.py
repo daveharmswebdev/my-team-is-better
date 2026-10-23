@@ -124,7 +124,10 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # differently -- a figure keeps its team's name past an out-of-block alias
 # like "USA", and a placeholder opening a sentence prints capitalized: a
 # grounding change only; "claims-v4" since #349, which rejects a `where`
-# claim on a row whose venue isn't reliable).
+# claim on a row whose venue isn't reliable; "claims-v5" since #388, which
+# rejects a venue phrase typed by hand -- a compound like "a road win"
+# anywhere, a bare "on the road" or "at home" only in a sentence that refers
+# to a game: a grounding change only).
 # persona-v12 (issue #300): the prompt changed -- the `when` claim kind's
 # enumeration gained "in the regular-season finale" and "in the Big 12 title
 # game", which the validator renders now that every game row in the fact

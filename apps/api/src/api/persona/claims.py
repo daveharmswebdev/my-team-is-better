@@ -136,7 +136,7 @@ TOOL_NAME: Final = "submit_narration"
 # These rules' version in the narration cache key (`api.persona.cache`,
 # issue #291): bump it when a change could accept or reject a narration
 # differently, so narrations checked under the old rules miss.
-GROUNDING_VERSION: Final = "claims-v4"
+GROUNDING_VERSION: Final = "claims-v5"
 
 # The claim cap (founder decisions on #291, 2026-09-15). The good 2017 Alabama
 # spike narration used five claims with two scores; a 2019 narration with
@@ -269,6 +269,38 @@ _TIMING_ERROR: Final = (
     'that game, which prints "in the <conference> title game", "in the regular-season '
     'finale", "to open the season", "in the postseason" or "in week N"; use a `when` '
     "claim or leave the timing out"
+)
+# Where a game was played, typed by hand (#388): only a `where` claim states a
+# venue, and only on a row whose venue is reliable (#349). A compound venue
+# phrase ("a road win", "the home crowd", "away from home", "a neutral site")
+# is rejected anywhere in the prose. Idioms stay prose: "a long road back",
+# "roadblock", "the home stretch", "a home run", "right away", "away from the
+# ball". "neutral ground" is left out as too often figurative.
+_VENUE_COMPOUND_RE: Final = re.compile(
+    rf"\broad\s*[{_DASHES}\s]\s*(?:win|loss|losse|game|victor(?:y|ie)|trip|test|upset|record)s?\b"
+    rf"|\bhome\s*[{_DASHES}\s]\s*(?:win|loss|losse|game|crowd|field|turf|stadium|opener|record)s?\b"
+    rf"|\bneutral\s*[{_DASHES}\s]\s*(?:site|field)s?\b"
+    rf"|\baway\s*[{_DASHES}\s]\s*(?:from\s+home|(?:game|win|loss|losse)s?)\b",
+    re.IGNORECASE,
+)
+# The bare phrases are as often idiom ("right at home", "on the road to
+# Pasadena", "fans watching at home"), so they are rejected only in a sentence
+# that refers to a game (`_RESULT_VERB_RE`, or a game-kind placeholder), and
+# there with no idiom exemptions (#388 round 2). A venue stated in the
+# sentence after the game's passes: cross-sentence venue is out of scope.
+_VENUE_BARE_RE: Final = re.compile(r"\bon\s+the\s+road\b|\bat\s+home\b", re.IGNORECASE)
+# A result verb: with one, a sentence refers to a game even without a
+# game-kind placeholder ("Texas edged Ohio State on the road.").
+_RESULT_VERB_RE: Final = re.compile(
+    r"\b(?:beat|beats|beating|won|win|wins|lost|lose|loses|fell|topped|edged|routed|upset"
+    r"|knocked\s+off|took\s+down)\b",
+    re.IGNORECASE,
+)
+_VENUE_ERROR: Final = (
+    "the FACT BLOCK states where a game was played only through a `where` claim on "
+    'that game, which prints "at home", "on the road" or "at a neutral site", and only '
+    "on a game whose row has venue_reliable true; use a `where` claim there, and on any "
+    "other game leave the venue out"
 )
 _THE: Final = ("the", "The")
 _WORD_CHAR_RE: Final = re.compile(r"\w")
@@ -448,6 +480,7 @@ def check_and_render(
     name_claims: dict[str, str] = {}
     rank_claims: set[str] = set()
     pair_claims: set[str] = set()
+    game_claims: set[str] = set()
     claim_ids: list[str] = []
     if "claims" not in tool_input:
         errors.append(f'{TOOL_NAME} needs "claims" (a list, which may be empty)')
@@ -508,6 +541,8 @@ def check_and_render(
                     rank_claims.add(claim_id)
             elif isinstance(kind, str) and kind in _PAIR_KINDS:
                 pair_claims.add(claim_id)
+                if kind in _GAME_KINDS:
+                    game_claims.add(claim_id)
 
     bare_at: Collection[int] = ()
     if isinstance(text, str) and not _has_surrogate(text):
@@ -527,7 +562,15 @@ def check_and_render(
             errors.append("the text contains a NUL character")
         else:
             prose_errors, bare_at = _check_prose(
-                text, name_claims, rank_claims, pair_claims, block, index, name_re, alias_re
+                text,
+                name_claims,
+                rank_claims,
+                pair_claims,
+                game_claims,
+                block,
+                index,
+                name_re,
+                alias_re,
             )
             errors.extend(prose_errors)
 
@@ -1340,6 +1383,7 @@ def _check_prose(
     name_claims: Mapping[str, str],
     rank_claims: Collection[str],
     pair_claims: Collection[str],
+    game_claims: Collection[str],
     block: _Block,
     index: _CatalogIndex,
     name_re: re.Pattern[str],
@@ -1367,11 +1411,15 @@ def _check_prose(
     week_starts = [start for start, _, _ in weeks]
     holdings_by_sentence: dict[tuple[int, int], str] = {}
 
-    def holdings(start: int, end: int) -> str:
+    def sentence_of(start: int, end: int) -> tuple[int, int]:
         after = bisect.bisect_right(break_ends, start)
         left = break_ends[after - 1] if after else 0
         before = bisect.bisect_left(break_starts, end)
         right = break_starts[before] if before < len(break_starts) else len(masked)
+        return left, right
+
+    def holdings(start: int, end: int) -> str:
+        left, right = sentence_of(start, end)
         if (left, right) not in holdings_by_sentence:
             names = _block_teams_in(masked[left:right], block, index, name_re)
             holdings_by_sentence[(left, right)] = block.holdings(names)
@@ -1415,6 +1463,24 @@ def _check_prose(
     # title game" is never mistaken for one typed by hand (#382).
     for match in _TIMING_RE.finditer(masked):
         errors.append(f"the prose types the game timing {_quote(match.group(0))}; {_TIMING_ERROR}")
+    # Likewise masked, so a `where` placeholder that prints "on the road" is
+    # never mistaken for one typed by hand (#388).
+    game_starts = sorted(match.start() for match in placeholders if match.group(1) in game_claims)
+
+    def in_game_sentence(start: int, end: int) -> bool:
+        left, right = sentence_of(start, end)
+        at = bisect.bisect_left(game_starts, left)
+        if at < len(game_starts) and game_starts[at] < right:
+            return True
+        return _RESULT_VERB_RE.search(masked, left, right) is not None
+
+    venues = list(_VENUE_COMPOUND_RE.finditer(masked)) + [
+        match
+        for match in _VENUE_BARE_RE.finditer(masked)
+        if in_game_sentence(match.start(), match.end())
+    ]
+    for match in sorted(venues, key=lambda match: match.start()):
+        errors.append(f"the prose types the venue {_quote(match.group(0))}; {_VENUE_ERROR}")
 
     placeholder_ending = {match.end(): match.group(1) for match in placeholders}
     # Where a team name ends: a mascot word right after one is a nickname.

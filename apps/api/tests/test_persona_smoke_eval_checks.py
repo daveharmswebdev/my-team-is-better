@@ -962,7 +962,7 @@ def test_the_summary_line_names_both_versions_and_the_counts() -> None:
         prompt_version=PROMPT_VERSION,
         grounding_version=GROUNDING_VERSION,
     )
-    assert "persona-v13" in line and "claims-v4" in line
+    assert "persona-v13" in line and "claims-v5" in line
     assert "first=2" in line and "retry=1" in line and "fallback=1" in line
     assert "claude_calls=6" in line
     assert "1/3" in line and "2/6" in line
