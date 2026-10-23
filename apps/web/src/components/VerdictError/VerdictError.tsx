@@ -61,10 +61,20 @@ export function VerdictError({
     case 'ambiguous_team':
       return (
         <div role="alert" className={styles.pick}>
-          <p className={styles.msg}>
-            &ldquo;{state.body.query}&rdquo; could mean more than one team. Did
-            you mean:
-          </p>
+          {/* Since #123 the engine also raises this with a single candidate,
+              when a name matches one team too weakly to resolve silently.
+              One candidate isn't ambiguity, so don't claim it is. */}
+          {state.body.candidates.length === 1 ? (
+            <p className={styles.msg}>
+              &ldquo;{state.body.query}&rdquo; isn&apos;t a team I know. Did you
+              mean:
+            </p>
+          ) : (
+            <p className={styles.msg}>
+              &ldquo;{state.body.query}&rdquo; could mean more than one team.
+              Did you mean:
+            </p>
+          )}
           <ul className={styles.chipList}>
             {state.body.candidates.map((candidate) => (
               <li key={candidate}>
