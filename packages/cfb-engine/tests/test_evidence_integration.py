@@ -483,6 +483,60 @@ def test_known_school_whose_rating_row_is_missing_is_unknown(
             resolve_team(regression_conn, 2004, query, method="keener")
 
 
+def test_fuzzy_runner_up_cutoff_is_0_75() -> None:
+    assert proof.FUZZY_RUNNER_UP_CUTOFF == 0.75
+
+
+def test_typo_that_scores_well_only_case_sensitively_still_resolves(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Maimi" scores 0.8 against "Miami" case-sensitively but only 0.6 once
+    both are lowercased (difflib's greedy longest block differs on
+    "maimi"/"miami"). A name scores the better of the two, so the typo
+    resolves; lowercase-only scoring made it UnknownTeamError (#123 round 2)."""
+    miami = resolve_team(rated_conn, 2005, "Miami", method="keener")
+    assert resolve_team(rated_conn, 2005, "Maimi", method="keener") == miami
+
+
+def test_all_lowercase_typo_that_scores_weakly_asks(rated_conn: sqlite3.Connection) -> None:
+    """ "maimi" scores 0.6 against "Miami" as typed (0.4 lowercased) and
+    nothing else reaches 0.6: a one-candidate "did you mean Miami?", where
+    lowercase-only scoring made it UnknownTeamError."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "maimi", method="keener")
+    assert exc_info.value.candidates == ["Miami"]
+
+
+def test_strong_top_match_with_a_close_runner_up_asks(
+    regression_conn: sqlite3.Connection,
+) -> None:
+    """ "TUSA" (2013) scores 0.889 against Tulsa but 0.75 against UTSA: a
+    runner-up at >= FUZZY_RUNNER_UP_CUTOFF means the top name isn't a safe
+    guess, so it asks with both listed."""
+    compute_and_store(regression_conn, 2013, "keener")
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(regression_conn, 2013, "TUSA", method="keener")
+    assert "Tulsa" in exc_info.value.candidates
+    assert "UTSA" in exc_info.value.candidates
+    assert exc_info.value.candidates == sorted(exc_info.value.candidates)
+
+
+def test_runner_up_at_the_cutoff_asks(rated_conn: sqlite3.Connection) -> None:
+    """ "Olkahoma State" scores 0.9286 against Oklahoma State and exactly
+    0.75 against Ohio State: the runner-up bar is inclusive, so it asks."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Olkahoma State", method="keener")
+    assert "Oklahoma State" in exc_info.value.candidates
+    assert "Ohio State" in exc_info.value.candidates
+
+
+def test_runner_up_just_under_the_cutoff_resolves(rated_conn: sqlite3.Connection) -> None:
+    """ "Oklaoma State" scores 0.963 against Oklahoma State and 0.7407
+    against Colorado State, the best of the rest: it resolves."""
+    oklahoma_state = resolve_team(rated_conn, 2005, "Oklahoma State", method="keener")
+    assert resolve_team(rated_conn, 2005, "Oklaoma State", method="keener") == oklahoma_state
+
+
 # ---------------------------------------------------------------------------
 # issue #95 -- Keener's verdict text, pinned exactly against real ratings
 # ---------------------------------------------------------------------------
