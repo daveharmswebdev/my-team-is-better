@@ -136,7 +136,7 @@ TOOL_NAME: Final = "submit_narration"
 # These rules' version in the narration cache key (`api.persona.cache`,
 # issue #291): bump it when a change could accept or reject a narration
 # differently, so narrations checked under the old rules miss.
-GROUNDING_VERSION: Final = "claims-v4"
+GROUNDING_VERSION: Final = "claims-v5"
 
 # The claim cap (founder decisions on #291, 2026-09-15). The good 2017 Alabama
 # spike narration used five claims with two scores; a 2019 narration with
@@ -269,6 +269,30 @@ _TIMING_ERROR: Final = (
     'that game, which prints "in the <conference> title game", "in the regular-season '
     'finale", "to open the season", "in the postseason" or "in week N"; use a `when` '
     "claim or leave the timing out"
+)
+# Where a game was played, typed by hand (#388): only a `where` claim states a
+# venue, and only on a row whose venue is reliable (#349), so these are
+# rejected outright. Idioms stay prose: "on the road to a title", "a long
+# road back", "roadblock", "the home stretch", "a home run", "brought it
+# home", "right at home", "right away", "away from the ball". "neutral
+# ground" is left out as too often figurative.
+_VENUE_RE: Final = re.compile(
+    r"\bon\s+the\s+road\b"
+    r"(?!\s+(?:to\s+(?:a|an|the|their|its|his|her|recovery|redemption|glory|nowhere|ruin"
+    r"|respectability|relevance)|back|ahead|less)\b)"
+    r"|(?<!\bright\s)(?<!\bfeel\s)(?<!\bfelt\s)(?<!\bfeels\s)(?<!\bfeeling\s)"
+    r"(?<!\byourself\s)(?<!\bthemselves\s)\bat\s+home\b"
+    rf"|\broad\s*[{_DASHES}\s]\s*(?:win|loss|losse|game|victor(?:y|ie)|trip|test|upset|record)s?\b"
+    rf"|\bhome\s*[{_DASHES}\s]\s*(?:win|loss|losse|game|crowd|field|turf|stadium|opener|record)s?\b"
+    rf"|\bneutral\s*[{_DASHES}\s]\s*(?:site|field)s?\b"
+    rf"|\baway\s*[{_DASHES}\s]\s*(?:from\s+home|(?:game|win|loss|losse)s?)\b",
+    re.IGNORECASE,
+)
+_VENUE_ERROR: Final = (
+    "the FACT BLOCK states where a game was played only through a `where` claim on "
+    'that game, which prints "at home", "on the road" or "at a neutral site", and only '
+    "on a game whose row has venue_reliable true; use a `where` claim there, and on any "
+    "other game leave the venue out"
 )
 _THE: Final = ("the", "The")
 _WORD_CHAR_RE: Final = re.compile(r"\w")
@@ -1415,6 +1439,10 @@ def _check_prose(
     # title game" is never mistaken for one typed by hand (#382).
     for match in _TIMING_RE.finditer(masked):
         errors.append(f"the prose types the game timing {_quote(match.group(0))}; {_TIMING_ERROR}")
+    # Likewise masked, so a `where` placeholder that prints "on the road" is
+    # never mistaken for one typed by hand (#388).
+    for match in _VENUE_RE.finditer(masked):
+        errors.append(f"the prose types the venue {_quote(match.group(0))}; {_VENUE_ERROR}")
 
     placeholder_ending = {match.end(): match.group(1) for match in placeholders}
     # Where a team name ends: a mascot word right after one is a nickname.
