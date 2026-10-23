@@ -619,7 +619,7 @@ def _fuzzy_scores(q: str, candidates: list[sqlite3.Row]) -> list[tuple[float, sq
     ratio `difflib.get_close_matches` uses (the name as seq1, the query as
     seq2). The lowercased ratio keeps a typo's capitalisation from mattering
     ("ALABMA" vs "Alabama"); the case-sensitive one keeps typos difflib only
-    lines up with the capitals in place ("Maimi" vs "Miami": 0.8, but 0.6
+    lines up with the capitals in place ("Maimi" vs "Miami": 0.8, but 0.4
     lowercased)."""
     as_typed = difflib.SequenceMatcher()
     as_typed.set_seq2(q)
