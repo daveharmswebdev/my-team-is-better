@@ -40,11 +40,25 @@ from cfb_strength.evidence.credit_explain import explain_credit
 # Take 1 used a top-25 threshold; we keep that convention here.
 QUALITY_WIN_RANK_THRESHOLD = 25
 
-# Fuzzy-match tuning for `resolve_team`'s third and last stage: one close
-# name at or above this ratio is a resolution. Anything below it is not a
-# match and gets no second, looser pass -- see UnknownTeamError in
-# contracts.py for why a near-miss list cannot be built here.
+# Fuzzy-match tuning for `resolve_team`'s third and last stage, which compares
+# the lowercased query against lowercased rated names (issue #123):
+#
+# - FUZZY_MATCH_CUTOFF: a name scoring below this is not a match at all, and
+#   gets no second, looser pass -- see UnknownTeamError in contracts.py for
+#   why a near-miss list cannot be built here.
+# - FUZZY_RESOLVE_CUTOFF: the query resolves silently only when exactly one
+#   name scores at or above this and no other name does. Every other fuzzy
+#   result with a match >= FUZZY_MATCH_CUTOFF asks (AmbiguousTeamError, a
+#   one-name list being "did you mean X?"). Measured over every one-edit typo
+#   of every rated CFB name in the seven golden years: 0.8 resolves ~89% of
+#   typos right and 7 wrong, asks (right name listed) for the rest; 0.6
+#   resolved 120 wrong, and 0.85 resolved 26 wrong.
+#
+# No cutoff separates a typo from a real school that just isn't rated that
+# season ("Northeastern" scores 0.917 against Northwestern, above the median
+# typo), so `resolve_team` checks for those by exact name first.
 FUZZY_MATCH_CUTOFF = 0.6
+FUZZY_RESOLVE_CUTOFF = 0.8
 FUZZY_MATCH_LIMIT = 10
 
 # How `build_comparison`'s verdict prints a rating, per registered method
@@ -509,14 +523,20 @@ def resolve_team(
 
     Resolution order:
       1. Exact match (case-insensitive, whitespace-trimmed).
-      2. Substring match (either direction), case-insensitive.
-      3. Fuzzy match via difflib.get_close_matches.
+      2. Known but unrated: the query exactly names a `teams` row of this
+         sport that has no rating row here -> UnknownTeamError (issue #123).
+      3. Substring match (either direction), case-insensitive.
+      4. Fuzzy match on lowercased names (difflib ratio): resolves only when
+         exactly one name scores >= FUZZY_RESOLVE_CUTOFF; any other result
+         with a name >= FUZZY_MATCH_CUTOFF asks.
 
-    Raises AmbiguousTeamError if any stage other than a unique exact match
-    yields more than one candidate (its `candidates` list is always
-    non-empty). Raises UnknownTeamError -- carrying only the query, year and
-    sport -- if no stage matches anything at all. Raises UnknownYearError if
-    there are no ratings at all for year/method/sport.
+    Raises AmbiguousTeamError when a stage yields candidates but no unique
+    answer -- several names, or a fuzzy stage whose only matches are weak (a
+    one-name "did you mean X?"). Its `candidates` list is always non-empty.
+    Raises UnknownTeamError -- carrying only the query, year and sport -- for
+    a known-but-unrated team or when no stage matches anything at all.
+    Raises UnknownYearError if there are no ratings at all for
+    year/method/sport.
     """
     _require_year(conn, year, method, sport)
     candidates = _rated_teams(conn, year, method, sport)
@@ -530,6 +550,14 @@ def resolve_team(
     if len(exact) > 1:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in exact))
 
+    # Issue #123: the query names a real team of this sport that has no rating
+    # row for year/method -- an FCS school in a season it wasn't rated, or a
+    # school whose row is missing. The looser stages below would answer with a
+    # *different* rated school ("North Dakota State" -> Colorado State, "USC"
+    # -> UCF), so stop here.
+    if _is_known_team(conn, q_lower, sport):
+        raise UnknownTeamError(query, year, sport)
+
     substring = [
         row
         for row in candidates
@@ -540,22 +568,54 @@ def resolve_team(
     if len(substring) > 1:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in substring))
 
-    names = [row["school"] for row in candidates]
-    close = difflib.get_close_matches(q, names, n=FUZZY_MATCH_LIMIT, cutoff=FUZZY_MATCH_CUTOFF)
-    if len(close) == 1:
-        matched = close[0]
-        return int(next(r["team_id"] for r in candidates if r["school"] == matched))
+    close = _fuzzy_scores(q_lower, candidates)
+    strong = [(score, row) for score, row in close if score >= FUZZY_RESOLVE_CUTOFF]
+    if len(strong) == 1:
+        return int(strong[0][1]["team_id"])
 
-    # 0 matches and >1 are opposite failures and must not share an error
-    # (issue #100): >1 is "which of these did you mean", 0 is "no such rated
+    # Anything else that came close asks rather than guesses (issue #123):
+    # several strong names, or only weak ones -- a single weak name is a
+    # one-candidate "did you mean X?", never a silent answer.
+    #
+    # 0 matches and >=1 are opposite failures and must not share an error
+    # (issue #100): >=1 is "which of these did you mean", 0 is "no such rated
     # team". Conflating them produced an `ambiguous_team` payload with an
     # empty candidate list, i.e. a "did you mean:" prompt with nothing under
     # it. AmbiguousTeamError.candidates is therefore non-empty from every
     # raise site in this module, by construction.
-    if len(close) > 1:
-        raise AmbiguousTeamError(query, sorted(close))
+    if close:
+        raise AmbiguousTeamError(query, sorted(row["school"] for _, row in close))
 
     raise UnknownTeamError(query, year, sport)
+
+
+def _is_known_team(conn: sqlite3.Connection, q_lower: str, sport: str) -> bool:
+    """True when some `teams` row of `sport` has exactly this name
+    (case-insensitive, trimmed). Scoped by sport (#57/#58/#86): an NFL team
+    named like a CFB query says nothing about the CFB pool. Compared in
+    Python, as the exact stage is, so both agree on what "lowercase" means."""
+    rows = conn.execute("SELECT school FROM teams WHERE sport = ?", (sport,)).fetchall()
+    return any(str(row["school"]).strip().lower() == q_lower for row in rows)
+
+
+def _fuzzy_scores(q_lower: str, candidates: list[sqlite3.Row]) -> list[tuple[float, sqlite3.Row]]:
+    """Rated rows whose lowercased name scores >= FUZZY_MATCH_CUTOFF against
+    the lowercased query, best first, at most FUZZY_MATCH_LIMIT of them.
+
+    The same ratio `difflib.get_close_matches` uses (the query as seq2, the
+    name as seq1), kept here with its score so the caller can apply the
+    resolve bar. Lowercasing both sides keeps the score from depending on
+    how the caller capitalised a typo ("ALABMA" vs "Alabama")."""
+    matcher = difflib.SequenceMatcher()
+    matcher.set_seq2(q_lower)
+    scored: list[tuple[float, sqlite3.Row]] = []
+    for row in candidates:
+        matcher.set_seq1(str(row["school"]).lower())
+        score = matcher.ratio()
+        if score >= FUZZY_MATCH_CUTOFF:
+            scored.append((score, row))
+    scored.sort(key=lambda pair: (-pair[0], str(pair[1]["school"])))
+    return scored[:FUZZY_MATCH_LIMIT]
 
 
 def _require_title_game_column(conn: sqlite3.Connection) -> None:
