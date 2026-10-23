@@ -179,6 +179,129 @@ def test_bar_stool_road_home_and_away_idioms_pass(
     assert rendered(text, [], texas_2005, catalog) == text
 
 
+# ---------------------------------------------------------------------------
+# round 2 (#388 review): the bare phrases count only in a game sentence
+# ---------------------------------------------------------------------------
+#
+# Rule A: a compound venue phrase ("a road win", "the home crowd", "away from
+# home", "neutral site") is rejected anywhere in the prose. Rule B: the bare
+# phrases "on the road" and "at home" are rejected only in a sentence that
+# refers to a game -- one holding a game_score, margin, when or where
+# placeholder, or a result verb ("beat", "won", "lost", "edged", ...) -- and
+# there with no idiom exemptions.
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Round 1 let these through on its "back" / "ahead" exemptions.
+        "Texas beat Ohio State {g1} on the road back in September.",
+        "Texas beat Ohio State {g1} on the road ahead of conference play.",
+        # A result verb alone makes it a game sentence.
+        "Texas edged Ohio State on the road.",
+        "Texas won at home all year.",
+        # A game placeholder alone makes it a game sentence, with no verb.
+        "Texas over Ohio State {g1} on the road was the whole season.",
+    ],
+)
+def test_a_bare_venue_phrase_in_a_game_sentence_is_rejected_with_no_exemptions(
+    texas_2005: str, catalog: tuple[TeamRecord, ...], text: str
+) -> None:
+    claims = [_texas_score()] if "{g1}" in text else []
+    errors = rejected(text, claims, texas_2005, catalog)
+    assert_an_error_says(errors, "the prose types the venue", "`where` claim")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The reviewer's false positives: no game in the sentence.
+        "Young looked at home in the pocket.",
+        "Ohio State fans were sitting at home in January.",
+        "Ohio State stayed at home for bowl season.",
+        "Texas fans watching at home knew it.",
+        "Texas played like a team at home on any field.",
+        "Texas was on the road to Pasadena.",
+        "He was out on the road recruiting.",
+    ],
+)
+def test_a_bare_venue_phrase_outside_a_game_sentence_passes(
+    texas_2005: str, catalog: tuple[TeamRecord, ...], text: str
+) -> None:
+    assert rendered(text, [], texas_2005, catalog) == text
+
+
+def test_a_bare_venue_phrase_beside_a_game_sentence_passes(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    """Only the sentence holding the phrase counts: a game in the sentence
+    before doesn't make "at home" in this one a venue."""
+    text = "Texas beat Ohio State {g1}. Young looked at home in the pocket."
+    out = rendered(text, [_texas_score()], texas_2005, catalog)
+    assert out.endswith(" Young looked at home in the pocket."), out
+
+
+@pytest.mark.parametrize(
+    ("text", "phrase"),
+    [
+        ("That was a road win for the ages.", "road win"),
+        ("The home crowd never quit on Texas.", "home crowd"),
+        ("Road trips never bothered Texas.", "Road trips"),
+        ("Texas played every away game like a final.", "away game"),
+        ("Texas was a long way away from home all fall.", "away from home"),
+        ("Texas liked a neutral site.", "neutral site"),
+        ("Texas fans packed the home stadium.", "home stadium"),
+    ],
+)
+def test_a_compound_venue_phrase_is_rejected_with_no_game_in_the_sentence(
+    texas_2005: str, catalog: tuple[TeamRecord, ...], text: str, phrase: str
+) -> None:
+    errors = rejected(text, [], texas_2005, catalog)
+    assert_an_error_says(errors, "the prose types the venue", phrase, "`where` claim")
+
+
+def test_a_where_placeholder_in_a_game_sentence_passes(
+    auburn_2013: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    out = rendered(
+        "Auburn lost to LSU {g1} {v}, and that is the whole story.",
+        [
+            game_claim("g1", "game_score", "Auburn", "LSU", "L"),
+            game_claim("v", "where", "Auburn", "LSU", "L"),
+        ],
+        auburn_2013,
+        catalog,
+    )
+    assert " on the road, and that" in out, out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Rule B has no idiom exemptions, so an idiom in a game sentence costs
+        # one retry. Accepted (coordinator decision on #388 round 2).
+        "Texas beat Ohio State {g1} on the road to Pasadena.",
+        "Texas beat Ohio State {g1} and looked right at home.",
+    ],
+)
+def test_accepted_cost_an_idiom_in_a_game_sentence_is_rejected(
+    texas_2005: str, catalog: tuple[TeamRecord, ...], text: str
+) -> None:
+    errors = rejected(text, [_texas_score()], texas_2005, catalog)
+    assert_an_error_says(errors, "the prose types the venue")
+
+
+def test_accepted_cost_a_venue_in_the_sentence_after_the_game_passes(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    """Cross-sentence venue is out of scope for #388: the sentence holding
+    "on the road" has no game reference of its own. The smoke eval's broader
+    detector still sees it."""
+    text = "They beat Ohio State {g1}. They did it on the road."
+    out = rendered(text, [_texas_score()], texas_2005, catalog)
+    assert out.endswith(" They did it on the road."), out
+
+
 def test_the_grounding_version_moved_for_the_venue_check() -> None:
     """A narration accepted under claims-v4 can be rejected now, so cached
     ones must miss."""
