@@ -687,7 +687,8 @@ export interface AmbiguousTeamErrorBody {
  *
  * Deliberately carries **no** correction candidates. An earlier cut of this
  * body had a fuzzy-matched `suggestions` array; it was removed from the wire
- * because the engine's strict stage already resolves anything scoring >= 0.6,
+ * because the engine's fuzzy stage already resolves or offers (as
+ * `ambiguous_team`, one candidate allowed since #123) anything scoring >= 0.6,
  * so the only names that could ever reach this branch score below that -- and
  * at that range there is no cutoff separating signal from noise
  * ("Gonzaga"/"Georgia" scores 0.5714, above "Texas"/"Houston Texans" at
