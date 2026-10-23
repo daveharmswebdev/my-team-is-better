@@ -316,10 +316,14 @@ Two consequences worth knowing:
   and `where` from the game row (home, away or neutral since #294, and only on
   a row whose venue is reliable since #349). The validator also rejects the
   commonest hand-typed forms in prose, outside a placeholder: timing phrases
-  such as "title game", "finale" or "opener" (#382), and venue phrases such as
-  "on the road", "at home", "a road win" or "the home crowd" (#388). Those
-  lists are kept narrow so that idioms ("on the road to a title", "brought it
-  home") still pass. A broader rate detector in the persona eval measures how
+  such as "title game", "finale" or "opener" (#382), and venue phrases (#388).
+  A compound venue phrase ("a road win", "the home crowd", "away from home",
+  "neutral site") is rejected anywhere; the bare "on the road" and "at home"
+  only in a sentence that refers to a game (a game_score, margin, when or
+  where placeholder, or a result verb such as "beat" or "won"), so idioms
+  elsewhere ("right at home in the pocket", "on the road to Pasadena") still
+  pass. A venue stated in a different sentence from its game is not caught.
+  A broader rate detector in the persona eval measures how
   often narrator-typed timing or venue wording still appears; it never blocks
   a response.
 
