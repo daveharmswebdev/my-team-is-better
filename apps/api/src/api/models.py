@@ -1149,13 +1149,14 @@ class AmbiguousTeamErrorBody(BaseModel):
 
 class UnknownTeamErrorBody(BaseModel):
     """The zero-match case (issue #100) -- the opposite problem from
-    `AmbiguousTeamErrorBody`, which is >1 match and whose `candidates` is
-    always non-empty.
+    `AmbiguousTeamErrorBody`, which is >1 match (or, since #123, one match
+    too weak to resolve silently) and whose `candidates` is always non-empty.
 
     **Deliberately carries no suggestion list.** The first cut of #100 added
     one and it could not work: the engine's `resolve_team` already resolves
-    anything scoring >= 0.6, so this branch is reached only when *nothing*
-    does, and no cutoff separates signal from noise in what is left
+    or offers anything scoring >= 0.6, so this branch is reached only when
+    *nothing* does (or the query names an unrated team exactly), and no
+    cutoff separates signal from noise in what is left
     ("Gonzaga"/"Georgia" scores 0.5714 and outranks "Texas"/"Houston
     Texans" at 0.5263). Real typos never arrive here at all --
     "Alabma"/"Alabama" scores 0.9231 and resolves upstream. The field

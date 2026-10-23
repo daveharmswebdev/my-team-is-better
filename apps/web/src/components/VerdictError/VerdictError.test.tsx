@@ -51,6 +51,34 @@ describe('VerdictError', () => {
     expect(onSelectCandidate).toHaveBeenCalledWith('Texas State')
   })
 
+  it('renders a single weak-match candidate as a suggestion, not as ambiguity (issue #123)', async () => {
+    const onSelectCandidate = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <VerdictError
+        state={{
+          kind: 'ambiguous_team',
+          body: {
+            error: 'ambiguous_team',
+            query: 'Zzyzx Tech',
+            candidates: ['Texas Tech'],
+          },
+        }}
+        onSelectCandidate={onSelectCandidate}
+      />,
+    )
+
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/Zzyzx Tech/)
+    expect(alert).toHaveTextContent(/isn't a team I know/)
+    expect(alert).toHaveTextContent(/did you mean/i)
+    expect(alert).not.toHaveTextContent(/more than one team/i)
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+    const chip = screen.getByRole('button', { name: 'Texas Tech' })
+    await user.click(chip)
+    expect(onSelectCandidate).toHaveBeenCalledWith('Texas Tech')
+  })
+
   describe('unknown_team (issue #100)', () => {
     it('renders a single not-found state naming the season and league, with nothing to pick', () => {
       render(

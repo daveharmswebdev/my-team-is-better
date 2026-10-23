@@ -65,9 +65,10 @@ function rankTeam(team: TeamDetail, foldedQuery: string): number {
  *
  * **This is deliberately stricter than the API, and must not be "fixed" to
  * agree with it.** `cfb_strength.evidence.proof.resolve_team` also matches
- * by substring in either direction and by fuzzy match at 0.6, so names this
- * rejects -- "Alabma", "Ohio ST" -- do resolve server-side and return a
- * normal verdict. That divergence is harmless in this direction *because
+ * by substring in either direction and by fuzzy match (since #123 a confident
+ * match resolves and a weaker one >= 0.6 comes back as a "did you mean"), so
+ * names this rejects -- "Alabma", "Ohio ST" -- do resolve server-side and
+ * return a normal verdict or a pick. That divergence is harmless in this direction *because
  * the flag never blocks and never disables submit*: the worst case is a
  * notice next to a value that then submits fine. Loosening this to match
  * `resolve_team` would silently stop flagging genuinely out-of-scope values,

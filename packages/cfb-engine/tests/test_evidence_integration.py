@@ -37,6 +37,7 @@ from cfb_strength.contracts import (
     UnknownYearError,
 )
 from cfb_strength.db.connection import ensure_schema
+from cfb_strength.evidence import proof
 from cfb_strength.evidence.proof import (
     build_comparison,
     build_team_case,
@@ -368,6 +369,172 @@ def test_ambiguous_team_error_never_carries_empty_candidates(
     # Without this sentinel the sweep silently degrades to a no-op if the
     # fixture is ever regenerated thinner (mirrors the colocated unit twin).
     assert raised_at_least_one, "expected at least one genuinely ambiguous query in the sweep"
+
+
+# ---------------------------------------------------------------------------
+# issue #123 -- the fuzzy stage never silently turns an unknown name into a
+# different real team
+# ---------------------------------------------------------------------------
+
+
+def test_invented_name_with_one_weak_lookalike_asks_instead_of_resolving(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Zzyzx Tech" scores exactly 0.6 against "Texas Tech" and nothing else
+    reaches 0.6. Before #123 that lone weak match resolved silently; now it
+    is a "did you mean Texas Tech?" -- a one-candidate AmbiguousTeamError."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Zzyzx Tech", method="keener")
+    assert exc_info.value.query == "Zzyzx Tech"
+    assert exc_info.value.candidates == ["Texas Tech"]
+
+
+@pytest.mark.parametrize("query", ["Alabma", "alabma", "ALABMA"])
+def test_a_real_typo_resolves_in_any_case(rated_conn: sqlite3.Connection, query: str) -> None:
+    """The fuzzy score includes the lowercased ratio: "alabma" scores 0.9231
+    against "alabama" whatever the caller's casing."""
+    alabama = resolve_team(rated_conn, 2005, "Alabama", method="keener")
+    assert resolve_team(rated_conn, 2005, query, method="keener") == alabama
+
+
+def test_invented_name_with_several_weak_lookalikes_asks(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Qwerty State" scores 0.727 against "kent state" and lower against
+    several other "... State" schools: nothing reaches 0.8, so it asks."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Qwerty State", method="keener")
+    assert "Kent State" in exc_info.value.candidates
+    assert len(exc_info.value.candidates) > 1
+
+
+def test_invented_name_with_no_lookalike_is_unknown(rated_conn: sqlite3.Connection) -> None:
+    with pytest.raises(UnknownTeamError):
+        resolve_team(rated_conn, 2005, "Nonexistent U", method="keener")
+
+
+def test_fuzzy_resolve_cutoff_is_0_8() -> None:
+    assert proof.FUZZY_RESOLVE_CUTOFF == 0.8
+    assert proof.FUZZY_MATCH_CUTOFF == 0.6
+
+
+def test_lone_fuzzy_match_just_under_the_resolve_cutoff_asks(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Clrdo" scores 0.7692 against "colorado" and nothing else in the 2005
+    rated set reaches 0.6: a single candidate under 0.8 asks."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Clrdo", method="keener")
+    assert exc_info.value.candidates == ["Colorado"]
+
+
+def test_lone_fuzzy_match_at_the_resolve_cutoff_resolves(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Wscnsn" scores exactly 0.8 against "wisconsin" and nothing else
+    reaches 0.6: the bar is inclusive, so it resolves."""
+    wisconsin = resolve_team(rated_conn, 2005, "Wisconsin", method="keener")
+    assert resolve_team(rated_conn, 2005, "Wscnsn", method="keener") == wisconsin
+
+
+def test_strong_fuzzy_match_resolves_despite_weaker_candidates(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Mchgan" scores 0.857 against "michigan" and 0.6 against "michigan
+    state": one name at >= 0.8 and no other one there still resolves."""
+    michigan = resolve_team(rated_conn, 2005, "Michigan", method="keener")
+    assert resolve_team(rated_conn, 2005, "Mchgan", method="keener") == michigan
+
+
+def test_known_but_unrated_school_is_unknown_not_a_lookalike(
+    regression_conn: sqlite3.Connection,
+) -> None:
+    """ "North Dakota State" is in `teams` but has no 2019 keener rating in
+    the regression fixture. Before #123 the fuzzy stage resolved it to
+    Colorado State; an exact name match on an unrated team of this sport is
+    UnknownTeamError, before any looser stage runs."""
+    compute_and_store(regression_conn, 2019, "keener")
+    with pytest.raises(UnknownTeamError) as exc_info:
+        resolve_team(regression_conn, 2019, "North Dakota State", method="keener")
+    assert exc_info.value.query == "North Dakota State"
+    assert exc_info.value.year == 2019
+    assert exc_info.value.sport == "cfb"
+
+
+def test_known_school_whose_rating_row_is_missing_is_unknown(
+    regression_conn: sqlite3.Connection,
+) -> None:
+    """With USC's 2004 keener row gone, "USC" (and "usc") used to fuzzy-match
+    UCF. A known school without a rating that season is UnknownTeamError."""
+    compute_and_store(regression_conn, 2004, "keener")
+    usc_id = resolve_team(regression_conn, 2004, "USC", method="keener")
+    regression_conn.execute(
+        "DELETE FROM rating_breakdowns WHERE year = 2004 AND method = 'keener' "
+        "AND sport = 'cfb' AND team_id = ?",
+        (usc_id,),
+    )
+    regression_conn.execute(
+        "DELETE FROM ratings WHERE year = 2004 AND method = 'keener' "
+        "AND sport = 'cfb' AND team_id = ?",
+        (usc_id,),
+    )
+    for query in ("USC", "usc", "  USC "):
+        with pytest.raises(UnknownTeamError):
+            resolve_team(regression_conn, 2004, query, method="keener")
+
+
+def test_fuzzy_runner_up_cutoff_is_0_75() -> None:
+    assert proof.FUZZY_RUNNER_UP_CUTOFF == 0.75
+
+
+def test_typo_that_scores_well_only_case_sensitively_still_resolves(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Maimi" scores 0.8 against "Miami" case-sensitively but only 0.6 once
+    both are lowercased (difflib's greedy longest block differs on
+    "maimi"/"miami"). A name scores the better of the two, so the typo
+    resolves; lowercase-only scoring made it UnknownTeamError (#123 round 2)."""
+    miami = resolve_team(rated_conn, 2005, "Miami", method="keener")
+    assert resolve_team(rated_conn, 2005, "Maimi", method="keener") == miami
+
+
+def test_all_lowercase_typo_that_scores_weakly_asks(rated_conn: sqlite3.Connection) -> None:
+    """ "maimi" scores 0.6 against "Miami" as typed (0.4 lowercased) and
+    nothing else reaches 0.6: a one-candidate "did you mean Miami?", where
+    lowercase-only scoring made it UnknownTeamError."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "maimi", method="keener")
+    assert exc_info.value.candidates == ["Miami"]
+
+
+def test_strong_top_match_with_a_close_runner_up_asks(
+    regression_conn: sqlite3.Connection,
+) -> None:
+    """ "TUSA" (2013) scores 0.889 against Tulsa but 0.75 against UTSA: a
+    runner-up at >= FUZZY_RUNNER_UP_CUTOFF means the top name isn't a safe
+    guess, so it asks with both listed."""
+    compute_and_store(regression_conn, 2013, "keener")
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(regression_conn, 2013, "TUSA", method="keener")
+    assert "Tulsa" in exc_info.value.candidates
+    assert "UTSA" in exc_info.value.candidates
+    assert exc_info.value.candidates == sorted(exc_info.value.candidates)
+
+
+def test_runner_up_at_the_cutoff_asks(rated_conn: sqlite3.Connection) -> None:
+    """ "Olkahoma State" scores 0.9286 against Oklahoma State and exactly
+    0.75 against Ohio State: the runner-up bar is inclusive, so it asks."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Olkahoma State", method="keener")
+    assert "Oklahoma State" in exc_info.value.candidates
+    assert "Ohio State" in exc_info.value.candidates
+
+
+def test_runner_up_just_under_the_cutoff_resolves(rated_conn: sqlite3.Connection) -> None:
+    """ "Oklaoma State" scores 0.963 against Oklahoma State and 0.7407
+    against Colorado State, the best of the rest: it resolves."""
+    oklahoma_state = resolve_team(rated_conn, 2005, "Oklahoma State", method="keener")
+    assert resolve_team(rated_conn, 2005, "Oklaoma State", method="keener") == oklahoma_state
 
 
 # ---------------------------------------------------------------------------

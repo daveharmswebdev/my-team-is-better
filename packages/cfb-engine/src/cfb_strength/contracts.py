@@ -1348,13 +1348,21 @@ class ComparisonResult:
 
 
 class AmbiguousTeamError(ValueError):
-    """Raised by evidence.resolve_team when a query matches >1 team ambiguously.
+    """Raised by evidence.resolve_team when a query has no unique, confident
+    match: more than one team matches, one does but too weakly to resolve, or
+    the best match has a runner-up too close behind it ("TUSA": Tulsa 0.889,
+    UTSA 0.75).
 
     `candidates` is always non-empty -- "too many matches", never "none". A
     zero-match query is `UnknownTeamError` below; the two were conflated
     until issue #100, which produced an `ambiguous_team` payload carrying an
     empty candidate list and therefore a "did you mean:" prompt with nothing
     under it.
+
+    Since issue #123 a single candidate is legal too: a fuzzy match strong
+    enough to suggest (>= 0.6) but too weak to resolve silently (< 0.8) asks
+    "did you mean X?" rather than redirecting the query, which is how
+    "Zzyzx Tech" stopped becoming Texas Tech.
     """
 
     def __init__(self, query: str, candidates: list[str]):
@@ -1373,7 +1381,11 @@ class UnknownTeamError(ValueError):
     league entirely ("Texas" under `sport="nfl"`), or it belongs to this
     league but has no rating row for this particular season (an FCS school
     in a year it wasn't rated). `UnknownYearError` already covers the third
-    case -- the season has no ratings at all -- and is raised first.
+    case -- the season has no ratings at all -- and is raised first. Since
+    issue #123 a query that names a team of this league exactly, but one
+    without a rating row for the season, raises this before any substring or
+    fuzzy matching: "North Dakota State" used to become Colorado State, and
+    an unrated "USC" became UCF.
 
     Only ever raised for a team the caller asked to *look up* -- a team-case
     `team`, or a comparison's `team_a`/`team_b`. A request's `user_team` is
@@ -1381,11 +1393,14 @@ class UnknownTeamError(ValueError):
 
     **Deliberately carries no suggestion list.** The first cut of #100 added
     one, built from a looser `difflib` pass over the rated names, and it
-    could not work: `resolve_team`'s strict stage already resolves anything
-    scoring >= 0.6, so this branch is reached only when *nothing* does, and
-    the remaining [cutoff, 0.6) window holds noise rather than near-misses.
-    Real typos never arrive here at all ("Alabma"/"Alabama" scores 0.9231
-    and resolves upstream). Worse, no cutoff separates signal from noise:
+    could not work: `resolve_team`'s fuzzy stage already resolves or offers
+    (as `AmbiguousTeamError`) anything scoring >= 0.6 (the better of its
+    case-sensitive and lowercased difflib ratios), so this branch is
+    reached only when *nothing* does (or the query names an unrated team
+    exactly), and the remaining [cutoff, 0.6) window holds noise rather than
+    near-misses. Real typos never arrive here at all ("Alabma"/"Alabama"
+    scores 0.9231 and resolves upstream). Worse, no cutoff separates signal
+    from noise:
     "Gonzaga"/"Georgia" scores 0.5714 and outranks "Texas"/"Houston Texans"
     at 0.5263 -- and the latter was itself a bad suggestion, since someone
     typing "Texas" under sport="nfl" wants the other league, not the Texans.

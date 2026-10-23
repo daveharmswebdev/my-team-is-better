@@ -472,6 +472,31 @@ def test_zero_match_query_with_no_lookalike_at_all_is_unknown_team_error(
     assert exc_info.value.sport == "cfb"
 
 
+def test_known_but_unrated_team_is_unknown_before_the_substring_stage(
+    conn: sqlite3.Connection,
+) -> None:
+    """Issue #123: "Bravo Tech U" is a CFB team in `teams` with no rating row.
+    Its name contains the rated "Bravo Tech", so the substring stage would
+    silently answer with that other school; an exact (case-insensitive) match
+    on a known-but-unrated team of this sport is UnknownTeamError first."""
+    _insert_team(conn, 5, "Bravo Tech U", classification="fcs", sport="cfb")
+    for query in ("Bravo Tech U", "bravo tech u", "  BRAVO TECH U "):
+        with pytest.raises(UnknownTeamError) as exc_info:
+            resolve_team(conn, YEAR, query, method=METHOD, sport="cfb")
+        assert exc_info.value.sport == "cfb"
+    # The rated name itself still resolves.
+    assert resolve_team(conn, YEAR, "Bravo Tech", method=METHOD, sport="cfb") == 2
+
+
+def test_unrated_team_of_another_sport_does_not_trigger_the_guard(
+    conn: sqlite3.Connection,
+) -> None:
+    """An unrated NFL "Bravo Tech U" says nothing about the CFB pool: the CFB
+    query still reaches the substring stage and finds the rated Bravo Tech."""
+    _insert_team(conn, 107, "Bravo Tech U", classification=None, sport="nfl")
+    assert resolve_team(conn, YEAR, "Bravo Tech U", method=METHOD, sport="cfb") == 2
+
+
 def test_unknown_team_propagates_through_build_team_case_and_comparison(
     conn: sqlite3.Connection,
 ) -> None:

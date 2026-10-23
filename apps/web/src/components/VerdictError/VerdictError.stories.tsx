@@ -44,6 +44,24 @@ export const AmbiguousTeam: Story = {
 }
 
 /**
+ * 422 `ambiguous_team` with a single candidate (issue #123): the name matched
+ * one team too weakly to resolve silently. Reads as a suggestion, never as
+ * "more than one team".
+ */
+export const AmbiguousTeamSingleCandidate: Story = {
+  args: {
+    state: {
+      kind: 'ambiguous_team',
+      body: {
+        error: 'ambiguous_team',
+        query: 'Zzyzx Tech',
+        candidates: ['Texas Tech'],
+      },
+    },
+  },
+}
+
+/**
  * 404 `unknown_team` (issue #100): the name resolved to nothing rated in
  * that exact season and league. A single not-found render -- no correction
  * pills, by contract. It names the scope that came up empty and what to
