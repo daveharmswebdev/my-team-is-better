@@ -314,3 +314,83 @@ export const EscapeClosesARatingPanelFirst: Story = {
     await expect(args.onClose).toHaveBeenCalledTimes(1)
   },
 }
+
+function touchMatchMediaStub(query: string): MediaQueryList {
+  return {
+    matches: true,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  } as MediaQueryList
+}
+
+/**
+ * Issue #216 on a touch screen: a tap opens the rating's panel as a modal of
+ * its own, stacked above the verdict. Tab stays inside the panel, and Escape
+ * closes only the panel, returning focus to the rating.
+ */
+export const TouchRatingPanelIsModal: Story = {
+  args: EscapeClosesARatingPanelFirst.args,
+  decorators: [
+    // Forces a coarse/touch pointer for the initial render, as
+    // RatingDisclosureShell's TouchMode story does.
+    (Story) => {
+      const original = window.matchMedia
+      window.matchMedia = touchMatchMediaStub
+      const rendered = Story()
+      setTimeout(() => {
+        window.matchMedia = original
+      }, 0)
+      return rendered
+    },
+  ],
+  play: async ({ canvasElement, args }) => {
+    const verdict = within(canvasElement).getByRole('dialog', {
+      name: 'The verdict',
+    })
+    const trigger = within(verdict).getByRole('button', { name: '1,661' })
+    // A tap that never focuses the trigger, as on Safari and iOS.
+    trigger.blur()
+    trigger.click()
+    const panel = await within(verdict).findByRole('dialog', {
+      name: 'Texas Elo rating, game by game',
+    })
+    const close = within(panel).getByRole('button', { name: /close/i })
+    await waitFor(() => expect(close).toHaveFocus())
+    await expect(panel.matches(':modal')).toBe(true)
+
+    await userEvent.tab({ shift: true })
+    await expect(panel.contains(document.activeElement)).toBe(true)
+    await expect(document.activeElement).not.toBe(close)
+    await userEvent.tab()
+    await expect(close).toHaveFocus()
+
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(
+        within(verdict).queryByRole('dialog', {
+          name: 'Texas Elo rating, game by game',
+        }),
+      ).toBeNull(),
+    )
+    await expect(args.onClose).not.toHaveBeenCalled()
+    await expect(verdict).toHaveAttribute('open')
+    // Back on the rating, not on the verdict's close button or the page.
+    await expect(trigger).toHaveFocus()
+
+    trigger.blur()
+    trigger.click()
+    const reopened = await within(verdict).findByRole('dialog', {
+      name: 'Texas Elo rating, game by game',
+    })
+    await userEvent.click(
+      within(reopened).getByRole('button', { name: /close/i }),
+    )
+    await expect(args.onClose).not.toHaveBeenCalled()
+    await expect(trigger).toHaveFocus()
+  },
+}
