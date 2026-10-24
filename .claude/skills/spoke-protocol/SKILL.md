@@ -101,6 +101,9 @@ shape:
 }
 ```
 
+When you were briefed by a pointer ("your brief is in …"), read that whole file first:
+it is your brief (#400).
+
 If the hook says the return doesn't validate, don't redo the work: fix exactly what it
 lists and send the whole block again. You get two retries. If the message after them is
 still invalid, the coordinator records the round as `malformed-return`.

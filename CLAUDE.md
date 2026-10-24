@@ -125,13 +125,14 @@ has five independent modules behind `import-linter` contracts.
 | `evidence-agent` | `cfb_strength/evidence/` | ingest/, ratings/, players/, mcp_server/, contracts.py, db/ |
 | `players-agent` | `cfb_strength/players/` | ingest/, ratings/, evidence/, mcp_server/, contracts.py, db/ |
 | `mcp-agent` | `cfb_strength/mcp_server/` + its integration test | everything else |
+| `hooks-agent` | `.claude/hooks/` (process scripts + their tests) | skills, CLAUDE.md, ownership map, agent definitions, `settings.json`, `.github/`, app and engine code |
 | `validator` | nothing (read-only) | everything — golden dataset + persona smoke eval |
 | `reviewer` | nothing (read-only) | everything — independent review of a diff and its seams |
 | `prompt-engineer` | nothing (read-only) | everything — reviews model-read text as prompts and compares variants by eval score (#327) |
 
 The exact globs live in `.claude/ownership.json`, which the edit-scope hook and the
-brief validator read. Coordinator-owned: everything no agent owns (this file, `.claude/`,
-`.github/`, `docs/`, `render.yaml`, `contracts.py`, `db/`, `cli.py`, `config.py`,
+brief validator read. Coordinator-owned: everything no agent owns (this file, the rest
+of `.claude/`, `.github/`, `docs/`, `render.yaml`, `contracts.py`, `db/`, `cli.py`, `config.py`,
 `credit_math.py`). `.claude/hooks/tests/test_ownership.py` keeps this table, the JSON and
 `.claude/agents/*.md` in step, so an agent can't exist in one place and be missing from
 another (#105).
@@ -205,6 +206,7 @@ this architecture.
 | Persona *voice/tone quality* ("does this read as a good bar-stool guy?") | **coordinator directly** — a continuous, subjective, iterative judgment, not a scoped task | all spokes, until there is a specific, scoped prompt change to delegate |
 | A prompt-facing change (persona prompt, tool schema descriptions, retry feedback, MCP tool descriptions), or a narrator misbehavior that keeps recurring | `prompt-engineer` for scores and proposed diffs; the coordinator makes the voice call, then `api-agent` / `mcp-agent` implements | reviewer, validator (they gate a diff, not a prompt's quality) |
 | Why a ranking disagrees with known outcomes | **coordinator directly** | ratings-agent, until there's a specific hypothesis to implement |
+| A code change in `.claude/hooks/` | `hooks-agent`, always in a worktree, with a `gate` (checked); the coordinator keeps the skills and settings that call it | — |
 | Typo, rename, one-line fix, config change | **nobody** — coordinator does it inline | all |
 | A contract (shared type/schema) needs a new field | coordinator amends and commits it, then re-delegates every affected spoke | — |
 

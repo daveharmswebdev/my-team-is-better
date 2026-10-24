@@ -84,12 +84,20 @@ Add the attribution lines your session's instructions give you.
   work is already in `origin/main` and that are more than a day old. It archives each
   branch tip under `refs/archive/worktree-agent/` first. This round's own spokes are too
   new, so a later `/ship` collects them.
-- **Verify the deploys.** Don't assume auto-deploy fired; it has stalled before. Use the
-  Render MCP (`list_services`, then `list_deploys`) for `my-team-is-better-api` and
-  `my-team-is-better-web`:
-  - `render.yaml` in the diff: the API deploys with trigger `blueprint_sync`.
-  - `render.yaml` not in the diff: the API deploys with trigger `new_commit`.
+- **Verify the deploys.** Don't assume auto-deploy fired; it has stalled before. Work
+  out first which services should deploy, then check only those, with the Render MCP's
+  `list_deploys`: api `srv-dahkq61594qs73fe0mrg`, web `srv-dahkq61594qs73fe0mo0`, so no
+  `list_services` call is needed:
+  - The API deploys only when the diff touches its `buildFilter` (`apps/api/**`,
+    `packages/cfb-engine/**`, `pyproject.toml`, `uv.lock`) or `render.yaml`. With
+    `render.yaml` in the diff the trigger is `blueprint_sync`, otherwise `new_commit`.
   - The web service deploys only if `apps/web/` changed (`rootDir: apps/web`).
+  - Neither: nothing deploys (a `.claude/`- or `docs/`-only merge). Say so on the PR and
+    skip the calls.
+  - Use `limit: 1` and compare only the commit id and `status`. Each row carries the
+    full squash message, 2–3k tokens (#400). With `render.yaml` in the diff use
+    `limit: 3`, because a harmless same-commit `build_failed` can sit beside the live
+    one (#297).
   - Nothing within about 10 minutes when one was expected: trigger it manually and note
     it on the PR.
 - Run any "after deploy" check the description promised, and report the result on the

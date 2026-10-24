@@ -4,14 +4,17 @@
 # ///
 """The delegation contract, checked by code.
 
-    uv run --script .claude/hooks/delegation.py render-brief <brief.json>
+    uv run --script .claude/hooks/delegation.py render-brief <brief.json> [--out <prompt.md>]
     uv run --script .claude/hooks/delegation.py validate-brief <brief.json>
     uv run --script .claude/hooks/delegation.py validate-return --agent <name> <file>
+    uv run --script .claude/hooks/delegation.py validate-return --agent <name> --transcript <out>
     uv run --script .claude/hooks/delegation.py pre-handback     (PreToolUse hook, stdin)
     uv run --script .claude/hooks/delegation.py subagent-stop    (SubagentStop hook, stdin)
 
 `render-brief` validates a brief against brief.schema.json and the ownership map, then
-prints the prompt to hand to the Agent tool. The two hooks validate a spoke's return
+prints the prompt to hand to the Agent tool. With `--out` it writes that prompt to a file
+and prints only a short pointer to it, so the brief reaches the spoke without passing
+through the coordinator's context twice (#400). The two hooks validate a spoke's return
 against return.schema.json plus the rules a schema can't express, and ask the spoke to
 fix an invalid one, with the errors as feedback, up to MAX_RETURN_RETRIES times.
 `pre-handback` checks a SubagentHandback report before it is delivered and denies an
@@ -42,12 +45,16 @@ __all__ = [
     "load_ownership",
     "pre_handback",
     "render_brief",
+    "render_pointer",
     "subagent_stop",
     "validate_brief",
     "validate_return",
 ]
 
 MAX_RETURN_RETRIES = 2
+# Agents whose every brief must carry a `gate`: hooks-agent edits the enforcement layer
+# itself, so a round without a threat model and stopping rule is mis-scoped (#400).
+GATED_AGENTS = frozenset({"hooks-agent"})
 HANDBACK_TOOL = "SubagentHandback"
 SCHEMAS_DIR = CLAUDE_DIR / "schemas"
 
@@ -200,6 +207,11 @@ def validate_brief(data: object, ownership: Ownership) -> list[str]:
                     f"scope/{index}: {scope!r} is outside {agent}'s ownership "
                     f"({', '.join(entry.owns)}). Split the round, or route that part to its owner"
                 )
+    if agent in GATED_AGENTS and data["gate"] is None:
+        errors.append(
+            f"gate: every {agent} round changes the enforcement layer itself, so it needs a "
+            "gate (threat model, blocking definition, max_review_rounds)"
+        )
     if Path(data["scratch_dir"].rstrip("/")).name == "scratchpad":
         errors.append(
             "scratch_dir: give this spoke its own subdirectory (e.g. "
@@ -283,7 +295,22 @@ def render_brief(brief: dict[str, Any], ownership: Ownership | None = None) -> s
     return "\n\n".join(sections) + "\n"
 
 
-def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
+def render_pointer(brief: dict[str, Any], prompt_path: Path) -> str:
+    """The Agent prompt when the brief itself is on disk: who it's for, and where."""
+    who = brief["agent"]
+    if brief.get("round"):
+        who += f", round {brief['round']}"
+    if brief["issue"] is not None:
+        who += f", issue #{brief['issue']}"
+    return (
+        f"Your brief ({who}) is in `{prompt_path}`. Read that whole file with the Read "
+        "tool before doing anything else: it is your complete task (objective, contract, "
+        "scope, rubric, base commit, scratch dir and the return contract), and nothing in "
+        "this message replaces it.\n"
+    )
+
+
+def _final_output(payload: dict[str, Any], *, this_round: bool = False) -> tuple[str, bool]:
     """The spoke's latest output, and whether it was a delivered SubagentHandback report.
 
     A spoke that hands back through the SubagentHandback tool ends with no closing
@@ -291,6 +318,10 @@ def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
     input in the transcript does (#305). A handback whose tool result is an error
     was denied by `pre_handback` and never delivered. Falls back to
     `last_assistant_message` when the transcript can't be read.
+
+    With `this_round`, the walk stops at the latest prompt (a user entry that is text,
+    not tool results): a spoke resumed for a later round that hasn't reported yet has
+    no output, rather than the previous round's report (#400).
     """
     fallback = payload.get("last_assistant_message")
     fallback = fallback if isinstance(fallback, str) else ""
@@ -311,6 +342,11 @@ def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
         content = message.get("content")
         blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
         if entry.get("type") == "user":
+            if this_round and (
+                isinstance(content, str)
+                or (blocks and not any(b.get("type") == "tool_result" for b in blocks))
+            ):
+                return "", False
             failed_calls |= {
                 str(b.get("tool_use_id"))
                 for b in blocks
@@ -462,9 +498,20 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("render-brief", "validate-brief"):
         commands.add_parser(name).add_argument("brief")
+    commands.choices["render-brief"].add_argument(
+        "--out", type=Path, help="write the prompt here and print only a pointer to it"
+    )
     validate = commands.add_parser("validate-return")
     validate.add_argument("--agent", required=True)
-    validate.add_argument("path", help="a .json return, or a message with one ```json block")
+    source = validate.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "path", nargs="?", help="a .json return, a message with one ```json block, or -"
+    )
+    source.add_argument(
+        "--transcript",
+        type=Path,
+        help="a spoke's task output file: validates the report it delivered (#400)",
+    )
     commands.add_parser("subagent-stop")
     commands.add_parser("pre-handback")
     args = parser.parse_args(argv)
@@ -490,10 +537,24 @@ def main(argv: list[str] | None = None) -> int:
         if brief_errors:
             print("\n".join(brief_errors), file=sys.stderr)
             return 1
-        print(render_brief(brief, ownership) if args.command == "render-brief" else "brief ok")
+        if args.command == "validate-brief":
+            print("brief ok")
+        elif args.out is None:
+            print(render_brief(brief, ownership))
+        else:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(render_brief(brief, ownership))
+            print(render_pointer(brief, args.out.resolve()), end="")
         return 0
 
-    text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
+    missing = args.transcript if args.transcript is not None else Path(args.path)
+    if args.path != "-" and not missing.is_file():
+        print(f"validate-return: no such file: {missing}", file=sys.stderr)
+        return 2
+    if args.transcript is not None:
+        text, _ = _final_output({"agent_transcript_path": str(args.transcript)}, this_round=True)
+    else:
+        text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
     errors: list[str] = []
     if text.lstrip().startswith("{"):
         data: object = json.loads(text)
@@ -508,7 +569,8 @@ def main(argv: list[str] | None = None) -> int:
     if check.errors:
         print("\n".join(check.errors), file=sys.stderr)
         return 1
-    print("return ok")
+    assert isinstance(data, dict)  # validate_return reports a non-object as an error
+    print(f"return ok: {data['agent']} status {data['status']}, head {data.get('head_sha')}")
     return 0
 
 
