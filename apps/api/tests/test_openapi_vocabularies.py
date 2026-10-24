@@ -447,3 +447,32 @@ def test_every_vocabulary_enum_in_the_schema_is_walked() -> None:
         "them; add the property to ALIASED_PROPERTIES:\n  " + "\n  ".join(unwalked)
     )
     assert stale == [], f"stale UNWALKED_ENUMS entries (gone, or now walked): {stale}"
+
+
+# ---------------------------------------------------------------------------
+# 4. the committed file is current
+# ---------------------------------------------------------------------------
+
+
+def test_committed_vocabulary_file_matches_the_live_schema() -> None:
+    from api.openapi_vocabularies import extract_vocabularies, render
+
+    expected = render(extract_vocabularies(_live_openapi()))
+    committed_bytes = VOCABULARY_FILE.read_bytes() if VOCABULARY_FILE.exists() else b"<missing>"
+    committed = committed_bytes.decode(errors="replace")
+
+    assert committed_bytes == expected.encode(), (
+        f"{VOCABULARY_FILE.name} is stale: it is what apps/web is checked against, and it "
+        f"no longer matches what the API publishes. Regenerate it with:\n\n"
+        f"    {REGENERATE_COMMAND}\n\n"
+        f"committed:\n{committed}\nlive:\n{expected}"
+    )
+
+
+def test_rendered_format_is_fixed() -> None:
+    from api.openapi_vocabularies import render
+
+    assert render({"sport": ["cfb", "nfl"], "method": ["keener", "elo"]}) == (
+        '{\n  "method": [\n    "keener",\n    "elo"\n  ],\n'
+        '  "sport": [\n    "cfb",\n    "nfl"\n  ]\n}\n'
+    )
