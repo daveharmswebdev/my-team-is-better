@@ -208,6 +208,8 @@ const TEAM_CASE: TeamCaseEnvelope = {
     contested: false,
     cached: true,
   },
+  // Issue #155: where Elo ranks Texas 2005, as the fixture db has it.
+  other_method_ranks: [{ method: 'elo', rank: 1 }],
 }
 
 const CHAMPION: TeamCaseEnvelope = {
@@ -228,6 +230,7 @@ const TEAM_CASE_ELO: TeamCaseEnvelope = {
     elo_ledger: TEXAS_ELO.elo_ledger,
   },
   narration: TEAM_CASE.narration,
+  other_method_ranks: [{ method: 'keener', rank: 1 }],
 }
 
 function summary(
@@ -281,6 +284,8 @@ const COMPARE_ELO: ComparisonEnvelope = {
     contested: false,
     cached: true,
   },
+  team_a_other_method_ranks: [{ method: 'keener', rank: 1 }],
+  team_b_other_method_ranks: [{ method: 'keener', rank: 2 }],
 }
 
 const COMPARE_KEENER: ComparisonEnvelope = {
@@ -305,6 +310,8 @@ const COMPARE_KEENER: ComparisonEnvelope = {
     },
     rating_diff: TEXAS_2005.rating - 0.0171,
   },
+  team_a_other_method_ranks: [{ method: 'elo', rank: 1 }],
+  team_b_other_method_ranks: [{ method: 'elo', rank: 2 }],
 }
 
 /** The verdict modal, once its answer is on screen. */

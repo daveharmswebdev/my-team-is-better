@@ -1,7 +1,8 @@
-import type { VerdictCardState } from '../../lib/api/types'
+import type { Method, VerdictCardState } from '../../lib/api/types'
 import { isTeamCaseEnvelope } from '../../lib/api/types'
 import { METHOD_RADIO_LABEL } from '../../lib/methods'
 import type { HeadingLevel } from '../Heading/headingLevel'
+import { OtherEngineRanks } from '../OtherEngineRanks/OtherEngineRanks'
 import { ComparisonReceipts } from '../EvidenceReceipts/ComparisonReceipts'
 import { TeamCaseReceipts } from '../EvidenceReceipts/TeamCaseReceipts'
 import { ShareButton } from '../ShareButton/ShareButton'
@@ -14,6 +15,11 @@ export interface VerdictCardProps {
   onSelectYear?: (year: number) => void
   /** Re-submits the same question with the exact resolved team name (ambiguous_team only). */
   onSelectCandidate?: (candidate: string) => void
+  /**
+   * Re-submits the same question under another engine (issue #155), from
+   * the other engines' ranks line on a success card.
+   */
+  onSelectMethod?: (method: Method) => void
   /**
    * The absolute share link for the verdict on screen (issue #184). When set,
    * a success card ends with a "Share this verdict" button; loading and error
@@ -40,6 +46,7 @@ export function VerdictCard({
   state,
   onSelectYear,
   onSelectCandidate,
+  onSelectMethod,
   shareUrl,
   headingLevel = 2,
 }: VerdictCardProps) {
@@ -81,6 +88,25 @@ export function VerdictCard({
       <p className={styles.engine}>
         {`Engine: ${METHOD_RADIO_LABEL[envelope.evidence.method]}`}
       </p>
+      {/* Issue #155: right under the answering engine's name, and so just
+          above its rank in the receipts. */}
+      <OtherEngineRanks
+        rows={
+          isTeamCaseEnvelope(envelope)
+            ? [{ ranks: envelope.other_method_ranks }]
+            : [
+                {
+                  teamName: envelope.evidence.team_a.team_name,
+                  ranks: envelope.team_a_other_method_ranks,
+                },
+                {
+                  teamName: envelope.evidence.team_b.team_name,
+                  ranks: envelope.team_b_other_method_ranks,
+                },
+              ]
+        }
+        onSelectMethod={onSelectMethod}
+      />
       {isTeamCaseEnvelope(envelope) ? (
         <TeamCaseReceipts
           evidence={envelope.evidence}

@@ -110,7 +110,51 @@ test('asking Elo for the 2005 champion shows Texas’s Elo rating game by game, 
   expect(steps).toHaveLength(GAMES_2005)
   expect(steps.filter((work) => !roundsToPrintedShift(work))).toEqual([])
 
-  await expect(verdict).not.toContainText('Keener')
+  // Keener answered nothing here. Its name appears only in the other
+  // engines' ranks line (issue #155), never as the engine that answered.
+  await expect(verdict.getByText(/^Engine: /)).toHaveText(
+    'Engine: Elo (second opinion)',
+  )
+  await expect(verdict.getByText('Keener (default): #1')).toBeVisible()
+})
+
+// Issue #155: a verdict says where the other displayed engine ranks the same
+// team, and re-asks the question under it in place. The fixture has Penn
+// State 2005 at Keener #3 and Elo #6, and no `elo_career` rows.
+test('a Keener verdict on Penn State 2005 shows Elo’s #6, and asking Elo lands an Elo verdict with the Engine radio on Elo', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page
+    .getByLabel('What do you want to know?')
+    .selectOption({ label: 'How good was a team in a year?' })
+  await fillYear(page, '2005')
+  await pickTeam(page, 'Team', 'Penn State')
+  await page.getByRole('button', { name: 'Get the verdict' }).click()
+
+  const verdict = verdictIn(page)
+  await expect(verdict.getByText(/^Engine: /)).toHaveText(
+    'Engine: Keener (default)',
+  )
+  await expect(verdict).toContainText('Rank #3')
+  await expect(verdict.getByText('Elo (second opinion): #6')).toBeVisible()
+  await expect(verdict).not.toContainText('career')
+
+  await verdict
+    .getByRole('button', { name: 'Ask Elo (second opinion)' })
+    .click()
+
+  await expect(verdict.getByText(/^Engine: /)).toHaveText(
+    'Engine: Elo (second opinion)',
+  )
+  await expect(verdict).toContainText('Rank #6')
+  await expect(verdict.getByText('Keener (default): #3')).toBeVisible()
+  await expect(
+    page
+      .getByRole('group', { name: 'Engine' })
+      .getByRole('radio', { name: 'Elo (second opinion)' }),
+  ).toBeChecked()
+  await expect(page).toHaveURL(/engine=elo/)
 })
 
 test('an Elo comparison of Texas and USC in 2005 shows each team’s own ledger, every row within a tenth', async ({

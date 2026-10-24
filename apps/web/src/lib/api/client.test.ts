@@ -110,6 +110,10 @@ describe('api client', () => {
         worst_loss: null,
       },
       narration: { text: 'Texas.', contested: false, cached: false },
+      other_method_ranks: [
+        { method: 'elo', rank: 1 },
+        { method: 'elo_career', rank: 2 },
+      ],
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, envelope))
     vi.stubGlobal('fetch', fetchMock)

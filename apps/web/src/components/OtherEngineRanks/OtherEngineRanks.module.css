@@ -1,0 +1,37 @@
+/* Issue #155: the other engines' ranks -- quiet attribution text in the
+   register of VerdictCard's "Engine: ..." line, not a callout. Nothing here
+   varies with the ranks: the engines have no mandate to agree. */
+.others {
+  margin: var(--sp-1) 0 0;
+}
+
+.line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+  font-family: var(--font-label);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+
+/* A text-weight control: underlined like a link (it reads as one), but a
+   button, since it re-asks the question in place rather than navigating. */
+.ask {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--navy);
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
+.ask:hover {
+  text-decoration-thickness: 2px;
+}

@@ -234,14 +234,35 @@ export interface NarrationOut {
   cached: boolean
 }
 
+/**
+ * Mirrors `MethodRankOut` (issue #155): where one other rating method ranks
+ * a verdict's team that season. Rank only, never a rating -- the methods'
+ * ratings are on different scales.
+ */
+export interface MethodRankOut {
+  method: Method
+  rank: number
+}
+
 export interface TeamCaseEnvelope {
   evidence: TeamCaseOut
   narration: NarrationOut
+  /**
+   * Issue #155: every registered method other than the answering one that
+   * has a ratings row for this team and season, in `METHODS` order. The API
+   * applies no UI policy, so it can include methods apps/web doesn't offer
+   * (`elo_career`); filter to `DISPLAYED_METHODS` before rendering. May be [].
+   */
+  other_method_ranks: MethodRankOut[]
 }
 
 export interface ComparisonEnvelope {
   evidence: ComparisonResultOut
   narration: NarrationOut
+  /** Issue #155: `TeamCaseEnvelope.other_method_ranks`, for `team_a`. */
+  team_a_other_method_ranks: MethodRankOut[]
+  /** Issue #155: `TeamCaseEnvelope.other_method_ranks`, for `team_b`. */
+  team_b_other_method_ranks: MethodRankOut[]
 }
 
 export type VerdictEnvelope = TeamCaseEnvelope | ComparisonEnvelope
