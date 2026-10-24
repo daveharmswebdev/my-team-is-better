@@ -1125,3 +1125,89 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
     expect(document.activeElement).toBe(playerA())
   })
 })
+
+describe('PlayerComparePage: a lone link whose career lookup failed (issue #367)', () => {
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    searchByQuery()
+  })
+
+  const unknownPlayer = () =>
+    new PlayerApiError(404, {
+      error: 'unknown_player',
+      player_id: WARNER,
+      sport: 'nfl',
+    })
+
+  it("shows the narrator's line while the fields hold only the lone link's player", async () => {
+    const user = userEvent.setup()
+    mockedCareer.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+
+    renderPage(`?a=${WARNER}`)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      NETWORK_ERROR_COPY,
+    )
+    expect(playerA()).toHaveValue(`Player #${WARNER}`)
+    expect(compareButton()).toBeDisabled()
+
+    // Typing in B picks nobody: the fields still hold only the lone pick.
+    await user.type(playerB(), 'zz')
+    expect(screen.getByRole('alert')).toHaveTextContent(NETWORK_ERROR_COPY)
+  })
+
+  it('shows the unknown-player line while the fields hold only the lone pick', async () => {
+    mockedCareer.mockRejectedValue(unknownPlayer())
+
+    renderPage(`?a=${WARNER}`)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      PLAYER_NOT_FOUND_COPY,
+    )
+  })
+
+  it("drops the career's network line once a second player is picked: the prompt follows the fields", async () => {
+    const user = userEvent.setup()
+    mockedCareer.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+
+    renderPage(`?a=${WARNER}`)
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      NETWORK_ERROR_COPY,
+    )
+
+    await pick(user, playerB(), 'McNair', /Steve McNair/)
+
+    expect(playerA()).toHaveValue(`Player #${WARNER}`)
+    expect(playerB()).toHaveValue('Steve McNair')
+    expect(compareButton()).toBeEnabled()
+    expect(screen.queryByText(NETWORK_ERROR_COPY)).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByText(PICK_TWO_COPY)).not.toBeInTheDocument()
+  })
+
+  it("drops the career's unknown-player line once a second player is picked", async () => {
+    const user = userEvent.setup()
+    mockedCareer.mockRejectedValue(unknownPlayer())
+
+    renderPage(`?a=${WARNER}`)
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      PLAYER_NOT_FOUND_COPY,
+    )
+
+    await pick(user, playerB(), 'McNair', /Steve McNair/)
+
+    expect(playerB()).toHaveValue('Steve McNair')
+    expect(compareButton()).toBeEnabled()
+    expect(
+      screen.queryByText(PLAYER_NOT_FOUND_COPY, { exact: false }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+})
