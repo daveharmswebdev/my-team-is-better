@@ -575,3 +575,85 @@ def test_stale_database_returns_fixed_stale_body_and_logs_tables(
     assert len(records) == 1, [r.getMessage() for r in caplog.records]
     for table in LEDGER_TABLES:
         assert table in records[0].getMessage()
+
+
+# ---------------------------------------------------------------------------
+# Issue #423: a stale database missing a late-added COLUMN (not just a
+# table) returns the same fixed `stale_database` body from every tool and
+# resource that reads ratings/teams/games -- including the ones that run
+# their own listing query before (or instead of) any evidence call. Before
+# #423, get_rankings and get_champion hit `no such column` in their own
+# queries and returned internal_error, and list_seasons/seasons_resource/
+# teams_resource either did the same or answered from a stale db as if it
+# were current. The drop-a-column recipe mirrors
+# tests/test_evidence_stale_columns.py.
+# ---------------------------------------------------------------------------
+
+STALE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("ratings", "sport"),  # #51: get_rankings, get_champion and the catalog query it
+    ("ratings", "ties"),  # #83: get_rankings selects it
+    ("teams", "sport"),  # #51: teams_resource selects it
+)
+
+STALE_ENTRYPOINTS: tuple[str, ...] = (
+    "get_rankings",
+    "get_champion",
+    "list_seasons",
+    "seasons_resource",
+    "teams_resource",
+    "get_team_season",
+    "compare_teams",
+)
+
+
+def _drop_column(db_path: Path, table: str, column: str) -> None:
+    """Rebuild `table` without `column`, SQLite's documented recipe (its
+    DROP COLUMN can't re-parse schema.sql's commented DDL for every column)."""
+    conn = get_conn(db_path)
+    try:
+        kept = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})")]
+        assert column in kept, f"{table}.{column} is not in the fixture's schema"
+        kept.remove(column)
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute(f"CREATE TABLE {table}_stale AS SELECT {', '.join(kept)} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_stale RENAME TO {table}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.mark.parametrize("entrypoint", STALE_ENTRYPOINTS)
+@pytest.mark.parametrize(("table", "column"), STALE_COLUMNS)
+def test_stale_column_returns_fixed_stale_body_from_every_entrypoint(
+    mcp_fixture_db: Path,
+    caplog: pytest.LogCaptureFixture,
+    table: str,
+    column: str,
+    entrypoint: str,
+) -> None:
+    import cfb_strength.mcp_server.server as server_module
+
+    _drop_column(mcp_fixture_db, table, column)
+    calls = {
+        "get_rankings": lambda: server_module.get_rankings(
+            2005, top_n=5, method="keener", sport="cfb"
+        ),
+        "get_champion": lambda: server_module.get_champion(2005, method="keener", sport="cfb"),
+        "list_seasons": lambda: server_module.list_seasons(),
+        "seasons_resource": lambda: server_module.seasons_resource(),
+        "teams_resource": lambda: server_module.teams_resource(),
+        "get_team_season": lambda: server_module.get_team_season(2005, "Texas"),
+        "compare_teams": lambda: server_module.compare_teams(2005, "Texas", "USC"),
+    }
+    caplog.set_level(logging.ERROR, logger=SERVER_LOGGER)
+
+    result = calls[entrypoint]()
+
+    assert result == {"error": "stale_database", "message": STALE_DATABASE_MESSAGE}, result
+    assert f"{table}.{column}" not in json.dumps(result)
+
+    # The operator gets the missing column's name, once, at error level.
+    records = [r for r in caplog.records if r.name == SERVER_LOGGER and r.levelno >= logging.ERROR]
+    assert len(records) == 1, [r.getMessage() for r in caplog.records]
+    assert f"{table}.{column}" in records[0].getMessage()
