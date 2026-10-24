@@ -1,0 +1,98 @@
+<!doctype html>
+<!--
+  The 1200x630 link-preview card (issue #185). `generate.ts` screenshots this
+  page to public/og-image.png; edit here and re-run `npm run og-image`.
+  Colors are the light-theme tokens in src/styles/tokens.css; fonts are the
+  ones index.html loads; the mark is public/favicon.svg, which the script
+  inlines in place of the band's placeholder.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow:wght@500&family=Barlow+Condensed:wght@700&display=block"
+    />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html,
+      body {
+        width: 1200px;
+        height: 630px;
+      }
+      body {
+        display: flex;
+        background: #f3ecdd;
+        color: #1c1a17;
+        font-family: 'Barlow', sans-serif;
+        font-weight: 500;
+      }
+      .band {
+        width: 300px;
+        background: #6b3423;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-right: 10px solid #a9781f;
+      }
+      .band svg {
+        width: 200px;
+        height: 200px;
+      }
+      .band svg path {
+        fill: #fbf8f1;
+      }
+      .band svg text {
+        fill: #6b3423;
+      }
+      .copy {
+        flex: 1;
+        padding: 0 72px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 28px;
+      }
+      .eyebrow {
+        font-family: 'Barlow Condensed', sans-serif;
+        font-weight: 700;
+        font-size: 34px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #6b3423;
+      }
+      h1 {
+        font-family: 'Anton', sans-serif;
+        font-weight: 400;
+        font-size: 128px;
+        line-height: 0.95;
+        text-transform: uppercase;
+      }
+      .rule {
+        width: 140px;
+        height: 8px;
+        background: #a9781f;
+      }
+      .tagline {
+        font-size: 36px;
+        line-height: 1.3;
+        color: #5b564c;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="band">{{FAVICON}}</div>
+    <div class="copy">
+      <p class="eyebrow">College football &middot; NFL</p>
+      <h1>My Team<br />Is Better</h1>
+      <div class="rule"></div>
+      <p class="tagline">
+        Ask whose team is better. The guy at the end of the bar settles it, and
+        he shows his math.
+      </p>
+    </div>
+  </body>
+</html>
