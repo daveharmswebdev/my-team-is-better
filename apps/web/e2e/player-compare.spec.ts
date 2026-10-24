@@ -243,25 +243,50 @@ test('a link to two receivers compares their receiving, with no passing or recor
 })
 
 // Round 3 of #352: each player's columns are decided on his own stats.
-// Zayne Anderson (SAF, 2023) recorded nothing but solo tackles (3), which
-// is defense for him; next to Kurt Warner, whose passing would otherwise
-// hide a tackles-only line, his Solo tackles row still shows.
-test("a quarterback next to a tackles-only defender keeps the defender's Solo tackles row", async ({
+// Since #433 only players of one position group compare, so the rule is
+// shown with two running backs. On the fixture, Robert Farmer (RB, 1999)
+// recorded nothing but solo tackles (8), which is defense for him; Marshall
+// Faulk (RB, 1999) ran for 1,327 yards and made 1 solo tackle, which for him
+// is not defense. Judged together, Faulk's rushing would hide Farmer's
+// tackles-only line; judged one player at a time, Farmer's Solo tackles row
+// still shows.
+const FAULK = '2252790861'
+const FARMER = '2039946310'
+
+test("a running back next to a tackles-only running back keeps the tackles-only player's Solo tackles row", async ({
+  page,
+}) => {
+  await page.goto(`/nfl/compare?a=${FAULK}&b=${FARMER}`)
+
+  const dialog = comparisonModal(page, 'Marshall Faulk and Robert Farmer')
+  const regular = dialog.getByRole('table', {
+    name: 'Marshall Faulk and Robert Farmer, regular season',
+  })
+  const tackles = valueCells(regular, 'Solo tackles')
+  await expect(tackles.nth(0)).toHaveText('1')
+  await expect(tackles.nth(1)).toContainText('8')
+  await expect(tackles.nth(1)).toContainText('(larger number)')
+  await expect(valueCells(regular, 'Rushing yards').nth(0)).toContainText(
+    '1,327',
+  )
+})
+
+// Issue #433: the API compares like with like, so a link to a quarterback
+// and a safety (Kurt Warner, Zayne Anderson) gets no comparison. Until the
+// narrator explains the refusal (epic #372, step 3) the modal shows an
+// error line; this pins only that it is an error, with no comparison table
+// and no raw status code.
+test('a link to players from different position groups shows an error, not a comparison', async ({
   page,
 }) => {
   await page.goto(`/nfl/compare?a=${WARNER}&b=2071342796`)
 
-  const dialog = comparisonModal(page, 'Kurt Warner and Zayne Anderson')
-  const regular = dialog.getByRole('table', {
-    name: 'Kurt Warner and Zayne Anderson, regular season',
-  })
-  const tackles = valueCells(regular, 'Solo tackles')
-  await expect(tackles.nth(0)).toHaveText('1')
-  await expect(tackles.nth(1)).toContainText('3')
-  await expect(tackles.nth(1)).toContainText('(larger number)')
-  await expect(valueCells(regular, 'Passing yards').nth(0)).toContainText(
-    '4,044',
-  )
+  const dialog = page.getByRole('dialog')
+  const alert = dialog.getByRole('alert')
+  await expect(alert).toBeVisible()
+  await expect(dialog.getByRole('table')).toHaveCount(0)
+  await expect(dialog).not.toContainText('400')
+  await expect(page.getByRole('button', { name: /^Share/ })).toHaveCount(0)
 })
 
 test('the Primary nav reaches the compare page', async ({ page }) => {
