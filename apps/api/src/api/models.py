@@ -1119,14 +1119,35 @@ class NarrationOut(BaseModel):
     cached: bool
 
 
+class MethodRankOut(BaseModel):
+    """Where one other rating method ranks a verdict's team that season
+    (issue #155). Rank only: the methods' ratings are on different scales,
+    so a rating here would invite a comparison the numbers can't support.
+
+    Composed by the route beside the narration (`api.repositories.ratings
+    .other_method_ranks`), never part of `evidence`, and never handed to
+    the persona layer: the fact block and the narration cache key don't
+    see it."""
+
+    method: Method
+    rank: int
+
+
 class TeamCaseEnvelope(BaseModel):
     evidence: TeamCaseOut
     narration: NarrationOut
+    # Issue #155: every registered method other than the answering one that
+    # has a `ratings` row for this team and season, in `Method` order.
+    other_method_ranks: list[MethodRankOut]
 
 
 class ComparisonEnvelope(BaseModel):
     evidence: ComparisonResultOut
     narration: NarrationOut
+    # Issue #155: the same list as `TeamCaseEnvelope.other_method_ranks`,
+    # once for each side of the comparison.
+    team_a_other_method_ranks: list[MethodRankOut]
+    team_b_other_method_ranks: list[MethodRankOut]
 
 
 # ---------------------------------------------------------------------------
