@@ -1931,6 +1931,49 @@ def test_stale_db_error_propagates_through_build_comparison(tmp_path: Path) -> N
         build_comparison(conn, YEAR, "Alpha State", "Bravo Tech", method="keener", sport="cfb")
 
 
+class _GuardSentinel(Exception):
+    """Raised by the stand-in guard below; nothing else raises it."""
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda c: list_available_years(c, METHOD, sport="cfb"), id="years"),
+        pytest.param(
+            lambda c: build_team_case(c, YEAR, "Alpha State", method=METHOD, sport="cfb"),
+            id="team_case",
+        ),
+        pytest.param(
+            lambda c: build_comparison(
+                c, YEAR, "Alpha State", "Bravo Tech", method=METHOD, sport="cfb"
+            ),
+            id="comparison",
+        ),
+    ],
+)
+def test_entry_points_run_the_one_public_schema_guard(
+    conn: sqlite3.Connection,
+    monkeypatch: pytest.MonkeyPatch,
+    call: typing.Callable[[sqlite3.Connection], object],
+) -> None:
+    """Issue #423: `require_current_schema` is the single stale-schema
+    check. Replacing it replaces the check for every evidence entry point,
+    so none of them carries a private copy that could drift from what
+    apps/api and the MCP server call."""
+
+    def stand_in(_conn: sqlite3.Connection) -> None:
+        raise _GuardSentinel
+
+    monkeypatch.setattr(proof, "require_current_schema", stand_in)
+    with pytest.raises(_GuardSentinel):
+        call(conn)
+
+
+def test_there_is_no_private_copy_of_the_schema_guard() -> None:
+    """The #385 private name is gone, not kept as a second entry point."""
+    assert not hasattr(proof, "_require_current_schema")
+
+
 # Issue #300: `games.conference_championship` is the latest column evidence
 # reads. A db built before it and opened read-only (apps/api, the MCP
 # server) is stale in the same sense as a pre-#183 one, so it fails the same

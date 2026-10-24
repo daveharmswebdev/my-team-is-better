@@ -15,7 +15,10 @@ boundary, so a malformed request (bad year, ambiguous team name) surfaces as
 data the calling LLM can read and react to, not a protocol-level failure.
 The typed, recoverable errors keep their structured bodies; a database that
 predates the schema the evidence layer reads gets a fixed `stale_database`
-body from `_stale_database` (issue #280); anything else
+body from `_stale_database` (issue #280). Every entry point that runs
+its own query against a late-added table or column calls the evidence
+layer's `require_current_schema` before that query (issue #423), so a stale
+db is `stale_database` there too, never internal_error; anything else
 gets one fixed `internal_error` body from `_internal_error` (issue #208), so
 an exception's text -- a db path, a SQL fragment -- never reaches the
 connected model. The real cause goes to the operator through `logging`:
@@ -66,6 +69,7 @@ from cfb_strength.evidence.proof import (
     build_comparison,
     build_team_case,
     list_available_years,
+    require_current_schema,
 )
 
 logger = logging.getLogger(__name__)
@@ -143,7 +147,13 @@ def _season_catalog(conn: sqlite3.Connection) -> dict[str, Any]:
     one entry per (sport, year), ordered by sport then year. Shared by the
     `list_seasons` tool and the `seasons` resource so there's exactly one
     query for this, not two drifting copies.
+
+    Runs the evidence layer's schema guard first (#423): on a db built
+    before `ratings.sport` existed the query would fail as internal_error,
+    and on one missing any other late-added name it would answer from a
+    stale db as if it were current. Both are `StaleDatabaseError` instead.
     """
+    require_current_schema(conn)
     rows = conn.execute(
         "SELECT DISTINCT sport, year, method FROM ratings ORDER BY sport, year, method"
     ).fetchall()
@@ -178,6 +188,8 @@ def list_seasons() -> dict[str, Any]:
             return _season_catalog(conn)
         finally:
             conn.close()
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
         return _internal_error(e)
 
@@ -200,6 +212,8 @@ def seasons_resource() -> dict[str, Any]:
             return _season_catalog(conn)
         finally:
             conn.close()
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
         return _internal_error(e)
 
@@ -220,6 +234,9 @@ def teams_resource() -> dict[str, Any]:
     try:
         conn = _get_conn()
         try:
+            # Guard first (#423): `teams.sport` is late-added, and a db
+            # missing any late-added name is stale as a whole.
+            require_current_schema(conn)
             rows = conn.execute(
                 "SELECT id, school, classification, sport FROM teams ORDER BY school"
             ).fetchall()
@@ -237,6 +254,8 @@ def teams_resource() -> dict[str, Any]:
                 for row in rows
             ],
         }
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001 -- must never raise across the MCP boundary
         return _internal_error(e)
 
@@ -275,6 +294,9 @@ def get_rankings(
     try:
         conn = _get_conn()
         try:
+            # Guard first (#423): this tool's own queries read the
+            # late-added `ratings.sport` and `ratings.ties`.
+            require_current_schema(conn)
             exists = conn.execute(
                 "SELECT 1 FROM ratings WHERE year = ? AND method = ? AND sport = ? LIMIT 1",
                 (year, method, sport),
@@ -318,6 +340,8 @@ def get_rankings(
         }
     except UnknownYearError as e:
         return _unknown_year(e, sport)
+    except StaleDatabaseError as e:
+        return _stale_database(e)
     except Exception as e:  # noqa: BLE001
         return _internal_error(e)
 
@@ -411,6 +435,9 @@ def get_champion(year: int, method: str = "keener", sport: Sport = "cfb") -> dic
     try:
         conn = _get_conn()
         try:
+            # Guard first (#423): the #1 lookup below reads the late-added
+            # `ratings.sport` before build_team_case's own guard can run.
+            require_current_schema(conn)
             row = conn.execute(
                 """
                 SELECT t.school AS school

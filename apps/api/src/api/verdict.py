@@ -62,7 +62,12 @@ import unicodedata
 from collections.abc import Sequence
 
 from cfb_strength.contracts import UnknownYearError
-from cfb_strength.evidence.proof import build_comparison, build_team_case, list_available_years
+from cfb_strength.evidence.proof import (
+    build_comparison,
+    build_team_case,
+    list_available_years,
+    require_current_schema,
+)
 from fastapi import APIRouter, Depends
 
 from api.deps import get_call_budget, get_db_conn, get_narration_cache, get_narrator
@@ -205,7 +210,13 @@ def _resolve_champion_name(
       #172 this case returned `None`, the caller fell through to
       `build_team_case(conn, year, "")`, and the empty query came back as a
       422 `ambiguous_team` naming every rated team as a candidate.
+
+    The schema is checked first (issue #423): the query below filters on
+    `ratings.sport`, a late-added column, so on a stale db it would raise a
+    bare `sqlite3.OperationalError` (an unmapped 500) before
+    `build_team_case` ever got to say `StaleDatabaseError` (503).
     """
+    require_current_schema(conn)
     row = conn.execute(
         """
         SELECT t.school AS school
