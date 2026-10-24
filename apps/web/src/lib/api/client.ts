@@ -29,8 +29,10 @@ import type {
   PlayerLeaderSort,
   PlayerLeaderCategory,
   PlayerLeadersOut,
+  PlayerPositionGroup,
   PlayerSearchOut,
   PlayerSeasonType,
+  PlayersNotComparableErrorBody,
   Sport,
   TeamCaseEnvelope,
   TeamsOut,
@@ -38,7 +40,11 @@ import type {
   VerdictErrorBody,
   YearsOut,
 } from './types'
-import { isUnknownPlayerErrorBody, isVerdictErrorBody } from './types'
+import {
+  isPlayersNotComparableErrorBody,
+  isUnknownPlayerErrorBody,
+  isVerdictErrorBody,
+} from './types'
 
 const API_BASE_URL: string =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
@@ -105,6 +111,23 @@ export class PlayerApiError extends Error {
   }
 }
 
+/**
+ * `GET /api/players/compare`'s typed 400 (issue #433): the two players aren't
+ * in one position group. The page refuses the pair in the narrator's voice
+ * (`notComparableCopy`), never showing the status (issue #436).
+ */
+export class PlayersNotComparableError extends Error {
+  readonly status: number
+  readonly body: PlayersNotComparableErrorBody
+
+  constructor(status: number, body: PlayersNotComparableErrorBody) {
+    super(`player API error (${status}): ${body.error}`)
+    this.name = 'PlayersNotComparableError'
+    this.status = status
+    this.body = body
+  }
+}
+
 /** Unreachable API (`fetch` rejected), or a request that timed out. */
 export class VerdictNetworkError extends Error {
   constructor(message: string) {
@@ -142,9 +165,13 @@ export interface VerdictRequestOptions {
   signal?: AbortSignal
 }
 
-/** Options for `searchPlayers`: a `limit` (default 10) and a caller `signal`. */
+/**
+ * Options for `searchPlayers`: a `limit` (default 10), a caller `signal`, and
+ * a position `group` to search within (issue #436; omitted = unfiltered).
+ */
 export interface PlayerSearchOptions extends VerdictRequestOptions {
   limit?: number
+  group?: PlayerPositionGroup
 }
 
 function abortError(): DOMException {
@@ -492,6 +519,8 @@ export function fetchPlayerCareer(playerId: number): Promise<PlayerCareerOut> {
  * `GET /api/players/compare?a=&b=&sport=nfl` (issue #301): both careers and
  * their head-to-heads as opposing starters. A typed 404 `unknown_player` (for
  * either id) rejects with a `PlayerApiError`; everything else is `getJson`'s.
+ * A typed 400 `players_not_comparable` (two position groups, or either
+ * player with none; issue #433) rejects with a `PlayersNotComparableError`.
  * `a == b` is a 422, which callers rule out before asking.
  */
 export function fetchPlayerComparison(
@@ -505,10 +534,15 @@ export function fetchPlayerComparison(
   })
   return getJson<PlayerComparisonOut>(
     `${API_BASE_URL}/api/players/compare?${params.toString()}`,
-    (status, detail) =>
-      isUnknownPlayerErrorBody(detail)
-        ? new PlayerApiError(status, detail)
-        : null,
+    (status, detail) => {
+      if (isUnknownPlayerErrorBody(detail)) {
+        return new PlayerApiError(status, detail)
+      }
+      if (isPlayersNotComparableErrorBody(detail)) {
+        return new PlayersNotComparableError(status, detail)
+      }
+      return null
+    },
   )
 }
 
@@ -517,15 +551,17 @@ export function fetchPlayerComparison(
  * name contains `query`. The API wants 2..100 characters once stripped and a
  * `limit` of 1..20; callers screen the query. No match is a 200 with no rows.
  * `signal` aborts the request when the typed text has moved on (issue #370);
- * the call then rejects with a `DOMException` named `AbortError`.
+ * the call then rejects with a `DOMException` named `AbortError`. A `group`
+ * keeps only that position group's players, applied before `limit` (#433).
  */
 export function searchPlayers(
   query: string,
-  { limit = 10, signal }: PlayerSearchOptions = {},
+  { limit = 10, signal, group }: PlayerSearchOptions = {},
 ): Promise<PlayerSearchOut> {
   const params = new URLSearchParams({
     q: query,
     limit: String(limit),
+    ...(group === undefined ? {} : { group }),
     sport: 'nfl',
   })
   return getJson<PlayerSearchOut>(

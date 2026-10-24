@@ -107,6 +107,7 @@ describe('PlayerCombobox (issue #301)', () => {
             player_id: 1,
             display_name: 'Mike Smith',
             position: 'QB',
+            group: 'QB',
             first_season: 1999,
             last_season: 2004,
           },
@@ -114,6 +115,7 @@ describe('PlayerCombobox (issue #301)', () => {
             player_id: 2,
             display_name: 'Mike Smith',
             position: null,
+            group: null,
             first_season: 2023,
             last_season: 2023,
           },
@@ -270,6 +272,31 @@ describe('PlayerCombobox re-entry (issue #304)', () => {
     expect(onClear).toHaveBeenCalledTimes(1)
     expect(input).toHaveValue('')
     expect(input).toHaveFocus()
+    expect(
+      screen.queryByRole('button', { name: 'Clear Player B' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('a disabled field takes no typing and offers no clear button (#436)', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    render(
+      <PlayerCombobox
+        label="Player B"
+        value="Kurt Warner"
+        options={[]}
+        status="idle"
+        disabled
+        onChange={onChange}
+        onSelect={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    )
+
+    const input = screen.getByLabelText('Player B', { exact: true })
+    expect(input).toBeDisabled()
+    await user.type(input, 'x')
+    expect(onChange).not.toHaveBeenCalled()
     expect(
       screen.queryByRole('button', { name: 'Clear Player B' }),
     ).not.toBeInTheDocument()

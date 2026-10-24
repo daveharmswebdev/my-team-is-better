@@ -75,6 +75,18 @@ export const Suggestions: Story = {
   },
 }
 
+/** Waiting on another field (issue #436): no typing, no clear button. */
+export const Disabled: Story = {
+  args: { disabled: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByLabelText('Player B')).toBeDisabled()
+    await expect(
+      canvas.queryByRole('button', { name: 'Clear Player B' }),
+    ).not.toBeInTheDocument()
+  },
+}
+
 /** Two players with one name, told apart by position and seasons. */
 export const SameNames: Story = {
   args: {
@@ -84,6 +96,7 @@ export const SameNames: Story = {
         player_id: 1,
         display_name: 'Mike Smith',
         position: 'QB',
+        group: 'QB',
         first_season: 1999,
         last_season: 2004,
       },
@@ -91,6 +104,7 @@ export const SameNames: Story = {
         player_id: 2,
         display_name: 'Mike Smith',
         position: null,
+        group: null,
         first_season: 2023,
         last_season: 2023,
       },

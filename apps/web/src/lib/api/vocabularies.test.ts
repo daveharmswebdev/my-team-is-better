@@ -3,7 +3,12 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DISPLAYED_METHODS } from '../methods'
 import type { DisplayedMethod } from '../methods'
-import { METHODS, SPORTS, isVerdictErrorBody } from './types'
+import {
+  METHODS,
+  PLAYER_POSITION_GROUPS,
+  SPORTS,
+  isVerdictErrorBody,
+} from './types'
 import type { Method } from './types'
 
 /**
@@ -73,6 +78,11 @@ const WEB_VOCABULARY_DECISIONS: Record<
   // Mirrored: `QuestionForm`'s league toggle sends it, and
   // `isVerdictErrorBody` validates `unknown_team.sport` against it.
   sport: SPORTS,
+  // Mirrored (issue #436, epic #372): /nfl/compare sends Player A's group as
+  // Player B's search filter, keys its restriction copy on it in an
+  // exhaustive `Record<PlayerPositionGroup, ...>`, and
+  // `isPlayersNotComparableErrorBody` validates the 400's groups against it.
+  group: PLAYER_POSITION_GROUPS,
 }
 
 function isNotMirrored(

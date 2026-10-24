@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PlayerSearchOut } from '../../lib/api/types'
+import type { PlayerPositionGroup, PlayerSearchOut } from '../../lib/api/types'
 import { SEARCH_MC, SEARCH_MCNAIR } from '../../lib/playerFixtures'
 import { SEARCH_DEBOUNCE_MS, usePlayerSearch } from './usePlayerSearch'
 
@@ -130,6 +130,34 @@ describe('usePlayerSearch: a superseded search is aborted (issue #370)', () => {
       status: 'done',
       rows: SEARCH_MCNAIR.rows,
     })
+  })
+
+  it("sends the group it's given, and asks again when the group changes (#436)", async () => {
+    mockedSearch.mockResolvedValue({ ...SEARCH_MCNAIR, rows: [] })
+    const { rerender } = renderHook(
+      ({ group }: { group: PlayerPositionGroup | undefined }) =>
+        usePlayerSearch('faulk', group),
+      { initialProps: { group: 'RB' as PlayerPositionGroup | undefined } },
+    )
+    await passDebounce()
+    expect(mockedSearch).toHaveBeenLastCalledWith('faulk', {
+      signal: expect.any(AbortSignal) as AbortSignal,
+      group: 'RB',
+    })
+
+    rerender({ group: 'WR' })
+    await passDebounce()
+    expect(mockedSearch).toHaveBeenCalledTimes(2)
+    expect(mockedSearch).toHaveBeenLastCalledWith('faulk', {
+      signal: expect.any(AbortSignal) as AbortSignal,
+      group: 'WR',
+    })
+
+    // No group: no group key at all, so the search is unfiltered.
+    rerender({ group: undefined })
+    await passDebounce()
+    expect(mockedSearch).toHaveBeenCalledTimes(3)
+    expect(mockedSearch.mock.calls[2]?.[1]).not.toHaveProperty('group')
   })
 
   it('aborts an in-flight search when the hook unmounts', async () => {

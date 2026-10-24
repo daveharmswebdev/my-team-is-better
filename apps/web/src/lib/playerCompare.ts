@@ -8,7 +8,9 @@
 import type {
   PlayerCareerOut,
   PlayerCareerTotalsOut,
+  PlayerComparisonOut,
   PlayerHeadToHeadGameOut,
+  PlayerPositionGroup,
   PlayerSeasonType,
   PlayerStatsOut,
   StarterRecordOut,
@@ -359,6 +361,190 @@ export function formatGameWhen(game: PlayerHeadToHeadGameOut): string {
     parts.push(formatGameDate(game.start_date))
   }
   return parts.join(' · ')
+}
+
+// ---------------------------------------------------------------------------
+// Comparing like with like (issue #436, epic #372). Founder decisions: a
+// player's group comes from his position label; Player B is searched within
+// Player A's group; a mixed link is refused; head-to-head is QB only. The
+// copy was decided on #436 (2026-10-24): only its slots are filled here.
+// ---------------------------------------------------------------------------
+
+/** How a position reads in a sentence: "a quarterback", "safeties". */
+interface PositionNoun {
+  article: 'a' | 'an'
+  singular: string
+  plural: string
+}
+
+/** Each group as the decided copy names it. */
+const GROUP_NOUNS: Record<PlayerPositionGroup, PositionNoun> = {
+  QB: { article: 'a', singular: 'quarterback', plural: 'quarterbacks' },
+  RB: { article: 'a', singular: 'running back', plural: 'running backs' },
+  WR: { article: 'a', singular: 'receiver', plural: 'receivers' },
+  TE: { article: 'a', singular: 'tight end', plural: 'tight ends' },
+}
+
+/**
+ * Every `players.position` label in the committed raw cache (players.csv,
+ * 25 labels, measured for #428). A label outside it reads generically.
+ */
+export const MEASURED_POSITION_LABELS = [
+  'WR',
+  'LB',
+  'RB',
+  'DB',
+  'DE',
+  'OT',
+  'TE',
+  'G',
+  'DT',
+  'CB',
+  'QB',
+  'C',
+  'OLB',
+  'K',
+  'P',
+  'SAF',
+  'S',
+  'FS',
+  'NT',
+  'FB',
+  'ILB',
+  'MLB',
+  'LS',
+  'OL',
+  'DL',
+] as const
+
+type MeasuredPositionLabel = (typeof MEASURED_POSITION_LABELS)[number]
+
+/** Every measured label, in words. The four grouped labels read as their group. */
+export const POSITION_NOUNS: Record<MeasuredPositionLabel, PositionNoun> = {
+  QB: GROUP_NOUNS.QB,
+  RB: GROUP_NOUNS.RB,
+  WR: GROUP_NOUNS.WR,
+  TE: GROUP_NOUNS.TE,
+  FB: { article: 'a', singular: 'fullback', plural: 'fullbacks' },
+  OL: {
+    article: 'an',
+    singular: 'offensive lineman',
+    plural: 'offensive linemen',
+  },
+  OT: {
+    article: 'an',
+    singular: 'offensive tackle',
+    plural: 'offensive tackles',
+  },
+  G: { article: 'a', singular: 'guard', plural: 'guards' },
+  C: { article: 'a', singular: 'center', plural: 'centers' },
+  DL: {
+    article: 'a',
+    singular: 'defensive lineman',
+    plural: 'defensive linemen',
+  },
+  DE: { article: 'a', singular: 'defensive end', plural: 'defensive ends' },
+  DT: {
+    article: 'a',
+    singular: 'defensive tackle',
+    plural: 'defensive tackles',
+  },
+  NT: { article: 'a', singular: 'nose tackle', plural: 'nose tackles' },
+  LB: { article: 'a', singular: 'linebacker', plural: 'linebackers' },
+  OLB: {
+    article: 'an',
+    singular: 'outside linebacker',
+    plural: 'outside linebackers',
+  },
+  ILB: {
+    article: 'an',
+    singular: 'inside linebacker',
+    plural: 'inside linebackers',
+  },
+  MLB: {
+    article: 'a',
+    singular: 'middle linebacker',
+    plural: 'middle linebackers',
+  },
+  DB: {
+    article: 'a',
+    singular: 'defensive back',
+    plural: 'defensive backs',
+  },
+  CB: { article: 'a', singular: 'cornerback', plural: 'cornerbacks' },
+  SAF: { article: 'a', singular: 'safety', plural: 'safeties' },
+  S: { article: 'a', singular: 'safety', plural: 'safeties' },
+  FS: { article: 'a', singular: 'free safety', plural: 'free safeties' },
+  K: { article: 'a', singular: 'kicker', plural: 'kickers' },
+  P: { article: 'a', singular: 'punter', plural: 'punters' },
+  LS: { article: 'a', singular: 'long snapper', plural: 'long snappers' },
+}
+
+/** An unknown label, or none at all. */
+const ANY_POSITION: PositionNoun = {
+  article: 'a',
+  singular: 'player at that position',
+  plural: 'players at that position',
+}
+
+function positionNoun(label: string | null): PositionNoun {
+  if (label === null || !Object.hasOwn(POSITION_NOUNS, label)) {
+    return ANY_POSITION
+  }
+  return POSITION_NOUNS[label as MeasuredPositionLabel]
+}
+
+function withArticle(noun: PositionNoun): string {
+  return `${noun.article} ${noun.singular}`
+}
+
+/** "a running back". */
+export function groupSingular(group: PlayerPositionGroup): string {
+  return withArticle(GROUP_NOUNS[group])
+}
+
+/** "a safety", from a position label; generic for an unknown or missing one. */
+export function positionSingular(label: string | null): string {
+  return withArticle(positionNoun(label))
+}
+
+/** "safeties", from a position label; generic for an unknown or missing one. */
+export function positionPlural(label: string | null): string {
+  return positionNoun(label).plural
+}
+
+/** Plain UI text, shown once Player A is picked: who Player B can be. */
+export function restrictionCopy(group: PlayerPositionGroup): string {
+  const noun = GROUP_NOUNS[group]
+  return `Comparing ${noun.plural}. Player B has to be ${withArticle(noun)} too.`
+}
+
+/**
+ * The narrator refusing a mixed link. `bSingular` is Player B's group
+ * (`groupSingular`) or, for a Player B with no group, his position
+ * (`positionSingular`): never a group he doesn't have.
+ */
+export function notComparableCopy(
+  aGroup: PlayerPositionGroup,
+  bSingular: string,
+): string {
+  const a = GROUP_NOUNS[aGroup]
+  const opening = withArticle(a)
+  return `${opening.charAt(0).toUpperCase()}${opening.slice(1)} and ${bSingular}? That's apples and footballs, pal. Pick another ${a.singular}.`
+}
+
+/** A Player A with no group: his position, pluralized, can't be compared yet. */
+export function uncomparableCopy(label: string | null): string {
+  return `Can't stack up ${positionPlural(label)} yet. Quarterbacks, running backs, receivers and tight ends only, for now.`
+}
+
+/**
+ * Head-to-head counts games two players started at quarterback against each
+ * other, so it shows for two quarterbacks only (#372); every other pair gets
+ * its career totals alone. Presentation only: the API still sends it.
+ */
+export function showsHeadToHead(comparison: PlayerComparisonOut): boolean {
+  return comparison.a.group === 'QB' && comparison.b.group === 'QB'
 }
 
 /**

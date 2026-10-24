@@ -92,6 +92,14 @@
   color: var(--ink-muted);
 }
 
+/* Who Player B can be, once Player A is picked (issue #436). */
+.restriction {
+  margin: 0;
+  font-family: var(--font-label);
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+
 /* Inside the modal the page's own column layout is gone, so the comparison,
    its credit and the share button bring their own (issue #310). */
 .answer {

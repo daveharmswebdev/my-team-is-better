@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PlayerApiError,
+  PlayersNotComparableError,
   SERVER_ERROR_COPY,
   VerdictHttpError,
   VerdictNetworkError,
@@ -50,6 +51,41 @@ describe('player comparison and search client (issue #301)', () => {
 
     expect(error).toBeInstanceOf(PlayerApiError)
     expect(error).toMatchObject({ status: 404, body: detail })
+  })
+
+  it("rejects the comparison's players_not_comparable 400 with a PlayersNotComparableError (#436)", async () => {
+    const detail = {
+      error: 'players_not_comparable',
+      a_group: 'QB',
+      b_group: null,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(jsonResponse(400, { detail })),
+    )
+
+    const error: unknown = await fetchPlayerComparison(
+      2044124519,
+      2071342796,
+    ).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(PlayersNotComparableError)
+    expect(error).toMatchObject({ status: 400, body: detail })
+  })
+
+  it('searches within a position group when given one (#436)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rows: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await searchPlayers('faulk', { group: 'RB' })
+
+    const [url] = fetchMock.mock.calls[0] as [string]
+    expect(Object.fromEntries(new URL(url).searchParams)).toEqual({
+      q: 'faulk',
+      limit: '10',
+      group: 'RB',
+      sport: 'nfl',
+    })
   })
 
   it('searches the NFL with the given text and limit', async () => {

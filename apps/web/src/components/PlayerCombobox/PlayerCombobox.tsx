@@ -24,6 +24,11 @@ export interface PlayerComboboxProps {
   /** Secondary text under the field, e.g. a search that failed. */
   hint?: string
   placeholder?: string
+  /**
+   * Takes no typing and offers no clear button (issue #436: Player B waits
+   * for Player A). Whatever `value` holds still shows.
+   */
+  disabled?: boolean
 }
 
 const SEPARATOR = ' · '
@@ -73,6 +78,7 @@ export function PlayerCombobox({
   status,
   hint,
   placeholder,
+  disabled = false,
 }: PlayerComboboxProps) {
   const generatedId = useId()
   const inputId = `${generatedId}-input`
@@ -182,6 +188,7 @@ export function PlayerCombobox({
           type="text"
           value={value}
           placeholder={placeholder}
+          disabled={disabled}
           autoComplete="off"
           spellCheck={false}
           maxLength={MAX_QUERY_LENGTH}
@@ -196,7 +203,7 @@ export function PlayerCombobox({
           onClick={() => setIsExpanded(true)}
           onBlur={close}
         />
-        {value !== '' && (
+        {value !== '' && !disabled && (
           <button
             type="button"
             className={styles.clear}

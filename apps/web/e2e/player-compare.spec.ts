@@ -240,6 +240,11 @@ test('a link to two receivers compares their receiving, with no passing or recor
       regular.getByRole('rowheader', { name: gone, exact: true }),
     ).toHaveCount(0)
   }
+  // Head-to-head is for two quarterbacks only (#436).
+  await expect(
+    dialog.getByRole('region', { name: 'Head to head' }),
+  ).toHaveCount(0)
+  await expect(dialog.getByText(/started at quarterback/)).toHaveCount(0)
 })
 
 // Round 3 of #352: each player's columns are decided on his own stats.
@@ -269,24 +274,114 @@ test("a running back next to a tackles-only running back keeps the tackles-only 
   await expect(valueCells(regular, 'Rushing yards').nth(0)).toContainText(
     '1,327',
   )
+  // Two backs: no head-to-head section (#436).
+  await expect(
+    dialog.getByRole('region', { name: 'Head to head' }),
+  ).toHaveCount(0)
 })
 
-// Issue #433: the API compares like with like, so a link to a quarterback
-// and a safety (Kurt Warner, Zayne Anderson) gets no comparison. Until the
-// narrator explains the refusal (epic #372, step 3) the modal shows an
-// error line; this pins only that it is an error, with no comparison table
-// and no raw status code.
-test('a link to players from different position groups shows an error, not a comparison', async ({
+// Issue #436 (epic #372, step 3): a link to a quarterback and a safety (Kurt
+// Warner, Zayne Anderson) is refused, never shown. The API's 400 names the
+// groups (QB, none); the safety has none, so the narrator names him by his
+// position. Kurt Warner stays as Player A; Player B is emptied and ready for
+// another quarterback; the address bar names no pair (#325).
+test('a link to players from different position groups is refused, keeping Player A', async ({
   page,
 }) => {
   await page.goto(`/nfl/compare?a=${WARNER}&b=2071342796`)
 
-  const dialog = page.getByRole('dialog')
-  const alert = dialog.getByRole('alert')
-  await expect(alert).toBeVisible()
-  await expect(dialog.getByRole('table')).toHaveCount(0)
-  await expect(dialog).not.toContainText('400')
+  const alert = page.getByRole('alert')
+  await expect(alert).toHaveText(
+    "A quarterback and a safety? That's apples and footballs, pal. Pick another quarterback.",
+  )
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await expect(page.locator('main')).not.toContainText('400')
   await expect(page.getByRole('button', { name: /^Share/ })).toHaveCount(0)
+  await expect(page).toHaveURL(new RegExp(`/nfl/compare\\?a=${WARNER}$`))
+
+  const playerA = page.getByLabel('Player A', { exact: true })
+  const playerB = page.getByLabel('Player B', { exact: true })
+  await expect(playerA).toHaveValue('Kurt Warner')
+  await expect(playerB).toHaveValue('')
+  await expect(playerB).toBeEnabled()
+  await expect(playerB).toBeFocused()
+  await expect(
+    page.getByText(
+      'Comparing quarterbacks. Player B has to be a quarterback too.',
+    ),
+  ).toBeVisible()
+
+  // A new quarterback for Player B: the refusal goes, Compare is on.
+  await playerB.pressSequentially('McNair')
+  await page.getByRole('option', { name: /Steve McNair/ }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Compare', exact: true }),
+  ).toBeEnabled()
+})
+
+// Issue #436: Player B waits for Player A, then searches only Player A's
+// group. On the fixture, Eddie George is a 1999 running back: with him as
+// Player A, "warner" finds nobody for Player B, and "faulk" finds Marshall
+// Faulk (and Kevin Faulk, also a back).
+test("a Player A pick restricts Player B's typeahead to his group", async ({
+  page,
+}) => {
+  await page.goto('/nfl/compare')
+  const playerA = page.getByLabel('Player A', { exact: true })
+  const playerB = page.getByLabel('Player B', { exact: true })
+  await expect(playerB).toBeDisabled()
+
+  await playerA.pressSequentially('George')
+  await page.getByRole('option', { name: /Eddie George/ }).click()
+
+  await expect(playerB).toBeEnabled()
+  await expect(
+    page.getByText(
+      'Comparing running backs. Player B has to be a running back too.',
+    ),
+  ).toBeVisible()
+
+  await playerB.pressSequentially('warner')
+  await expect(page.getByText('Nobody by that name.')).toBeVisible()
+  await expect(page.getByRole('option')).toHaveCount(0)
+
+  await playerB.fill('')
+  await playerB.pressSequentially('faulk')
+  await expect(
+    page.getByRole('option', { name: /Marshall Faulk/ }),
+  ).toBeVisible()
+  for (const option of await page.getByRole('option').all()) {
+    await expect(option).toContainText('RB')
+  }
+
+  // Clearing Player A clears Player B, and Player B waits again.
+  await page.getByRole('option', { name: /Marshall Faulk/ }).click()
+  await page.getByRole('button', { name: 'Clear Player A' }).click()
+  await expect(playerB).toHaveValue('')
+  await expect(playerB).toBeDisabled()
+})
+
+// Issue #436: a kicker has no group, so there is nobody to compare him with
+// yet. Jeff Wilkins kicked for the 1999 Rams on the fixture.
+test('a kicker as Player A gets the uncomparable line, and Player B stays disabled', async ({
+  page,
+}) => {
+  await page.goto('/nfl/compare')
+  const playerA = page.getByLabel('Player A', { exact: true })
+  await playerA.pressSequentially('Wilkins')
+  await page.getByRole('option', { name: /Jeff Wilkins/ }).click()
+
+  await expect(
+    page.getByText(
+      "Can't stack up kickers yet. Quarterbacks, running backs, receivers and tight ends only, for now.",
+    ),
+  ).toBeVisible()
+  await expect(page.getByLabel('Player B', { exact: true })).toBeDisabled()
+  await expect(
+    page.getByRole('button', { name: 'Compare', exact: true }),
+  ).toBeDisabled()
 })
 
 test('the Primary nav reaches the compare page', async ({ page }) => {
@@ -509,9 +604,10 @@ test('on a phone, a share link opens its comparison full screen with the first l
 })
 
 // Issue #367: a lone link's failed career lookup is about that pick alone.
-// Once a second player is picked, the narrator's line goes and the form reads
-// like any other two-player form.
-test("a lone link's career failure goes once a second player is picked", async ({
+// Once another player is picked, the narrator's line goes and the form reads
+// like any other. Since #436 Player B waits on Player A's group, which the
+// failed lookup never said, so the other player is a new Player A.
+test("a lone link's career failure goes once another player is picked", async ({
   page,
 }) => {
   await page.route(
@@ -525,14 +621,14 @@ test("a lone link's career failure goes once a second player is picked", async (
   const playerA = page.getByLabel('Player A', { exact: true })
   const playerB = page.getByLabel('Player B', { exact: true })
   await expect(playerA).toHaveValue(`Player #${WARNER}`)
+  await expect(playerB).toBeDisabled()
 
-  await playerB.pressSequentially('McNair')
+  await playerA.fill('')
+  await playerA.pressSequentially('McNair')
   await page.getByRole('option', { name: /Steve McNair/ }).click()
 
-  await expect(playerB).toHaveValue('Steve McNair')
-  await expect(
-    page.getByRole('button', { name: 'Compare', exact: true }),
-  ).toBeEnabled()
+  await expect(playerA).toHaveValue('Steve McNair')
+  await expect(playerB).toBeEnabled()
   await expect(page.getByRole('alert')).toHaveCount(0)
   await expect(page.getByText(PICK_TWO_COPY)).toHaveCount(0)
 })

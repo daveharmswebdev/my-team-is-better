@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   CAREER_WITH_NULL_STATS,
   EDGERRIN_JAMES,
+  FAULK_VS_FARMER,
   FRED_MCCRARY_CAREER,
+  HILL_VS_LAMB,
   HARRISON_VS_JAMES,
   KURT_WARNER_CAREER,
   MARE_VS_GOWIN,
@@ -11,12 +13,21 @@ import {
   ZAYNE_ANDERSON_CAREER,
 } from './playerFixtures'
 import {
+  MEASURED_POSITION_LABELS,
+  POSITION_NOUNS,
   compareUndercountNote,
   comparisonRows,
   formatGameDate,
+  groupSingular,
   headToHeadStatLine,
   largerRecordSide,
   largerSide,
+  notComparableCopy,
+  positionPlural,
+  positionSingular,
+  restrictionCopy,
+  showsHeadToHead,
+  uncomparableCopy,
 } from './playerCompare'
 import { DASH } from './playerStats'
 
@@ -350,5 +361,94 @@ describe('compareUndercountNote (issue #301)', () => {
     expect(
       compareUndercountNote(STEVE_MCNAIR_CAREER, CAREER_WITH_NULL_STATS),
     ).toBeNull()
+  })
+})
+
+describe('comparing like with like (issue #436)', () => {
+  it('names the restriction for each group, plural then singular', () => {
+    expect(restrictionCopy('QB')).toBe(
+      'Comparing quarterbacks. Player B has to be a quarterback too.',
+    )
+    expect(restrictionCopy('RB')).toBe(
+      'Comparing running backs. Player B has to be a running back too.',
+    )
+    expect(restrictionCopy('WR')).toBe(
+      'Comparing receivers. Player B has to be a receiver too.',
+    )
+    expect(restrictionCopy('TE')).toBe(
+      'Comparing tight ends. Player B has to be a tight end too.',
+    )
+  })
+
+  it("refuses a mixed pair in the narrator's voice: A's group, B's, then A's again", () => {
+    expect(notComparableCopy('QB', groupSingular('RB'))).toBe(
+      "A quarterback and a running back? That's apples and footballs, pal. Pick another quarterback.",
+    )
+    expect(notComparableCopy('WR', groupSingular('TE'))).toBe(
+      "A receiver and a tight end? That's apples and footballs, pal. Pick another receiver.",
+    )
+  })
+
+  it("fills a group-less B's slot from B's position label, never a group it lacks", () => {
+    expect(notComparableCopy('QB', positionSingular('SAF'))).toBe(
+      "A quarterback and a safety? That's apples and footballs, pal. Pick another quarterback.",
+    )
+    expect(positionSingular('OT')).toBe('an offensive tackle')
+    expect(positionSingular(null)).toBe('a player at that position')
+    expect(positionSingular('HB')).toBe('a player at that position')
+  })
+
+  it("says a group-less Player A's position can't be compared yet, pluralized", () => {
+    expect(uncomparableCopy('K')).toBe(
+      "Can't stack up kickers yet. Quarterbacks, running backs, receivers and tight ends only, for now.",
+    )
+    expect(uncomparableCopy('SAF')).toBe(
+      "Can't stack up safeties yet. Quarterbacks, running backs, receivers and tight ends only, for now.",
+    )
+    expect(uncomparableCopy(null)).toBe(
+      "Can't stack up players at that position yet. Quarterbacks, running backs, receivers and tight ends only, for now.",
+    )
+    expect(uncomparableCopy('XX')).toBe(
+      "Can't stack up players at that position yet. Quarterbacks, running backs, receivers and tight ends only, for now.",
+    )
+  })
+
+  it('has its own singular and plural for every measured position label (25)', () => {
+    const measured =
+      'WR LB RB DB DE OT TE G DT CB QB C OLB K P SAF S FS NT FB ILB MLB LS OL DL'.split(
+        ' ',
+      )
+    expect(measured).toHaveLength(25)
+    expect([...MEASURED_POSITION_LABELS].sort()).toEqual([...measured].sort())
+    expect(Object.keys(POSITION_NOUNS).sort()).toEqual([...measured].sort())
+    for (const label of measured) {
+      const singular = positionSingular(label)
+      const plural = positionPlural(label)
+      expect({ label, singular }).not.toEqual({
+        label,
+        singular: 'a player at that position',
+      })
+      expect({ label, plural }).not.toEqual({
+        label,
+        plural: 'players at that position',
+      })
+      expect(singular).toMatch(/^(a|an) [a-z]/)
+    }
+    // A grouped label reads the same as its group.
+    expect(positionPlural('QB')).toBe('quarterbacks')
+    expect(positionPlural('WR')).toBe('receivers')
+    expect(positionPlural('FB')).toBe('fullbacks')
+  })
+
+  it('shows head-to-head only for two quarterbacks', () => {
+    expect(showsHeadToHead(WARNER_VS_MCNAIR)).toBe(true)
+    expect(showsHeadToHead(HILL_VS_LAMB)).toBe(false)
+    expect(showsHeadToHead(FAULK_VS_FARMER)).toBe(false)
+    expect(
+      showsHeadToHead({
+        ...WARNER_VS_MCNAIR,
+        b: { ...STEVE_MCNAIR_CAREER, group: null },
+      }),
+    ).toBe(false)
   })
 })

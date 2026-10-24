@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { PlayerSearchStatus } from '../../components/PlayerCombobox/PlayerCombobox'
 import { searchPlayers } from '../../lib/api/client'
-import type { PlayerSearchRowOut } from '../../lib/api/types'
+import type {
+  PlayerPositionGroup,
+  PlayerSearchRowOut,
+} from '../../lib/api/types'
 
 /** How long typing must pause before a search is sent. */
 export const SEARCH_DEBOUNCE_MS = 250
@@ -12,9 +15,12 @@ const MIN_QUERY_LENGTH = 2
 /** The API's `PLAYER_SEARCH_MAX_QUERY_LENGTH`. */
 const MAX_QUERY_LENGTH = 100
 
+/** What a search asked: the stripped text, within a group or not. */
+type Asked = string
+
 type Answer =
-  | { query: string; status: 'done'; rows: PlayerSearchRowOut[] }
-  | { query: string; status: 'error' }
+  | { asked: Asked; status: 'done'; rows: PlayerSearchRowOut[] }
+  | { asked: Asked; status: 'error' }
 
 export interface PlayerSearchState {
   status: PlayerSearchStatus
@@ -26,12 +32,19 @@ export interface PlayerSearchState {
  * Debounced `GET /api/players/search` for a combobox's typed text (issue
  * #301). Stripped text of 2..100 characters is searched, so there are at
  * least two non-space characters; anything shorter or longer is never sent
- * (the API would 422 it). An answer for text since changed is dropped.
+ * (the API would 422 it). A `group` keeps the search within that position
+ * group (issue #436: Player B searches Player A's); without one the search is
+ * unfiltered and sends no group at all. An answer for text or a group since
+ * changed is dropped.
  */
-export function usePlayerSearch(text: string): PlayerSearchState {
+export function usePlayerSearch(
+  text: string,
+  group?: PlayerPositionGroup,
+): PlayerSearchState {
   const query = text.trim()
   const eligible =
     query.length >= MIN_QUERY_LENGTH && query.length <= MAX_QUERY_LENGTH
+  const asked: Asked = `${group ?? ''}:${query}`
   const [answer, setAnswer] = useState<Answer | null>(null)
 
   useEffect(() => {
@@ -45,15 +58,19 @@ export function usePlayerSearch(text: string): PlayerSearchState {
     let cancelled = false
     const controller = new AbortController()
     const timer = setTimeout(() => {
-      searchPlayers(query, { signal: controller.signal }).then(
+      const options =
+        group === undefined
+          ? { signal: controller.signal }
+          : { signal: controller.signal, group }
+      searchPlayers(query, options).then(
         (result) => {
           if (!cancelled) {
-            setAnswer({ query, status: 'done', rows: result.rows })
+            setAnswer({ asked, status: 'done', rows: result.rows })
           }
         },
         () => {
           if (!cancelled) {
-            setAnswer({ query, status: 'error' })
+            setAnswer({ asked, status: 'error' })
           }
         },
       )
@@ -63,12 +80,12 @@ export function usePlayerSearch(text: string): PlayerSearchState {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [query, eligible])
+  }, [query, group, asked, eligible])
 
   if (!eligible) {
     return { status: 'idle', rows: [] }
   }
-  if (answer === null || answer.query !== query) {
+  if (answer === null || answer.asked !== asked) {
     return {
       status: 'searching',
       rows: answer?.status === 'done' ? answer.rows : [],

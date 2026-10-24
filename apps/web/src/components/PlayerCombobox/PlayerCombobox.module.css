@@ -27,6 +27,14 @@
   width: 100%;
 }
 
+/* Waiting on another field (issue #436): readable, but plainly not live. */
+.input:disabled {
+  color: var(--ink-muted);
+  background: var(--surface-alt);
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
 .input:focus {
   border-color: var(--leather);
 }
