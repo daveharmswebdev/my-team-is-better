@@ -538,6 +538,62 @@ def test_runner_up_just_under_the_cutoff_resolves(rated_conn: sqlite3.Connection
 
 
 # ---------------------------------------------------------------------------
+# issue #393 -- a common abbreviation of one school never silently resolves to
+# a different real school (measured on base: every "<X> St." below resolved
+# to <X>, and "Miami OH" to Miami)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("query", "intended"),
+    [
+        ("Ohio St.", "Ohio State"),
+        ("Ohio St", "Ohio State"),
+        ("Michigan St.", "Michigan State"),
+        ("Kansas St.", "Kansas State"),
+        ("Kansas St", "Kansas State"),
+        ("Florida St.", "Florida State"),
+        ("Oklahoma St.", "Oklahoma State"),
+        ("Iowa St.", "Iowa State"),
+        ("Washington St.", "Washington State"),
+        ("Arizona St.", "Arizona State"),
+        ("Miami OH", "Miami (OH)"),
+        ("Miami(OH)", "Miami (OH)"),
+        ("OhioState", "Ohio State"),
+    ],
+)
+@pytest.mark.parametrize("year", [2003, 2005])
+def test_abbreviation_resolves_to_the_intended_school(
+    regression_conn: sqlite3.Connection, year: int, query: str, intended: str
+) -> None:
+    compute_and_store(regression_conn, year, "keener")
+    expected = resolve_team(regression_conn, year, intended, method="keener")
+    assert resolve_team(regression_conn, year, query, method="keener") == expected
+
+
+def test_texas_st_is_texas_state_never_texas(regression_conn: sqlite3.Connection) -> None:
+    """Texas State is rated in 2019 (FBS) but only a known, unrated `teams`
+    row in 2005 (FCS). "Texas St." is Texas State, or UnknownTeamError, and
+    never Texas."""
+    compute_and_store(regression_conn, 2019, "keener")
+    texas_state = resolve_team(regression_conn, 2019, "Texas State", method="keener")
+    assert resolve_team(regression_conn, 2019, "Texas St.", method="keener") == texas_state
+    compute_and_store(regression_conn, 2005, "keener")
+    with pytest.raises(UnknownTeamError):
+        resolve_team(regression_conn, 2005, "Texas St.", method="keener")
+
+
+def test_miami_with_a_trailing_word_asks_instead_of_answering_miami(
+    rated_conn: sqlite3.Connection,
+) -> None:
+    """ "Miami FL" contains the rated "Miami" with more than punctuation
+    around it: a guess, so it asks with Miami listed."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Miami FL", method="keener")
+    assert "Miami" in exc_info.value.candidates
+
+
+# ---------------------------------------------------------------------------
 # issue #95 -- Keener's verdict text, pinned exactly against real ratings
 # ---------------------------------------------------------------------------
 

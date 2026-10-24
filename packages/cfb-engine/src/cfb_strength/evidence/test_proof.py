@@ -492,9 +492,13 @@ def test_unrated_team_of_another_sport_does_not_trigger_the_guard(
     conn: sqlite3.Connection,
 ) -> None:
     """An unrated NFL "Bravo Tech U" says nothing about the CFB pool: the CFB
-    query still reaches the substring stage and finds the rated Bravo Tech."""
+    query still reaches the substring stage and finds the rated Bravo Tech.
+    That hit is a rated name inside the query (#393), so it is offered, not
+    silently answered -- and it is offered, i.e. no UnknownTeamError."""
     _insert_team(conn, 107, "Bravo Tech U", classification=None, sport="nfl")
-    assert resolve_team(conn, YEAR, "Bravo Tech U", method=METHOD, sport="cfb") == 2
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(conn, YEAR, "Bravo Tech U", method=METHOD, sport="cfb")
+    assert "Bravo Tech" in exc_info.value.candidates
 
 
 def test_unknown_team_propagates_through_build_team_case_and_comparison(
@@ -539,6 +543,163 @@ def test_ambiguous_team_error_never_carries_empty_candidates(
             except UnknownTeamError:
                 pass
     assert raised_at_least_one, "expected at least one genuinely ambiguous query in the sweep"
+
+
+# ---------------------------------------------------------------------------
+# issue #393 -- an abbreviation of one school never silently resolves to a
+# different, shorter-named real school ("Ohio St." -> Ohio)
+# ---------------------------------------------------------------------------
+
+ABBREV_YEAR = 2003
+
+# CFBD school names, as in tests/fixtures/cfb_regression.sqlite3.
+_ABBREV_SCHOOLS = {
+    201: "Ohio",
+    202: "Ohio State",
+    203: "Michigan",
+    204: "Michigan State",
+    205: "Miami",
+    206: "Miami (OH)",
+    207: "Alabama",
+    208: "Kansas",
+    209: "Kansas State",
+    210: "Arkansas State",
+}
+
+
+@pytest.fixture
+def abbrev_conn(tmp_path: Path) -> sqlite3.Connection:
+    c = get_conn(_make_db(tmp_path))
+    for rank, (tid, school) in enumerate(_ABBREV_SCHOOLS.items(), start=1):
+        _insert_team(c, tid, school, classification="fbs")
+        _insert_rating(c, ABBREV_YEAR, METHOD, tid, 1.0 / rank, rank, 0, 0)
+    c.commit()
+    return c
+
+
+def _id_of(school: str) -> int:
+    return next(tid for tid, name in _ABBREV_SCHOOLS.items() if name == school)
+
+
+@pytest.mark.parametrize(
+    ("query", "intended"),
+    [
+        ("Ohio St.", "Ohio State"),
+        ("ohio st.", "Ohio State"),
+        ("Michigan St.", "Michigan State"),
+        ("Kansas St.", "Kansas State"),
+        ("  Michigan   St. ", "Michigan State"),
+    ],
+)
+def test_state_abbreviation_resolves_to_the_state_school(
+    abbrev_conn: sqlite3.Connection, query: str, intended: str
+) -> None:
+    """A trailing "St." word means "State": "Ohio St." is Ohio State. Before
+    #393 the reverse substring ("ohio" inside "ohio st.") resolved Ohio."""
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD) == _id_of(intended)
+
+
+@pytest.mark.parametrize(
+    ("query", "intended"),
+    [("Ohio St", "Ohio State"), ("Michigan St", "Michigan State"), ("Kansas St", "Kansas State")],
+)
+def test_state_abbreviation_without_a_period_resolves_too(
+    abbrev_conn: sqlite3.Connection, query: str, intended: str
+) -> None:
+    """ "Ohio St" used to ask [Ohio, Ohio State]; "Kansas St" asked [Arkansas
+    State, Kansas, Kansas State]. A trailing "St" word is "State" exactly as
+    "St." is (no rated or known CFB school name ends in a bare "St" word), so
+    it now resolves to the State school instead of asking."""
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD) == _id_of(intended)
+
+
+@pytest.mark.parametrize("query", ["Miami OH", "miami oh", "Miami(OH)", "Miami OH."])
+def test_miami_oh_resolves_to_miami_oh_never_miami(
+    abbrev_conn: sqlite3.Connection, query: str
+) -> None:
+    """ "Miami OH" differs from "Miami (OH)" only by whitespace and
+    punctuation, so it resolves there. Before #393 the reverse substring
+    ("miami" inside "miami oh") resolved Miami (FL)."""
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD) == _id_of("Miami (OH)")
+
+
+@pytest.mark.parametrize(
+    ("query", "shorter"),
+    [
+        ("Miami RedHawks", "Miami"),
+        ("Miami FL", "Miami"),
+        ("Ohio Bobcats", "Ohio"),
+        ("Michigan St. Spartans", "Michigan"),
+    ],
+)
+def test_a_lone_reverse_substring_hit_asks_instead_of_resolving(
+    abbrev_conn: sqlite3.Connection, query: str, shorter: str
+) -> None:
+    """A rated name inside the query, with more than punctuation around it,
+    is a guess ("Miami RedHawks" is Miami (OH)): it asks, listing that name,
+    and never resolves silently."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD)
+    assert shorter in exc_info.value.candidates
+    assert exc_info.value.candidates == sorted(exc_info.value.candidates)
+
+
+def test_state_abbreviation_whose_state_school_is_unrated_asks_not_resolves(
+    abbrev_conn: sqlite3.Connection,
+) -> None:
+    """With Ohio State absent from the pool entirely, "Ohio St." still must
+    not silently become Ohio: its one substring lead is a reverse hit, so it
+    asks, offering Ohio beside the fuzzy stage's close names."""
+    abbrev_conn.execute("DELETE FROM ratings WHERE team_id = ?", (_id_of("Ohio State"),))
+    abbrev_conn.execute("DELETE FROM teams WHERE id = ?", (_id_of("Ohio State"),))
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(abbrev_conn, ABBREV_YEAR, "Ohio St.", method=METHOD)
+    assert "Ohio" in exc_info.value.candidates
+    assert exc_info.value.candidates == sorted(exc_info.value.candidates)
+
+
+def test_state_abbreviation_of_a_known_unrated_school_is_unknown(
+    abbrev_conn: sqlite3.Connection,
+) -> None:
+    """Issue #123's guard covers the expanded name: Ohio State is a known
+    team with no rating this season, so "Ohio St." is UnknownTeamError, not
+    Ohio."""
+    abbrev_conn.execute("DELETE FROM ratings WHERE team_id = ?", (_id_of("Ohio State"),))
+    for query in ("Ohio St.", "Ohio St", "Ohio-State"):
+        with pytest.raises(UnknownTeamError):
+            resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD)
+
+
+@pytest.mark.parametrize("school", list(_ABBREV_SCHOOLS.values()))
+def test_exact_names_still_resolve(abbrev_conn: sqlite3.Connection, school: str) -> None:
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, school, method=METHOD) == _id_of(school)
+
+
+def test_forward_substring_still_resolves_on_a_single_hit(abbrev_conn: sqlite3.Connection) -> None:
+    """The query inside one rated name is unchanged: "Alab" is Alabama."""
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, "Alab", method=METHOD) == _id_of("Alabama")
+
+
+@pytest.mark.parametrize("query", ["Alabma", "alabma", "Michgan State"])
+def test_typos_still_resolve(abbrev_conn: sqlite3.Connection, query: str) -> None:
+    expected = "Alabama" if "lab" in query.lower() else "Michigan State"
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD) == _id_of(expected)
+
+
+def test_ambiguous_fuzzy_candidates_are_capped_at_the_limit(tmp_path: Path) -> None:
+    """A query that matches more than FUZZY_MATCH_LIMIT names fuzzily (and
+    none by substring) lists exactly FUZZY_MATCH_LIMIT of them, best first
+    then by name -- the cap is what keeps a "did you mean" short."""
+    c = get_conn(_make_db(tmp_path))
+    names = [f"Wolf College {n:02d}" for n in range(1, proof.FUZZY_MATCH_LIMIT + 3)]
+    for tid, school in enumerate(names, start=301):
+        _insert_team(c, tid, school, classification="fbs")
+        _insert_rating(c, ABBREV_YEAR, METHOD, tid, 0.1, tid - 300, 0, 0)
+    c.commit()
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(c, ABBREV_YEAR, "Wolf Colege", method=METHOD)
+    assert len(names) > proof.FUZZY_MATCH_LIMIT
+    assert exc_info.value.candidates == names[: proof.FUZZY_MATCH_LIMIT]
 
 
 # ---------------------------------------------------------------------------

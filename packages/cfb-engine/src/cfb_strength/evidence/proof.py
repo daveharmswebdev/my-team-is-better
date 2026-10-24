@@ -528,19 +528,34 @@ def resolve_team(
     rating row for `year`/`method`/`sport` (a team without a rating can't have
     a TeamCase built for it anyway).
 
+    Before any stage after the first, a trailing "St." or "St" word in the
+    query is read as "State" ("Ohio St." -> "Ohio State"; issue #393).
+
     Resolution order:
-      1. Exact match (case-insensitive, whitespace-trimmed).
-      2. Known but unrated: the query exactly names a `teams` row of this
-         sport that has no rating row here -> UnknownTeamError (issue #123).
-      3. Substring match (either direction), case-insensitive.
-      4. Fuzzy match (difflib ratio, the better of case-sensitive and
+      1. Exact match (case-insensitive, whitespace-trimmed), as typed.
+      2. Loose exact match: the query, as typed or with "St." expanded,
+         equals a rated name once case, whitespace and punctuation are
+         ignored ("Ohio St." -> Ohio State, "Miami OH" -> Miami (OH)).
+      3. Known but unrated: the query names a `teams` row of this sport that
+         has no rating row here, exactly or in the loose sense of stage 2
+         -> UnknownTeamError (issue #123).
+      4. Substring match, case-insensitive, on the expanded query. A query
+         inside rated names: one hit resolves, several ask. A rated name
+         inside the query (the reverse direction) never resolves on its
+         own (#393: "Miami FL" contains "Miami" but is a guess) -- any such
+         hit asks, listing every substring hit plus the fuzzy stage's close
+         names. Only a query that differs from a name by whitespace or
+         punctuation alone resolves to it, and stage 2 already did that.
+      5. Fuzzy match (difflib ratio, the better of case-sensitive and
          lowercased): resolves only when the top name scores
          >= FUZZY_RESOLVE_CUTOFF and the runner-up < FUZZY_RUNNER_UP_CUTOFF;
-         any other result with a name >= FUZZY_MATCH_CUTOFF asks.
+         any other result with a name >= FUZZY_MATCH_CUTOFF asks, listing
+         at most FUZZY_MATCH_LIMIT of them.
 
     Raises AmbiguousTeamError when a stage yields candidates but no unique
-    answer -- several names, or a fuzzy stage whose only matches are weak (a
-    one-name "did you mean X?"). Its `candidates` list is always non-empty.
+    answer -- several names, a lone reverse-substring hit, or a fuzzy stage
+    whose only matches are weak (a one-name "did you mean X?"). Its
+    `candidates` list is always non-empty.
     Raises UnknownTeamError -- carrying only the query, year and sport -- for
     a known-but-unrated team or when no stage matches anything at all.
     Raises UnknownYearError if there are no ratings at all for
@@ -558,25 +573,49 @@ def resolve_team(
     if len(exact) > 1:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in exact))
 
+    # Issue #393: "Ohio St." is Ohio State. Every later stage works on the
+    # expanded query, so the substring stage can't find "ohio" inside it.
+    q = _expand_state_abbreviation(q)
+    q_lower = q.lower()
+    loose_forms = {_loose(query), _loose(q)} - {""}
+
+    loose = [row for row in candidates if _loose(str(row["school"])) in loose_forms]
+    if len(loose) == 1:
+        return int(loose[0]["team_id"])
+    if len(loose) > 1:
+        raise AmbiguousTeamError(query, sorted(r["school"] for r in loose))
+
     # Issue #123: the query names a real team of this sport that has no rating
     # row for year/method -- an FCS school in a season it wasn't rated, or a
     # school whose row is missing. The looser stages below would answer with a
     # *different* rated school ("North Dakota State" -> Colorado State, "USC"
-    # -> UCF), so stop here.
-    if _is_known_team(conn, q_lower, sport):
+    # -> UCF, "Texas St." -> Texas), so stop here.
+    if _is_known_team(conn, query.strip().lower(), loose_forms, sport):
         raise UnknownTeamError(query, year, sport)
 
-    substring = [
+    forward = [row for row in candidates if q_lower in row["school"].lower()]
+    reverse = [
         row
         for row in candidates
-        if q_lower in row["school"].lower() or row["school"].lower() in q_lower
+        if row["school"].lower() in q_lower and q_lower not in row["school"].lower()
     ]
-    if len(substring) == 1:
-        return int(substring[0]["team_id"])
-    if len(substring) > 1:
-        raise AmbiguousTeamError(query, sorted(r["school"] for r in substring))
-
     scored = _fuzzy_scores(q, candidates)
+    # A name scoring below FUZZY_MATCH_CUTOFF is no match; the cap keeps a
+    # "did you mean" list short.
+    close = [row for score, row in scored if score >= FUZZY_MATCH_CUTOFF][:FUZZY_MATCH_LIMIT]
+
+    if reverse:
+        # Issue #393: a rated name inside the query is the query's guess at
+        # a *shorter* school ("Miami FL" -> Miami, "Michigan St. Spartans" ->
+        # Michigan), never an answer on its own. Offer it beside every other
+        # lead, so the intended school can be picked.
+        offered = {str(r["school"]) for r in forward + reverse + close}
+        raise AmbiguousTeamError(query, sorted(offered))
+    if len(forward) == 1:
+        return int(forward[0]["team_id"])
+    if len(forward) > 1:
+        raise AmbiguousTeamError(query, sorted(r["school"] for r in forward))
+
     top_score = scored[0][0] if scored else 0.0
     runner_up_score = scored[1][0] if len(scored) > 1 else 0.0
     if top_score >= FUZZY_RESOLVE_CUTOFF and runner_up_score < FUZZY_RUNNER_UP_CUTOFF:
@@ -593,20 +632,44 @@ def resolve_team(
     # empty candidate list, i.e. a "did you mean:" prompt with nothing under
     # it. AmbiguousTeamError.candidates is therefore non-empty from every
     # raise site in this module, by construction.
-    close = [row for score, row in scored if score >= FUZZY_MATCH_CUTOFF][:FUZZY_MATCH_LIMIT]
     if close:
         raise AmbiguousTeamError(query, sorted(row["school"] for row in close))
 
     raise UnknownTeamError(query, year, sport)
 
 
-def _is_known_team(conn: sqlite3.Connection, q_lower: str, sport: str) -> bool:
+def _expand_state_abbreviation(q: str) -> str:
+    """A trailing "St." or "St" word (any case) read as "State", whitespace
+    collapsed: "Ohio St." -> "Ohio State" (issue #393). A lone "St" is left
+    alone -- there is no school to attach it to. Deliberately just this one
+    word, not an abbreviation table: school names end in "State", never in a
+    bare "St" word, so the expansion can't turn one real name into another."""
+    words = q.split()
+    if len(words) >= 2 and words[-1].lower() in ("st", "st."):
+        words[-1] = "State"
+    return " ".join(words) if len(words) >= 2 else q
+
+
+def _loose(name: str) -> str:
+    """A name with case, whitespace and punctuation removed, for comparing
+    "Miami OH" with "Miami (OH)" (issue #393)."""
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def _is_known_team(
+    conn: sqlite3.Connection, q_lower: str, loose_forms: set[str], sport: str
+) -> bool:
     """True when some `teams` row of `sport` has exactly this name
-    (case-insensitive, trimmed). Scoped by sport (#57/#58/#86): an NFL team
-    named like a CFB query says nothing about the CFB pool. Compared in
-    Python, as the exact stage is, so both agree on what "lowercase" means."""
+    (case-insensitive, trimmed), or matches one of `loose_forms` once case,
+    whitespace and punctuation are ignored. Scoped by sport (#57/#58/#86): an
+    NFL team named like a CFB query says nothing about the CFB pool. Compared
+    in Python, as the exact stage is, so both agree on what "lowercase"
+    means."""
     rows = conn.execute("SELECT school FROM teams WHERE sport = ?", (sport,)).fetchall()
-    return any(str(row["school"]).strip().lower() == q_lower for row in rows)
+    return any(
+        str(row["school"]).strip().lower() == q_lower or _loose(str(row["school"])) in loose_forms
+        for row in rows
+    )
 
 
 def _fuzzy_scores(q: str, candidates: list[sqlite3.Row]) -> list[tuple[float, sqlite3.Row]]:
