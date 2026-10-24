@@ -1,7 +1,7 @@
 ---
 name: cycle
-description: One full coordinator cycle with the founder's standing answers already given — orient, file every untracked gap through /triage without asking, then work the ready, unclaimed, non-colliding issues in parallel (one spoke worktree each) through /delegate and /ship. Use at session start or after /clear when the founder says "cycle", "the usual", or "keep going".
-argument-hint: "[max-parallel, default 3]"
+description: One full coordinator cycle with the founder's standing answers already given — orient, file every untracked gap through /triage without asking, then work the ready, unclaimed, non-colliding issues in parallel (one spoke worktree each) through /delegate and /ship. Can repeat for N rounds or until the work runs out. Use at session start or after /clear when the founder says "cycle", "the usual", or "keep going".
+argument-hint: "[max-parallel, default 3] [rounds: a number or 'all', default 1]"
 ---
 
 # Cycle
@@ -10,7 +10,10 @@ The founder ran this loop by hand for weeks, giving the same two answers every t
 "yes, triage the gaps" and "work the ready items in parallel, in separate worktrees".
 Those answers are standing authorization. Don't ask them again; report what you did.
 
-Arguments, if given: `$ARGUMENTS` (the most issues to work at once; default 3).
+Arguments, if given: `$ARGUMENTS`. The first is the most issues to work at once (default
+3). The second is how many rounds to run: a number, or `all` to keep going until the
+work runs out (default 1). `/cycle 3 5` runs five rounds of up to three issues each;
+`/cycle 3 all` runs until a stop condition in step 6 fires.
 
 ## 1. Orient
 
@@ -56,7 +59,7 @@ Inline work (a typo, a one-line fix) still skips delegation, per the routing tab
 ## 5. Report (under 30 lines)
 
 ```
-## Cycle — <date>
+## Cycle — <date>, round <k> of <rounds|all>
 **Filed:** #n (Kind, Priority) … | none   **Not filed:** <gap — reason>
 **Shipped:** #n → PR #p (deploy verified: api/web)
 **Parked:** #n — <why, and what the founder needs to decide>
@@ -64,5 +67,17 @@ Inline work (a typo, a one-line fix) still skips delegation, per the routing tab
 **Needs founder:** <P0/P1 proposals, decisions> | none
 ```
 
-Then stop. Don't start a second cycle unless the founder asked for a loop
-(`/loop /cycle`).
+## 6. Next round, or stop
+
+Once every pick from this round has shipped or been parked, start the next round at
+step 1. Orient again, because other sessions will have moved things. Stop when any of
+these is true, and say which one fired:
+
+- the requested number of rounds is done;
+- step 3 found no ready pick and step 2 filed nothing, so the work has run out (what's
+  left is claimed, colliding, or waiting on the founder);
+- two rounds in a row shipped nothing, which means it's stuck, not finished;
+- something needs the founder before anything else can safely go ahead (a red `main`,
+  a failed deploy, a P0 proposal).
+
+At the end, add a one-line total across all rounds above the last report.
