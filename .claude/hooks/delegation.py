@@ -310,7 +310,7 @@ def render_pointer(brief: dict[str, Any], prompt_path: Path) -> str:
     )
 
 
-def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
+def _final_output(payload: dict[str, Any], *, this_round: bool = False) -> tuple[str, bool]:
     """The spoke's latest output, and whether it was a delivered SubagentHandback report.
 
     A spoke that hands back through the SubagentHandback tool ends with no closing
@@ -318,6 +318,10 @@ def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
     input in the transcript does (#305). A handback whose tool result is an error
     was denied by `pre_handback` and never delivered. Falls back to
     `last_assistant_message` when the transcript can't be read.
+
+    With `this_round`, the walk stops at the latest prompt (a user entry that is text,
+    not tool results): a spoke resumed for a later round that hasn't reported yet has
+    no output, rather than the previous round's report (#400).
     """
     fallback = payload.get("last_assistant_message")
     fallback = fallback if isinstance(fallback, str) else ""
@@ -338,6 +342,11 @@ def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
         content = message.get("content")
         blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
         if entry.get("type") == "user":
+            if this_round and (
+                isinstance(content, str)
+                or (blocks and not any(b.get("type") == "tool_result" for b in blocks))
+            ):
+                return "", False
             failed_calls |= {
                 str(b.get("tool_use_id"))
                 for b in blocks
@@ -543,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"validate-return: no such file: {missing}", file=sys.stderr)
         return 2
     if args.transcript is not None:
-        text, _ = _final_output({"agent_transcript_path": str(args.transcript)})
+        text, _ = _final_output({"agent_transcript_path": str(args.transcript)}, this_round=True)
     else:
         text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
     errors: list[str] = []

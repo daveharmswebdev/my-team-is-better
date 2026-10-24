@@ -807,3 +807,65 @@ def test_hooks_agent_brief_needs_a_gate() -> None:
         "max_review_rounds": 3,
     }
     assert delegation.validate_brief(brief, ownership) == []
+
+
+def _prompt_entry(text: str) -> dict[str, Any]:
+    return {"type": "user", "message": {"content": text}}
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        # Resumed for round 2, then only tool calls: still running, or hit max turns.
+        [
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "x"}]
+                },
+            },
+        ],
+        # Resumed, and ended on blank text.
+        [{"type": "assistant", "message": {"content": [{"type": "text", "text": "  "}]}}],
+        # Resumed, nothing yet.
+        [],
+    ],
+)
+def test_cli_validate_return_never_reports_an_earlier_rounds_report(
+    tmp_path: Path, tail: list[dict[str, Any]]
+) -> None:
+    """#400 review round 2: a resumed spoke whose current round has no report yet must
+    not validate as the previous round's report."""
+    path = _task_output(
+        tmp_path,
+        _prompt_entry("Brief for api-agent, round 1."),
+        _handback_entry(_fenced(_success())),
+        _prompt_entry("Brief for api-agent, round 2."),
+        *tail,
+    )
+    result = _cli("validate-return", "--agent", "api-agent", "--transcript", str(path))
+    assert result.returncode == 1
+    assert "no fenced" in result.stderr
+
+
+def test_cli_validate_return_reads_a_report_after_the_latest_prompt(tmp_path: Path) -> None:
+    second = _success()
+    second["head_sha"] = "f00dbabe"
+    path = _task_output(
+        tmp_path,
+        _prompt_entry("round 1"),
+        _handback_entry(_fenced(_success()), "a"),
+        _prompt_entry("round 2"),
+        _handback_entry(_fenced(second), "b"),
+    )
+    result = _cli("validate-return", "--agent", "api-agent", "--transcript", str(path))
+    assert result.returncode == 0, result.stderr
+    assert "head f00dbabe" in result.stdout

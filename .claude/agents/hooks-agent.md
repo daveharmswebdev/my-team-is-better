@@ -22,8 +22,10 @@ tests. So:
   `render-brief` refuses a hooks-agent brief without one. Judge "loosens a guard or a
   validation rule" against it. That covers `guard_*.py`, `delegation.py`'s checks and
   `ownership.py`.
-- You run in your own worktree. The live hooks run from the coordinator's checkout,
-  and your edits don't touch them until they merge. If your checkout is the primary
+- You run in your own worktree. The live hooks run from the session's project
+  directory, the primary checkout (`$CLAUDE_PROJECT_DIR`), even while the coordinator
+  works in an `issue-*` worktree. Your edits don't touch them until they merge and that
+  checkout is updated. If your checkout is the primary
   one (`git rev-parse --git-dir` has no `/worktrees/`), stop and return
   `tool-or-environment-failure`.
 - Every error path keeps the safe direction: a broken hook must never trap a spoke, and
