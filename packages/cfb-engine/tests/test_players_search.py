@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from cfb_strength.contracts import PLAYER_SEARCH_MAX_LIMIT, PlayerSearchRow
+from cfb_strength.contracts import (
+    PLAYER_SEARCH_MAX_LIMIT,
+    PlayerCareer,
+    PlayerPositionGroup,
+    PlayerSearchRow,
+    position_group,
+)
 from cfb_strength.players import search_players
 from tests.test_players_support import STAT_COLUMNS, PlayerDb, conn_of, full_stats
 
@@ -61,7 +67,7 @@ def test_matching_is_a_case_insensitive_substring(db: PlayerDb) -> None:
 def test_the_stripped_query_and_limit_are_echoed(db: PlayerDb) -> None:
     _passer(db, "Eli Manning")
     result = search_players(conn_of(db), sport="nfl", query="  eli \t", limit=5)
-    assert (result.sport, result.query, result.limit) == ("nfl", "eli", 5)
+    assert (result.sport, result.query, result.limit, result.group) == ("nfl", "eli", 5, None)
     assert [r.display_name for r in result.rows] == ["Eli Manning"]
 
 
@@ -110,6 +116,102 @@ def test_a_nul_in_the_query_matches_literally_so_nothing(db: PlayerDb) -> None:
     _passer(db, "Josh Allen", 200)
     assert _names(db, "a\x00b") == []
     assert _names(db, "\x00\x00") == []
+
+
+# --- position group (#428) ----------------------------------------------------
+
+# Every label measured over the committed raw cache (players.csv, 24,824 rows).
+_MEASURED_LABELS = [
+    "WR", "LB", "RB", "DB", "DE", "OT", "TE", "G", "DT", "CB", "QB", "C", "OLB",
+    "K", "P", "SAF", "S", "FS", "NT", "FB", "ILB", "MLB", "LS", "OL", "DL",
+]  # fmt: skip
+_GROUPED = {"QB": "QB", "RB": "RB", "FB": "RB", "WR": "WR", "TE": "TE"}
+
+
+@pytest.mark.parametrize("label", [*_MEASURED_LABELS, None])
+def test_position_group_maps_every_measured_label(label: str | None) -> None:
+    expected = _GROUPED.get(label) if label is not None else None
+    assert position_group(label) == expected
+    assert PlayerSearchRow(1, "X", label, 2000, 2000).group == expected
+    career = PlayerCareer("nfl", 1, "X", label, [], None, None)
+    assert career.group == expected
+
+
+def _one_of_each_position(db: PlayerDb) -> dict[str | None, int]:
+    """A qualifying "Pos <label>" player for every measured label and None,
+    all with the same games, so the unfiltered order is by name."""
+    ids: dict[str | None, int] = {}
+    for label in [*_MEASURED_LABELS, None]:
+        p = db.player(f"Pos {label or 'none'}", position=label)
+        db.season(p, 2000, games=5, **_only(carries=1))
+        ids[label] = p
+    return ids
+
+
+@pytest.mark.parametrize("group", ["QB", "RB", "WR", "TE"])
+def test_a_group_keeps_exactly_the_players_whose_label_maps_to_it(
+    db: PlayerDb, group: PlayerPositionGroup
+) -> None:
+    ids = _one_of_each_position(db)
+    result = search_players(
+        conn_of(db), sport="nfl", query="pos", limit=PLAYER_SEARCH_MAX_LIMIT, group=group
+    )
+    labels = sorted((label for label, g in _GROUPED.items() if g == group), key="Pos {}".format)
+    expected = [ids[label] for label in labels]
+    assert [r.player_id for r in result.rows] == expected
+    assert all(r.group == group for r in result.rows)
+    assert result.group == group
+
+
+def test_rb_includes_fb_and_excludes_every_other_label(db: PlayerDb) -> None:
+    ids = _one_of_each_position(db)
+    rows = search_players(
+        conn_of(db), sport="nfl", query="pos", limit=PLAYER_SEARCH_MAX_LIMIT, group="RB"
+    ).rows
+    assert [r.player_id for r in rows] == [ids["FB"], ids["RB"]]
+
+
+def test_the_group_filter_applies_before_the_limit(db: PlayerDb) -> None:
+    # The ten most-played matches are all QBs, so a filter applied to the
+    # first `limit` rows would find no RB at all.
+    for i in range(10):
+        _passer(db, f"Lim Qb {i}", games=100 + i)
+    rbs = []
+    for i in range(3):
+        p = db.player(f"Lim Rb {i}", position="RB")
+        db.season(p, 2000, games=10 - i, **_only(carries=5))
+        rbs.append(p)
+    conn = conn_of(db)
+    assert all(r.position == "QB" for r in search_players(conn, sport="nfl", query="lim").rows)
+    rows = search_players(conn, sport="nfl", query="lim", limit=2, group="RB").rows
+    assert [r.player_id for r in rows] == rbs[:2]
+    rows = search_players(conn, sport="nfl", query="lim", limit=10, group="RB").rows
+    assert [r.player_id for r in rows] == rbs
+
+
+def test_no_group_is_the_unfiltered_result(db: PlayerDb) -> None:
+    _one_of_each_position(db)
+    conn = conn_of(db)
+    default = search_players(conn, sport="nfl", query="pos", limit=PLAYER_SEARCH_MAX_LIMIT)
+    explicit = search_players(
+        conn, sport="nfl", query="pos", limit=PLAYER_SEARCH_MAX_LIMIT, group=None
+    )
+    assert default == explicit
+    assert default.group is None
+    # The first page of every label, by name, whatever its group.
+    expected = sorted(f"Pos {label or 'none'}" for label in [*_MEASURED_LABELS, None])
+    assert [r.display_name for r in default.rows] == expected[:PLAYER_SEARCH_MAX_LIMIT]
+
+
+@pytest.mark.parametrize("group", ["", "qb", "FB", "K", "HB", "QB ", 1])
+def test_an_invalid_group_raises(db: PlayerDb, group: object) -> None:
+    with pytest.raises(ValueError):
+        search_players(conn_of(db), sport="nfl", query="ab", group=group)  # type: ignore[arg-type]
+
+
+def test_a_nul_query_with_a_group_echoes_the_group(db: PlayerDb) -> None:
+    result = search_players(conn_of(db), sport="nfl", query="a\x00b", group="TE")
+    assert (result.group, result.rows) == ("TE", [])
 
 
 # --- who qualifies ------------------------------------------------------------
