@@ -31,8 +31,9 @@ delivered: you get the errors instead, so fix them and hand it back again.
   The persona integration test then makes a real Claude call and rewrites a row in
   production Postgres, and `api.config` loads `.env` itself, so unsetting shell variables
   isn't enough. Check `ls apps/api/.env` first; if it exists, use a worktree without it.
-- **Git.** Don't push, merge, open PRs or touch labels unless the brief says to. Never use
-  `git stash`: the stash is shared by every session (a hook blocks it).
+- **Git.** Commit your work (see "Before you hand back"), but don't push, merge, open PRs
+  or touch labels unless the brief says to. Never use `git stash`: the stash is shared by
+  every session (a hook blocks it).
 - **Sabotage runs** (when the rubric asks for them): the edit anchor must match exactly
   once; confirm the edit landed before running; restore byte-exact and verify with
   `cmp`. For Python, delete the package's `__pycache__` and set
@@ -52,6 +53,14 @@ delivered: you get the errors instead, so fix them and hand it back again.
   don't bend the work to fit: report the measured numbers in `brief_defects`.
 - **Out-of-scope defects** you notice go in `findings` (with `tracked_issue` looked up
   via `gh issue list --state open --search "<keywords>"`), not into your diff.
+
+## Before you hand back
+
+**Commit the round's work** on your worktree branch, in one or more commits past
+`base_sha`, so `git status --short` prints nothing. Report the last one as `head_sha`.
+The coordinator ships from your commits. Uncommitted edits get committed by hand or
+stranded when the worktree is reclaimed (#415, #420). Leave scratch files in SCRATCH, not
+in the tree. Read-only agents commit nothing.
 
 ## Where things go in the return
 
