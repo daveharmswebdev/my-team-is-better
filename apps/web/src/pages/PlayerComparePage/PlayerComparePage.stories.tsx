@@ -192,6 +192,47 @@ export const PickedAndCompared: Story = {
   },
 }
 
+/**
+ * A lone `?a=<id>` link whose career lookup couldn't be reached: the
+ * narrator's line stays on the form while the fields hold only that pick.
+ */
+export const LoneLinkCareerFailed: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}`, {
+      career: () => Promise.reject(new TypeError('Failed to fetch')),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByRole('alert')).toHaveTextContent(
+      NETWORK_ERROR_COPY,
+    )
+    await expect(canvas.queryByRole('dialog')).toBeNull()
+  },
+}
+
+/**
+ * The same failed lone link, then Steve McNair picked into Player B (issue
+ * #367): the failure was about the lone pick, so it goes, and Compare is on.
+ */
+export const LoneLinkCareerFailedThenPicked: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}`, {
+      career: () => Promise.reject(new TypeError('Failed to fetch')),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('alert')
+    await userEvent.type(playerB(canvas), 'McNair')
+    await userEvent.click(
+      await canvas.findByRole('option', { name: /Steve McNair/ }),
+    )
+    await expect(canvas.getByRole('button', { name: 'Compare' })).toBeEnabled()
+    await expect(canvas.queryByRole('alert')).toBeNull()
+  },
+}
+
 export const SamePlayer: Story = {
   decorators: [atSearch(`?a=${WARNER}&b=${WARNER}`)],
   play: async ({ canvasElement }) => {
