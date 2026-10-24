@@ -22,6 +22,14 @@ dropping a name from the guard's own list turns exactly that case red.
 Each case drops one column (or table) from a copy of the committed CFB
 regression fixture, rated for 2005 under `elo` (so the ledger tables hold
 rows), and never touches the committed file.
+
+Issue #423: the guard is public (`require_current_schema`), so apps/api and
+the MCP server can run it before their own late-column queries, and
+`list_available_years` runs it too. Every case below therefore checks four
+callers: the guard itself, `list_available_years`, `build_team_case` and
+`build_comparison`. `list_available_years` reads only `ratings.sport` of the
+late-added names (not `ratings.ties`), but it still fails on every one: the
+guard checks the whole schema, because a db missing any of them is stale.
 """
 
 from __future__ import annotations
@@ -37,6 +45,8 @@ from cfb_strength.evidence.proof import (
     StaleDatabaseError,
     build_comparison,
     build_team_case,
+    list_available_years,
+    require_current_schema,
 )
 from cfb_strength.ratings.compute_ratings import compute_and_store
 from tests.conftest import REGRESSION_FIXTURE_DB
@@ -112,8 +122,16 @@ def _drop_table(db_path: Path, table: str) -> None:
 
 
 def _raises_stale(conn: sqlite3.Connection) -> list[StaleDatabaseError]:
-    """The error each public evidence entry point raises on `conn`."""
+    """The error each public evidence entry point raises on `conn`: the
+    guard itself, `list_available_years` (#423), `build_team_case` and
+    `build_comparison`."""
     errors: list[StaleDatabaseError] = []
+    with pytest.raises(StaleDatabaseError) as guard_info:
+        require_current_schema(conn)
+    errors.append(guard_info.value)
+    with pytest.raises(StaleDatabaseError) as years_info:
+        list_available_years(conn, METHOD, sport="cfb")
+    errors.append(years_info.value)
     with pytest.raises(StaleDatabaseError) as case_info:
         build_team_case(conn, YEAR, "Texas", method=METHOD, sport="cfb")
     errors.append(case_info.value)
@@ -132,6 +150,29 @@ def test_the_unmodified_copy_is_not_stale(rated_db: Path, tmp_path: Path) -> Non
     finally:
         conn.close()
     assert case.elo_ledger is not None
+
+
+def test_list_available_years_on_a_current_copy_is_unchanged(
+    rated_db: Path, tmp_path: Path
+) -> None:
+    """Control for #423: on a current db the guard passes silently and
+    list_available_years returns exactly what the bare query returns."""
+    conn = get_conn(_copy(rated_db, tmp_path), read_only=True)
+    try:
+        require_current_schema(conn)
+        expected = [
+            int(row["year"])
+            for row in conn.execute(
+                "SELECT DISTINCT year FROM ratings WHERE method = ? AND sport = 'cfb' "
+                "ORDER BY year",
+                (METHOD,),
+            )
+        ]
+        years = list_available_years(conn, METHOD, sport="cfb")
+    finally:
+        conn.close()
+    assert expected == [YEAR]
+    assert years == expected
 
 
 @pytest.mark.parametrize(
