@@ -132,7 +132,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import Response
 
-from api.errors import MissingChampionError
+from api.errors import MissingChampionError, PlayersNotComparableError
 
 UNKNOWN_YEAR = "UnknownYearErrorResponse"
 UNKNOWN_TEAM = "UnknownTeamErrorResponse"
@@ -140,6 +140,7 @@ AMBIGUOUS_TEAM = "AmbiguousTeamErrorResponse"
 SAME_TEAM = "SameTeamComparisonErrorResponse"
 MISSING_CHAMPION = "MissingChampionErrorResponse"
 UNKNOWN_PLAYER = "UnknownPlayerErrorResponse"
+PLAYERS_NOT_COMPARABLE = "PlayersNotComparableErrorResponse"
 STALE_DATABASE = "StaleDatabaseErrorResponse"
 HTTP_VALIDATION = "HTTPValidationError"
 
@@ -153,6 +154,7 @@ ENGINE_ERROR_COMPONENTS = frozenset(
         SAME_TEAM,
         MISSING_CHAMPION,
         UNKNOWN_PLAYER,
+        PLAYERS_NOT_COMPARABLE,
         STALE_DATABASE,
         "UnknownYearErrorBody",
         "UnknownTeamErrorBody",
@@ -160,6 +162,7 @@ ENGINE_ERROR_COMPONENTS = frozenset(
         "SameTeamComparisonErrorBody",
         "MissingChampionErrorBody",
         "UnknownPlayerErrorBody",
+        "PlayersNotComparableErrorBody",
         "StaleDatabaseErrorBody",
     }
 )
@@ -211,9 +214,11 @@ KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
     ("/api/players/leaders", "get"): frozenset(),
     ("/api/players/{player_id}", "get"): frozenset({UnknownPlayerError}),
     # Issue #301. Compare reaches `get_player_career` through the engine and
-    # raises UnknownPlayerError itself for an out-of-range id. Search raises
-    # only ValueError, which the route's own validation rejects first.
-    ("/api/players/compare", "get"): frozenset({UnknownPlayerError}),
+    # raises UnknownPlayerError itself for an out-of-range id; since #433 it
+    # also raises the API-local PlayersNotComparableError for a pair outside
+    # one position group. Search raises only ValueError (a bad limit, query
+    # or group), which the route's own validation rejects first.
+    ("/api/players/compare", "get"): frozenset({UnknownPlayerError, PlayersNotComparableError}),
     ("/api/players/search", "get"): frozenset(),
     ("/health", "get"): frozenset(),
 }
@@ -250,6 +255,10 @@ EXAMPLE_EXCEPTIONS: dict[type[BaseException], BaseException] = {
     # Issue #296: GET /api/players/{player_id}. Triggered for real in
     # test_player_errors_validate_against_advertised_schema below.
     UnknownPlayerError: UnknownPlayerError(1, "nfl"),
+    # Issue #433, API-local: GET /api/players/compare for a pair outside one
+    # position group. Triggered for real in
+    # test_player_errors_validate_against_advertised_schema below.
+    PlayersNotComparableError: PlayersNotComparableError("QB", None),
     # Issue #280, the engine's. RUNTIME_CASES cannot trigger it: the committed
     # fixture has the #183 ledger tables. tests/test_verdict_stale_database.py
     # drops them on a copy, triggers it for real through every verdict route
@@ -829,12 +838,19 @@ PLAYER_SEARCH_ROUTE = ("/api/players/search", "get")
 @pytest.mark.parametrize(
     "route", [PLAYER_CAREER_ROUTE, PLAYER_COMPARE_ROUTE], ids=lambda r: f"GET {r[0]}"
 )
-def test_player_route_advertises_exactly_the_unknown_player_404(route: tuple[str, str]) -> None:
+def test_player_route_advertises_exactly_its_player_errors(route: tuple[str, str]) -> None:
     openapi = _openapi()
     responses = openapi["paths"][route[0]][route[1]]["responses"]
 
     assert _union_members(_json_schema(responses["404"])) == [UNKNOWN_PLAYER]
-    for status in sorted(s for s in responses if not s.startswith("2") and s != "404"):
+    # Compare alone also refuses a pair outside one position group (#433).
+    own = {"404"}
+    if route == PLAYER_COMPARE_ROUTE:
+        assert _union_members(_json_schema(responses["400"])) == [PLAYERS_NOT_COMPARABLE]
+        own.add("400")
+    else:
+        assert "400" not in responses
+    for status in sorted(s for s in responses if not s.startswith("2") and s not in own):
         leaked = _all_refs(responses[status]) & ENGINE_ERROR_COMPONENTS
         assert not leaked, f"GET {route[0]} {status} references engine errors: {leaked}"
 
@@ -856,7 +872,24 @@ PLAYER_RUNTIME_CASES: list[tuple[str, str, dict[str, str | int], int, str | None
         422,
         None,
     ),
+    # Issue #433: a pair outside one position group -- different groups, and
+    # a player with none (Kurt Warner QB, Eddie George RB, Jeff Wilkins K).
+    (
+        "/api/players/compare",
+        PLAYER_COMPARE_ROUTE[0],
+        {"a": 2044124519, "b": 2464876093},
+        400,
+        "players_not_comparable",
+    ),
+    (
+        "/api/players/compare",
+        PLAYER_COMPARE_ROUTE[0],
+        {"a": 2044124519, "b": 2050106967},
+        400,
+        "players_not_comparable",
+    ),
     ("/api/players/search", PLAYER_SEARCH_ROUTE[0], {"q": " a "}, 422, None),
+    ("/api/players/search", PLAYER_SEARCH_ROUTE[0], {"q": "mc", "group": "K"}, 422, None),
     ("/api/players/search", PLAYER_SEARCH_ROUTE[0], {"q": "mc", "sport": "cfb"}, 422, None),
 ]
 

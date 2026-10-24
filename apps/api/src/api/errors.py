@@ -10,6 +10,7 @@ persona copy for these is issue #4's job, not this one's).
 | `SameTeamComparisonError`  | 400                                           |
 | `MissingChampionError`     | 500, body echoes `year`/`method`/`sport`      |
 | `UnknownPlayerError`       | 404, body echoes `player_id`/`sport` (#296)   |
+| `PlayersNotComparableError`| 400, body echoes `a_group`/`b_group` (#433)   |
 | `StaleDatabaseError`       | 503, `error` tag only, details logged (#280)  |
 
 Registered once on the app (`api.main`) rather than caught per-route, so
@@ -29,6 +30,14 @@ team query and came back as a 422 `ambiguous_team` listing every rated team
 as a candidate for a query the user never typed. It is declared on the
 champion route only (`CHAMPION_ERROR_RESPONSES`), and the handler logs it
 at error level, since it is the operator's problem, not the user's.
+
+`PlayersNotComparableError` (issue #433) is API-local too: the engine's
+`get_player_comparison` compares any two players, and the rule that
+/players/compare compares only two players of one position group (founder
+decision, epic #372) is a gate `api.players.compare` puts in front of it.
+400, like `same_team_comparison`: the request names a pair that cannot be
+compared. Either player with no group (a kicker, a linebacker) is refused
+too, even two of the same label.
 
 `StaleDatabaseError` (issue #280) is the engine's, from
 `cfb_strength.evidence.proof`: `_elo_ledger` raises it when the db predates
@@ -85,6 +94,7 @@ from typing import Any
 from cfb_strength.contracts import (
     AmbiguousTeamError,
     Method,
+    PlayerPositionGroup,
     SameTeamComparisonError,
     Sport,
     UnknownPlayerError,
@@ -107,6 +117,8 @@ from api.models import (
     AmbiguousTeamErrorResponse,
     MissingChampionErrorBody,
     MissingChampionErrorResponse,
+    PlayersNotComparableErrorBody,
+    PlayersNotComparableErrorResponse,
     SameTeamComparisonErrorBody,
     SameTeamComparisonErrorResponse,
     StaleDatabaseErrorBody,
@@ -139,6 +151,18 @@ class MissingChampionError(RuntimeError):
         self.sport = sport
 
 
+class PlayersNotComparableError(ValueError):
+    """Raised by `api.players.compare` when `a` and `b` are not two players
+    of one position group: different groups, or either with none (issue
+    #433; the module docstring has the reasoning). API-local: the engine
+    has no such rule."""
+
+    def __init__(self, a_group: PlayerPositionGroup | None, b_group: PlayerPositionGroup | None):
+        super().__init__(f"players not comparable: a is {a_group}, b is {b_group}")
+        self.a_group = a_group
+        self.b_group = b_group
+
+
 @dataclass(frozen=True)
 class MappedError:
     status_code: int
@@ -152,6 +176,7 @@ ENGINE_ERROR_RESPONSES: dict[type[Exception], MappedError] = {
     SameTeamComparisonError: MappedError(400, SameTeamComparisonErrorResponse),
     MissingChampionError: MappedError(500, MissingChampionErrorResponse),
     UnknownPlayerError: MappedError(404, UnknownPlayerErrorResponse),
+    PlayersNotComparableError: MappedError(400, PlayersNotComparableErrorResponse),
     StaleDatabaseError: MappedError(503, StaleDatabaseErrorResponse),
 }
 
@@ -215,6 +240,14 @@ def register_exception_handlers(app: FastAPI) -> None:
         body = UnknownPlayerErrorBody(player_id=exc.player_id, sport=exc.sport)
         return JSONResponse(
             status_code=ENGINE_ERROR_RESPONSES[UnknownPlayerError].status_code,
+            content={"detail": body.model_dump()},
+        )
+
+    @app.exception_handler(PlayersNotComparableError)
+    def _players_not_comparable(request: Request, exc: PlayersNotComparableError) -> JSONResponse:
+        body = PlayersNotComparableErrorBody(a_group=exc.a_group, b_group=exc.b_group)
+        return JSONResponse(
+            status_code=ENGINE_ERROR_RESPONSES[PlayersNotComparableError].status_code,
             content={"detail": body.model_dump()},
         )
 
@@ -343,9 +376,13 @@ PLAYER_CAREER_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
 # loads both careers through `get_player_career`, so it raises
 # `UnknownPlayerError` for the first unknown id, and `api.players` raises it
 # itself for an id outside SQLite's INTEGER range. `a == b` is a
-# request-validation 422, so it keeps FastAPI's default declaration.
+# request-validation 422, so it keeps FastAPI's default declaration. Once
+# both are known, `api.players.compare` raises `PlayersNotComparableError`
+# unless they share a position group (#433).
 # `GET /api/players/search` reaches no engine error and declares none.
-PLAYER_COMPARISON_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
+PLAYER_COMPARISON_ERROR_RESPONSES = openapi_error_responses(
+    UnknownPlayerError, PlayersNotComparableError
+)
 
 # `GET /api/years` and `GET /api/teams` (issue #423): both read the ratings
 # and teams tables, so each checks the schema first (`list_available_years`

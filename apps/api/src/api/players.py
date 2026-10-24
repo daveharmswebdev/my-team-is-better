@@ -38,6 +38,13 @@ boundary:
   would otherwise reach sqlite3 and raise an unmapped `OverflowError` as a
   500 -- the same "echo what was asked" rule #189 set for season years.
   Compare checks `a`'s range, then `b`'s, before the engine looks either up.
+- **Like with like (#433, epic #372).** Compare answers only for two players
+  of one position group (`contracts.position_group`: QB, RB with FB, WR,
+  TE). Different groups, or either player with none, is a 400
+  `players_not_comparable` naming both groups, raised after the `a == b`
+  422 and the `unknown_player` 404 so those keep their precedence. Search's
+  optional `group` is the engine's own filter, applied before `limit`, and
+  is echoed in the response; an unknown group is the enum's 422.
 - **Fixed paths before `/players/{player_id}`.** Starlette matches routes in
   declaration order, so `leaders`, `compare` and `search` are declared first;
   below it they would be parsed as a non-integer `player_id` and 422.
@@ -55,6 +62,7 @@ from cfb_strength.contracts import (
     PLAYER_SEARCH_MIN_QUERY_LENGTH,
     PlayerLeaderCategory,
     PlayerLeaderSort,
+    PlayerPositionGroup,
     PlayerSeasonType,
     UnknownPlayerError,
 )
@@ -68,7 +76,11 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
 
 from api.deps import get_db_conn
-from api.errors import PLAYER_CAREER_ERROR_RESPONSES, PLAYER_COMPARISON_ERROR_RESPONSES
+from api.errors import (
+    PLAYER_CAREER_ERROR_RESPONSES,
+    PLAYER_COMPARISON_ERROR_RESPONSES,
+    PlayersNotComparableError,
+)
 from api.models import (
     PlayerCareerOut,
     PlayerComparisonOut,
@@ -206,7 +218,9 @@ def compare(
     with `a`'s W-L-T against `b` and the games in chronological order. Both
     head-to-heads are always present, 0-0-0 when the two never met.
     `unknown_player` 404 for the first of `a`, `b` with no player in `sport`;
-    `a == b` is a 422 at `b`."""
+    `a == b` is a 422 at `b`. Two players not of one position group
+    (different groups, or either with none) are a 400
+    `players_not_comparable` echoing both groups (#433)."""
     if a == b:
         raise RequestValidationError(
             [
@@ -220,7 +234,14 @@ def compare(
         )
     _require_storable_player_id(a, sport)
     _require_storable_player_id(b, sport)
-    return PlayerComparisonOut.from_dataclass(get_player_comparison(conn, sport=sport, a=a, b=b))
+    # The engine loads both careers (raising `unknown_player` for the first
+    # unknown id) and compares any two players; the group rule is the API's
+    # gate on its answer, so the refused comparison is never published.
+    comparison = get_player_comparison(conn, sport=sport, a=a, b=b)
+    a_group, b_group = comparison.a.group, comparison.b.group
+    if a_group is None or b_group is None or a_group != b_group:
+        raise PlayersNotComparableError(a_group, b_group)
+    return PlayerComparisonOut.from_dataclass(comparison)
 
 
 @router.get("/players/search", response_model=PlayerSearchOut)
@@ -231,13 +252,16 @@ def search(
     ],
     sport: Annotated[Sport, Depends(player_sport)],
     limit: Annotated[int, Query(ge=1, le=PLAYER_SEARCH_MAX_LIMIT)] = 10,
+    group: PlayerPositionGroup | None = None,
     conn: sqlite3.Connection = Depends(get_db_conn),
 ) -> PlayerSearchOut:
     """Players whose name contains `q` (case-insensitive, literal), in the
     engine's order: regular-season career games descending, then name, then
     id (#371). Any player on any leaderboard can match. `query` echoes `q`
     stripped; no match is a 200 with no rows. A `q` under two characters once
-    stripped is a 422 at `q`."""
+    stripped is a 422 at `q`. `group` keeps only that position group's
+    players (filtered before `limit`) and is echoed; omitted, it is null and
+    the search is unfiltered (#433)."""
     if len(q.strip()) < PLAYER_SEARCH_MIN_QUERY_LENGTH:
         raise RequestValidationError(
             [
@@ -253,7 +277,9 @@ def search(
                 }
             ]
         )
-    return PlayerSearchOut.from_dataclass(search_players(conn, sport=sport, query=q, limit=limit))
+    return PlayerSearchOut.from_dataclass(
+        search_players(conn, sport=sport, query=q, limit=limit, group=group), group=group
+    )
 
 
 @router.get(

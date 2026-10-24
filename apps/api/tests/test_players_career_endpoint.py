@@ -128,6 +128,7 @@ def test_warner_1999_lines_disclose_the_game_without_stat_lines(client: TestClie
         "player_id",
         "display_name",
         "position",
+        "group",
         "seasons",
         "regular_season",
         "postseason",

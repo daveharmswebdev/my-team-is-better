@@ -43,6 +43,7 @@ from cfb_strength.contracts import (
     PlayerLeaderRow,
     PlayerLeaders,
     PlayerLeaderSort,
+    PlayerPositionGroup,
     PlayerSearch,
     PlayerSearchRow,
     PlayerSeasonLine,
@@ -961,6 +962,10 @@ class PlayerCareerOut(BaseModel):
     player_id: int
     display_name: str
     position: str | None
+    # The engine's derived `PlayerCareer.group` (#428): `position`'s group,
+    # null for a label with none (K, LB, ...) or no label. /players/compare
+    # compares only two players of one group (#433).
+    group: PlayerPositionGroup | None
     seasons: list[PlayerSeasonLineOut]
     # Null when the player has no season line of that type.
     regular_season: PlayerCareerTotalsOut | None
@@ -973,6 +978,7 @@ class PlayerCareerOut(BaseModel):
             player_id=career.player_id,
             display_name=career.display_name,
             position=career.position,
+            group=career.group,
             seasons=[PlayerSeasonLineOut.from_dataclass(line) for line in career.seasons],
             regular_season=(
                 PlayerCareerTotalsOut.from_dataclass(career.regular_season)
@@ -1075,6 +1081,8 @@ class PlayerSearchRowOut(BaseModel):
     player_id: int
     display_name: str
     position: str | None
+    # The engine's derived `PlayerSearchRow.group` (#428), as on a career.
+    group: PlayerPositionGroup | None
     first_season: int
     last_season: int
 
@@ -1084,6 +1092,7 @@ class PlayerSearchRowOut(BaseModel):
             player_id=row.player_id,
             display_name=row.display_name,
             position=row.position,
+            group=row.group,
             first_season=row.first_season,
             last_season=row.last_season,
         )
@@ -1094,14 +1103,20 @@ class PlayerSearchOut(BaseModel):
     # The query as matched: stripped of surrounding whitespace.
     query: str
     limit: int
+    # The request's `group` filter, echoed (#433); null = unfiltered. Not on
+    # the engine's `PlayerSearch`, so the route passes it in.
+    group: PlayerPositionGroup | None
     rows: list[PlayerSearchRowOut]
 
     @classmethod
-    def from_dataclass(cls, search: PlayerSearch) -> PlayerSearchOut:
+    def from_dataclass(
+        cls, search: PlayerSearch, *, group: PlayerPositionGroup | None
+    ) -> PlayerSearchOut:
         return cls(
             sport=search.sport,
             query=search.query,
             limit=search.limit,
+            group=group,
             rows=[PlayerSearchRowOut.from_dataclass(row) for row in search.rows],
         )
 
@@ -1290,3 +1305,21 @@ class UnknownPlayerErrorBody(BaseModel):
 
 class UnknownPlayerErrorResponse(BaseModel):
     detail: UnknownPlayerErrorBody
+
+
+class PlayersNotComparableErrorBody(BaseModel):
+    """`GET /api/players/compare` was asked for two players outside one
+    position group (issue #433, epic #372): different groups, or either
+    player with none (`contracts.position_group` is None for K, LB, ...).
+    Founder decision (#372): a mixed-group link is refused, never shown.
+    Both groups are echoed so a client can say which pair it was; null is
+    "no group", never "unknown". API-local, like `MissingChampionErrorBody`:
+    the engine compares any two players, and this gate sits in front of it."""
+
+    error: Literal["players_not_comparable"] = "players_not_comparable"
+    a_group: PlayerPositionGroup | None
+    b_group: PlayerPositionGroup | None
+
+
+class PlayersNotComparableErrorResponse(BaseModel):
+    detail: PlayersNotComparableErrorBody
