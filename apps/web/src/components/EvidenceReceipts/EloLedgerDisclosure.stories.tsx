@@ -59,6 +59,8 @@ const meta = {
   component: EloLedgerDisclosure,
   tags: ['autodocs'],
   args: {
+    // Under a team's own heading, as in a comparison verdict (issue #219).
+    headingLevel: 3,
     teamName: TEXAS_ELO.team_name,
     rating: TEXAS_ELO.rating,
     ledger: TEXAS_ELO.elo_ledger,

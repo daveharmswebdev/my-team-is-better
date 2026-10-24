@@ -9,6 +9,9 @@
   text-transform: uppercase;
   color: var(--ink-muted);
   margin: var(--sp-3) 0 var(--sp-2);
+  /* Level set by the caller (issue #219): wrap as the h6 it was, not as
+     index.css balances h1-h4. */
+  text-wrap: wrap;
 }
 
 .rows {

@@ -24,6 +24,7 @@ afterEach(() => {
 function renderShell(scroll?: 'panel' | 'region') {
   return render(
     <RatingDisclosureShell
+      headingLevel={3}
       triggerLabel="42"
       title="Example rating work"
       closeLabel="Close example"
@@ -93,5 +94,20 @@ describe('RatingDisclosureShell', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+  })
+
+  it('titles the panel at the heading level its caller passes (issue #219)', async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    renderShell()
+
+    await user.hover(screen.getByRole('button', { name: '42' }))
+
+    expect(
+      within(screen.getByRole('dialog')).getByRole('heading', {
+        level: 3,
+        name: 'Example rating work',
+      }),
+    ).toBeInTheDocument()
   })
 })

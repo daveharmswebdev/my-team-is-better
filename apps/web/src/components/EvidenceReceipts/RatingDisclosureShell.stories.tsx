@@ -22,6 +22,7 @@ const meta = {
   args: {
     triggerLabel: '42',
     title: 'Example rating work',
+    headingLevel: 3,
     closeLabel: 'Close example',
     children: (
       <p>

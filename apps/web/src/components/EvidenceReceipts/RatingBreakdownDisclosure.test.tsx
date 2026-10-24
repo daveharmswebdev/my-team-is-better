@@ -62,6 +62,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -84,6 +85,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -106,6 +108,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -127,6 +130,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -149,6 +153,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -173,6 +178,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -207,6 +213,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Cincinnati Bengals"
         method="keener"
         rating={0.00877}
@@ -253,6 +260,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="elo"
         rating={1684.4}
@@ -275,6 +283,7 @@ describe('RatingBreakdownDisclosure', () => {
     const user = userEvent.setup()
     render(
       <RatingBreakdownDisclosure
+        headingLevel={3}
         teamName="Ohio State"
         method="keener"
         rating={0.00877}
@@ -290,6 +299,36 @@ describe('RatingBreakdownDisclosure', () => {
     ).toBeInTheDocument()
     expect(
       within(dialog).getByText(/ran them off the field, 45-3/i),
+    ).toBeInTheDocument()
+  })
+
+  it('titles the panel at headingLevel and its section one level below (issue #219)', async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    render(
+      <RatingBreakdownDisclosure
+        headingLevel={2}
+        teamName="Ohio State"
+        method="keener"
+        rating={0.00877}
+        breakdown={breakdown}
+      />,
+    )
+
+    await user.hover(screen.getByRole('button', { name: /8\.77/ }))
+    const dialog = screen.getByRole('dialog')
+
+    expect(
+      within(dialog).getByRole('heading', {
+        level: 2,
+        name: 'Ohio State rating breakdown',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('heading', {
+        level: 3,
+        name: 'Credit by opponent',
+      }),
     ).toBeInTheDocument()
   })
 })

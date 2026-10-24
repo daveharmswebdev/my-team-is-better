@@ -48,7 +48,7 @@ test('opening a share link answers its question in the verdict modal with no cli
   const verdict = dialog.getByRole('article')
   await expect(verdict).toBeVisible()
   await expect(verdict.getByText('Solid case, no notes.')).toBeVisible()
-  // Exact <h4> team headings, as in `compare.spec.ts`.
+  // Exact team headings (<h2>, issue #219), as in `compare.spec.ts`.
   await expect(
     verdict.getByRole('heading', { name: 'Texas', exact: true }),
   ).toBeVisible()

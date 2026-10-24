@@ -22,7 +22,7 @@ test('submitting a compare question renders a verdict comparing Texas and USC in
   await expect(verdict).toBeVisible()
   await expect(verdict.getByText('Solid case, no notes.')).toBeVisible()
   // `ComparisonReceipts`' `TeamSummary` renders each team's exact name as its
-  // own <h4> heading -- an unambiguous anchor (unlike a bare text search,
+  // own heading (an <h2> under the page's h1, issue #219) -- an unambiguous anchor (unlike a bare text search,
   // which would also match substrings like "Texas Tech"/"Texas A&M" in the
   // rendered common-opponents list).
   await expect(

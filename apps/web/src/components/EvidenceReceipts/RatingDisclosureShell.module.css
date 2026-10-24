@@ -133,10 +133,15 @@
   gap: var(--sp-3);
 }
 
+/* Styled by class, never by tag: its level is the caller's (issue #219), so
+   the margins and wrapping an h5 used to get from the browser are spelled
+   out here, and an h2 looks the same as an h6. */
 .panelTitle {
   font-family: var(--font-label);
   font-weight: 700;
   font-size: 0.95rem;
+  margin: 1.67em 0;
+  text-wrap: wrap;
 }
 
 .closeButton {
