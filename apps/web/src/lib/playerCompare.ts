@@ -125,7 +125,8 @@ function statRow(column: TableStatColumn): RowSpec {
  * The comparison's rows, in order (issue #352): seasons, games, the starter
  * record when either player passed or started, then the stat groups either
  * player recorded, each judged on his own totals (`statColumnsForPlayers`).
- * No sack rows until #298.
+ * No sack rows: like the boards, the comparison doesn't show sacks suffered
+ * or sack yards lost, a display choice (#298).
  */
 function rowSpecs(totals: readonly PlayerCareerTotalsOut[]): RowSpec[] {
   return [
