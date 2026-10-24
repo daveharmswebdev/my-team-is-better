@@ -72,6 +72,12 @@ from cfb_strength.ingest.normalize import (
     team_rows_by_cfbd_id,
     team_rows_from_game,
 )
+from cfb_strength.ingest.team_alias_overrides import (
+    TEAM_ALIAS_OVERRIDES_PATH,
+    TeamAliasOverrideError,
+    apply_team_alias_overrides,
+    load_team_alias_overrides,
+)
 
 MIN_YEAR = 1998
 MAX_YEAR = 2025
@@ -233,7 +239,11 @@ def _write_games(conn: Any, game_rows: list[GameRow]) -> None:
 
 
 def enrich_team_aliases(
-    conn: Any, *, force: bool = False, raw_dir: Path = RAW_DIR
+    conn: Any,
+    *,
+    force: bool = False,
+    raw_dir: Path = RAW_DIR,
+    alias_overrides_path: Path = TEAM_ALIAS_OVERRIDES_PATH,
 ) -> AliasEnrichmentResult:
     """Fill in `teams.mascot` / `teams.alternate_names` from CFBD `/teams`.
 
@@ -264,13 +274,20 @@ def enrich_team_aliases(
       * `sport = 'cfb'` scopes the match, so a CFB school name can never
         overwrite an NFL row's columns.
 
+    The committed `data/raw/team_alias_overrides.json` supplement (#417) is
+    merged into the id join before anything is written: its aliases follow
+    CFBD's own, deduped case-insensitively ("UF" for Florida, which CFBD
+    gives only to Findlay). It is read first, so a malformed file raises
+    `TeamAliasOverrideError` before any row changes.
+
     Idempotent by construction: re-running writes the same values to the same
     rows. Raises `CFBDClientError` if there is neither a `data/raw/teams.json`
     cache nor an API key -- the caller handles that the same way it handles a
     failed year batch (report it, keep going).
     """
+    overrides = load_team_alias_overrides(alias_overrides_path)
     teams_raw, fetched_live = get_teams(force=force, raw_dir=raw_dir)
-    by_id = team_rows_by_cfbd_id(teams_raw)
+    by_id = apply_team_alias_overrides(team_rows_by_cfbd_id(teams_raw), overrides)
 
     schools_with_aliases = 0
     rows_updated = 0
@@ -531,7 +548,7 @@ def main(argv: list[str] | None = None) -> int:
         # year-independent (see enrich_team_aliases).
         try:
             alias_result = enrich_team_aliases(conn, force=args.force)
-        except CFBDClientError as e:
+        except (CFBDClientError, TeamAliasOverrideError) as e:
             hard_errors.append(f"team aliases: {e}")
             print(f"error: team aliases: {e}", file=sys.stderr)
         else:

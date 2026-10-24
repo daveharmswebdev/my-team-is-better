@@ -1,0 +1,4 @@
+{
+  "$comment": "Aliases CFBD's /teams payload lacks, keyed by CFBD team id (issue #417). Ingest (cfb_strength/ingest/team_alias_overrides.py) appends each list after CFBD's own alternateNames, deduped case-insensitively, when it fills teams.alternate_names. An entry needs evidence: a common fan form CFBD doesn't carry, and a lookup sweep over the golden years showing it moves no query that resolves today. 57 Florida: 'UF' is the Gators' everyday name, but CFBD gives Florida only ['FLA','Florida'] and gives 'UF' to Findlay (2224, D-II, never rated), so 'UF' resolved to a ?Buffalo|UCF prompt in every golden year.",
+  "57": ["UF"]
+}
