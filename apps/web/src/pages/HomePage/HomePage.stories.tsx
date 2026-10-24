@@ -20,6 +20,12 @@ import { HomePage } from './HomePage'
  * axe's `heading-order` rule checks the composed outline rather than each
  * component on its own.
  *
+ * Under the modal that outline is the dialog's alone: `showModal()` makes
+ * the page behind inert, so axe never sees the page's h1 there, and these
+ * stories can't catch an h1 -> verdict skip. Only `Idle` checks the page's
+ * own outline; the "heading outline (issue #219)" cases in HomePage.test.tsx
+ * pin the verdict's continuation under the h1.
+ *
  * Like the other page stories (AboutPage, PlayerComparePage), these drive the
  * page through a stubbed `window.fetch` -- there is no shared mock helper
  * yet (#221 tracks moving every story to one): `/api/years` and `/api/teams`
