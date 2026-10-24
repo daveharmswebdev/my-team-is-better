@@ -136,17 +136,56 @@ VERDICT_RATING_FORMATS: dict[Method, str] = {
 }
 
 
-# The two tables issue #183 added. `_elo_ledger` checks both exist before it
-# queries either, so a pre-#183 database opened read-only (apps/api and the
-# MCP server never run ensure_schema) fails as `StaleDatabaseError` instead
-# of a bare `sqlite3.OperationalError: no such table` (issue #192).
+# The two tables issue #183 added. A pre-#183 database opened read-only
+# (apps/api and the MCP server never run ensure_schema) fails as
+# `StaleDatabaseError` instead of a bare `sqlite3.OperationalError: no such
+# table` (issue #192).
 ELO_LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
 
 # The `games` column issue #300 added: the conference title-game flag every
-# per-game evidence record reads. Checked before the games query for the same
-# reason as the ledger tables: a pre-#300 database opened read-only would
-# otherwise fail with a bare `sqlite3.OperationalError: no such column`.
+# per-game evidence record reads.
 TITLE_GAME_COLUMN = "conference_championship"
+
+# Issue #385: every table and column the evidence layer reads that was added
+# to db/schema.sql after the scaffold commit (`git log -S <name> --
+# db/schema.sql`), keyed to the issue that added it. A database built before
+# one of them and opened read-only still lacks it, so
+# `_require_current_schema` checks them all before `build_team_case` or
+# `build_comparison` runs its first query, and the failure is
+# `StaleDatabaseError` naming everything absent at once, never a bare
+# `sqlite3.OperationalError` from whichever query happened to trip first.
+#
+# Read-but-original names (`games.neutral_site`, `ratings.method`, ...) are
+# not here: no database without them can exist. Late-added names evidence
+# never reads (`teams.source_id`, `games.source_id`, `teams.mascot`,
+# `team_season.sport`) are not here either: a db without them is stale, but
+# not in a way that breaks evidence. tests/test_evidence_stale_columns.py
+# lists the same names independently and drops each one in turn.
+LATE_ADDED_TABLES: dict[str, str] = {
+    "rating_breakdowns": "#31",
+    ELO_LEDGER_TABLES[0]: "#183",
+    ELO_LEDGER_TABLES[1]: "#183",
+}
+LATE_ADDED_COLUMNS: dict[str, str] = {
+    "teams.sport": "#51",
+    "teams.alternate_names": "#76",
+    "games.sport": "#51",
+    f"games.{TITLE_GAME_COLUMN}": "#300",
+    "ratings.sport": "#51",
+    "ratings.ties": "#83",
+    "rating_breakdowns.sport": "#51",
+    "elo_ledger_configs.mov_denom_floor_fraction": "#194",
+}
+
+
+def _issues_for(names: tuple[str, ...], issues: dict[str, str]) -> str:
+    """' (issue #N)' / ' (issues #N, #M)' for the names that have one, in
+    first-seen order, or '' when none do."""
+    found = list(dict.fromkeys(issues[n] for n in names if n in issues))
+    if not found:
+        return ""
+    return f" (issue{'s' if len(found) > 1 else ''} {', '.join(found)})"
+
 
 # Issue #349: the first CFB season whose venue (CFBD's neutral-site flag) is
 # stated as fact. Before it, the founder trusts only #359's curated overrides
@@ -164,8 +203,9 @@ CFBD_NEUTRAL_SITE_SQL = (
 
 class StaleDatabaseError(RuntimeError):
     """Raised by evidence functions when the database predates the schema
-    they read (issue #192): the Elo ledger tables from issue #183, or the
-    `games.conference_championship` column from issue #300.
+    they read (issue #192): any table in `LATE_ADDED_TABLES` (the Elo ledger
+    tables from issue #183, ...) or column in `LATE_ADDED_COLUMNS`
+    (`games.conference_championship` from issue #300, ...; issue #385).
 
     Deliberately loud rather than degrading to "no ledger" (the #97 spirit)
     or to "no title games". A reader that opens the db read-only cannot
@@ -189,22 +229,25 @@ class StaleDatabaseError(RuntimeError):
             names = ", ".join(missing_tables)
             noun = "table" if len(missing_tables) == 1 else "tables"
             sentences.append(
-                f"stale database: missing {noun} {names}. This database was built "
-                "before the Elo ledger (issue #183) and is opened read-only, so nothing "
-                "has added the ledger tables to it. Run `cfb doctor` for the diagnosis; "
-                "the fix is a rebuild of the ratings (`cfb rate --years ... --method elo`, "
-                "or the full render.yaml build sequence)."
+                f"stale database: missing {noun} {names}. This database predates the "
+                "schema the evidence layer reads"
+                f"{_issues_for(missing_tables, LATE_ADDED_TABLES)} and is opened "
+                f"read-only, so nothing has added the {noun} to it. Run `cfb doctor` for "
+                "the diagnosis; the fix is a rebuild of the ratings (`cfb rate --years "
+                "... --method elo`, or the full render.yaml build sequence)."
             )
         if missing_columns:
             names = ", ".join(missing_columns)
             noun = "column" if len(missing_columns) == 1 else "columns"
             sentences.append(
-                f"stale database: missing {noun} {names}. This database was built "
-                "before conference title games were flagged (issue #300) and is opened "
-                "read-only, so nothing has added the column to it. Run `cfb doctor` for "
+                f"stale database: missing {noun} {names}. This database predates the "
+                "schema the evidence layer reads"
+                f"{_issues_for(missing_columns, LATE_ADDED_COLUMNS)} and is opened "
+                f"read-only, so nothing has added the {noun} to it. Run `cfb doctor` for "
                 "the diagnosis; the fix is a rebuild from an empty database "
                 "(`cfb ingest --years ...` then `cfb rate`, i.e. the full render.yaml "
-                "build sequence), since only ingest can set the flag."
+                "build sequence), since a migration's default cannot backfill what only "
+                "ingest and rating know."
             )
         super().__init__(" ".join(sentences))
         self.missing_tables = missing_tables
@@ -348,25 +391,40 @@ def _rating_breakdown(
     return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
-def _require_elo_ledger_tables(conn: sqlite3.Connection) -> None:
-    """Raise `StaleDatabaseError` unless both #183 ledger tables exist.
+def _require_current_schema(conn: sqlite3.Connection) -> None:
+    """Raise `StaleDatabaseError` unless every `LATE_ADDED_TABLES` table and
+    `LATE_ADDED_COLUMNS` column exists (issues #192, #300, #385).
 
-    One `sqlite_master` lookup per call (so one per `_elo_ledger`, never one
-    per step). Checking before querying is what turns "no such table" into a
-    named, explained error; catching sqlite's OperationalError afterwards
-    would also have to guess which of several possible causes it was.
+    One `sqlite_master` lookup plus one `PRAGMA table_info` per table that
+    holds a listed column. Checking before querying is what turns "no such
+    table/column" into a named, explained error; catching sqlite's
+    OperationalError afterwards would have to guess which of several causes
+    it was. A missing table is reported as a table only: its own late-added
+    columns are not listed on top of it.
     """
-    placeholders = ", ".join("?" for _ in ELO_LEDGER_TABLES)
+    column_tables = tuple(dict.fromkeys(name.split(".", 1)[0] for name in LATE_ADDED_COLUMNS))
+    wanted = tuple(dict.fromkeys((*LATE_ADDED_TABLES, *column_tables)))
+    placeholders = ", ".join("?" for _ in wanted)
     present = {
         row[0]
         for row in conn.execute(
             f"SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ({placeholders})",
-            ELO_LEDGER_TABLES,
+            wanted,
         )
     }
-    missing = tuple(t for t in ELO_LEDGER_TABLES if t not in present)
-    if missing:
-        raise StaleDatabaseError(missing)
+    missing_tables = tuple(t for t in LATE_ADDED_TABLES if t not in present)
+    columns_by_table = {
+        table: {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for table in column_tables
+        if table in present
+    }
+    missing_columns: list[str] = []
+    for name in LATE_ADDED_COLUMNS:
+        table, column = name.split(".", 1)
+        if table in columns_by_table and column not in columns_by_table[table]:
+            missing_columns.append(name)
+    if missing_tables or missing_columns:
+        raise StaleDatabaseError(missing_tables, tuple(missing_columns))
 
 
 def _elo_ledger(
@@ -390,12 +448,10 @@ def _elo_ledger(
     or elo ratings computed before #183 in a database that `ensure_schema`
     has since brought up to date (the tables exist, empty).
 
-    Raises `StaleDatabaseError` (issue #192) before any ledger query when
-    either ledger table is absent altogether: a pre-#183 database opened
-    read-only, which no caller on that path migrates. That fires for every
-    method, keener included, because a stale db is stale regardless of the
-    method asked, and a bare "no such table" from sqlite would say nothing
-    about why or what to do.
+    A pre-#183 database (either ledger table absent altogether) never gets
+    here: `build_team_case` runs `_require_current_schema` first and raises
+    `StaleDatabaseError` (issues #192, #385) for every method, keener
+    included, because a stale db is stale regardless of the method asked.
 
     Raises ValueError, naming the missing table, when only one side is
     present (a config row but no steps for this rated team, or steps with no
@@ -403,7 +459,6 @@ def _elo_ledger(
     a corrupt database. Inventing constants, dropping a step, or showing a
     blank opponent would present fabricated work as evidence.
     """
-    _require_elo_ledger_tables(conn)
     config = conn.execute(
         """
         SELECT starting_rating, k, hfa, scale, mov_scale, mov_autocorr,
@@ -962,16 +1017,6 @@ def _distinctive_parts_agree(q: str, name: str) -> bool:
     return _fuzzy_ratio(n_head, q_head) >= FUZZY_TAIL_STRIPPED_CUTOFF
 
 
-def _require_title_game_column(conn: sqlite3.Connection) -> None:
-    """Raise `StaleDatabaseError` unless `games.conference_championship`
-    (issue #300) exists. One `PRAGMA table_info` per call, before the games
-    query that reads it, so a pre-#300 db opened read-only fails as the named
-    error rather than `sqlite3.OperationalError: no such column`."""
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(games)")}
-    if TITLE_GAME_COLUMN not in columns:
-        raise StaleDatabaseError(missing_columns=(f"games.{TITLE_GAME_COLUMN}",))
-
-
 def _title_game_conference(game: sqlite3.Row) -> str | None:
     """Issue #300: the conference whose title game this was, else None.
 
@@ -1045,7 +1090,6 @@ def _game_venue_reliable(game: sqlite3.Row) -> bool:
 
 
 def _team_games(conn: sqlite3.Connection, year: int, team_id: int, sport: str) -> list[sqlite3.Row]:
-    _require_title_game_column(conn)
     return conn.execute(
         f"""
         SELECT id, season, sport, week, season_type, neutral_site,
@@ -1123,6 +1167,7 @@ def build_team_case(
     method: str = "keener",
     sport: Sport = "cfb",
 ) -> TeamCase:
+    _require_current_schema(conn)
     team_id = resolve_team(conn, year, team, method=method, sport=sport)
 
     rating_row = conn.execute(
@@ -1208,6 +1253,7 @@ def build_comparison(
     method: str = "keener",
     sport: Sport = "cfb",
 ) -> ComparisonResult:
+    _require_current_schema(conn)
     team_a_id = resolve_team(conn, year, team_a, method=method, sport=sport)
     team_b_id = resolve_team(conn, year, team_b, method=method, sport=sport)
     if team_a_id == team_b_id:
@@ -1221,7 +1267,7 @@ def build_comparison(
     case_b = build_team_case(conn, year, team_b, method=method, sport=sport)
 
     # Head-to-head: any completed game this season between the two teams.
-    # build_team_case has already run `_require_title_game_column` above.
+    # build_team_case has already run `_require_current_schema` above.
     h2h_games = conn.execute(
         f"""
         SELECT id, season, sport, week, season_type, neutral_site,
