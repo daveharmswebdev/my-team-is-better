@@ -15,7 +15,8 @@
     "dep-cruise": "depcruise src",
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "og-image": "node scripts/og-image/generate.ts"
   },
   "dependencies": {
     "react": "^19.2.8",
