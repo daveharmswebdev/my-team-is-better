@@ -130,6 +130,7 @@ function roundedTo(value: Printed, places: number): bigint {
 function renderTexas(ledger: EloLedgerOut = TEXAS_ELO.elo_ledger) {
   return render(
     <EloLedgerDisclosure
+      headingLevel={3}
       teamName="Texas"
       rating={TEXAS_ELO.rating}
       ledger={ledger}
@@ -308,6 +309,7 @@ describe('EloLedgerDisclosure', () => {
     render(
       <>
         <EloLedgerDisclosure
+          headingLevel={3}
           teamName="Texas"
           rating={TEXAS_ELO.rating}
           ledger={TEXAS_ELO.elo_ledger}
@@ -428,6 +430,7 @@ describe('EloLedgerDisclosure', () => {
     render(
       <MemoryRouter>
         <EloLedgerDisclosure
+          headingLevel={3}
           teamName="Texas"
           rating={TEXAS_ELO.rating}
           ledger={TEXAS_ELO.elo_ledger}
@@ -528,5 +531,23 @@ describe('EloLedgerDisclosure', () => {
         expect(within(item).getByText(row.work)).toBeInTheDocument()
       })
     })
+  })
+
+  it('titles the panel at headingLevel and the rule one level below (issue #219)', async () => {
+    renderTexas()
+    const { dialog } = await openOnDesktop()
+
+    expect(
+      within(dialog).getByRole('heading', {
+        level: 3,
+        name: 'Texas Elo rating, game by game',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByRole('heading', {
+        level: 4,
+        name: 'The rule — same for every team',
+      }),
+    ).toBeInTheDocument()
   })
 })

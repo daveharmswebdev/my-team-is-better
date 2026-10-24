@@ -25,6 +25,10 @@ import type {
   TeamCaseEnvelope,
   TeamsOut,
 } from '../../lib/api/types'
+import {
+  TEXAS_ELO,
+  USC_ELO,
+} from '../../components/EvidenceReceipts/eloLedgerFixture'
 import { HomePage } from './HomePage'
 
 vi.mock('../../lib/api/client', async () => {
@@ -1627,6 +1631,156 @@ describe('HomePage', () => {
       unmount()
 
       await waitFor(() => expect(signals[0]?.aborted).toBe(true))
+    })
+  })
+
+  /**
+   * Issue #219: the page's heading outline never skips a level, with a
+   * verdict on screen and each rating disclosure open. The verdict modal's
+   * title is a `<p>` that names the dialog, so the dialog's content continues
+   * the page's outline under its h1.
+   *
+   * This test is the only check of that continuation. The dialog is modal
+   * (`showModal()`), so in a real browser the page behind it is inert and
+   * axe leaves its h1 out: in the HomePage stories, heading-order checks the
+   * dialog's outline on its own, starting from its first heading.
+   */
+  describe('heading outline (issue #219)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    /** Every heading's level, in document order. */
+    function headingLevels(): number[] {
+      return Array.from(
+        document.querySelectorAll('h1, h2, h3, h4, h5, h6'),
+        (heading) => Number(heading.tagName.slice(1)),
+      )
+    }
+
+    /** One h1 first, and no heading more than one level below the one before it. */
+    function expectNoSkippedLevels() {
+      const levels = headingLevels()
+      expect(levels[0]).toBe(1)
+      expect(levels.filter((level) => level === 1)).toHaveLength(1)
+      const skips = levels.flatMap((level, index) =>
+        index > 0 && level - (levels[index - 1] ?? 0) > 1
+          ? [`h${levels[index - 1]} -> h${level}`]
+          : [],
+      )
+      expect({ levels, skips }).toEqual({ levels, skips: [] })
+    }
+
+    /** Desktop: a hover opens the popover, so each disclosure can be opened in turn. */
+    function desktop() {
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn().mockReturnValue({
+          matches: false,
+          media: '',
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }),
+      )
+    }
+
+    /** Opens each rating disclosure in the verdict, one at a time, checking the outline with each open. */
+    async function expectOutlineWithEachDisclosureOpen(
+      expectedTriggers: number,
+    ) {
+      const user = userEvent.setup()
+      const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
+      await within(dialog).findByRole('article')
+      expectNoSkippedLevels()
+      const triggers = within(dialog)
+        .getAllByRole('button')
+        .filter((button) => button.getAttribute('aria-haspopup') === 'dialog')
+      expect(triggers).toHaveLength(expectedTriggers)
+      for (const trigger of triggers) {
+        await user.hover(trigger)
+        expect(
+          await within(dialog).findByRole('dialog', { name: /rating/ }),
+        ).toBeInTheDocument()
+        expectNoSkippedLevels()
+        await user.unhover(trigger)
+        await waitFor(() =>
+          expect(
+            within(dialog).queryByRole('dialog', { name: /rating/ }),
+          ).not.toBeInTheDocument(),
+        )
+      }
+    }
+
+    it('a Keener team-case verdict, with its rating breakdown open', async () => {
+      desktop()
+      const envelope = envelopeFor('Texas', 'Texas, full stop.')
+      mockedFetchTeamCase.mockResolvedValue(envelope)
+
+      renderHomePage(
+        '/?q=team_case&sport=cfb&year=2005&engine=keener&team=Texas',
+      )
+
+      await expectOutlineWithEachDisclosureOpen(1)
+    })
+
+    it('an Elo team-case verdict, with its game-by-game ledger open', async () => {
+      desktop()
+      const envelope = envelopeFor('Texas', 'Texas, full stop.')
+      mockedFetchTeamCase.mockResolvedValue({
+        ...envelope,
+        evidence: {
+          ...envelope.evidence,
+          method: 'elo',
+          rating: TEXAS_ELO.rating,
+          elo_ledger: TEXAS_ELO.elo_ledger,
+        },
+      })
+
+      renderHomePage('/?q=team_case&sport=cfb&year=2005&engine=elo&team=Texas')
+
+      await expectOutlineWithEachDisclosureOpen(1)
+    })
+
+    it("a Keener comparison verdict, with each team's rating breakdown open", async () => {
+      desktop()
+      const envelope = comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.')
+      mockedFetchCompare.mockResolvedValue({
+        ...envelope,
+        evidence: { ...envelope.evidence, method: 'keener' },
+      })
+
+      renderHomePage(
+        '/?q=compare&sport=cfb&year=2005&engine=keener&a=Texas&b=USC',
+      )
+
+      await expectOutlineWithEachDisclosureOpen(2)
+    })
+
+    it("an Elo comparison verdict, with each team's ledger open", async () => {
+      desktop()
+      const envelope = comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.')
+      mockedFetchCompare.mockResolvedValue({
+        ...envelope,
+        evidence: {
+          ...envelope.evidence,
+          team_a: {
+            ...envelope.evidence.team_a,
+            elo_ledger: TEXAS_ELO.elo_ledger,
+          },
+          team_b: {
+            ...envelope.evidence.team_b,
+            elo_ledger: USC_ELO.elo_ledger,
+          },
+        },
+      })
+
+      renderHomePage('/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC')
+
+      await expectOutlineWithEachDisclosureOpen(2)
     })
   })
 })

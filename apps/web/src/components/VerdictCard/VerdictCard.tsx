@@ -1,6 +1,7 @@
 import type { VerdictCardState } from '../../lib/api/types'
 import { isTeamCaseEnvelope } from '../../lib/api/types'
 import { METHOD_RADIO_LABEL } from '../../lib/methods'
+import type { HeadingLevel } from '../Heading/headingLevel'
 import { ComparisonReceipts } from '../EvidenceReceipts/ComparisonReceipts'
 import { TeamCaseReceipts } from '../EvidenceReceipts/TeamCaseReceipts'
 import { ShareButton } from '../ShareButton/ShareButton'
@@ -19,6 +20,11 @@ export interface VerdictCardProps {
    * states never offer one, since there is no verdict to share.
    */
   shareUrl?: string
+  /**
+   * The level of the receipts' section headings (issue #219), from where
+   * the card sits in its page's outline. Defaults to 2, right under an h1.
+   */
+  headingLevel?: HeadingLevel
 }
 
 /**
@@ -35,6 +41,7 @@ export function VerdictCard({
   onSelectYear,
   onSelectCandidate,
   shareUrl,
+  headingLevel = 2,
 }: VerdictCardProps) {
   if (state.status === 'loading') {
     return (
@@ -75,9 +82,15 @@ export function VerdictCard({
         {`Engine: ${METHOD_RADIO_LABEL[envelope.evidence.method]}`}
       </p>
       {isTeamCaseEnvelope(envelope) ? (
-        <TeamCaseReceipts evidence={envelope.evidence} />
+        <TeamCaseReceipts
+          evidence={envelope.evidence}
+          headingLevel={headingLevel}
+        />
       ) : (
-        <ComparisonReceipts evidence={envelope.evidence} />
+        <ComparisonReceipts
+          evidence={envelope.evidence}
+          headingLevel={headingLevel}
+        />
       )}
       {shareUrl !== undefined && <ShareButton url={shareUrl} />}
     </article>

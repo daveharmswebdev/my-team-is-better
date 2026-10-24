@@ -65,6 +65,8 @@ const meta = {
   component: RatingBreakdownDisclosure,
   tags: ['autodocs'],
   args: {
+    // Under a team's own heading, as in a comparison verdict (issue #219).
+    headingLevel: 3,
     teamName: 'Ohio State',
     method: 'keener',
     rating: 0.00877,

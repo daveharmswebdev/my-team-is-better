@@ -227,7 +227,10 @@ const MEASURE_LEDGER = `(() => {
     return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }
   }
   const byText = (text) => {
-    const found = Array.from(dialog.querySelectorAll('h6, p')).find(
+    // Any heading level: the rule's level follows the page's outline (#219).
+    const found = Array.from(
+      dialog.querySelectorAll('h1, h2, h3, h4, h5, h6, p'),
+    ).find(
       (node) => node.textContent === text,
     )
     if (!found) throw new Error('no element with text ' + text)

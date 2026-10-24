@@ -9,6 +9,8 @@ import { formatRecord } from '../../lib/formatRecord'
 import { resultLabel } from '../../lib/resultLabel'
 import { EloLedgerDisclosure } from './EloLedgerDisclosure'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
+import { Heading } from '../Heading/Heading'
+import type { HeadingLevel } from '../Heading/headingLevel'
 import { ratingWorkFor } from './ratingBreakdownByMethod'
 import styles from './TeamCaseReceipts.module.css'
 
@@ -20,6 +22,11 @@ const TAG_CLASS: Record<GameResult, string | undefined> = {
 
 export interface TeamCaseReceiptsProps {
   evidence: TeamCaseOut
+  /**
+   * The level of the receipts' section headings (issue #219). Defaults to
+   * 2: on the home page, the verdict sits right under the page's h1.
+   */
+  headingLevel?: HeadingLevel
 }
 
 type Highlight = 'Quality win' | 'Worst loss'
@@ -95,7 +102,10 @@ function bySeasonOrder(a: OpponentResultOut, b: OpponentResultOut): number {
  * with two keys, both in the lists and in the quality-win/worst-loss
  * cross-reference below.
  */
-export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
+export function TeamCaseReceipts({
+  evidence,
+  headingLevel = 2,
+}: TeamCaseReceiptsProps) {
   const orderedGames = [...evidence.games].sort(bySeasonOrder)
 
   const highlightByGame = new Map<number, Highlight>()
@@ -127,12 +137,15 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
             method={evidence.method}
             rating={evidence.rating}
             breakdown={evidence.rating_breakdown}
+            // Beside this card's sections, not under one of them.
+            headingLevel={headingLevel}
           />
         ) : work.kind === 'elo-ledger' ? (
           <EloLedgerDisclosure
             teamName={evidence.team_name}
             rating={evidence.rating}
             ledger={work.ledger}
+            headingLevel={headingLevel}
           />
         ) : (
           formatRating(evidence.rating, evidence.method)
@@ -145,9 +158,13 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
         )}
       </div>
 
-      <h4 id={qualityWinsHeadingId} className={styles.label}>
+      <Heading
+        level={headingLevel}
+        id={qualityWinsHeadingId}
+        className={styles.label}
+      >
         Quality wins
-      </h4>
+      </Heading>
       {evidence.quality_wins.length > 0 ? (
         <ul className={styles.list} aria-labelledby={qualityWinsHeadingId}>
           {evidence.quality_wins.map((game) => (
@@ -158,9 +175,13 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
         <p className={styles.empty}>No standout quality wins.</p>
       )}
 
-      <h4 id={worstLossHeadingId} className={styles.label}>
+      <Heading
+        level={headingLevel}
+        id={worstLossHeadingId}
+        className={styles.label}
+      >
         Worst loss
-      </h4>
+      </Heading>
       {evidence.worst_loss ? (
         <ul className={styles.list} aria-labelledby={worstLossHeadingId}>
           <GameLine game={evidence.worst_loss} />
@@ -169,9 +190,13 @@ export function TeamCaseReceipts({ evidence }: TeamCaseReceiptsProps) {
         <p className={styles.empty}>No losses.</p>
       )}
 
-      <h4 id={fullScheduleHeadingId} className={styles.label}>
+      <Heading
+        level={headingLevel}
+        id={fullScheduleHeadingId}
+        className={styles.label}
+      >
         Full schedule
-      </h4>
+      </Heading>
       {orderedGames.length > 0 ? (
         <ul className={styles.list} aria-labelledby={fullScheduleHeadingId}>
           {orderedGames.map((game) => (

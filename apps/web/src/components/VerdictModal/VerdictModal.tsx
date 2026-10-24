@@ -166,9 +166,12 @@ export function VerdictModal({
       {open && (
         <div className={styles.panel}>
           <div className={styles.header}>
-            {/* Not a heading: it names the dialog (`aria-labelledby`), and
-                a heading here would sit between the page's h1 and the
-                verdict's h4s and skip a level (axe heading-order, #219). */}
+            {/* Not a heading: it names the dialog (`aria-labelledby`). The
+                dialog's content continues the page's outline -- the
+                verdict's headings sit one level under the page's h1, at the
+                `headingLevel` the page passes (#219) -- so it reads right
+                both as part of the page and, with the page inert behind
+                this modal, on its own (axe heading-order). */}
             <p id={titleId} className={styles.title}>
               {title}
             </p>

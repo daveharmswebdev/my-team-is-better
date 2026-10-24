@@ -5,6 +5,9 @@ import type {
   GameResult,
 } from '../../lib/api/types'
 import { formatRating } from '../../lib/formatRating'
+import { Heading } from '../Heading/Heading'
+import { nextHeadingLevel } from '../Heading/headingLevel'
+import type { HeadingLevel } from '../Heading/headingLevel'
 import { RatingDisclosureShell } from './RatingDisclosureShell'
 import styles from './EloLedgerDisclosure.module.css'
 
@@ -15,6 +18,12 @@ export interface EloLedgerDisclosureProps {
   rating: number
   /** The engine's own game-by-game work, straight from the response. */
   ledger: EloLedgerOut
+  /**
+   * The level of the panel's heading (issue #219), from where the trigger
+   * sits in the page's outline: one below the heading the rating sits under,
+   * or level with the sections beside it. Its own sections sit one below.
+   */
+  headingLevel: HeadingLevel
 }
 
 const MINUS = '−'
@@ -156,6 +165,7 @@ export function EloLedgerDisclosure({
   teamName,
   rating,
   ledger,
+  headingLevel,
 }: EloLedgerDisclosureProps) {
   const steps = [...ledger.steps].sort((a, b) => a.game_number - b.game_number)
   const last = steps.at(-1)
@@ -168,11 +178,17 @@ export function EloLedgerDisclosure({
     <RatingDisclosureShell
       triggerLabel={formatRating(rating, 'elo')}
       title={`${teamName} Elo rating, game by game`}
+      headingLevel={headingLevel}
       closeLabel="Close Elo rating, game by game"
       scroll="region"
     >
       <div className={styles.rule}>
-        <h6 className={styles.sectionLabel}>The rule — same for every team</h6>
+        <Heading
+          level={nextHeadingLevel(headingLevel)}
+          className={styles.sectionLabel}
+        >
+          The rule — same for every team
+        </Heading>
         <ul className={styles.ruleLines}>
           <li>{`Gap = team rating ${MINUS} opponent rating, ± ${constant(ledger.hfa)} for home field (0 at a neutral site)`}</li>
           <li>{`Win expectancy = 1 ÷ (10^(${MINUS}gap ÷ ${constant(ledger.scale)}) + 1)`}</li>

@@ -1186,4 +1186,71 @@ describe('ComparisonReceipts', () => {
       expect(item.textContent).not.toContain('won')
     })
   })
+
+  describe('heading levels (issue #219)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('puts team names and sections at h2 by default, right under a page h1', () => {
+      render(<ComparisonReceipts evidence={evidence} />)
+
+      for (const name of [
+        evidence.team_a.team_name,
+        evidence.team_b.team_name,
+        'Head to head',
+        'Common opponents',
+      ]) {
+        expect(
+          screen.getByRole('heading', { level: 2, name }),
+        ).toBeInTheDocument()
+      }
+    })
+
+    it("follows headingLevel, and titles each team's rating panel one level under the team's name", async () => {
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn().mockReturnValue({
+          matches: false,
+          media: '',
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }),
+      )
+      const user = userEvent.setup()
+      render(
+        <ComparisonReceipts
+          evidence={{
+            ...evidence,
+            method: 'elo',
+            team_a: { ...evidence.team_a, elo_ledger: TEXAS_ELO.elo_ledger },
+            team_b: { ...evidence.team_b, elo_ledger: USC_ELO.elo_ledger },
+          }}
+          headingLevel={3}
+        />,
+      )
+
+      expect(
+        screen.getByRole('heading', { level: 3, name: 'Head to head' }),
+      ).toBeInTheDocument()
+      const triggers = screen
+        .getAllByRole('button')
+        .filter((b) => b.getAttribute('aria-haspopup') === 'dialog')
+      expect(triggers).toHaveLength(2)
+      await user.hover(triggers[0]!)
+      const dialog = screen.getByRole('dialog')
+      expect(
+        within(dialog).getByRole('heading', { name: /game by game/ }),
+      ).toHaveProperty('tagName', 'H4')
+      expect(
+        within(dialog).getByRole('heading', {
+          name: 'The rule — same for every team',
+        }),
+      ).toHaveProperty('tagName', 'H5')
+    })
+  })
 })
