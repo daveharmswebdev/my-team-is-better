@@ -89,6 +89,7 @@ function envelopeFor(teamName: string, narration: string): TeamCaseEnvelope {
       worst_loss: null,
     },
     narration: { text: narration, contested: false, cached: false },
+    other_method_ranks: [],
   }
 }
 
@@ -200,6 +201,8 @@ function comparisonEnvelopeFor(
       verdict: `${teamA} was better.`,
     },
     narration: { text: narration, contested: false, cached: false },
+    team_a_other_method_ranks: [],
+    team_b_other_method_ranks: [],
   }
 }
 
@@ -877,6 +880,7 @@ describe('HomePage', () => {
         worst_loss: null,
       },
       narration: { text: 'Texas, full stop.', contested: false, cached: false },
+      other_method_ranks: [],
     })
 
     renderHomePage()
@@ -929,6 +933,7 @@ describe('HomePage', () => {
           contested: false,
           cached: false,
         },
+        other_method_ranks: [],
       })
 
     renderHomePage()
@@ -1124,6 +1129,69 @@ describe('HomePage', () => {
         WITH_SIGNAL,
       )
       expect(eloRadio()).toBeChecked()
+    })
+
+    /**
+     * Issue #155: the verdict's other-engine line re-asks the same question
+     * under that engine through the same path a pill correction takes, so
+     * the form's Engine toggle flips to match the verdict on screen.
+     */
+    it("re-asks the same question under the other engine from the verdict's ranks line, and the Engine radio follows", async () => {
+      const user = userEvent.setup()
+      mockedFetchTeamCase
+        .mockResolvedValueOnce({
+          ...envelopeFor('USC', 'USC, by Keener.'),
+          other_method_ranks: [
+            { method: 'elo', rank: 6 },
+            { method: 'elo_career', rank: 8 },
+          ],
+        })
+        .mockResolvedValueOnce({
+          ...envelopeFor('USC', 'USC, by Elo.'),
+          evidence: {
+            ...envelopeFor('USC', 'USC, by Elo.').evidence,
+            method: 'elo',
+            rank: 6,
+          },
+          other_method_ranks: [{ method: 'keener', rank: 1 }],
+        })
+
+      renderHomePage()
+      await user.selectOptions(
+        screen.getByLabelText(/what do you want to know/i),
+        'team_case',
+      )
+      await waitForDefaultYear()
+      await user.clear(screen.getByLabelText(/year/i))
+      await user.type(screen.getByLabelText(/year/i), '2005')
+      await user.type(screen.getByLabelText(/^team$/i), 'USC')
+      await user.click(screen.getByRole('button', { name: /get the verdict/i }))
+
+      expect(await screen.findByText('USC, by Keener.')).toBeInTheDocument()
+      expect(screen.getByText('Elo (second opinion): #6')).toBeInTheDocument()
+
+      await user.click(
+        screen.getByRole('button', { name: 'Ask Elo (second opinion)' }),
+      )
+
+      expect(await screen.findByText('USC, by Elo.')).toBeInTheDocument()
+      expect(mockedFetchTeamCase).toHaveBeenCalledTimes(2)
+      expect(mockedFetchTeamCase).toHaveBeenLastCalledWith(
+        {
+          year: 2005,
+          team: 'USC',
+          user_team: null,
+          sport: 'cfb',
+          method: 'elo',
+        },
+        WITH_SIGNAL,
+      )
+      expect(
+        screen.getByText('Engine: Elo (second opinion)'),
+      ).toBeInTheDocument()
+      expect(eloRadio()).toBeChecked()
+      expect(screen.getByLabelText(/^team$/i)).toHaveValue('USC')
+      expect(screen.getByLabelText(/year/i)).toHaveValue(2005)
     })
 
     it('flipping the toggle neither re-asks nor clears the verdict on screen', async () => {

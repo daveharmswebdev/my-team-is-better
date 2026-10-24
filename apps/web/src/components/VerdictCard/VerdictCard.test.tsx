@@ -1,7 +1,10 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { composeStories } from '@storybook/react-vite'
+import { describe, expect, it, vi } from 'vitest'
 import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
+import * as stories from './VerdictCard.stories'
 import { VerdictCard } from './VerdictCard'
 
 const teamCaseEnvelope: TeamCaseEnvelope = {
@@ -26,6 +29,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
     contested: false,
     cached: false,
   },
+  other_method_ranks: [],
 }
 
 const comparisonEnvelope: ComparisonEnvelope = {
@@ -64,6 +68,8 @@ const comparisonEnvelope: ComparisonEnvelope = {
     verdict: 'Texas was better.',
   },
   narration: { text: 'Texas edges USC.', contested: true, cached: true },
+  team_a_other_method_ranks: [],
+  team_b_other_method_ranks: [],
 }
 
 describe('VerdictCard', () => {
@@ -312,4 +318,138 @@ describe('VerdictCard', () => {
       screen.getByRole('heading', { level: 3, name: 'Quality wins' }),
     ).toBeInTheDocument()
   })
+
+  /**
+   * Issue #155: where each other displayed engine ranks the same team, with a
+   * control that re-asks the question under that engine. The API sends every
+   * other method with a ratings row, `elo_career` included; the card shows
+   * only the ones the Engine toggle offers.
+   */
+  describe("the other engines' ranks", () => {
+    const pennState: TeamCaseEnvelope = {
+      ...teamCaseEnvelope,
+      evidence: {
+        ...teamCaseEnvelope.evidence,
+        team_name: 'Penn State',
+        rank: 3,
+      },
+      other_method_ranks: [
+        { method: 'elo', rank: 6 },
+        { method: 'elo_career', rank: 8 },
+      ],
+    }
+
+    it("renders the other displayed engine's rank on a team-case verdict", () => {
+      render(<VerdictCard state={{ status: 'success', envelope: pennState }} />)
+
+      expect(screen.getByText('Elo (second opinion): #6')).toBeInTheDocument()
+    })
+
+    it('does not show elo_career', () => {
+      const { container } = render(
+        <VerdictCard state={{ status: 'success', envelope: pennState }} />,
+      )
+
+      expect(container.textContent).not.toMatch(/Elo, career/)
+      expect(container.textContent).not.toMatch(/#8/)
+    })
+
+    it('renders no line for an empty list', () => {
+      render(
+        <VerdictCard
+          state={{ status: 'success', envelope: teamCaseEnvelope }}
+          onSelectMethod={vi.fn()}
+        />,
+      )
+
+      expect(screen.queryByText(/opinion\): #/)).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: /^Ask / }),
+      ).not.toBeInTheDocument()
+    })
+
+    it('renders a line per team on a compare verdict', () => {
+      render(
+        <VerdictCard
+          state={{
+            status: 'success',
+            envelope: {
+              ...comparisonEnvelope,
+              team_a_other_method_ranks: [
+                { method: 'elo', rank: 1 },
+                { method: 'elo_career', rank: 4 },
+              ],
+              team_b_other_method_ranks: [{ method: 'elo', rank: 2 }],
+            },
+          }}
+          onSelectMethod={vi.fn()}
+        />,
+      )
+
+      expect(
+        screen.getByText('Texas · Elo (second opinion): #1'),
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText('USC · Elo (second opinion): #2'),
+      ).toBeInTheDocument()
+      expect(
+        screen.getAllByRole('button', { name: 'Ask Elo (second opinion)' }),
+      ).toHaveLength(1)
+    })
+
+    it('calls onSelectMethod with the other method when the control is clicked', async () => {
+      const onSelectMethod = vi.fn()
+      render(
+        <VerdictCard
+          state={{ status: 'success', envelope: pennState }}
+          onSelectMethod={onSelectMethod}
+        />,
+      )
+
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Ask Elo (second opinion)' }),
+      )
+
+      expect(onSelectMethod).toHaveBeenCalledExactlyOnceWith('elo')
+    })
+
+    /**
+     * Founder framing (2026-09-13): the engines have no mandate to agree.
+     * Texas 2005 (Keener #1, Elo #1) and Penn State 2005 (#3, #6) render the
+     * line with the same elements and the same classes; only the rank differs.
+     */
+    it('renders the line identically for the Texas 2005 and Penn State 2005 stories', () => {
+      const { OtherEngineRanksTexas2005, OtherEngineRanksPennState2005 } =
+        composeStories(stories)
+
+      const lineShape = (Story: () => React.JSX.Element, text: string) => {
+        const { unmount } = render(<Story />)
+        const line = screen.getByText(text).closest('div')
+        expect(line).not.toBeNull()
+        const shape = elementShape(line as Element)
+        unmount()
+        return shape
+      }
+
+      const texas = lineShape(
+        OtherEngineRanksTexas2005,
+        'Elo (second opinion): #1',
+      )
+      const pennState = lineShape(
+        OtherEngineRanksPennState2005,
+        'Elo (second opinion): #6',
+      )
+
+      expect(texas).toBe(pennState)
+      // Not vacuous: the shape names the line's own classes.
+      expect(texas).toMatch(/p\.[^[]+\[span\.?/)
+    })
+  })
 })
+
+/** An element's tags and class lists, recursively, with every text node left out. */
+function elementShape(element: Element): string {
+  const classes = [...element.classList].sort().join('.')
+  const children = [...element.children].map(elementShape).join(',')
+  return `${element.tagName.toLowerCase()}${classes ? `.${classes}` : ''}[${children}]`
+}

@@ -58,6 +58,7 @@ const teamCaseEnvelope: TeamCaseEnvelope = {
     contested: false,
     cached: false,
   },
+  other_method_ranks: [],
 }
 
 const comparisonEnvelope: ComparisonEnvelope = {
@@ -160,6 +161,8 @@ const comparisonEnvelope: ComparisonEnvelope = {
     contested: true,
     cached: true,
   },
+  team_a_other_method_ranks: [],
+  team_b_other_method_ranks: [],
 }
 
 const meta = {
@@ -169,6 +172,7 @@ const meta = {
   args: {
     onSelectYear: fn(),
     onSelectCandidate: fn(),
+    onSelectMethod: fn(),
   },
 } satisfies Meta<typeof VerdictCard>
 
@@ -298,6 +302,103 @@ export const ComparisonAnsweredByElo: Story = {
       await userEvent.unhover(trigger)
       await expect(canvas.queryByRole('dialog')).toBeNull()
     }
+  },
+}
+
+/**
+ * Issue #155: Texas 2005 under Keener (#1), with where Elo ranks it (#1,
+ * as the fixture db has it) and a control to ask Elo instead. The API's
+ * `elo_career` entry is never shown. Renders exactly like
+ * `OtherEngineRanksPennState2005`, ranks aside (`VerdictCard.test.tsx`).
+ */
+export const OtherEngineRanksTexas2005: Story = {
+  args: {
+    state: {
+      status: 'success',
+      envelope: {
+        ...teamCaseEnvelope,
+        other_method_ranks: [
+          { method: 'elo', rank: 1 },
+          { method: 'elo_career', rank: 2 },
+        ],
+      },
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Elo (second opinion): #1')).toBeVisible()
+    await expect(canvas.queryByText(/Elo, career/)).toBeNull()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Ask Elo (second opinion)' }),
+    )
+    await expect(args.onSelectMethod).toHaveBeenCalledWith('elo')
+  },
+}
+
+/**
+ * Issue #155: Penn State 2005 under Keener (#3), with where Elo ranks it
+ * (#6, as the fixture db and production have it). The same quiet line as
+ * `OtherEngineRanksTexas2005`: the engines have no mandate to agree.
+ */
+export const OtherEngineRanksPennState2005: Story = {
+  args: {
+    state: {
+      status: 'success',
+      envelope: {
+        ...teamCaseEnvelope,
+        evidence: {
+          ...teamCaseEnvelope.evidence,
+          team_name: 'Penn State',
+          rank: 3,
+          wins: 11,
+          losses: 1,
+        },
+        narration: {
+          text: "Penn State went 11-1 and that's a top-three team on the math.",
+          contested: false,
+          cached: false,
+        },
+        other_method_ranks: [
+          { method: 'elo', rank: 6 },
+          { method: 'elo_career', rank: 8 },
+        ],
+      },
+    },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Elo (second opinion): #6')).toBeVisible()
+    await expect(canvas.queryByText(/Elo, career/)).toBeNull()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Ask Elo (second opinion)' }),
+    )
+    await expect(args.onSelectMethod).toHaveBeenCalledWith('elo')
+  },
+}
+
+/** Issue #155: a compare verdict shows a line for each team, and one control. */
+export const OtherEngineRanksComparison: Story = {
+  args: {
+    state: {
+      status: 'success',
+      envelope: {
+        ...comparisonEnvelope,
+        team_a_other_method_ranks: [{ method: 'elo', rank: 1 }],
+        team_b_other_method_ranks: [{ method: 'elo', rank: 2 }],
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText('Texas · Elo (second opinion): #1'),
+    ).toBeVisible()
+    await expect(
+      canvas.getByText('USC · Elo (second opinion): #2'),
+    ).toBeVisible()
+    await expect(
+      canvas.getAllByRole('button', { name: 'Ask Elo (second opinion)' }),
+    ).toHaveLength(1)
   },
 }
 

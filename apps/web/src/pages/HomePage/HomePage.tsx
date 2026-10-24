@@ -302,6 +302,18 @@ export function HomePage() {
     }
   }
 
+  /**
+   * Re-asks the question on screen under another engine (issue #155), from
+   * the verdict's other-engine ranks line. Through `applyCorrection`, so the
+   * form's Engine toggle flips to match the verdict it now shows.
+   */
+  function handleSelectMethod(method: Method) {
+    if (!submission) {
+      return
+    }
+    applyCorrection({ ...submission, method })
+  }
+
   return (
     <main className={styles.wrap}>
       <h1 className={styles.title}>My Team Is Better</h1>
@@ -333,6 +345,7 @@ export function HomePage() {
             state={state}
             onSelectYear={handleSelectYear}
             onSelectCandidate={handleSelectCandidate}
+            onSelectMethod={handleSelectMethod}
             // The dialog's title is a `<p>` that names it, so its content
             // continues this page's outline: h1, then the verdict's h2s.
             headingLevel={2}

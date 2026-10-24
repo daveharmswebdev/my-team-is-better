@@ -90,6 +90,7 @@ const SHORT_SUCCESS: TeamCaseEnvelope = {
     contested: false,
     cached: false,
   },
+  other_method_ranks: [{ method: 'elo', rank: 1 }],
 }
 
 /** A full season of receipts under a long narration: more than any screen holds. */
@@ -115,6 +116,7 @@ const LONG_SUCCESS: TeamCaseEnvelope = {
     contested: false,
     cached: true,
   },
+  other_method_ranks: SHORT_SUCCESS.other_method_ranks,
 }
 
 const SHARE_URL =
