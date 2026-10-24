@@ -63,6 +63,20 @@ def by_name(entries: list[rw.Entry]) -> dict[str, rw.Entry]:
     return {e.name: e for e in entries}
 
 
+@pytest.fixture(autouse=True)
+def no_github(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """`main` asks GitHub which merged PR holds a tip (#391); no test may reach it.
+    Returns the shas asked about, and answers "none"."""
+    asked: list[str] = []
+
+    def lookup(repo: Path, sha: str) -> int | None:
+        asked.append(sha)
+        return None
+
+    monkeypatch.setattr(rw, "merged_pr_via_gh", lookup)
+    return asked
+
+
 def test_squash_merged_spoke_is_a_candidate(repo: Path) -> None:
     wt = add_spoke(repo, "agent-a")
     commit_file(wt, "a.txt", "a\n", "spoke a")
@@ -237,3 +251,143 @@ def test_runs_from_inside_a_worktree(repo: Path) -> None:
     entries = by_name(rw.survey(other, now=LATER))
     assert entries["agent-a"].reason is None
     assert entries["agent-z"].reason == rw.CURRENT
+
+
+def test_tip_in_a_merged_pr_is_a_candidate(repo: Path) -> None:
+    # #391: the coordinator fixed the spoke's file in a review round before the PR
+    # squash-merged, so merging the spoke tip into main conflicts and the tree test
+    # keeps it, though the PR that carried the tip merged.
+    wt = add_spoke(repo, "agent-m")
+    tip = commit_file(wt, "m.txt", "spoke draft\n", "spoke m")
+    squash_onto_main(repo, "m.txt", "reviewed version\n")
+
+    def merged(r: Path, sha: str) -> int | None:
+        return 383 if sha == tip else None
+
+    entry = by_name(rw.survey(repo, now=LATER, merged_pr=merged))["agent-m"]
+    assert entry.reason is None
+    assert entry.merged_pr == 383
+
+
+def test_tip_in_no_merged_pr_is_still_kept(repo: Path) -> None:
+    wt = add_spoke(repo, "agent-n")
+    commit_file(wt, "n.txt", "n\n", "spoke n")
+
+    entry = by_name(rw.survey(repo, now=LATER, merged_pr=lambda r, sha: None))["agent-n"]
+    assert entry.reason == rw.NOT_IN_MAIN
+    assert entry.merged_pr is None
+
+
+def test_merged_pr_never_overrides_the_other_guards(repo: Path) -> None:
+    # Dirty, recent and locked are about the worktree, not its history: a merged PR
+    # doesn't make unreturned work, a just-started spoke or a lock safe to remove.
+    dirty = add_spoke(repo, "agent-dirty")
+    (dirty / "scratch.txt").write_text("unreturned\n")
+    add_spoke(repo, "agent-new")
+    locked = add_spoke(repo, "agent-lock")
+    git(repo, "worktree", "lock", str(locked))
+    asked: list[str] = []
+
+    def merged(r: Path, sha: str) -> int | None:
+        asked.append(sha)
+        return 1
+
+    entries = by_name(rw.survey(repo, merged_pr=merged))
+    assert entries["agent-dirty"].reason == rw.DIRTY
+    assert entries["agent-new"].reason == rw.RECENT
+    assert entries["agent-lock"].reason == rw.LOCKED
+    assert asked == []
+
+
+def test_lookup_only_runs_when_the_tree_test_fails(repo: Path) -> None:
+    wt = add_spoke(repo, "agent-a")
+    commit_file(wt, "a.txt", "a\n", "spoke a")
+    squash_onto_main(repo, "a.txt", "a\n")
+    asked: list[str] = []
+
+    def merged(r: Path, sha: str) -> int | None:
+        asked.append(sha)
+        return None
+
+    assert by_name(rw.survey(repo, now=LATER, merged_pr=merged))["agent-a"].reason is None
+    assert asked == []
+
+
+def test_orphan_branch_in_a_merged_pr_is_a_candidate(repo: Path) -> None:
+    wt = add_spoke(repo, "agent-o")
+    tip = commit_file(wt, "o.txt", "draft\n", "spoke o")
+    squash_onto_main(repo, "o.txt", "final\n")
+    git(repo, "worktree", "remove", str(wt))
+
+    entry = by_name(rw.survey(repo, now=LATER, merged_pr=lambda r, sha: 7 if sha == tip else None))[
+        "worktree-agent-o"
+    ]
+    assert entry.reason is None
+    assert entry.merged_pr == 7
+
+
+def test_main_asks_github_and_names_the_pr(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    wt = add_spoke(repo, "agent-g")
+    tip = commit_file(wt, "g.txt", "draft\n", "spoke g")
+    squash_onto_main(repo, "g.txt", "final\n")
+    monkeypatch.setattr(rw, "merged_pr_via_gh", lambda r, sha: 383 if sha == tip else None)
+
+    assert rw.main(["--repo", str(repo)], now=LATER) == 0
+    assert "reclaim  worktree  agent-g  (merged in #383)" in capsys.readouterr().out
+
+
+def test_no_github_flag_skips_the_lookup(repo: Path, no_github: list[str]) -> None:
+    wt = add_spoke(repo, "agent-h")
+    commit_file(wt, "h.txt", "draft\n", "spoke h")
+    squash_onto_main(repo, "h.txt", "final\n")
+
+    assert rw.main(["--repo", str(repo), "--no-github"], now=LATER) == 0
+    assert no_github == []
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "expected"),
+    [
+        (0, '[{"number": 383, "commits": [{"oid": "TIP"}, {"oid": "other"}]}]', 383),
+        # Search matched the sha in some other text, but the PR doesn't hold the commit.
+        (0, '[{"number": 12, "commits": [{"oid": "other"}]}]', None),
+        (0, "[]", None),
+        # gh missing, offline or unauthenticated: every error keeps.
+        (1, "", None),
+        (0, "not json", None),
+    ],
+)
+def test_merged_pr_via_gh_parses_and_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: str,
+    expected: int | None,
+) -> None:
+    monkeypatch.undo()  # the autouse fake; this test exercises the real function
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert rw.merged_pr_via_gh(tmp_path, "TIP") == expected
+    assert calls and calls[0][:4] == ["gh", "pr", "list", "--state"]
+    assert "TIP" in calls[0]
+
+
+def test_merged_pr_via_gh_without_gh_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()
+
+    def missing(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    assert rw.merged_pr_via_gh(tmp_path, "TIP") is None
