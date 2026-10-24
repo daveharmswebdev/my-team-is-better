@@ -824,6 +824,18 @@ def test_a_lone_substring_hit_never_answers_for_a_short_typo(
     assert team_id == intended_id, f"{query!r} resolved to {_SHORT_NAMES[team_id]!r}"
 
 
+@pytest.mark.parametrize(("query", "hit"), [("UK", "Duke"), ("ulan", "Tulane"), ("urd", "Purdue")])
+def test_a_lone_mid_word_hit_with_no_one_edit_rival_asks(
+    short_name_conn: sqlite3.Connection, query: str, hit: str
+) -> None:
+    """#403 round 2: a query inside one rated name but starting mid-word,
+    with no other name one edit away, is still no answer ("UK" is Kentucky,
+    not Duke). It asks, offering the hit."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(short_name_conn, ABBREV_YEAR, query, method=METHOD)
+    assert hit in exc_info.value.candidates
+
+
 def test_a_word_aligned_substring_with_no_one_edit_rival_resolves(
     short_name_conn: sqlite3.Connection,
 ) -> None:

@@ -793,6 +793,53 @@ def test_a_short_typo_inside_a_longer_name_never_resolves_to_it(
 
 
 @pytest.mark.parametrize(
+    ("sport", "year", "query", "wrong"),
+    [
+        ("cfb", 2019, "UK", "Duke"),
+        ("cfb", 2005, "oston", "Houston"),
+        ("cfb", 2019, "oston", "Houston"),
+        ("cfb", 2005, "uth", "Utah"),
+        ("cfb", 2019, "uth", "Utah"),
+        ("cfb", 2005, "tlan", "Tulane"),
+        ("cfb", 2019, "sachuse", "Syracuse"),
+    ],
+)
+def test_a_query_whose_hits_are_all_mid_word_never_resolves(
+    rated_398_conns: dict[str, sqlite3.Connection],
+    sport: Sport,
+    year: int,
+    query: str,
+    wrong: str,
+) -> None:
+    """#403 round 2: a query that sits only mid-word in rated names ("uk"
+    in Duke, "oston" in Boston College) points at no one school, and no
+    other rated name is one edit from it. It asks, offering the hits; it
+    never answers -- not the hit ("UK" is Kentucky, not Duke) and not a
+    fuzzy lookalike outside the hits ("oston" -> Houston, measured on
+    7d45fd7)."""
+    conn = rated_398_conns[sport]
+    try:
+        team_id = resolve_team(conn, year, query, method="keener", sport=sport)
+    except AmbiguousTeamError:
+        return
+    name = conn.execute("SELECT school FROM teams WHERE id = ?", (team_id,)).fetchone()[0]
+    pytest.fail(f"{query!r} resolved silently to {name!r} (7d45fd7: {wrong!r})")
+
+
+@pytest.mark.parametrize("year", [2005, 2019])
+def test_sc_asks_instead_of_answering_usc(
+    rated_398_conns: dict[str, sqlite3.Connection], year: int
+) -> None:
+    """ "SC" sits mid-word in USC, and teams.alternate_names gives it to
+    South Carolina: a silent USC is a wrong-school risk. It asks, as on
+    cef4ade (['USC', 'Wisconsin'])."""
+    conn = rated_398_conns["cfb"]
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(conn, year, "SC", method="keener")
+    assert "USC" in exc_info.value.candidates
+
+
+@pytest.mark.parametrize(
     ("sport", "year", "query", "intended"),
     [
         ("cfb", 2019, "Michigan St", "Michigan State"),
@@ -820,6 +867,11 @@ def test_a_short_typo_inside_a_longer_name_never_resolves_to_it(
         ("nfl", 2022, "Vegas", "Las Vegas Raiders"),
         ("nfl", 2022, "Tampa", "Tampa Bay Buccaneers"),
         ("nfl", 2022, "Kansas City", "Kansas City Chiefs"),
+        # Mid-word, but the name with its first letters dropped (round 2).
+        ("cfb", 2019, "Cuse", "Syracuse"),
+        ("cfb", 2019, "hio State", "Ohio State"),
+        ("nfl", 2022, "Boys", "Dallas Cowboys"),
+        ("nfl", 2022, "ittsburgh Steelers", "Pittsburgh Steelers"),
     ],
 )
 def test_word_aligned_partials_still_resolve_after_403(
