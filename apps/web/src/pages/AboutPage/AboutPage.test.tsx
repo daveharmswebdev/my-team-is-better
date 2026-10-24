@@ -376,6 +376,66 @@ describe('AboutPage', () => {
    * resolve, the page has to do the hash scroll itself -- the browser and
    * React Router both gave up long before the element was there.
    */
+  /**
+   * Issue #409: the self-hosted typefaces (#405) are credited on the page,
+   * by family and author, with their license. It is static copy, not part of
+   * /api/credits, so it must show whatever state the credits request is in.
+   */
+  describe('the Typefaces credit (issue #409)', () => {
+    function typefacesSection(): HTMLElement {
+      const heading = screen.getByRole('heading', { name: /typefaces/i })
+      const section = heading.closest('section')
+      expect(section).not.toBeNull()
+      return section as HTMLElement
+    }
+
+    function expectTypefacesCredit() {
+      const section = within(typefacesSection())
+      expect(section.getByRole('link', { name: 'Anton' })).toHaveAttribute(
+        'href',
+        'https://github.com/googlefonts/AntonFont',
+      )
+      expect(section.getByRole('link', { name: 'Barlow' })).toHaveAttribute(
+        'href',
+        'https://github.com/jpt/barlow',
+      )
+      expect(section.getByText(/Barlow Condensed/)).toBeInTheDocument()
+      expect(section.getByText(/Vernon Adams/)).toBeInTheDocument()
+      expect(section.getByText(/Jeremy Tribby/)).toBeInTheDocument()
+      expect(
+        section.getByRole('link', { name: /SIL Open Font License/ }),
+      ).toHaveAttribute('href', '/fonts/OFL.txt')
+    }
+
+    it('credits Anton and Barlow by author, with the license, once the credits load', async () => {
+      mockedFetchCredits.mockResolvedValue(credits)
+
+      render(<AboutPage />)
+
+      await screen.findByRole('heading', { name: "Keener's method" })
+      expectTypefacesCredit()
+    })
+
+    it('shows while the credits request is still loading', () => {
+      mockedFetchCredits.mockReturnValue(new Promise(() => {}))
+
+      render(<AboutPage />)
+
+      expectTypefacesCredit()
+    })
+
+    it('shows when the credits request fails', async () => {
+      mockedFetchCredits.mockRejectedValue(
+        new VerdictNetworkError(NETWORK_ERROR_COPY),
+      )
+
+      render(<AboutPage />)
+
+      await screen.findByRole('alert')
+      expectTypefacesCredit()
+    })
+  })
+
   describe('landing on a method by hash (issue #227)', () => {
     /** The elements `scrollIntoView` was called on, in order. */
     let scrolledInto: Element[]

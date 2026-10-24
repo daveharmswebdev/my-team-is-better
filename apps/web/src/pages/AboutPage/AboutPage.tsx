@@ -192,6 +192,52 @@ export function AboutPage() {
             )
           })}
       </section>
+
+      {/*
+        Issue #409: the typefaces the site serves itself (#405), credited by
+        family and author. Unlike the sections above this is static copy, not
+        part of /api/credits -- the fonts are the web app's, not the engine's
+        -- so it shows whatever state the credits request is in. The facts
+        come from public/fonts/README.md and OFL.txt.
+      */}
+      <section id="typefaces" className={styles.section}>
+        <h2 className={styles.heading}>The Typefaces</h2>
+        <p className={styles.body}>
+          The headlines are set in{' '}
+          <a
+            href="https://github.com/googlefonts/AntonFont"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Anton
+          </a>
+          , by Vernon Adams (copyright 2020 The Anton Project Authors).
+          Everything else is{' '}
+          <a
+            href="https://github.com/jpt/barlow"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Barlow
+          </a>{' '}
+          and{' '}
+          <a
+            href="https://github.com/jpt/barlow"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Barlow Condensed
+          </a>
+          , by Jeremy Tribby (copyright 2017 The Barlow Project Authors).
+        </p>
+        <p className={styles.body}>
+          All three are free fonts, licensed under the{' '}
+          <a href="/fonts/OFL.txt" target="_blank" rel="noreferrer">
+            SIL Open Font License, Version 1.1
+          </a>
+          , and served by this site itself.
+        </p>
+      </section>
     </main>
   )
 }
