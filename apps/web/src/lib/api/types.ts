@@ -393,8 +393,9 @@ export interface StarterRecordOut {
 
 /**
  * Every stat is `null` when the source did not record it -- never 0. Sack
- * stats are mirrored faithfully but not shown in v1: the stored sack yards
- * are negative against the column's name (#298).
+ * stats are mirrored faithfully but not shown in v1, by choice: the yards a
+ * sacked passer lost are published positive (#298), so `sack_yards_lost`
+ * reads the way its name and an official stat line read.
  *
  * The receiving stats (issue #314) are mirrored in full, but only
  * `receptions`, `receiving_yards` and `receiving_tds` are shown, and only on
