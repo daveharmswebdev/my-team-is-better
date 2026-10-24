@@ -315,13 +315,25 @@ export interface CreditsOut {
 
 /**
  * The engine's `PlayerSeasonType` literal, in its order. Not in
- * `apps/api/openapi-vocabularies.json` (only `sport` and `method` are
- * published), so nothing checks this list against the API yet; it is copied
+ * `apps/api/openapi-vocabularies.json` (it publishes `sport`, `method` and
+ * `group`), so nothing checks this list against the API yet; it is copied
  * from `cfb_strength.contracts`.
  */
 export const PLAYER_SEASON_TYPES = ['regular', 'postseason'] as const
 
 export type PlayerSeasonType = (typeof PLAYER_SEASON_TYPES)[number]
+
+/**
+ * The engine's `PlayerPositionGroup` literal, in its display order (issue
+ * #436, epic #372): the groups /nfl/compare compares within. A player's group
+ * comes from his position label (FB is RB); every other label, and a missing
+ * one, has none (`null`). Checked against the API's published
+ * `apps/api/openapi-vocabularies.json` (`group`, order included) by
+ * `vocabularies.test.ts`.
+ */
+export const PLAYER_POSITION_GROUPS = ['QB', 'RB', 'WR', 'TE'] as const
+
+export type PlayerPositionGroup = (typeof PLAYER_POSITION_GROUPS)[number]
 
 /**
  * The engine's `PlayerLeaderCategory` literal, in its order (issue #312):
@@ -539,6 +551,8 @@ export interface PlayerCareerOut {
   player_id: number
   display_name: string
   position: string | null
+  /** `position`'s group (#433); `null` for a label with none (K, LB, ...). */
+  group: PlayerPositionGroup | null
   /** Chronological; regular season before postseason within a season. */
   seasons: PlayerSeasonLineOut[]
   /** `null` when the player has no season line of that type. */
@@ -585,6 +599,8 @@ export interface PlayerSearchRowOut {
   player_id: number
   display_name: string
   position: string | null
+  /** As on a career. */
+  group: PlayerPositionGroup | null
   first_season: number
   last_season: number
 }
@@ -594,6 +610,8 @@ export interface PlayerSearchOut {
   /** The query as matched: stripped of surrounding whitespace. */
   query: string
   limit: number
+  /** The request's `group` filter, echoed (#433); `null` = unfiltered. */
+  group: PlayerPositionGroup | null
   rows: PlayerSearchRowOut[]
 }
 
@@ -786,6 +804,38 @@ export function isUnknownPlayerErrorBody(
     value['error'] === 'unknown_player' &&
     typeof value['player_id'] === 'number' &&
     isSport(value['sport'])
+  )
+}
+
+export function isPlayerPositionGroup(
+  value: unknown,
+): value is PlayerPositionGroup {
+  // Widened to `readonly unknown[]` so `includes` accepts an unvalidated value.
+  return (PLAYER_POSITION_GROUPS as readonly unknown[]).includes(value)
+}
+
+/**
+ * 400 from `GET /api/players/compare` (issue #433, epic #372): the two
+ * players aren't in one position group -- different groups, or either with
+ * none. Both groups are echoed; `null` is "no group", never "unknown".
+ * Founder decision (#372): the page refuses the pair, never shows it.
+ */
+export interface PlayersNotComparableErrorBody {
+  error: 'players_not_comparable'
+  a_group: PlayerPositionGroup | null
+  b_group: PlayerPositionGroup | null
+}
+
+export function isPlayersNotComparableErrorBody(
+  value: unknown,
+): value is PlayersNotComparableErrorBody {
+  const isGroupOrNull = (group: unknown) =>
+    group === null || isPlayerPositionGroup(group)
+  return (
+    isRecord(value) &&
+    value['error'] === 'players_not_comparable' &&
+    isGroupOrNull(value['a_group']) &&
+    isGroupOrNull(value['b_group'])
   )
 }
 

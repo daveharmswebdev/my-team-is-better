@@ -1,8 +1,9 @@
-"""Extract the `sport`/`method` vocabularies the API publishes in
-`/openapi.json`, and write `apps/api/openapi-vocabularies.json` (issue #112).
+"""Extract the `sport`/`method`/`group` vocabularies the API publishes in
+`/openapi.json`, and write `apps/api/openapi-vocabularies.json` (issues #112,
+#436).
 
-That file is what `apps/web`'s own `Sport`/`Method` unions are checked
-against, so it is generated from the live `api.main.app.openapi()`, not from
+That file is what `apps/web`'s own `Sport`/`Method`/`PlayerPositionGroup`
+unions are checked against, so it is generated from the live `api.main.app.openapi()`, not from
 `typing.get_args` on the aliases. It records what the API actually
 advertises. `tests/test_openapi_vocabularies.py` separately proves that this
 equals the `cfb_strength.contracts` aliases, and fails when the committed
@@ -12,7 +13,7 @@ Regenerate the committed file (from the repo root):
 
     cd apps/api && uv run python -m api.openapi_vocabularies > openapi-vocabularies.json
 
-If the published schema is inconsistent (a `sport`/`method` field with no
+If the published schema is inconsistent (a vocabulary field with no
 enum, or two enums that disagree), this exits non-zero and lists the
 locations on stderr. The shell redirect will already have truncated the file,
 and the freshness test then fails on it, so fix the schema and re-run.
@@ -30,11 +31,23 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
-# `group` (the players API's `PlayerPositionGroup`, #433) is deliberately not
-# here yet: apps/web's vocabularies.test.ts requires its decision table's keys
-# to equal this file's keys exactly, so a new vocabulary would fail web CI
-# from an api-only change. Epic #372 step 3 (web) adds it on both sides at once.
-VOCABULARY_NAMES: Final[tuple[str, ...]] = ("method", "sport")
+# `group` is the players API's `PlayerPositionGroup` (#433), published so
+# apps/web can mirror it (epic #372 step 3, #436).
+VOCABULARY_NAMES: Final[tuple[str, ...]] = ("group", "method", "sport")
+
+ALIASED_PROPERTIES: Final[Mapping[str, str]] = {
+    # `PlayersNotComparableErrorBody` echoes both players' groups (#433).
+    "a_group": "group",
+    "b_group": "group",
+}
+"""Properties whose name is not a vocabulary name but whose value is one,
+mapped to that vocabulary. The walk matches property names exactly, so a
+field like `a_group` is invisible to it unless it is listed here."""
+
+_PROPERTY_VOCABULARIES: Final[Mapping[str, str]] = {
+    **{name: name for name in VOCABULARY_NAMES},
+    **ALIASED_PROPERTIES,
+}
 
 UNCONSTRAINED_LOCATIONS: Final[Mapping[tuple[str, str], str]] = {
     # A response field, not an input. The engine's `contracts.TeamCase.method`
@@ -50,7 +63,7 @@ UNCONSTRAINED_LOCATIONS: Final[Mapping[tuple[str, str], str]] = {
         "response echo of the request's method; engine's TeamCase.method is str"
     ),
 }
-"""`(name, location)` pairs allowed to publish `sport`/`method` without an
+"""`(name, location)` pairs allowed to publish a vocabulary without an
 enum, each with its reason. An entry that no longer matches an enum-less
 occurrence is reported as a problem, so the allowlist cannot go stale."""
 
@@ -69,7 +82,9 @@ class VocabularyError(ValueError):
 
 @dataclass(frozen=True)
 class Occurrence:
-    """One published `sport`/`method` property or parameter."""
+    """One published vocabulary property or parameter. `name` is the
+    vocabulary's name, which differs from the property's own name for an
+    `ALIASED_PROPERTIES` field."""
 
     name: str
     location: str
@@ -136,9 +151,10 @@ def _parameter_location(tokens: Sequence[str], parameter: Mapping[str, Any]) -> 
 
 
 def find_occurrences(openapi: Mapping[str, Any]) -> list[Occurrence]:
-    """Every property or parameter named `sport`/`method`, anywhere in the
-    document: component schemas, inline request/response schemas, and path-
-    and operation-level parameters (`$ref`'d parameters resolved).
+    """Every property or parameter named for a vocabulary (or listed in
+    `ALIASED_PROPERTIES`), anywhere in the document: component schemas,
+    inline request/response schemas, and path- and operation-level
+    parameters (`$ref`'d parameters resolved).
 
     Locations are JSON pointers for properties (e.g.
     `#/components/schemas/ChampionRequest/properties/sport`) and
@@ -150,13 +166,13 @@ def find_occurrences(openapi: Mapping[str, Any]) -> list[Occurrence]:
         if isinstance(node, Mapping):
             properties = node.get("properties")
             if isinstance(properties, Mapping):
-                for name in VOCABULARY_NAMES:
-                    if name in properties:
+                for prop, name in _PROPERTY_VOCABULARIES.items():
+                    if prop in properties:
                         found.append(
                             Occurrence(
                                 name,
-                                _pointer([*tokens, "properties", name]),
-                                _leaves(properties[name], openapi),
+                                _pointer([*tokens, "properties", prop]),
+                                _leaves(properties[prop], openapi),
                             )
                         )
             parameters = node.get("parameters")

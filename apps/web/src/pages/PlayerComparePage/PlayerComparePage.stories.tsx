@@ -1,16 +1,24 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 import {
   PICK_FROM_LIST_COPY,
   PICK_TWO_COPY,
   SAME_PLAYER_COPY,
+  groupSingular,
+  notComparableCopy,
   pickOneMoreCopy,
+  restrictionCopy,
+  uncomparableCopy,
 } from '../../lib/playerCompare'
 import {
   DATA_SOURCES,
+  HILL_VS_LAMB,
+  JEFF_WILKINS_CAREER,
   KURT_WARNER_CAREER,
+  MARSHALL_FAULK_CAREER,
   NEVER_MET_COMPARISON,
+  SEARCH_FARMER_RB,
   SEARCH_MCNAIR,
   WARNER_VS_MCNAIR,
 } from '../../lib/playerFixtures'
@@ -22,7 +30,10 @@ type Handler = () => Promise<Response>
 
 interface Handlers {
   compare?: Handler
-  career?: Handler
+  /** Gets the id asked for, for a story that looks up more than one. */
+  career?: (playerId: number) => Promise<Response>
+  /** `/api/players/search`; the fixture's McNair row when not given. */
+  search?: (query: string, group: string | null) => Promise<Response>
 }
 
 /**
@@ -39,10 +50,17 @@ function installFetch(handlers: Handlers) {
       return (handlers.compare ?? never)()
     }
     if (url.pathname === '/api/players/search') {
-      return jsonResponse(200, SEARCH_MCNAIR)
+      return handlers.search === undefined
+        ? jsonResponse(200, SEARCH_MCNAIR)
+        : handlers.search(
+            url.searchParams.get('q') ?? '',
+            url.searchParams.get('group'),
+          )
     }
     if (url.pathname.startsWith('/api/players/')) {
-      return (handlers.career ?? never)()
+      return (handlers.career ?? never)(
+        Number(url.pathname.slice('/api/players/'.length)),
+      )
     }
     if (url.pathname === '/api/credits') {
       return jsonResponse(200, {
@@ -133,6 +151,8 @@ export const PickingPlayerB: Story = {
   ],
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
+    // Player B opens once Warner's career says he is a quarterback (#436).
+    await canvas.findByText(restrictionCopy('QB'))
     await userEvent.type(playerB(canvas), 'McNair')
     await expect(
       await canvas.findByRole('option', { name: /Steve McNair/ }),
@@ -212,8 +232,9 @@ export const LoneLinkCareerFailed: Story = {
 }
 
 /**
- * The same failed lone link, then Steve McNair picked into Player B (issue
- * #367): the failure was about the lone pick, so it goes, and Compare is on.
+ * The same failed lone link, then Steve McNair picked over it into Player A
+ * (issue #367): the failure was about the lone pick, so it goes. Player B
+ * waits on Player A's group (#436), so he is the only other pick to make.
  */
 export const LoneLinkCareerFailedThenPicked: Story = {
   decorators: [
@@ -224,11 +245,14 @@ export const LoneLinkCareerFailedThenPicked: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('alert')
-    await userEvent.type(playerB(canvas), 'McNair')
+    await expect(playerB(canvas)).toBeDisabled()
+    const playerA = canvas.getByLabelText('Player A', { exact: true })
+    await userEvent.clear(playerA)
+    await userEvent.type(playerA, 'McNair')
     await userEvent.click(
       await canvas.findByRole('option', { name: /Steve McNair/ }),
     )
-    await expect(canvas.getByRole('button', { name: 'Compare' })).toBeEnabled()
+    await expect(playerB(canvas)).toBeEnabled()
     await expect(canvas.queryByRole('alert')).toBeNull()
   },
 }
@@ -351,11 +375,18 @@ export const ClosedAfterFailedLink: Story = {
   },
 }
 
-/** Never met, and one of them with null stats and no playoff games. */
+/**
+ * Never met, and one of them with null stats and no playoff games. Both
+ * quarterbacks, since only they get a head-to-head (#436).
+ */
 export const NeverMet: Story = {
   decorators: [
     atSearch(`?a=${WARNER}&b=1001`, {
-      compare: () => jsonResponse(200, NEVER_MET_COMPARISON),
+      compare: () =>
+        jsonResponse(200, {
+          ...NEVER_MET_COMPARISON,
+          b: { ...NEVER_MET_COMPARISON.b, position: 'QB', group: 'QB' },
+        }),
     }),
   ],
   play: async ({ canvasElement }) => {
@@ -406,5 +437,107 @@ export const NetworkError: Story = {
       NETWORK_ERROR_COPY,
     )
     await expect(canvas.queryByRole('button', { name: /^Share/ })).toBeNull()
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Comparing like with like (issue #436). Everything below is copied from the
+// API on the committed fixture db.
+// ---------------------------------------------------------------------------
+
+/**
+ * Marshall Faulk as Player A: the page names the restriction, and Player B's
+ * typeahead searches running backs only.
+ */
+export const RestrictedToRunningBacks: Story = {
+  decorators: [
+    atSearch(`?a=${MARSHALL_FAULK_CAREER.player_id}`, {
+      career: () => jsonResponse(200, MARSHALL_FAULK_CAREER),
+      search: (query, group) =>
+        jsonResponse(
+          200,
+          group === 'RB' && query === 'farmer'
+            ? SEARCH_FARMER_RB
+            : { ...SEARCH_FARMER_RB, query, group, rows: [] },
+        ),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByText(restrictionCopy('RB'))).toBeVisible()
+    await userEvent.type(playerB(canvas), 'farmer')
+    await expect(
+      await canvas.findByRole('option', { name: /Robert Farmer/ }),
+    ).toBeVisible()
+  },
+}
+
+/**
+ * A shared link to a quarterback and a running back: refused in the
+ * narrator's voice, never shown. Kurt Warner stays as Player A; Player B is
+ * empty and ready for another quarterback.
+ */
+export const MixedLinkRefused: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=2464876093`, {
+      compare: () =>
+        jsonResponse(400, {
+          detail: {
+            error: 'players_not_comparable',
+            a_group: 'QB',
+            b_group: 'RB',
+          },
+        }),
+      career: () => jsonResponse(200, KURT_WARNER_CAREER),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByRole('alert')).toHaveTextContent(
+      notComparableCopy('QB', groupSingular('RB')),
+    )
+    // The modal that showed "Loading" closes as the form takes the refusal.
+    await waitFor(() => expect(canvas.queryByRole('dialog')).toBeNull())
+    await expect(
+      await canvas.findByDisplayValue('Kurt Warner'),
+    ).toBeInTheDocument()
+    await expect(playerB(canvas)).toHaveValue('')
+    await expect(playerB(canvas)).toBeEnabled()
+  },
+}
+
+/** Jeff Wilkins, a kicker, as Player A: no group, so nobody to compare yet. */
+export const UncomparablePlayerA: Story = {
+  decorators: [
+    atSearch(`?a=${JEFF_WILKINS_CAREER.player_id}`, {
+      career: () => jsonResponse(200, JEFF_WILKINS_CAREER),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByText(uncomparableCopy('K'))).toBeVisible()
+    await expect(playerB(canvas)).toBeDisabled()
+  },
+}
+
+/** Tyreek Hill and CeeDee Lamb: careers side by side, no head-to-head. */
+export const ReceiversCompared: Story = {
+  decorators: [
+    atSearch(`?a=${HILL_VS_LAMB.a.player_id}&b=${HILL_VS_LAMB.b.player_id}`, {
+      compare: () => jsonResponse(200, HILL_VS_LAMB),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Tyreek Hill and CeeDee Lamb',
+    })
+    const modal = within(dialog)
+    await modal.findByRole('table', {
+      name: 'Tyreek Hill and CeeDee Lamb, regular season',
+    })
+    await expect(
+      modal.queryByRole('region', { name: 'Head to head' }),
+    ).toBeNull()
   },
 }

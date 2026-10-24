@@ -9,15 +9,18 @@ import { ShareButton } from '../../components/ShareButton/ShareButton'
 import { VerdictModal } from '../../components/VerdictModal/VerdictModal'
 import {
   PlayerApiError,
+  PlayersNotComparableError,
   SERVER_ERROR_COPY,
   VerdictHttpError,
   VerdictNetworkError,
   fetchPlayerCareer,
   fetchPlayerComparison,
 } from '../../lib/api/client'
+import { isPlayerPositionGroup } from '../../lib/api/types'
 import type {
   PlayerCareerTotalsOut,
   PlayerComparisonOut,
+  PlayerPositionGroup,
   PlayerSearchRowOut,
   PlayerSeasonType,
 } from '../../lib/api/types'
@@ -32,7 +35,13 @@ import {
   SAME_PLAYER_COPY,
   SEARCH_FAILED_COPY,
   compareUndercountNote,
+  groupSingular,
+  notComparableCopy,
   pickOneMoreCopy,
+  positionSingular,
+  restrictionCopy,
+  showsHeadToHead,
+  uncomparableCopy,
 } from '../../lib/playerCompare'
 import {
   PLAYER_NOT_FOUND_COPY,
@@ -77,10 +86,72 @@ function failureOf(error: unknown): Failure {
   return { status: 'error', message }
 }
 
+/**
+ * Why a pair was refused (issue #436): the API's two groups, and -- only for
+ * a Player B with no group next to a Player A with one -- Player B's
+ * position label, which the refusal names him by instead (`null` when it is
+ * missing or couldn't be fetched).
+ */
+interface Refusal {
+  aGroup: PlayerPositionGroup | null
+  bGroup: PlayerPositionGroup | null
+  bPosition: string | null
+}
+
 /** The latest comparison answer, tagged with the pair it answers. */
 type ComparisonAnswer = { key: string } & (
-  { status: 'success'; comparison: PlayerComparisonOut } | Failure
+  | { status: 'success'; comparison: PlayerComparisonOut }
+  | ({ status: 'not_comparable' } & Refusal)
+  | Failure
 )
+
+/**
+ * What the page has learned about a player's position, from any API answer
+ * or search row naming him. A missing key is "not known yet"; `null` is the
+ * API's "none".
+ */
+interface Profile {
+  group?: PlayerPositionGroup | null
+  position?: string | null
+}
+
+/** A state update adding what an answer just said about some players. */
+function learned(
+  answered: Record<number, Profile>,
+): (known: Record<number, Profile>) => Record<number, Profile> {
+  return (known) => {
+    const next = { ...known }
+    for (const [id, profile] of Object.entries(answered)) {
+      next[Number(id)] = { ...known[Number(id)], ...profile }
+    }
+    return next
+  }
+}
+
+/**
+ * The refusal a mixed link navigated with (issue #436), read off
+ * `location.state`, which is `any` and can hold anything a browser restored.
+ */
+function refusalOf(state: unknown): Refusal | null {
+  if (typeof state !== 'object' || state === null || !('refused' in state)) {
+    return null
+  }
+  const { refused } = state as { refused: unknown }
+  if (typeof refused !== 'object' || refused === null) {
+    return null
+  }
+  const { aGroup, bGroup, bPosition } = refused as Record<string, unknown>
+  const groupOrNull = (value: unknown): value is PlayerPositionGroup | null =>
+    value === null || isPlayerPositionGroup(value)
+  if (
+    !groupOrNull(aGroup) ||
+    !groupOrNull(bGroup) ||
+    !(bPosition === null || typeof bPosition === 'string')
+  ) {
+    return null
+  }
+  return { aGroup, bGroup, bPosition }
+}
 
 /** The latest lone-player answer, tagged with the id it answers. */
 type CareerAnswer = { id: number } & ({ status: 'success' } | Failure)
@@ -110,6 +181,8 @@ interface SlotState {
   pick: SlotPick | null
   text: string
 }
+
+const EMPTY: SlotState = { pick: null, text: '' }
 
 /** The slots, and the navigation (`location.key`) they were seeded from. */
 interface Seeded {
@@ -200,6 +273,11 @@ export function PlayerComparePage() {
   const pickB = parsePick(searchParams.get('b'))
 
   const [names, setNames] = useState<Record<number, string>>({})
+  const [profiles, setProfiles] = useState<Record<number, Profile>>({})
+  /** The entry whose refusal a slot change has since dismissed. */
+  const [dismissedRefusalKey, setDismissedRefusalKey] = useState<string | null>(
+    null,
+  )
   const [seeded, setSeeded] = useState<Seeded>(() => ({
     locationKey: location.key,
     slots: seedSlots({ a: pickA, b: pickB }, {}),
@@ -216,6 +294,8 @@ export function PlayerComparePage() {
   const pickersRef = useRef<HTMLDivElement>(null)
   /** Raised by a close, lowered once focus has actually moved (see below). */
   const focusCompareRef = useRef(false)
+  /** Raised by a refusal: focus goes to the field that needs a new pick. */
+  const focusPickerRef = useRef(false)
 
   // Back, Forward or a link moved the URL: the fields follow it. The one
   // exception is this page's own close (`closeComparison`), which drops ?a&b
@@ -279,15 +359,71 @@ export function PlayerComparePage() {
         }
         setComparisonAnswer({ key, status: 'success', comparison })
         setNames((known) => ({ ...known, ...answered }))
+        setProfiles(
+          learned({
+            [comparison.a.player_id]: {
+              group: comparison.a.group,
+              position: comparison.a.position,
+            },
+            [comparison.b.player_id]: {
+              group: comparison.b.group,
+              position: comparison.b.position,
+            },
+          }),
+        )
         setSeeded((current) => ({
           ...current,
           slots: nameSlots(current.slots, answered),
         }))
       })
       .catch((error: unknown) => {
-        if (!cancelled) {
-          setComparisonAnswer({ key, ...failureOf(error) })
+        if (cancelled) {
+          return
         }
+        if (!(error instanceof PlayersNotComparableError)) {
+          setComparisonAnswer({ key, ...failureOf(error) })
+          return
+        }
+        // A mixed pair (issue #436). The 400 names both groups but no
+        // position, so a Player B with no group next to a Player A with one
+        // is looked up: the refusal names him by his position instead.
+        const { a_group: aGroup, b_group: bGroup } = error.body
+        setProfiles(
+          learned({ [pickA]: { group: aGroup }, [pickB]: { group: bGroup } }),
+        )
+        const refuse = (bPosition: string | null) => {
+          setComparisonAnswer({
+            key,
+            status: 'not_comparable',
+            aGroup,
+            bGroup,
+            bPosition,
+          })
+        }
+        if (aGroup === null || bGroup !== null) {
+          refuse(null)
+          return
+        }
+        fetchPlayerCareer(pickB).then(
+          (career) => {
+            if (!cancelled) {
+              setProfiles(
+                learned({
+                  [career.player_id]: {
+                    group: career.group,
+                    position: career.position,
+                  },
+                }),
+              )
+              refuse(career.position)
+            }
+          },
+          () => {
+            if (!cancelled) {
+              refuse(null)
+            }
+          },
+        )
       })
     return () => {
       cancelled = true
@@ -307,6 +443,14 @@ export function PlayerComparePage() {
         const answered = { [career.player_id]: career.display_name }
         setCareerAnswer({ id: loneId, status: 'success' })
         setNames((known) => ({ ...known, ...answered }))
+        setProfiles(
+          learned({
+            [career.player_id]: {
+              group: career.group,
+              position: career.position,
+            },
+          }),
+        )
         setSeeded((current) => ({
           ...current,
           slots: nameSlots(current.slots, answered),
@@ -338,13 +482,112 @@ export function PlayerComparePage() {
       : (pick.display_name ?? unnamedPickText(pick.player_id))
   }
 
-  const searchA = usePlayerSearch(slots.a.pick === null ? slots.a.text : '')
-  const searchB = usePlayerSearch(slots.b.pick === null ? slots.b.text : '')
+  /**
+   * Player A's profile once he is picked (issue #436): his group decides who
+   * Player B can be. `undefined` until an answer has said.
+   */
+  const aProfile =
+    slots.a.pick === null ? undefined : profiles[slots.a.pick.player_id]
+  const aGroup = aProfile?.group
+  /** Player B searches only within Player A's known group. */
+  const bGroup = aGroup ?? undefined
+  /**
+   * Player B waits for a Player A whose group is known, and for a Player A
+   * with no group, for good: there is nobody to compare him with yet. But a
+   * Player B already holding a pick or text -- a failed link's, say -- stays
+   * live, so it can always be cleared or typed over (round 3).
+   */
+  /**
+   * The line under the fields: the restriction once Player A has a group,
+   * the uncomparable line once he has none (his label arrives with his
+   * career or search row; until then there is nothing true to say).
+   */
+  const bLine =
+    aGroup === undefined
+      ? null
+      : aGroup !== null
+        ? restrictionCopy(aGroup)
+        : aProfile?.position === undefined
+          ? null
+          : uncomparableCopy(aProfile.position)
+  const bLineId = `${noteId}-b-line`
+  const bHolds = slots.b.pick !== null || slots.b.text !== ''
+  const bDisabled = bGroup === undefined && !bHolds
 
+  const searchA = usePlayerSearch(slots.a.pick === null ? slots.a.text : '')
+  const searchB = usePlayerSearch(
+    bGroup !== undefined && slots.b.pick === null ? slots.b.text : '',
+    bGroup,
+  )
+
+  /**
+   * A Player A whose group nobody has said yet, on the form with no pair
+   * asked: a failed link's (a 404, a network error, a 5xx, the same player
+   * twice), whose answer never named him. His career says, so Player B can
+   * be picked again (round 3). A lone link's own lookup above covers that
+   * case; each player is looked up once.
+   */
+  const pairInUrl = pickA !== null && pickB !== null
+  const aLookupId =
+    !pairInUrl &&
+    slots.a.pick !== null &&
+    aGroup === undefined &&
+    slots.a.pick.player_id !== loneId
+      ? slots.a.pick.player_id
+      : null
+  const lookedUpRef = useRef(new Set<number>())
+  useEffect(() => {
+    if (aLookupId === null || lookedUpRef.current.has(aLookupId)) {
+      return
+    }
+    lookedUpRef.current.add(aLookupId)
+    fetchPlayerCareer(aLookupId).then(
+      (career) => {
+        const answered = { [career.player_id]: career.display_name }
+        setNames((known) => ({ ...known, ...answered }))
+        setProfiles(
+          learned({
+            [career.player_id]: {
+              group: career.group,
+              position: career.position,
+            },
+          }),
+        )
+        setSeeded((current) => ({
+          ...current,
+          slots: nameSlots(current.slots, answered),
+        }))
+      },
+      () => {
+        // Nothing learned: Player B can still be cleared, and a new
+        // Player A picked from the list brings his group with him.
+      },
+    )
+  }, [aLookupId])
+
+  /**
+   * Sets one field. Player B is picked against Player A's group, so whatever
+   * empties Player A -- typing over him, or the clear button -- empties
+   * Player B too (issue #436). Any change dismisses a refusal.
+   */
   function updateSlot(slot: Slot, next: SlotState) {
+    setDismissedRefusalKey(location.key)
+    if (refusalOf(location.state) !== null) {
+      // The refusal is dismissed for good: drop it from the entry's state,
+      // so a reload doesn't bring it back. Same URL, `replace`, and the
+      // `closedFrom` mark keeps the fields as they are rather than
+      // re-seeding them from the URL (see `closedFromKey`).
+      setSearchParams(searchParams, {
+        replace: true,
+        state: { closedFrom: location.key },
+      })
+    }
     setSeeded((current) => ({
       ...current,
-      slots: { ...current.slots, [slot]: next },
+      slots:
+        slot === 'a' && next.pick === null
+          ? { a: next, b: EMPTY }
+          : { ...current.slots, [slot]: next },
     }))
   }
 
@@ -358,6 +601,11 @@ export function PlayerComparePage() {
       ...known,
       [player.player_id]: player.display_name,
     }))
+    setProfiles(
+      learned({
+        [player.player_id]: { group: player.group, position: player.position },
+      }),
+    )
     updateSlot(slot, {
       pick: { player_id: player.player_id, display_name: player.display_name },
       text: '',
@@ -365,7 +613,7 @@ export function PlayerComparePage() {
   }
 
   function handleClear(slot: Slot) {
-    updateSlot(slot, { pick: null, text: '' })
+    updateSlot(slot, EMPTY)
   }
 
   const compareA = slotPick('a')
@@ -441,7 +689,66 @@ export function PlayerComparePage() {
           ?.focus()
       }
     }
+    // After a refusal, the same wait: then Player B, ready for a new pick,
+    // or Player A when Player B can't take one.
+    if (focusPickerRef.current && !askedPair) {
+      focusPickerRef.current = false
+      const [inputA, inputB] = Array.from(
+        pickersRef.current?.querySelectorAll('input') ?? [],
+      )
+      if (inputB !== undefined && !inputB.disabled) {
+        inputB.focus()
+      } else {
+        inputA?.focus()
+      }
+    }
   })
+
+  /**
+   * A mixed pair was refused (issue #436): back to the form, never showing
+   * the pair. The address bar drops Player B -- it names no pair until one
+   * is committed (#325) -- with `replace`, so Back skips the refused link,
+   * and the fields follow it as on any navigation: Player A stays, Player B
+   * is empty. The refusal rides along in the entry's state.
+   */
+  const refused =
+    currentComparison?.status === 'not_comparable' ? currentComparison : null
+  useEffect(() => {
+    if (refused === null || typeof pickA !== 'number') {
+      return
+    }
+    focusPickerRef.current = true
+    const { aGroup: a, bGroup: b, bPosition } = refused
+    setSearchParams(
+      { a: String(pickA) },
+      {
+        replace: true,
+        state: { refused: { aGroup: a, bGroup: b, bPosition } },
+      },
+    )
+  }, [refused, pickA, setSearchParams])
+
+  /**
+   * The refusal's line, while the form is as the refusal left it: Player A
+   * its link's player, Player B empty, and nothing changed since. A Player A
+   * with no group gets the uncomparable line instead (below).
+   */
+  const refusal = refusalOf(location.state)
+  const refusalCopy =
+    refusal !== null &&
+    refusal.aGroup !== null &&
+    !askedPair &&
+    dismissedRefusalKey !== location.key &&
+    typeof pickA === 'number' &&
+    slots.a.pick?.player_id === pickA &&
+    slots.b.pick === null
+      ? notComparableCopy(
+          refusal.aGroup,
+          refusal.bGroup !== null
+            ? groupSingular(refusal.bGroup)
+            : positionSingular(refusal.bPosition),
+        )
+      : null
 
   const comparison =
     currentComparison?.status === 'success'
@@ -497,7 +804,11 @@ export function PlayerComparePage() {
           {SAME_PLAYER_COPY}
         </p>
       )
-    } else if (currentComparison === null) {
+    } else if (
+      currentComparison === null ||
+      // Refused: on its way back to the form (the effect above), never shown.
+      currentComparison.status === 'not_comparable'
+    ) {
       answer = (
         <p role="status" className={styles.status}>
           Loading the comparison&hellip;
@@ -537,6 +848,16 @@ export function PlayerComparePage() {
         {loneCareerFailure.message}
       </p>
     )
+  } else if (refusalCopy !== null) {
+    prompt = (
+      <p role="alert" className={styles.error}>
+        {refusalCopy}
+      </p>
+    )
+  } else if (aGroup === null) {
+    // A Player A with no group (issue #436): the uncomparable line under the
+    // fields (`bLine`) says it all, so no pick-one-more prompt.
+    prompt = null
   } else {
     // Otherwise the prompt follows the fields, not the URL (issue #324): a
     // close empties the URL while the fields keep the pair, and a field
@@ -562,8 +883,8 @@ export function PlayerComparePage() {
 
       <h1 className={styles.title}>Compare NFL players</h1>
       <p className={styles.lede}>
-        Two players&rsquo; career totals side by side, and every game they
-        started at quarterback against each other.
+        Two players at the same position, career totals side by side. Two
+        quarterbacks get every game they started against each other too.
       </p>
 
       <div ref={pickersRef} className={styles.pickers}>
@@ -588,7 +909,20 @@ export function PlayerComparePage() {
           onSelect={(player) => handleSelect('b', player)}
           onClear={() => handleClear('b')}
           placeholder="Type a name"
+          disabled={bDisabled}
+          describedBy={bLine === null ? undefined : bLineId}
         />
+      </div>
+
+      {/* Who Player B can be, or why nobody can be yet (issue #436). Always
+          in the page, so a polite live region announces the line when it
+          appears or changes; Player B is described by it. */}
+      <div aria-live="polite" className={styles.bLine}>
+        {bLine !== null && (
+          <p id={bLineId} className={styles.restriction}>
+            {bLine}
+          </p>
+        )}
       </div>
 
       <div className={styles.actions}>
@@ -722,24 +1056,28 @@ function Comparison({
         )
       })}
 
-      <section className={styles.section} aria-labelledby={headToHeadId}>
-        <h2 id={headToHeadId} className={styles.heading}>
-          Head to head
-        </h2>
-        <p className={styles.rule}>{HEAD_TO_HEAD_RULE}</p>
-        {headToHeads.map((headToHead) => (
-          <div key={headToHead.season_type} className={styles.subsection}>
-            <h3 className={styles.subheading}>
-              {SEASON_TYPE_LABEL[headToHead.season_type]}
-            </h3>
-            <PlayerHeadToHead
-              aName={a.display_name}
-              bName={b.display_name}
-              headToHead={headToHead}
-            />
-          </div>
-        ))}
-      </section>
+      {/* Starts at quarterback against each other: two quarterbacks only
+          (#372). The API still sends it for any pair; this only hides it. */}
+      {showsHeadToHead(comparison) && (
+        <section className={styles.section} aria-labelledby={headToHeadId}>
+          <h2 id={headToHeadId} className={styles.heading}>
+            Head to head
+          </h2>
+          <p className={styles.rule}>{HEAD_TO_HEAD_RULE}</p>
+          {headToHeads.map((headToHead) => (
+            <div key={headToHead.season_type} className={styles.subsection}>
+              <h3 className={styles.subheading}>
+                {SEASON_TYPE_LABEL[headToHead.season_type]}
+              </h3>
+              <PlayerHeadToHead
+                aName={a.display_name}
+                bName={b.display_name}
+                headToHead={headToHead}
+              />
+            </div>
+          ))}
+        </section>
+      )}
     </>
   )
 }

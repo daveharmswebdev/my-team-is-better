@@ -1,4 +1,10 @@
 {
+  "group": [
+    "QB",
+    "RB",
+    "WR",
+    "TE"
+  ],
   "method": [
     "keener",
     "elo",

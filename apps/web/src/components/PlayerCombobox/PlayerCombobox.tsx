@@ -24,6 +24,16 @@ export interface PlayerComboboxProps {
   /** Secondary text under the field, e.g. a search that failed. */
   hint?: string
   placeholder?: string
+  /**
+   * Takes no typing and offers no clear button (issue #436: Player B waits
+   * for Player A). Whatever `value` holds still shows.
+   */
+  disabled?: boolean
+  /**
+   * The id of an element outside the field that also describes it, read
+   * after `hint` (issue #436: who Player B can be, or why he can't be).
+   */
+  describedBy?: string
 }
 
 const SEPARATOR = ' · '
@@ -73,6 +83,8 @@ export function PlayerCombobox({
   status,
   hint,
   placeholder,
+  disabled = false,
+  describedBy,
 }: PlayerComboboxProps) {
   const generatedId = useId()
   const inputId = `${generatedId}-input`
@@ -182,6 +194,7 @@ export function PlayerCombobox({
           type="text"
           value={value}
           placeholder={placeholder}
+          disabled={disabled}
           autoComplete="off"
           spellCheck={false}
           maxLength={MAX_QUERY_LENGTH}
@@ -190,13 +203,17 @@ export function PlayerCombobox({
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={activeDescendant}
-          aria-describedby={hint === undefined ? undefined : hintId}
+          aria-describedby={
+            [hint === undefined ? undefined : hintId, describedBy]
+              .filter((id) => id !== undefined)
+              .join(' ') || undefined
+          }
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onClick={() => setIsExpanded(true)}
           onBlur={close}
         />
-        {value !== '' && (
+        {value !== '' && !disabled && (
           <button
             type="button"
             className={styles.clear}
