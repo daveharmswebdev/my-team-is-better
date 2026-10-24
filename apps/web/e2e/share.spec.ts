@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.ts'
 
 // Share-by-link smoke spec (issue #184). A share link holds the *question*;
 // opening one fills in the form and re-asks the API with no click. Year 2005,
