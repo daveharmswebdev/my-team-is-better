@@ -197,8 +197,9 @@ export function leaderStatCell(
 
 /**
  * The passing stats, in order. Deliberately without `sacks_suffered` and
- * `sack_yards_lost`: the stored sack yards are negative against the
- * column's name (#298), so neither is shown in v1.
+ * `sack_yards_lost`: a display choice, not a data workaround. Both are
+ * published, and sack yards read positive the way an official stat line does
+ * (#298); whether to show them is a separate product call.
  */
 const PASSING_COLUMNS: readonly StatColumn[] = [
   { key: 'completions', label: 'Completions' },
@@ -217,7 +218,7 @@ const RUSHING_BOARD_COLUMNS: readonly StatColumn[] = [
 
 /**
  * The passing board's columns: passing, then the board-sized rushing three.
- * Without `sacks_suffered` and `sack_yards_lost` (#298).
+ * Without `sacks_suffered` and `sack_yards_lost`, by choice (#298).
  */
 export const STAT_COLUMNS: readonly StatColumn[] = [
   ...PASSING_COLUMNS,
