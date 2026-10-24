@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from cfb_strength.contracts import PLAYER_SEARCH_MAX_LIMIT
+from cfb_strength.contracts import PLAYER_SEARCH_MAX_LIMIT, PlayerPositionGroup
 from cfb_strength.players import search_players
 from fastapi.testclient import TestClient
 from fixtures.player_api_fixture import engine_json, fixture_conn
@@ -91,8 +91,8 @@ def _validation_locs(response: Any) -> list[tuple[str, ...]]:
 def test_measured_results_in_contracted_order(client: TestClient, q: str, names: list[str]) -> None:
     body = _search(client, q=q)
 
-    assert set(body) == {"sport", "query", "limit", "rows"}
-    assert (body["sport"], body["query"], body["limit"]) == ("nfl", q, 10)
+    assert set(body) == {"sport", "query", "limit", "group", "rows"}
+    assert (body["sport"], body["query"], body["limit"], body["group"]) == ("nfl", q, 10, None)
     assert [row["display_name"] for row in body["rows"]] == names
 
 
@@ -104,6 +104,7 @@ def test_a_row_carries_the_engines_fields(client: TestClient) -> None:
             "player_id": STEVE_MCNAIR,
             "display_name": "Steve McNair",
             "position": "QB",
+            "group": "QB",
             "first_season": 1999,
             "last_season": 1999,
         }
@@ -119,6 +120,7 @@ def test_a_non_passer_is_found_and_carries_its_own_position(client: TestClient) 
             "player_id": FRED_WARNER,
             "display_name": "Fred Warner",
             "position": "MLB",
+            "group": None,
             "first_season": 2023,
             "last_season": 2023,
         }
@@ -131,10 +133,25 @@ def test_a_non_passer_is_found_and_carries_its_own_position(client: TestClient) 
 def test_search_is_the_engines_search_field_for_field(
     client: TestClient, q: str, limit: int
 ) -> None:
+    """Every engine field, plus each row's derived `group` (`engine_json`
+    adds it) and the search's `group`: the request's filter echoed, not an
+    engine field, so null here where none was sent (#433)."""
     body = _search(client, q=q, limit=limit)
 
     with fixture_conn() as conn:
-        assert body == engine_json(search_players(conn, sport="nfl", query=q, limit=limit))
+        engine = engine_json(search_players(conn, sport="nfl", query=q, limit=limit))
+    assert body == {**engine, "group": None}
+
+
+@pytest.mark.parametrize("q,group", [("rob", "RB"), ("an", "WR"), ("an", "QB"), ("mc", "TE")])
+def test_a_grouped_search_is_the_engines_grouped_search_field_for_field(
+    client: TestClient, q: str, group: PlayerPositionGroup
+) -> None:
+    body = _search(client, q=q, limit=20, group=group)
+
+    with fixture_conn() as conn:
+        engine = engine_json(search_players(conn, sport="nfl", query=q, limit=20, group=group))
+    assert body == {**engine, "group": group}
 
 
 def test_the_query_is_echoed_stripped(client: TestClient) -> None:
@@ -154,7 +171,7 @@ def test_limit_caps_the_rows_and_is_echoed(client: TestClient) -> None:
 def test_no_match_is_a_200_with_no_rows(client: TestClient) -> None:
     body = _search(client, q="zzyzx")
 
-    assert body == {"sport": "nfl", "query": "zzyzx", "limit": 10, "rows": []}
+    assert body == {"sport": "nfl", "query": "zzyzx", "limit": 10, "group": None, "rows": []}
 
 
 def test_a_query_of_exactly_100_characters_is_accepted(client: TestClient) -> None:
@@ -233,7 +250,7 @@ def test_openapi_documents_the_route(client: TestClient) -> None:
     assert ok == {"$ref": "#/components/schemas/PlayerSearchOut"}
     assert "404" not in operation["responses"]
     params = {p["name"]: p for p in operation["parameters"]}
-    assert set(params) == {"q", "limit", "sport"}
+    assert set(params) == {"q", "limit", "sport", "group"}
     assert params["q"]["required"] is True
     assert params["q"]["schema"]["maxLength"] == 100
     assert (params["limit"]["schema"]["minimum"], params["limit"]["schema"]["maximum"]) == (1, 20)

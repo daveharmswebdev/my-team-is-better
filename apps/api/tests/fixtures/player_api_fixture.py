@@ -6,10 +6,13 @@ engine modules apps/api is permitted (`cfb_strength.players`, `db`,
 `contracts`), never `ratings` or `ingest`.
 
 - `engine_json` is what "faithful to the engine dataclasses, field for
-  field" means as a value: every dataclass field under its own name, with
-  `StarterRecord.starts` (a property, so absent from `dataclasses.asdict`)
-  added as the one derived field the API publishes. Comparing a response
-  body to it checks names, nesting, order of rows and every number at once.
+  field" means as a value: every dataclass field under its own name, plus
+  the derived properties the API publishes (absent from
+  `dataclasses.fields`): `StarterRecord.starts`, and since #433 the
+  position `group` of `PlayerCareer` and `PlayerSearchRow` (#428). Comparing
+  a response body to it checks names, nesting, order of rows and every
+  number at once. `PlayerSearchOut.group`, the request's filter echoed, is
+  not the engine's at all; the search tests add it themselves.
   Its one narrowing is `PlayerStats`, which since #354 carries 42 stats, 7
   of which the API does not publish (`UNPUBLISHED_STATS` below): the four
   0-49 yard field-goal buckets left out on purpose by #315, and #354's
@@ -50,7 +53,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from cfb_strength.contracts import PlayerSeasonType, PlayerStats, StarterRecord
+from cfb_strength.contracts import (
+    PlayerCareer,
+    PlayerSearchRow,
+    PlayerSeasonType,
+    PlayerStats,
+    StarterRecord,
+)
 from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 
@@ -206,10 +215,13 @@ def engine_json(value: object) -> Any:
     if isinstance(value, PlayerStats):
         return published_stats(value)
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {
+        fields = {
             field.name: engine_json(getattr(value, field.name))
             for field in dataclasses.fields(value)
         }
+        if isinstance(value, PlayerCareer | PlayerSearchRow):
+            fields["group"] = value.group
+        return fields
     if isinstance(value, list):
         return [engine_json(item) for item in value]
     return value
