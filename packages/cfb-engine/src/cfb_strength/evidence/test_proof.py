@@ -2441,6 +2441,9 @@ _ALIAS_TEAMS: tuple[tuple[int, str, str | None, bool], ...] = (
     # Known but unrated this season, each carrying a rated query's alias.
     (420, "Findlay", '["UF"]', False),
     (421, "Kentucky Wesleyan", '["UK"]', False),
+    # An unrated school whose name is a rated team's alias (#411 round 2).
+    (418, "Harbor State", '["HBST", "Lakeside"]', True),
+    (422, "Lakeside", '["LKS"]', False),
 )
 
 
@@ -2557,3 +2560,21 @@ def test_alias_stage_is_scoped_by_sport(alias_conn: sqlite3.Connection) -> None:
     """The Chiefs' "UK" answers an NFL query and never a CFB one (#57/#58)."""
     assert resolve_team(alias_conn, ALIAS_YEAR, "UK", method=METHOD, sport="nfl") == 430
     assert resolve_team(alias_conn, ALIAS_YEAR, "UK", method=METHOD) == _alias_id("Kentucky")
+
+
+@pytest.mark.parametrize("query", ["Lakeside", "  lakeside ", "LAKESIDE", "Lake-side"])
+def test_an_unrated_schools_own_name_beats_a_rated_teams_identical_alias(
+    alias_conn: sqlite3.Connection, query: str
+) -> None:
+    """#411 round 2 (reviewer): "Lakeside" names a known school with no
+    rating this season, and is also rated Harbor State's alias. A school's
+    name beats an alias, so the known-but-unrated stage (#123) answers
+    first: UnknownTeamError, never Harbor State. Measured on f1949cf, where
+    the alias stage ran first: it resolved to Harbor State."""
+    with pytest.raises(UnknownTeamError):
+        resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD)
+    # Harbor State's other alias still resolves, and the unrated school's
+    # own alias ("LKS") is no answer.
+    assert resolve_team(alias_conn, ALIAS_YEAR, "HBST", method=METHOD) == _alias_id("Harbor State")
+    with pytest.raises((AmbiguousTeamError, UnknownTeamError)):
+        resolve_team(alias_conn, ALIAS_YEAR, "LKS", method=METHOD)
