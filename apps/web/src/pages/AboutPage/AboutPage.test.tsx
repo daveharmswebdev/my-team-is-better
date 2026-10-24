@@ -369,14 +369,6 @@ describe('AboutPage', () => {
   })
 
   /**
-   * Issue #227: the Elo ledger's provenance link is `/about#elo`. Each
-   * article's id is the first entry of the credit's `methods` (issue #144:
-   * the API guarantees `methods[0]` is unique across credits), never the
-   * display name, and because the articles only exist once the credits
-   * resolve, the page has to do the hash scroll itself -- the browser and
-   * React Router both gave up long before the element was there.
-   */
-  /**
    * Issue #409: the self-hosted typefaces (#405) are credited on the page,
    * by family and author, with their license. It is static copy, not part of
    * /api/credits, so it must show whatever state the credits request is in.
@@ -436,6 +428,14 @@ describe('AboutPage', () => {
     })
   })
 
+  /**
+   * Issue #227: the Elo ledger's provenance link is `/about#elo`. Each
+   * article's id is the first entry of the credit's `methods` (issue #144:
+   * the API guarantees `methods[0]` is unique across credits), never the
+   * display name, and because the articles only exist once the credits
+   * resolve, the page has to do the hash scroll itself -- the browser and
+   * React Router both gave up long before the element was there.
+   */
   describe('landing on a method by hash (issue #227)', () => {
     /** The elements `scrollIntoView` was called on, in order. */
     let scrolledInto: Element[]
