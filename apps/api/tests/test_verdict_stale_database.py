@@ -156,3 +156,122 @@ def test_real_stale_database_response_matches_the_advertised_503_schema(
     root = {**schema, "components": openapi["components"]}
     errors = [e.message for e in Draft202012Validator(root).iter_errors(body)]
     assert not errors, f"body {body} does not match {schema}: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# Issue #423: a db missing a late-added *column* (here `ratings.sport`, #51)
+# is stale too, and every route that reads the ratings/teams tables says so
+# as the same declared 503. Before #423 three routes ran their own query on a
+# late-added name before anything checked the schema:
+#
+# * POST /api/verdict/champion -- `_resolve_champion_name`'s `r.sport = ?`
+#   query raised a bare `sqlite3.OperationalError` (a 500);
+# * GET /api/years -- the engine's `list_available_years` now raises
+#   `StaleDatabaseError`, which the route did not declare;
+# * GET /api/teams -- `list_team_records` reads `teams.sport`,
+#   `teams.alternate_names` and (with `year`) `ratings.sport`, so it either
+#   raised `OperationalError` or answered 200 from a db that every verdict
+#   route refuses.
+# ---------------------------------------------------------------------------
+
+STALE_COLUMN = ("ratings", "sport")
+
+
+def _drop_column(db_path: Path, table: str, column: str) -> None:
+    """Rebuild `table` without `column` (SQLite's documented recipe, as in
+    packages/cfb-engine/tests/test_evidence_stale_columns.py)."""
+    conn = sqlite3.connect(db_path)
+    try:
+        kept = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
+        # Premise: the committed fixture has the column, so dropping it is
+        # what makes the copy stale.
+        assert column in kept, f"{table}.{column} is not in the fixture's schema"
+        kept.remove(column)
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute(f"CREATE TABLE {table}_stale AS SELECT {', '.join(kept)} FROM {table}")
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {table}_stale RENAME TO {table}")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def stale_column_client(tmp_path: Path) -> Iterator[TestClient]:
+    """`stale_client`'s wiring against a copy of the fixture with only
+    `ratings.sport` removed: both ledger tables are still present."""
+    from api.deps import get_db_conn, get_narration_cache, get_narrator
+    from api.main import app
+    from api.persona.cache import InMemoryNarrationCache
+
+    db = tmp_path / "stale_column.sqlite3"
+    shutil.copy(FIXTURE_DB, db)
+    _drop_column(db, *STALE_COLUMN)
+
+    def _override() -> Iterator[sqlite3.Connection]:
+        conn = get_conn(db, read_only=True)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    app.dependency_overrides[get_db_conn] = _override
+    app.dependency_overrides[get_narration_cache] = lambda: InMemoryNarrationCache()
+    app.dependency_overrides[get_narrator] = lambda: FakeNarrator()
+    try:
+        yield TestClient(app, raise_server_exceptions=False)
+    finally:
+        app.dependency_overrides.pop(get_db_conn, None)
+        app.dependency_overrides.pop(get_narration_cache, None)
+        app.dependency_overrides.pop(get_narrator, None)
+
+
+# (http method, path, query params for a GET or the json body for a POST)
+STALE_COLUMN_REQUESTS: list[tuple[str, str, dict[str, Any]]] = [
+    ("post", "/api/verdict/champion", {"year": 2004}),
+    ("post", "/api/verdict/team-case", {"year": 2004, "team": "Auburn"}),
+    ("post", "/api/verdict/compare", {"year": 2004, "team_a": "USC", "team_b": "Auburn"}),
+    ("get", "/api/years", {}),
+    ("get", "/api/years", {"method": "elo", "sport": "nfl"}),
+    ("get", "/api/teams", {}),
+    ("get", "/api/teams", {"year": 2004}),
+    ("get", "/api/teams", {"sport": "nfl", "year": 2004, "method": "elo"}),
+]
+
+
+def _send(client: TestClient, method: str, path: str, data: dict[str, Any]) -> Any:
+    if method == "post":
+        return client.post(path, json=data)
+    return client.get(path, params=data)
+
+
+@pytest.mark.parametrize(("method", "path", "data"), STALE_COLUMN_REQUESTS)
+def test_missing_late_added_column_answers_the_declared_stale_database_503(
+    stale_column_client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    method: str,
+    path: str,
+    data: dict[str, Any],
+) -> None:
+    with caplog.at_level(logging.ERROR, logger="api.errors"):
+        response = _send(stale_column_client, method, path, data)
+
+    assert response.status_code == 503, response.text
+    assert response.headers["content-type"].startswith("application/json"), response.headers
+    assert response.json() == {"detail": {"error": "stale_database"}}
+    missing = ".".join(STALE_COLUMN)
+    assert missing not in response.text, response.text
+
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR and r.name == "api.errors"]
+    assert errors, "the stale-database handler logged nothing at error level"
+    assert missing in "\n".join(r.getMessage() for r in errors)
+
+    openapi = _openapi(stale_column_client)
+    responses = openapi["paths"][path][method]["responses"]
+    assert "503" in responses, f"{method.upper()} {path} advertises {sorted(responses)}, no 503"
+    schema = responses["503"]["content"]["application/json"]["schema"]
+    assert schema == {"$ref": f"#/components/schemas/{STALE_DATABASE_RESPONSE}"}, schema
+    root = {**schema, "components": openapi["components"]}
+    body = response.json()
+    problems = [e.message for e in Draft202012Validator(root).iter_errors(body)]
+    assert not problems, f"body {body} does not match {schema}: {problems}"

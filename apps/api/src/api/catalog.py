@@ -23,13 +23,14 @@ from cfb_strength.evidence.proof import list_available_years
 from fastapi import APIRouter, Depends
 
 from api.deps import get_db_conn
+from api.errors import TEAMS_ERROR_RESPONSES, YEARS_ERROR_RESPONSES
 from api.models import CreditsOut, Method, Sport, TeamDetailOut, TeamsOut, YearsOut
 from api.repositories.teams import list_team_records
 
 router = APIRouter(prefix="/api", tags=["catalog"])
 
 
-@router.get("/years", response_model=YearsOut)
+@router.get("/years", response_model=YearsOut, responses=YEARS_ERROR_RESPONSES)
 def years(
     method: Method = "keener",
     sport: Sport = "cfb",
@@ -45,11 +46,15 @@ def years(
     here (a method that exists but has not been computed), so before the
     constraint a typo'd method rendered as an empty year picker that looked
     exactly like an un-ingested season.
+
+    A stale db (one missing a late-added table or column) is a 503
+    `stale_database`, raised by `list_available_years`'s schema check
+    (issue #423), never an empty list or a 500.
     """
     return YearsOut(years=list_available_years(conn, method, sport))
 
 
-@router.get("/teams", response_model=TeamsOut)
+@router.get("/teams", response_model=TeamsOut, responses=TEAMS_ERROR_RESPONSES)
 def teams(
     sport: Sport = "cfb",
     year: int | None = None,
@@ -85,6 +90,9 @@ def teams(
     Note this is `list_team_records`, not the grounding check's
     `list_all_team_names`: the persona layer's known-team-name universe
     must stay unscoped (see `api.repositories.teams`).
+
+    A stale db is a 503 `stale_database`, as on every verdict route:
+    `list_team_records` checks the schema before its query (issue #423).
     """
     records = list_team_records(conn, sport=sport, year=year, method=method)
     return TeamsOut(

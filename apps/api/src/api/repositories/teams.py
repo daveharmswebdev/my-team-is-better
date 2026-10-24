@@ -37,6 +37,8 @@ import json
 import sqlite3
 from dataclasses import dataclass
 
+from cfb_strength.evidence.proof import require_current_schema
+
 
 def list_all_team_names(conn: sqlite3.Connection, sport: str = "cfb") -> list[str]:
     """Every distinct team name in the db for `sport` -- deliberately *not*
@@ -136,7 +138,15 @@ def list_team_records(
     Without `year`, this is exactly the pre-#78 `SELECT DISTINCT school FROM
     teams WHERE sport = ?` list, same names in the same order -- a client
     that never sends `year` sees no change.
+
+    Runs the engine's `require_current_schema` first (issue #423): both
+    queries read late-added columns (`teams.sport`, `teams.alternate_names`,
+    and `ratings.sport` with `year`), so a stale db raises
+    `StaleDatabaseError` (the API's 503 `stale_database`) rather than a bare
+    `sqlite3.OperationalError`, and is refused here exactly as every verdict
+    route refuses it, even when the columns this query reads happen to exist.
     """
+    require_current_schema(conn)
     if year is None:
         rows = conn.execute(_ALL_TEAM_RECORDS_SQL, (sport,)).fetchall()
     else:

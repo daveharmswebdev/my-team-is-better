@@ -201,8 +201,10 @@ KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
     ("/api/verdict/champion", "post"): _TEAM_CASE_KINDS | {MissingChampionError},
     ("/api/verdict/team-case", "post"): _TEAM_CASE_KINDS,
     ("/api/verdict/compare", "post"): _TEAM_CASE_KINDS | {SameTeamComparisonError},
-    ("/api/years", "get"): frozenset(),
-    ("/api/teams", "get"): frozenset(),
+    # Issue #423: both read the ratings/teams tables behind the engine's
+    # `require_current_schema` (`list_available_years`, `list_team_records`).
+    ("/api/years", "get"): frozenset({StaleDatabaseError}),
+    ("/api/teams", "get"): frozenset({StaleDatabaseError}),
     ("/api/credits", "get"): frozenset(),
     # Issue #296. Leaders raises only ValueError for a bad limit/offset,
     # which FastAPI's own bounds reject first (a 422, never reaching it).

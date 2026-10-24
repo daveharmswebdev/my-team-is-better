@@ -150,8 +150,8 @@ TITLE_GAME_COLUMN = "conference_championship"
 # to db/schema.sql after the scaffold commit (`git log -S <name> --
 # db/schema.sql`), keyed to the issue that added it. A database built before
 # one of them and opened read-only still lacks it, so
-# `_require_current_schema` checks them all before `build_team_case` or
-# `build_comparison` runs its first query, and the failure is
+# `require_current_schema` checks them all before `build_team_case`,
+# `build_comparison` or `list_available_years` runs its first query, and the failure is
 # `StaleDatabaseError` naming everything absent at once, never a bare
 # `sqlite3.OperationalError` from whichever query happened to trip first.
 #
@@ -391,9 +391,13 @@ def _rating_breakdown(
     return RatingBreakdown(entries=entries, residual_contribution=residual_contribution)
 
 
-def _require_current_schema(conn: sqlite3.Connection) -> None:
+def require_current_schema(conn: sqlite3.Connection) -> None:
     """Raise `StaleDatabaseError` unless every `LATE_ADDED_TABLES` table and
     `LATE_ADDED_COLUMNS` column exists (issues #192, #300, #385).
+
+    Public (issue #423) so apps/api and the MCP server can run it before
+    their own queries on late-added columns; it is the single
+    implementation, and the evidence entry points call it by this name.
 
     One `sqlite_master` lookup plus one `PRAGMA table_info` per table that
     holds a listed column. Checking before querying is what turns "no such
@@ -449,7 +453,7 @@ def _elo_ledger(
     has since brought up to date (the tables exist, empty).
 
     A pre-#183 database (either ledger table absent altogether) never gets
-    here: `build_team_case` runs `_require_current_schema` first and raises
+    here: `build_team_case` runs `require_current_schema` first and raises
     `StaleDatabaseError` (issues #192, #385) for every method, keener
     included, because a stale db is stale regardless of the method asked.
 
@@ -603,7 +607,16 @@ def _require_year(conn: sqlite3.Connection, year: int, method: str, sport: Sport
 def list_available_years(
     conn: sqlite3.Connection, method: str = "keener", sport: Sport = "cfb"
 ) -> list[int]:
-    """Distinct years for which ratings exist under `method`/`sport`, ascending."""
+    """Distinct years for which ratings exist under `method`/`sport`, ascending.
+
+    Runs `require_current_schema` first (issue #423), so a stale db raises
+    `StaleDatabaseError` naming what it lacks rather than a bare
+    `sqlite3.OperationalError` from the `sport` filter. The check is the
+    whole schema, not just `ratings.sport`: a db missing any late-added name
+    is stale, and every caller (`/years`, the MCP year lists, `_require_year`)
+    should say so the same way.
+    """
+    require_current_schema(conn)
     rows = conn.execute(
         "SELECT DISTINCT year FROM ratings WHERE method = ? AND sport = ? ORDER BY year",
         (method, sport),
@@ -1167,7 +1180,7 @@ def build_team_case(
     method: str = "keener",
     sport: Sport = "cfb",
 ) -> TeamCase:
-    _require_current_schema(conn)
+    require_current_schema(conn)
     team_id = resolve_team(conn, year, team, method=method, sport=sport)
 
     rating_row = conn.execute(
@@ -1253,7 +1266,7 @@ def build_comparison(
     method: str = "keener",
     sport: Sport = "cfb",
 ) -> ComparisonResult:
-    _require_current_schema(conn)
+    require_current_schema(conn)
     team_a_id = resolve_team(conn, year, team_a, method=method, sport=sport)
     team_b_id = resolve_team(conn, year, team_b, method=method, sport=sport)
     if team_a_id == team_b_id:
@@ -1267,7 +1280,7 @@ def build_comparison(
     case_b = build_team_case(conn, year, team_b, method=method, sport=sport)
 
     # Head-to-head: any completed game this season between the two teams.
-    # build_team_case has already run `_require_current_schema` above.
+    # build_team_case has already run `require_current_schema` above.
     h2h_games = conn.execute(
         f"""
         SELECT id, season, sport, week, season_type, neutral_site,

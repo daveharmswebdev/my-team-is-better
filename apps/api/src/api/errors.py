@@ -346,3 +346,12 @@ PLAYER_CAREER_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
 # request-validation 422, so it keeps FastAPI's default declaration.
 # `GET /api/players/search` reaches no engine error and declares none.
 PLAYER_COMPARISON_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
+
+# `GET /api/years` and `GET /api/teams` (issue #423): both read the ratings
+# and teams tables, so each checks the schema first (`list_available_years`
+# and `api.repositories.teams.list_team_records` run the engine's
+# `require_current_schema`) and answers a stale db with the same 503 as the
+# verdict routes. Their 422s are request validation only, so they keep
+# FastAPI's default declaration.
+YEARS_ERROR_RESPONSES = openapi_error_responses(StaleDatabaseError)
+TEAMS_ERROR_RESPONSES = openapi_error_responses(StaleDatabaseError)
