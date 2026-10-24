@@ -15,6 +15,30 @@ Arguments, if given: `$ARGUMENTS`. The first is the most issues to work at once 
 work runs out (default 1). `/cycle 3 5` runs five rounds of up to three issues each;
 `/cycle 3 all` runs until a stop condition in step 6 fires.
 
+## 0. The ledger
+
+A cycle outlives its context: two rounds of three picks fill most of the window, so the
+conversation gets compacted (automatically, or by the founder's `/compact` or `/clear`
+between rounds). GitHub keeps what shipped. The ledger keeps what GitHub doesn't: the
+running tally, which gaps were judged not worth filing and why, and which spokes are in
+flight. It lives at `"$(git rev-parse --git-dir)/cycle-ledger.md"`. That path is per
+worktree and untracked, so it survives compaction and `/clear` without colliding with
+other coordinators' ledgers.
+
+- **Read it first**, before orienting, whenever it exists: at the start of every
+  `/cycle`, and straight after any compaction. A gap listed under **Not filed** stays
+  unfiled unless there's new evidence, so don't argue it again.
+- A new `/cycle` appends `# Cycle <date> — args <max-parallel> <rounds>`. One started
+  after `/clear` to continue a cycle (the founder says "continue" or "next round")
+  keeps the existing header, so the total counts every round.
+- **Keep the In flight section current** from launch to merge, one line per pick:
+  issue, agent, agent ID, output file, worktree, branch, review round, and the next
+  step. A compaction mid-round then costs nothing, because SendMessage for the next
+  round needs that agent ID and validation needs that output file. Delete the line once
+  the pick ships or is parked.
+- **Append the round's report** (step 5) when the round ends, plus any **Not filed**
+  line with its reason. A process lesson belongs in a skill or `/triage`, not here.
+
 ## 1. Orient
 
 Run `/orient`. Its report is this cycle's state; don't re-derive it.
@@ -80,4 +104,9 @@ these is true, and say which one fired:
 - something needs the founder before anything else can safely go ahead (a red `main`,
   a failed deploy, a P0 proposal).
 
-At the end, add a one-line total across all rounds above the last report.
+At the end, add a one-line total across all rounds above the last report. Sum it
+from the ledger, not from memory, because earlier rounds may have been compacted away.
+
+The end of a round is the safe point to compact: every pick has shipped or been
+parked, and the ledger is written. You can't run `/compact` yourself. If the founder
+compacts or clears between rounds, the next turn reads the ledger and carries on.
