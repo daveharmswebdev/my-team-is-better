@@ -9,10 +9,13 @@
       Anton (Vernon Adams, The Anton Project Authors) and Barlow / Barlow
       Condensed (Jeremy Tribby, The Barlow Project Authors), SIL Open Font
       License 1.1: public/fonts/OFL.txt. Sources and credits:
-      public/fonts/README.md. src/test/selfHostedFonts.test.ts checks every
-      face is declared here and its file exists. The preloads are the faces
-      the home page paints above the fold: the Anton title, Barlow body text
-      and the Barlow Condensed brand (700) and nav (600).
+      public/fonts/README.md. The @font-face rules live in one place,
+      src/styles/fonts.css, shared with Storybook (issue #408); don't copy
+      them back in here. src/test/selfHostedFonts.test.ts checks every face is
+      declared there, its file exists, and each preload below is a declared
+      face. The preloads are the faces the home page paints above the fold:
+      the Anton title, Barlow body text and the Barlow Condensed brand (700)
+      and nav (600).
     -->
     <link
       rel="preload"
@@ -42,96 +45,6 @@
       type="font/woff2"
       crossorigin
     />
-    <style>
-      @font-face {
-        font-family: 'Anton';
-        font-style: normal;
-        font-weight: 400;
-        font-display: swap;
-        src: url('/fonts/anton-400-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow';
-        font-style: normal;
-        font-weight: 400;
-        font-display: swap;
-        src: url('/fonts/barlow-400-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow';
-        font-style: normal;
-        font-weight: 500;
-        font-display: swap;
-        src: url('/fonts/barlow-500-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow';
-        font-style: normal;
-        font-weight: 600;
-        font-display: swap;
-        src: url('/fonts/barlow-600-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow';
-        font-style: normal;
-        font-weight: 700;
-        font-display: swap;
-        src: url('/fonts/barlow-700-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow Condensed';
-        font-style: normal;
-        font-weight: 500;
-        font-display: swap;
-        src: url('/fonts/barlow-condensed-500-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow Condensed';
-        font-style: normal;
-        font-weight: 600;
-        font-display: swap;
-        src: url('/fonts/barlow-condensed-600-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-      @font-face {
-        font-family: 'Barlow Condensed';
-        font-style: normal;
-        font-weight: 700;
-        font-display: swap;
-        src: url('/fonts/barlow-condensed-700-latin.woff2') format('woff2');
-        unicode-range:
-          U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
-          U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-          U+2212, U+2215, U+FEFF, U+FFFD;
-      }
-    </style>
     <title>My Team Is Better</title>
     <!--
       Link previews (issue #185). Scrapers don't run JS, so these are static
