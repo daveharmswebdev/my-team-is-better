@@ -1,5 +1,8 @@
 import type { Preview } from '@storybook/react-vite'
 import '../src/styles/tokens.css'
+// The app's @font-face rules (issue #408), so stories paint in Anton and
+// Barlow; main.ts's staticDirs serves the /fonts/*.woff2 files they point at.
+import '../src/styles/fonts.css'
 import '../src/index.css'
 import { recordStoryA11yContext } from './a11yPolicy.ts'
 
