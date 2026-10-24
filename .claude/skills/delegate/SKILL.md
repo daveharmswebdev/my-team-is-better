@@ -122,6 +122,9 @@ acting:
 
 1. Re-run the rubric's gate commands yourself in the checkout that has the change.
 2. Diff against `base_sha`, not `main`, and take only the spoke's own commits or files.
+   `git -C <worktree> status --short` must be empty and `HEAD` must equal the return's
+   `head_sha`. Uncommitted work is a `brief_defects`-class miss (spoke-protocol says to
+   commit, #420): send it back rather than committing it for the spoke.
 3. Read any scope warnings (in the system message, and
    `<git-common-dir>/claude-hooks/scope-warnings.jsonl`).
 
