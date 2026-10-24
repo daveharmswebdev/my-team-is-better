@@ -55,15 +55,33 @@
   padding: 0 0 var(--sp-2);
 }
 
-/* Mobile tap modal: full-viewport backdrop, centered panel. */
+/* Mobile tap modal (issue #216): a `ModalDialog`, so a native <dialog> in
+   the top layer. The <dialog> covers the viewport, replacing the UA
+   defaults for a modal dialog (centered, a max size, a border, its own
+   colours), and centers the panel; its ::backdrop dims the page. A click on
+   the <dialog> around the panel is the backdrop click that closes it. */
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  padding: var(--sp-4);
+  background: transparent;
+  color: inherit;
+  overscroll-behavior: contain;
+}
+
+.overlay[open] {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--sp-4);
+}
+
+.overlay::backdrop {
   background: rgba(28, 26, 23, 0.45);
 }
 

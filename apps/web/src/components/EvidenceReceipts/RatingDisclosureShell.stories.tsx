@@ -69,5 +69,14 @@ export const TouchMode: Story = {
     await userEvent.click(canvas.getByRole('button', { name: '42' }))
     const dialog = await canvas.findByRole('dialog')
     await expect(dialog).toHaveAttribute('aria-modal', 'true')
+    // A real modal (issue #216): top layer, Tab kept inside, one Escape.
+    await expect(dialog.matches(':modal')).toBe(true)
+    const close = within(dialog).getByRole('button', { name: 'Close example' })
+    await expect(close).toHaveFocus()
+    await userEvent.tab()
+    await expect(close).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    await expect(canvas.queryByRole('dialog')).toBeNull()
+    await expect(canvas.getByRole('button', { name: '42' })).toHaveFocus()
   },
 }

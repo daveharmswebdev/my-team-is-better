@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
-import type { FocusEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { FocusEvent, ReactNode } from 'react'
 import { Heading } from '../Heading/Heading'
+import { ModalDialog } from '../ModalDialog/ModalDialog'
 import type { HeadingLevel } from '../Heading/headingLevel'
 import styles from './RatingDisclosureShell.module.css'
 
@@ -206,6 +207,11 @@ function classes(...names: Array<string | false | undefined>): string {
  * touch, with the same close rules for all of them -- pointer leaving, focus
  * leaving, Escape, the close button and the backdrop. It knows nothing
  * about any rating method; each method's panel content is its `children`.
+ *
+ * The touch modal is a real one (issue #216): a `ModalDialog`, so a native
+ * `<dialog>` opened with `showModal()` over an inert page, with Tab kept
+ * inside it and one close per Escape. Opened inside the verdict modal, it
+ * stacks above it in the top layer, and its Escape closes only the panel.
  */
 export function RatingDisclosureShell({
   triggerLabel,
@@ -270,20 +276,10 @@ export function RatingDisclosureShell({
     setOpen(true)
   }
 
-  function handleOverlayClick(event: MouseEvent<HTMLDivElement>) {
-    if (event.target === event.currentTarget) {
-      closeAndRefocus()
-    }
-  }
-
-  function handleOverlayKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === 'Escape') {
-      closeAndRefocus()
-    }
-  }
-
+  // Desktop only: the touch modal is a `ModalDialog`, which handles its own
+  // Escape. Two handlers there would close it, and refocus, twice (#216).
   useEffect(() => {
-    if (!open) {
+    if (!open || isTouch) {
       return
     }
     // Uses only the stable state setter and a ref, so it needs no other
@@ -296,12 +292,6 @@ export function RatingDisclosureShell({
     }
     document.addEventListener('keydown', handleDocumentKeyDown)
     return () => document.removeEventListener('keydown', handleDocumentKeyDown)
-  }, [open])
-
-  useEffect(() => {
-    if (open && isTouch) {
-      closeButtonRef.current?.focus()
-    }
   }, [open, isTouch])
 
   // Every desktop popover is placed on screen next to its trigger, wherever
@@ -370,22 +360,19 @@ export function RatingDisclosureShell({
         </div>
       )}
 
-      {open && isTouch && (
-        <div
+      {isTouch && (
+        <ModalDialog
+          open={open}
+          onClose={closeAndRefocus}
+          initialFocusRef={closeButtonRef}
+          id={panelId}
+          aria-label={title}
           className={classes(styles.overlay, framed && styles.framed)}
-          onClick={handleOverlayClick}
-          onKeyDown={handleOverlayKeyDown}
         >
-          <div
-            id={panelId}
-            role="dialog"
-            aria-modal="true"
-            aria-label={title}
-            className={classes(styles.modal, framed && styles.framed)}
-          >
+          <div className={classes(styles.modal, framed && styles.framed)}>
             {panel}
           </div>
-        </div>
+        </ModalDialog>
       )}
     </span>
   )

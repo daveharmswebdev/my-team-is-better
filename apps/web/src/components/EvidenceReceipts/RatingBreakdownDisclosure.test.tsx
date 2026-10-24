@@ -140,10 +140,9 @@ describe('RatingBreakdownDisclosure', () => {
 
     await user.click(screen.getByRole('button', { name: /8\.77/ }))
     const dialog = screen.getByRole('dialog')
-    // The overlay backdrop is the dialog's parent -- clicking it (not the
-    // dialog panel itself) is "outside" the modal content.
-    const overlay = dialog.parentElement as HTMLElement
-    await user.click(overlay)
+    // The backdrop is the <dialog> itself, around the panel box inside it
+    // (issue #216) -- clicking it, not the panel, is "outside" the content.
+    await user.click(dialog)
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
