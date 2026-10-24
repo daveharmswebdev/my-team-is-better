@@ -290,12 +290,12 @@ def _alias_names(raw: dict[str, Any]) -> tuple[str, ...]:
 def team_row_from_cfbd_team(raw: dict[str, Any]) -> TeamRow:
     """Convert one raw CFBD `/teams` record into a `TeamRow`.
 
-    `school` is copied through verbatim and is the join key onto the
-    `/games`-derived rows already in the `teams` table -- it matches
-    byte-for-byte, accents included ("San José State"), so no fuzzy matching
-    is needed or wanted here. It is also the canonical identity string the
-    rest of the project keys on, so enrichment never rewrites it; `mascot` and
-    `alternate_names` are display/search metadata layered on top.
+    `school` is copied through verbatim, accents included ("San José State").
+    It is the canonical identity string the rest of the project keys on, so
+    enrichment never rewrites it; `mascot` and `alternate_names` are
+    display/search metadata layered on top. The join onto the
+    `/games`-derived `teams` rows is by `id`, not `school`: see
+    `team_rows_by_cfbd_id` (#418).
     """
     mascot = raw.get("mascot")
     if isinstance(mascot, str):
@@ -327,6 +327,11 @@ def team_rows_from_cfbd_teams(records: Iterable[dict[str, Any]]) -> dict[str, Te
     therefore silently drop the mascot for roughly half of them. This prefers
     the record that actually has a mascot, so the result does not depend on
     payload order.
+
+    This is a per-school view, not the enrichment join: two different
+    programs can share a `school` string and tie on richness (Troy), and
+    then the first one listed wins. `enrich_team_aliases` joins by id
+    through `team_rows_by_cfbd_id` instead (#418).
     """
     best: dict[str, TeamRow] = {}
     for raw in records:
@@ -338,3 +343,28 @@ def team_rows_from_cfbd_teams(records: Iterable[dict[str, Any]]) -> dict[str, Te
         if incumbent is None or _alias_richness(row) > _alias_richness(incumbent):
             best[school] = row
     return best
+
+
+def team_rows_by_cfbd_id(records: Iterable[dict[str, Any]]) -> dict[int, TeamRow]:
+    """Index a raw `/teams` payload by CFBD team id, the join key onto `teams.id`.
+
+    `school` is not a unique key in `/teams`: different programs share one
+    string (Troy is both FBS Troy, 2653, and Hudson Valley CC, 3237, tied on
+    `_alias_richness`; Charlotte is both the 49ers, 2429, and the Charlotte
+    Saints, 3253). `teams.id` is the same CFBD id the `/games` payload carries,
+    so joining on it gives every row its own program's record (#418).
+
+    The committed payload has no repeated id. If a future one does, the
+    richer record wins, so the result still doesn't depend on payload order.
+    """
+    by_id: dict[int, TeamRow] = {}
+    for raw in records:
+        team_id = raw.get("id")
+        school = raw.get("school")
+        if not isinstance(team_id, int) or not isinstance(school, str) or not school:
+            continue
+        row = team_row_from_cfbd_team(raw)
+        incumbent = by_id.get(team_id)
+        if incumbent is None or _alias_richness(row) > _alias_richness(incumbent):
+            by_id[team_id] = row
+    return by_id
