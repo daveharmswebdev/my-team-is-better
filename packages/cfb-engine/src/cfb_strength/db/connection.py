@@ -201,6 +201,8 @@ def _migrate_games_conference_championship_column(conn: sqlite3.Connection) -> l
     season held, and only until that season is re-ingested: the flag comes
     from ingest, not from anything the migration could derive. Production
     always builds from an empty db, so it never sees the stale window.
+    `_unflagged_title_game_seasons` keeps that window visible on every open
+    after this one (#386).
     """
     if not _has_column(conn, "games", "conference_championship"):
         conn.execute(
@@ -278,6 +280,40 @@ def _migrate_player_stat_columns(conn: sqlite3.Connection) -> list[str]:
     return added
 
 
+# Issue #386: the smallest real CFB season the engine ingests holds 709
+# completed games (2001, the regression fixture), and every season of the
+# committed raw cache (1998-2025) has 3-10 title games. A hand-built test
+# season is far smaller, so this bound tells a real season from one.
+_FULL_CFB_SEASON_MIN_GAMES = 500
+
+
+def _unflagged_title_game_seasons(conn: sqlite3.Connection) -> list[int]:
+    """Completed CFB seasons with no game flagged `conference_championship`.
+
+    That is the signature of a db the #300 migration backfilled in place: a
+    season that has finished (it has a completed postseason game, and every
+    conference title game is played before the bowls) and is full-sized has
+    held title games since 1992. A season still in progress stays quiet.
+    """
+    # A hand-built `games` table (some migration tests) may lack the columns
+    # this reads; it holds no real season either.
+    if not all(_has_column(conn, "games", c) for c in ("completed", "season_type")):
+        return []
+    rows = conn.execute(
+        """
+        SELECT season FROM games
+        WHERE sport = 'cfb' AND completed = 1
+        GROUP BY season
+        HAVING COUNT(*) >= ?
+           AND MAX(season_type = 'postseason') = 1
+           AND MAX(conference_championship) = 0
+        ORDER BY season
+        """,
+        (_FULL_CFB_SEASON_MIN_GAMES,),
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
 def _schema_objects(conn: sqlite3.Connection) -> set[str]:
     return {
         f"{row[0]} {row[1]}"
@@ -309,15 +345,34 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     # Issue #97. Only a migration that actually fired on a db already holding
     # games is a staleness signal: a fresh db, an already-current db, and an
     # empty pre-existing db (nothing in it can be stale) all stay quiet.
-    if added and conn.execute("SELECT EXISTS (SELECT 1 FROM games)").fetchone()[0]:
-        db_file = conn.execute("PRAGMA database_list").fetchone()[2] or "this database"
-        warnings.warn(
-            StaleDatabaseWarning(
-                f"{db_file} predates the current schema: ensure_schema just added "
-                f"{', '.join(added)} to a database that already holds games, so its data "
-                "may predate the current schema too (e.g. no NFL rows, no team mascots), "
-                "which no migration can backfill. Run `cfb doctor --db-path "
-                f"{db_file}` to check it, or rebuild it from the committed raw cache."
-            ),
-            stacklevel=2,
+    # Issue #386: unflagged title games are a second signal, checked on every
+    # open, because the column that hides them exists after the first one.
+    migrated = bool(added) and bool(
+        conn.execute("SELECT EXISTS (SELECT 1 FROM games)").fetchone()[0]
+    )
+    unflagged = _unflagged_title_game_seasons(conn)
+    if not (migrated or unflagged):
+        return
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2] or "this database"
+    parts: list[str] = []
+    if migrated:
+        parts.append(
+            f"{db_file} predates the current schema: ensure_schema just added "
+            f"{', '.join(added)} to a database that already holds games, so its data "
+            "may predate the current schema too (e.g. no NFL rows, no team mascots), "
+            "which no migration can backfill."
         )
+    if unflagged:
+        parts.append(
+            f"{db_file} has no conference title game flagged in CFB season(s) "
+            f"{', '.join(str(season) for season in unflagged)} "
+            "(games.conference_championship is 0 throughout), so each title game reads as "
+            "the regular-season finale; re-ingest those seasons."
+        )
+    warnings.warn(
+        StaleDatabaseWarning(
+            " ".join(parts) + f" Run `cfb doctor --db-path {db_file}` to check it, "
+            "or rebuild it from the committed raw cache."
+        ),
+        stacklevel=2,
+    )
