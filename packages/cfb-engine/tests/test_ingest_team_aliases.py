@@ -501,31 +501,108 @@ def test_enrichment_leaves_nfl_rows_alone(
         conn.close()
 
 
-def test_two_teams_rows_sharing_one_school_both_get_the_aliases(
-    empty_schema_db: Path, cached_teams_dir: Path, no_network: list[object]
+# Issue #418: CFBD reuses `school` strings across genuinely different
+# programs, so the enrichment joins `/teams` onto `teams` by CFBD id. These
+# tests use the real records from the committed caches: the 2014 regular
+# season has a game for each of Troy 2653, Charlotte 2429 and Charlotte 3253.
+_DUPLICATE_SCHOOL_GAMES = (400547752, 400558115, 400559257)  # Troy-Duke, Charlotte x2
+_DUPLICATE_SCHOOL_TEAM_IDS = {
+    "Troy": (3237, 2653),  # Hudson Valley CC Vikings, then FBS Troy Trojans
+    "Charlotte": (2429, 3253),  # FBS 49ers, then the Charlotte Saints
+}
+
+
+def _committed_teams_records(school: str) -> list[dict[str, Any]]:
+    """Every `/teams` record for `school`, verbatim and in payload order."""
+    from cfb_strength.config import RAW_DIR
+
+    records: list[dict[str, Any]] = json.loads(teams_cache_path(RAW_DIR).read_text())
+    return [r for r in records if r["school"] == school]
+
+
+def _db_with_duplicate_school_teams(db_path: Path) -> sqlite3.Connection:
+    """`teams` rows minted from real 2014 `/games` records for Troy 2653,
+    Charlotte 2429 and Charlotte 3253, as the real ingest would write them."""
+    from cfb_strength.config import RAW_DIR
+
+    games: list[dict[str, Any]] = json.loads((RAW_DIR / "2014_regular.json").read_text())
+    picked = [g for g in games if g["id"] in _DUPLICATE_SCHOOL_GAMES]
+    assert len(picked) == len(_DUPLICATE_SCHOOL_GAMES)
+    conn = get_conn(db_path)
+    team_rows: dict[int, TeamRow] = {}
+    for raw in picked:
+        normalize_game(raw, season=2014, season_type="regular")
+        for tr in team_rows_from_game(raw):
+            team_rows[tr.id] = tr
+    assert {2653, 2429, 3253} <= set(team_rows)
+    _write_teams(conn, team_rows, 2014)
+    conn.commit()
+    return conn
+
+
+def _teams_dir_with(tmp_path: Path, records: list[dict[str, Any]]) -> Path:
+    raw_dir = tmp_path / "raw_418"
+    raw_dir.mkdir()
+    (raw_dir / "teams.json").write_text(json.dumps(records))
+    return raw_dir
+
+
+def test_duplicate_school_records_join_by_cfbd_id_not_school(
+    empty_schema_db: Path, tmp_path: Path, no_network: list[object]
 ) -> None:
-    """Two `teams` rows can share one school string. CFBD's `/games` payloads
-    give "Charlotte" two ids: 2429 (the 49ers, 149 games) and 3253 (the
-    Charlotte Saints / "Faith NC", 1 game), which is a genuinely different
-    program (#91). Edward Waters also had a second row once, but that came from
-    a duplicate game record and is no longer minted (#125). A school-keyed
-    UPDATE gives both rows the same mascot. For 3253 that is the 49ers'
-    mascot, which is harmless while 3253 is unrated (#91). What the UPDATE
-    must not do is insert, drop, or renumber either row.
-    """
-    conn = _db_with_games_derived_teams(empty_schema_db)
+    """Troy's two `/teams` records tie on alias richness (a mascot and two
+    aliases each), and the wrong one, Hudson Valley CC (3237), is listed
+    first. A school-keyed join gave FBS Troy (2653) the Vikings. Each row
+    must get the record whose CFBD id is its own id."""
+    troy = _committed_teams_records("Troy")
+    charlotte = _committed_teams_records("Charlotte")
+    assert [r["id"] for r in troy] == list(_DUPLICATE_SCHOOL_TEAM_IDS["Troy"])
+    assert [r["id"] for r in charlotte] == list(_DUPLICATE_SCHOOL_TEAM_IDS["Charlotte"])
+    assert [(r["mascot"], len(r["alternateNames"])) for r in troy] == [
+        ("Vikings", 2),
+        ("Trojans", 2),
+    ], "premise: the wrong record is first and tied on richness"
+
+    conn = _db_with_duplicate_school_teams(empty_schema_db)
     try:
-        second_texas = TeamRow(id=999251, school="Texas", classification=None, conference=None)
-        _write_teams(conn, {second_texas.id: second_texas}, 2005)
-        conn.commit()
+        raw_dir = _teams_dir_with(tmp_path, troy + charlotte)
+        before = conn.execute("SELECT COUNT(*) AS c FROM teams").fetchone()["c"]
 
-        enrich_team_aliases(conn, raw_dir=cached_teams_dir)
+        enrich_team_aliases(conn, raw_dir=raw_dir)
 
-        rows = conn.execute(
-            "SELECT id, school, mascot FROM teams WHERE school = 'Texas' ORDER BY id"
-        ).fetchall()
-        assert [r["id"] for r in rows] == [251, 999251]
-        assert [r["mascot"] for r in rows] == ["Longhorns", "Longhorns"]
+        got = {
+            r["id"]: (r["school"], r["mascot"], json.loads(r["alternate_names"]))
+            for r in conn.execute(
+                "SELECT id, school, mascot, alternate_names FROM teams "
+                "WHERE id IN (2653, 2429, 3253)"
+            )
+        }
+        assert got[2653] == ("Troy", "Trojans", ["TROY", "Troy"])
+        assert got[2429] == ("Charlotte", "49ers", ["CLT", "Charlotte"])
+        assert got[3253] == ("Charlotte", "Saints", ["COLLE", "Faith NC"])
+        after = conn.execute("SELECT COUNT(*) AS c FROM teams").fetchone()["c"]
+        assert after == before, "Hudson Valley CC (3237) never played; it must not be inserted"
+    finally:
+        conn.close()
+
+
+def test_a_teams_record_whose_id_has_no_teams_row_writes_nothing(
+    empty_schema_db: Path, tmp_path: Path, no_network: list[object]
+) -> None:
+    """Hudson Valley CC's record (3237) shares Troy's school string, but no
+    `teams` row has id 3237. It must not reach FBS Troy's row (2653) or any
+    other row, and must not insert one."""
+    (hvcc,) = [r for r in _committed_teams_records("Troy") if r["id"] == 3237]
+    conn = _db_with_duplicate_school_teams(empty_schema_db)
+    try:
+        snapshot = sorted(tuple(r) for r in conn.execute("SELECT * FROM teams"))
+
+        result = enrich_team_aliases(conn, raw_dir=_teams_dir_with(tmp_path, [hvcc]))
+
+        assert result.rows_updated == 0
+        assert sorted(tuple(r) for r in conn.execute("SELECT * FROM teams")) == snapshot
+        troy = conn.execute("SELECT mascot, alternate_names FROM teams WHERE id = 2653").fetchone()
+        assert tuple(troy) == (None, None)
     finally:
         conn.close()
 

@@ -69,7 +69,7 @@ from cfb_strength.ingest.normalize import (
     dedupe_game_records,
     is_unreported_result,
     normalize_game,
-    team_rows_from_cfbd_teams,
+    team_rows_by_cfbd_id,
     team_rows_from_game,
 )
 
@@ -112,6 +112,9 @@ class AliasEnrichmentResult:
     """Outcome of the once-per-run `/teams` alias enrichment."""
 
     payload_records: int
+    # `/teams` records with a mascot or an alias to contribute. Since #418 the
+    # join is per CFBD id, so a school string shared by two programs counts
+    # once per program, not once per string.
     schools_with_aliases: int
     rows_updated: int
     fetched_live: bool
@@ -246,10 +249,15 @@ def enrich_team_aliases(
     universe, and only an UPDATE can structurally guarantee that can't happen.
     Three further consequences of the same choice:
 
-      * `school` is never written, only matched on. It is the canonical
-        identity string the verdict lookup, the persona grounding check's
-        known-team-names universe, the golden dataset, and every cached
-        narration key depend on.
+      * the join is on CFBD team id (`teams.id`), never on `school`. CFBD
+        reuses school strings across different programs (FBS Troy 2653 and
+        Hudson Valley CC 3237 are both "Troy"), and a school-keyed UPDATE
+        gave FBS Troy the Vikings (#418). A `/teams` record whose id has no
+        `teams` row writes nothing, even when its school string matches one.
+      * `school` is never written. It is the canonical identity string the
+        verdict lookup, the persona grounding check's known-team-names
+        universe, the golden dataset, and every cached narration key depend
+        on.
       * teams in our table but absent from `/teams` simply keep
         `mascot = NULL`. Expected (Cal State Northridge is one), never an
         error.
@@ -262,11 +270,11 @@ def enrich_team_aliases(
     failed year batch (report it, keep going).
     """
     teams_raw, fetched_live = get_teams(force=force, raw_dir=raw_dir)
-    by_school = team_rows_from_cfbd_teams(teams_raw)
+    by_id = team_rows_by_cfbd_id(teams_raw)
 
     schools_with_aliases = 0
     rows_updated = 0
-    for tr in by_school.values():
+    for tr in by_id.values():
         if tr.mascot is None and not tr.alternate_names:
             # Nothing to contribute; skip rather than write NULL/'[]' over
             # whatever a previous run may have learned.
@@ -277,7 +285,7 @@ def enrich_team_aliases(
             UPDATE teams
                SET mascot = COALESCE(:mascot, mascot),
                    alternate_names = COALESCE(:alternate_names, alternate_names)
-             WHERE school = :school AND sport = 'cfb'
+             WHERE id = :id AND sport = 'cfb'
             """,
             {
                 "mascot": tr.mascot,
@@ -286,7 +294,7 @@ def enrich_team_aliases(
                     if tr.alternate_names
                     else None
                 ),
-                "school": tr.school,
+                "id": tr.id,
             },
         )
         rows_updated += max(cur.rowcount, 0)
