@@ -7,14 +7,17 @@ down, plus non-negotiable engineering standards for the Python and React sides.
 
 Procedures live in skills, so they load only when used: `/orient` (session start),
 `/delegate` (every delegation), `/ship` (PR to merged main), `/triage` (filing
-findings). Exact per-language commands live in `.claude/rules/python.md` and
+findings), and `/cycle`, which chains them: orient, triage the gaps, work the ready
+issues in parallel. Exact per-language commands live in `.claude/rules/python.md` and
 `.claude/rules/web.md`. Every spoke preloads the `spoke-protocol` skill.
 
 ---
 
 ## Starting a session
 
-Run `/orient` before anything else. This project's memory is GitHub (issues, PRs,
+Run `/orient` before anything else, or `/cycle`, which runs it and then acts on it
+without asking: the founder has standing-authorized filing untracked gaps through
+`/triage` and working ready, non-colliding issues in parallel worktrees. This project's memory is GitHub (issues, PRs,
 labels) and `git log`, not conversation history: a fresh or just-cleared session
 reconstructs state from them rather than asking the founder to re-explain it. `/orient`
 reports what other sessions have in flight, what just landed and what it flagged, open
