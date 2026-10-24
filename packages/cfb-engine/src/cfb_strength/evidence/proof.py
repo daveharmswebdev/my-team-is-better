@@ -100,7 +100,8 @@ FUZZY_TAIL_WORD_CUTOFF = 0.75
 
 # Issue #403 round 2: a lone substring hit starting mid-word resolves only
 # when the query runs to the end of the name and is at least this long
-# ("Cuse" -> Syracuse, "Boys" -> Dallas Cowboys; never "SC" -> USC). See
+# ("Cuse" -> Syracuse, "Boys" -> Dallas Cowboys; never "MU" -> SMU, a
+# fragment too short to point at one school). See
 # `_ends_the_name`. Measured over #398's typo sweep: 0 wrong in every CFB
 # and NFL year, and every NFL one-edit typo resolves as on cef4ade.
 MID_WORD_TAIL_MIN_CHARS = 4

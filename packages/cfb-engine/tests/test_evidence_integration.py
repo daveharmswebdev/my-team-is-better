@@ -802,6 +802,9 @@ def test_a_short_typo_inside_a_longer_name_never_resolves_to_it(
         ("cfb", 2019, "uth", "Utah"),
         ("cfb", 2005, "tlan", "Tulane"),
         ("cfb", 2019, "sachuse", "Syracuse"),
+        # MID_WORD_TAIL_MIN_CHARS: "MU" ends "SMU" with no one-edit rival,
+        # but a 2-letter fragment is Missouri or Marshall to many users.
+        ("cfb", 2019, "MU", "SMU"),
     ],
 )
 def test_a_query_whose_hits_are_all_mid_word_never_resolves(
