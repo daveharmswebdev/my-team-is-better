@@ -543,3 +543,42 @@ def test_no_partial_or_fuzzy_matching(tmp_path: Path) -> None:
         assert _resolve(conn, None, "cfb") is None
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# (k) 'UF' is Florida (issue #417)
+# ---------------------------------------------------------------------------
+
+FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
+
+
+@pytest.mark.parametrize("user_team", ["UF", " uf "])
+def test_uf_resolves_to_florida_on_the_committed_fixture_catalog(user_team: str) -> None:
+    """CFBD's /teams gives Florida no 'UF' and gives it to Findlay; the
+    engine's alias supplement (#417) moves it to Florida. Data drives this:
+    on the regenerated fixture, Florida is the only CFB team carrying 'UF',
+    so the ordinary single-owner alias rule resolves it."""
+    conn = get_conn(FIXTURE_DB, read_only=True)
+    try:
+        assert _resolve(conn, user_team, "cfb") == "Florida"
+    finally:
+        conn.close()
+
+
+def test_uf_shared_by_two_teams_still_resolves_to_no_team(tmp_path: Path) -> None:
+    """The ambiguity rule is unchanged: had Findlay kept 'UF' alongside
+    Florida, 'UF' would be nobody, while both canonical names still resolve."""
+    conn = _catalog_db(
+        tmp_path,
+        [
+            (57, "Florida", ["FLA", "Florida", "UF"], "cfb"),
+            (2224, "Findlay", ["UF"], "cfb"),
+        ],
+    )
+    try:
+        assert _resolve(conn, "UF", "cfb") is None
+        assert _resolve(conn, " uf ", "cfb") is None
+        assert _resolve(conn, "florida", "cfb") == "Florida"
+        assert _resolve(conn, "Findlay", "cfb") == "Findlay"
+    finally:
+        conn.close()
