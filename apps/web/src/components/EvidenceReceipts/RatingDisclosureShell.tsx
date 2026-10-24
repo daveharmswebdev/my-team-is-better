@@ -1,5 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { FocusEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import { Heading } from '../Heading/Heading'
+import type { HeadingLevel } from '../Heading/headingLevel'
 import styles from './RatingDisclosureShell.module.css'
 
 export interface RatingDisclosureShellProps {
@@ -7,6 +9,12 @@ export interface RatingDisclosureShellProps {
   triggerLabel: string
   /** The panel's heading and the dialog's accessible name. */
   title: string
+  /**
+   * The level of the panel's heading (issue #219), from where the trigger
+   * sits in the page's outline: one below the heading the rating sits under,
+   * or level with the sections beside it.
+   */
+  headingLevel: HeadingLevel
   /** Accessible name of the touch modal's close button. */
   closeLabel: string
   /**
@@ -202,6 +210,7 @@ function classes(...names: Array<string | false | undefined>): string {
 export function RatingDisclosureShell({
   triggerLabel,
   title,
+  headingLevel,
   closeLabel,
   scroll = 'panel',
   children,
@@ -310,7 +319,9 @@ export function RatingDisclosureShell({
   const panel = (
     <div className={classes(styles.panel, framed && styles.framed)}>
       <div className={styles.panelHeader}>
-        <h5 className={styles.panelTitle}>{title}</h5>
+        <Heading level={headingLevel} className={styles.panelTitle}>
+          {title}
+        </Heading>
         {isTouch && (
           <button
             ref={closeButtonRef}

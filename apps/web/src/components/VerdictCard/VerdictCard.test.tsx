@@ -292,4 +292,24 @@ describe('VerdictCard', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(NETWORK_ERROR_COPY)
   })
+
+  it("passes headingLevel to the receipts' section headings, h2 by default (issue #219)", () => {
+    const { unmount } = render(
+      <VerdictCard state={{ status: 'success', envelope: teamCaseEnvelope }} />,
+    )
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Quality wins' }),
+    ).toBeInTheDocument()
+    unmount()
+
+    render(
+      <VerdictCard
+        state={{ status: 'success', envelope: teamCaseEnvelope }}
+        headingLevel={3}
+      />,
+    )
+    expect(
+      screen.getByRole('heading', { level: 3, name: 'Quality wins' }),
+    ).toBeInTheDocument()
+  })
 })

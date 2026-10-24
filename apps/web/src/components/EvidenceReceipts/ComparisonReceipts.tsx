@@ -13,6 +13,9 @@ import type {
 } from '../../lib/api/types'
 import { EloLedgerDisclosure } from './EloLedgerDisclosure'
 import { RatingBreakdownDisclosure } from './RatingBreakdownDisclosure'
+import { Heading } from '../Heading/Heading'
+import { nextHeadingLevel } from '../Heading/headingLevel'
+import type { HeadingLevel } from '../Heading/headingLevel'
 import {
   RATING_BREAKDOWN_BY_METHOD,
   ratingWorkFor,
@@ -41,22 +44,31 @@ function ResultTag({ result }: { result: GameResult }) {
 
 export interface ComparisonReceiptsProps {
   evidence: ComparisonResultOut
+  /**
+   * The level of the receipts' section headings (issue #219). Defaults to
+   * 2: on the home page, the verdict sits right under the page's h1.
+   */
+  headingLevel?: HeadingLevel
 }
 
 /** Per-team Record/Rating summary (design-system.html's "Comparison" mockup's `kv-grid`). */
 function TeamSummary({
   team,
   method,
+  headingLevel,
 }: {
   team: ComparisonTeamSummaryOut
   method: Method
+  headingLevel: HeadingLevel
 }) {
   // Issues #153/#183: by method, never by the breakdown's emptiness.
   const work = ratingWorkFor(method, team.elo_ledger)
 
   return (
     <>
-      <h4 className={styles.label}>{team.team_name}</h4>
+      <Heading level={headingLevel} className={styles.label}>
+        {team.team_name}
+      </Heading>
       <dl className={styles.kvGrid}>
         <div>
           <dt>Record</dt>
@@ -71,12 +83,15 @@ function TeamSummary({
                 method={method}
                 rating={team.rating}
                 breakdown={team.rating_breakdown}
+                // Under this team's name.
+                headingLevel={nextHeadingLevel(headingLevel)}
               />
             ) : work.kind === 'elo-ledger' ? (
               <EloLedgerDisclosure
                 teamName={team.team_name}
                 rating={team.rating}
                 ledger={work.ledger}
+                headingLevel={nextHeadingLevel(headingLevel)}
               />
             ) : (
               formatRating(team.rating, method)
@@ -240,23 +255,26 @@ function verdictLine({ method, team_a, team_b }: ComparisonResultOut): string {
 }
 
 /** The "receipts" for a compare verdict (PRD §3 / Architecture Brief §4.3's "show your work"). */
-export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
+export function ComparisonReceipts({
+  evidence,
+  headingLevel = 2,
+}: ComparisonReceiptsProps) {
   const { method, team_a, team_b, head_to_head, common_opponents } = evidence
   const breakdownSupport = RATING_BREAKDOWN_BY_METHOD[method]
   const headToHeadId = useId()
 
   return (
     <section aria-label="comparison evidence" className={styles.receipts}>
-      <TeamSummary team={team_a} method={method} />
-      <TeamSummary team={team_b} method={method} />
+      <TeamSummary team={team_a} method={method} headingLevel={headingLevel} />
+      <TeamSummary team={team_b} method={method} headingLevel={headingLevel} />
       {/* About the method, so once for the whole block, not once per team. */}
       {breakdownSupport.kind === 'no-disclosure' && (
         <p className={styles.ratingNote}>{breakdownSupport.explainer}</p>
       )}
 
-      <h4 id={headToHeadId} className={styles.label}>
+      <Heading level={headingLevel} id={headToHeadId} className={styles.label}>
         Head to head
-      </h4>
+      </Heading>
       {head_to_head.played ? (
         <ul className={styles.list} aria-labelledby={headToHeadId}>
           {head_to_head.meetings.map((meeting) => (
@@ -269,7 +287,9 @@ export function ComparisonReceipts({ evidence }: ComparisonReceiptsProps) {
         </p>
       )}
 
-      <h4 className={styles.label}>Common opponents</h4>
+      <Heading level={headingLevel} className={styles.label}>
+        Common opponents
+      </Heading>
       {common_opponents.length > 0 ? (
         <ul className={styles.list}>
           {common_opponents.map((opponent) => (

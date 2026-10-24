@@ -5,6 +5,9 @@ import type {
   OpponentCreditOut,
   RatingBreakdownOut,
 } from '../../lib/api/types'
+import { Heading } from '../Heading/Heading'
+import { nextHeadingLevel } from '../Heading/headingLevel'
+import type { HeadingLevel } from '../Heading/headingLevel'
 import { RatingDisclosureShell } from './RatingDisclosureShell'
 import styles from './RatingBreakdownDisclosure.module.css'
 
@@ -16,6 +19,12 @@ export interface RatingBreakdownDisclosureProps {
   /** The same rating value `ComparisonReceipts` already displays -- shown again in the footer total so a fan can see it's consistent with the entries + residual below it. */
   rating: number
   breakdown: RatingBreakdownOut
+  /**
+   * The level of the panel's heading (issue #219), from where the trigger
+   * sits in the page's outline: one below the heading the rating sits under,
+   * or level with the sections beside it. Its own sections sit one below.
+   */
+  headingLevel: HeadingLevel
 }
 
 /**
@@ -52,6 +61,7 @@ export function RatingBreakdownDisclosure({
   method,
   rating,
   breakdown,
+  headingLevel,
 }: RatingBreakdownDisclosureProps) {
   const entriesTotal = breakdown.entries.reduce(
     (sum, entry) => sum + entry.contribution,
@@ -63,9 +73,15 @@ export function RatingBreakdownDisclosure({
     <RatingDisclosureShell
       triggerLabel={formatRating(rating, method)}
       title={`${teamName} rating breakdown`}
+      headingLevel={headingLevel}
       closeLabel="Close rating breakdown"
     >
-      <h6 className={styles.sectionLabel}>Credit by opponent</h6>
+      <Heading
+        level={nextHeadingLevel(headingLevel)}
+        className={styles.sectionLabel}
+      >
+        Credit by opponent
+      </Heading>
       {breakdown.entries.length > 0 ? (
         <ul className={styles.rows}>
           {breakdown.entries.map((entry) => (

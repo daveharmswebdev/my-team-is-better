@@ -333,6 +333,9 @@ export function HomePage() {
             state={state}
             onSelectYear={handleSelectYear}
             onSelectCandidate={handleSelectCandidate}
+            // The dialog's title is a `<p>` that names it, so its content
+            // continues this page's outline: h1, then the verdict's h2s.
+            headingLevel={2}
             shareUrl={
               state.status === 'success' && submission !== null
                 ? `${window.location.origin}/?${toShareSearch(submission)}`

@@ -625,4 +625,56 @@ describe('TeamCaseReceipts', () => {
       expect(consoleError).not.toHaveBeenCalled()
     })
   })
+
+  describe('heading levels (issue #219)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('puts its sections at h2 by default, right under a page h1', () => {
+      render(<TeamCaseReceipts evidence={evidence} />)
+
+      for (const name of ['Quality wins', 'Worst loss', 'Full schedule']) {
+        expect(
+          screen.getByRole('heading', { level: 2, name }),
+        ).toBeInTheDocument()
+      }
+    })
+
+    it('follows headingLevel, and titles the rating panel level with its sections', async () => {
+      vi.stubGlobal(
+        'matchMedia',
+        vi.fn().mockReturnValue({
+          matches: false,
+          media: '',
+          onchange: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }),
+      )
+      const user = userEvent.setup()
+      render(<TeamCaseReceipts evidence={evidence} headingLevel={3} />)
+
+      for (const name of ['Quality wins', 'Worst loss', 'Full schedule']) {
+        expect(
+          screen.getByRole('heading', { level: 3, name }),
+        ).toBeInTheDocument()
+      }
+      await user.hover(
+        screen
+          .getAllByRole('button')
+          .filter((b) => b.getAttribute('aria-haspopup') === 'dialog')[0]!,
+      )
+      const dialog = screen.getByRole('dialog')
+      expect(
+        within(dialog).getByRole('heading', { name: /rating breakdown/ }),
+      ).toHaveProperty('tagName', 'H3')
+      expect(
+        within(dialog).getByRole('heading', { name: 'Credit by opponent' }),
+      ).toHaveProperty('tagName', 'H4')
+    })
+  })
 })
