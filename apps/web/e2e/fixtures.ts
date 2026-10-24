@@ -7,14 +7,15 @@ import type { Route } from '@playwright/test'
  * other than this run's own servers itself, so no e2e page load waits on the
  * internet.
  *
- * Why: index.html links a Google Fonts stylesheet, a render-blocking request,
- * so the `load` event `page.goto` waits for also waits on fonts.googleapis.com.
- * Under `--repeat-each` load that request sometimes got no answer for 29.3s
- * (`net::ERR_TIMED_OUT` in the trace) while the preview server answered its
- * own assets in under 40ms, and every spec navigating at that moment failed
- * in `page.goto` -- the bunched stalls #242 describes. The app falls back to
- * its local font stack, which is what a visitor whose Google Fonts request
- * fails sees too.
+ * Why: index.html used to link a Google Fonts stylesheet, a render-blocking
+ * request, so the `load` event `page.goto` waits for also waited on
+ * fonts.googleapis.com. Under `--repeat-each` load that request sometimes got
+ * no answer for 29.3s (`net::ERR_TIMED_OUT` in the trace) while the preview
+ * server answered its own assets in under 40ms, and every spec navigating at
+ * that moment failed in `page.goto` -- the bunched stalls #242 describes. The
+ * fonts are self-hosted now (#405) and the app asks no other host for
+ * anything, which e2e/offline.spec.ts checks; this guard stays so a future
+ * third-party request can't bring the stalls back.
  *
  * ESLint stops a spec importing `test` from `@playwright/test` directly, so a
  * new spec can't quietly skip this.
