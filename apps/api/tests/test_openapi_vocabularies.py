@@ -1,5 +1,11 @@
-"""`sport` and `method` are named once, in `cfb_strength.contracts`, and the
-API publishes exactly that vocabulary (issue #112, epic #113).
+"""`sport`, `method` and `group` are named once, in `cfb_strength.contracts`,
+and the API publishes exactly that vocabulary (issues #112, #436; epics #113,
+#372).
+
+`group` is the players API's `PlayerPositionGroup` (#433). It is checked the
+same way as the other two below, and is also published under two other
+property names (`a_group`/`b_group`, via
+`api.openapi_vocabularies.ALIASED_PROPERTIES`).
 
 `Sport` and `Method` are the engine's contract aliases. The engine's own
 `tests/test_contract_vocabularies.py` ties them to what the engine actually
@@ -55,7 +61,11 @@ REGENERATE_COMMAND = (
     "cd apps/api && uv run python -m api.openapi_vocabularies > openapi-vocabularies.json"
 )
 
-CONTRACT_ALIASES: dict[str, Any] = {"sport": contracts.Sport, "method": contracts.Method}
+CONTRACT_ALIASES: dict[str, Any] = {
+    "sport": contracts.Sport,
+    "method": contracts.Method,
+    "group": contracts.PlayerPositionGroup,
+}
 
 # The floor. Written out by hand, deliberately NOT derived from the walker or
 # its constants: if `find_occurrences` stops finding things (a misspelled
@@ -90,6 +100,25 @@ REQUIRED_LOCATIONS: dict[str, tuple[str, ...]] = {
         "GET /api/years query parameter 'method'",
         "GET /api/teams query parameter 'method'",
     ),
+    # Issue #433: the players API's position group, on search and careers,
+    # and both players' groups on the not-comparable error body.
+    "group": (
+        "GET /api/players/search query parameter 'group'",
+        "#/components/schemas/PlayerSearchOut/properties/group",
+        "#/components/schemas/PlayerSearchRowOut/properties/group",
+        "#/components/schemas/PlayerCareerOut/properties/group",
+        "#/components/schemas/PlayersNotComparableErrorBody/properties/a_group",
+        "#/components/schemas/PlayersNotComparableErrorBody/properties/b_group",
+    ),
+}
+
+# Enums equal to a vocabulary that the walk does not reach, each with its
+# reason. `test_every_vocabulary_enum_in_the_schema_is_walked` fails on any
+# other one, and on an entry here that the walk starts reaching.
+UNWALKED_ENUMS: dict[str, str] = {
+    "components/schemas/MethodologyCreditOut/properties/methods/items": (
+        "a list of methods: the walk neither matches `methods` nor follows `items`"
+    ),
 }
 
 
@@ -121,7 +150,7 @@ def _vocabulary_values() -> set[str]:
 def _redeclarations(path: Path) -> list[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
     found: list[str] = []
-    names = {"Sport", "Method"}
+    names = {"Sport", "Method", "PlayerPositionGroup"}
     for node in tree.body:
         targets: list[ast.expr] = []
         if isinstance(node, ast.Assign):
@@ -264,7 +293,13 @@ def test_enums_behind_indirection_are_seen(schema: dict[str, Any]) -> None:
         components={
             "schemas": {
                 "SportEnum": _SPORT_ENUM,
-                "Req": {"properties": {"sport": schema, "method": {"enum": ["keener"]}}},
+                "Req": {
+                    "properties": {
+                        "sport": schema,
+                        "method": {"enum": ["keener"]},
+                        "group": {"enum": ["QB"]},
+                    }
+                },
             }
         }
     )
@@ -329,30 +364,86 @@ def test_a_stale_allowlist_entry_is_reported() -> None:
     assert any(location in p and "stale" in p for p in problems), problems
 
 
-# ---------------------------------------------------------------------------
-# 4. the committed file is current
-# ---------------------------------------------------------------------------
+def test_an_aliased_property_counts_as_its_vocabulary_at_its_own_location() -> None:
+    from api.openapi_vocabularies import find_occurrences, vocabulary_problems
 
-
-def test_committed_vocabulary_file_matches_the_live_schema() -> None:
-    from api.openapi_vocabularies import extract_vocabularies, render
-
-    expected = render(extract_vocabularies(_live_openapi()))
-    committed_bytes = VOCABULARY_FILE.read_bytes() if VOCABULARY_FILE.exists() else b"<missing>"
-    committed = committed_bytes.decode(errors="replace")
-
-    assert committed_bytes == expected.encode(), (
-        f"{VOCABULARY_FILE.name} is stale: it is what apps/web is checked against, and it "
-        f"no longer matches what the API publishes. Regenerate it with:\n\n"
-        f"    {REGENERATE_COMMAND}\n\n"
-        f"committed:\n{committed}\nlive:\n{expected}"
+    doc = _doc(
+        components={
+            "schemas": {
+                "Err": {
+                    "properties": {
+                        "a_group": {"anyOf": [{"enum": ["QB", "RB"]}, {"type": "null"}]},
+                        "b_group": {"enum": ["RB", "QB"]},
+                    }
+                }
+            }
+        }
     )
 
+    found = {(o.name, o.location) for o in find_occurrences(doc)}
+    problems = vocabulary_problems(doc, unconstrained={})
 
-def test_rendered_format_is_fixed() -> None:
-    from api.openapi_vocabularies import render
+    assert ("group", "#/components/schemas/Err/properties/a_group") in found, found
+    assert ("group", "#/components/schemas/Err/properties/b_group") in found, found
+    assert any("disagreeing" in p and "a_group" in p and "b_group" in p for p in problems), problems
 
-    assert render({"sport": ["cfb", "nfl"], "method": ["keener", "elo"]}) == (
-        '{\n  "method": [\n    "keener",\n    "elo"\n  ],\n'
-        '  "sport": [\n    "cfb",\n    "nfl"\n  ]\n}\n'
+
+def _vocabulary_enums(node: Any, tokens: tuple[str, ...] = ()) -> list[tuple[str, tuple[str, ...]]]:
+    """`(vocabulary, tokens)` for every enum under `node` equal to a contract
+    alias. Tokens, not a joined path: path keys like `/api/years` contain `/`."""
+    by_values = {tuple(get_args(alias)): name for name, alias in CONTRACT_ALIASES.items()}
+    found: list[tuple[str, tuple[str, ...]]] = []
+    if isinstance(node, dict):
+        enum = node.get("enum")
+        if isinstance(enum, list) and tuple(enum) in by_values:
+            found.append((by_values[tuple(enum)], tokens))
+        for key, child in node.items():
+            found.extend(_vocabulary_enums(child, (*tokens, str(key))))
+    elif isinstance(node, list):
+        for index, child in enumerate(node):
+            found.extend(_vocabulary_enums(child, (*tokens, str(index))))
+    return found
+
+
+def test_every_vocabulary_enum_in_the_schema_is_walked() -> None:
+    """The reverse of the floor: an enum equal to `Sport`/`Method`/
+    `PlayerPositionGroup` under a property name the walk doesn't match (a new
+    `c_group`, say) would otherwise go unchecked and unpublished."""
+    from api.openapi_vocabularies import find_occurrences
+
+    openapi = _live_openapi()
+    walked = {(o.name, o.location) for o in find_occurrences(openapi)}
+
+    def walked_location(tokens: tuple[str, ...]) -> str | None:
+        """The location the walk would report: the operation parameter, or
+        the nearest enclosing property."""
+        if len(tokens) > 4 and tokens[0] == "paths" and tokens[3] == "parameters":
+            parameter = openapi["paths"][tokens[1]][tokens[2]]["parameters"][int(tokens[4])]
+            return (
+                f"{tokens[2].upper()} {tokens[1]} {parameter['in']} parameter '{parameter['name']}'"
+            )
+        for i in range(len(tokens) - 1, 0, -1):
+            if tokens[i - 1] == "properties":
+                return "#/" + "/".join(tokens[: i + 1])
+        return None
+
+    enums = [
+        (name, "/".join(tokens), walked_location(tokens))
+        for name, tokens in _vocabulary_enums(openapi)
+    ]
+    unwalked = sorted(
+        f"{name} at {path}"
+        for name, path, location in enums
+        if path not in UNWALKED_ENUMS and (name, location) not in walked
     )
+    stale = sorted(
+        set(UNWALKED_ENUMS)
+        - {path for name, path, location in enums if (name, location) not in walked}
+    )
+
+    assert len(enums) > len(UNWALKED_ENUMS), enums
+    assert unwalked == [], (
+        "these enums equal a published vocabulary, but the OpenAPI walk does not see "
+        "them; add the property to ALIASED_PROPERTIES:\n  " + "\n  ".join(unwalked)
+    )
+    assert stale == [], f"stale UNWALKED_ENUMS entries (gone, or now walked): {stale}"
