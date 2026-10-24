@@ -76,14 +76,20 @@ Save it as `<scratchpad>/briefs/<issue>-<agent>-r<round>.json`. It must conform 
 ## 5. Render and launch
 
 ```bash
-uv run --script .claude/hooks/delegation.py render-brief <scratchpad>/briefs/<file>.json
+uv run --script .claude/hooks/delegation.py render-brief <scratchpad>/briefs/<file>.json \
+  --out <scratchpad>/briefs/<file>.prompt.md
 ```
 
-Fix every error it prints. Pass stdout **verbatim** as the Agent prompt, with
-`subagent_type` set to the brief's agent.
+Fix every error it prints. On success it writes the full prompt to `--out` and prints a
+short pointer to that file. Pass the pointer **verbatim** as the Agent prompt (or as the
+SendMessage text for a later round to the same spoke), with `subagent_type` set to the
+brief's agent. Don't `cat` the prompt file: you wrote the JSON it came from, and reading
+it back puts every brief in your context twice (#400).
 
 - Parallel spokes: put all the Agent calls in one message. Give writers that could touch
   the same checkout `isolation: "worktree"`.
+- Coordinator-owned code in `.claude/hooks/` goes to `hooks-agent` like any other spoke,
+  not inline. The skills, CLAUDE.md and settings that call it stay with you.
 - Reviewer: brief it with the diff range (`<base_sha>...<head>`) and the implementation
   brief's objective and rubric only. Never include the implementer's return or your
   reasoning; it reviews as an independent instance.
@@ -93,13 +99,16 @@ Fix every error it prints. Pass stdout **verbatim** as the Agent prompt, with
 The return hooks have already made the spoke fix an invalid return before it was
 delivered, up to two retries (`pre-handback` for a `SubagentHandback` report,
 SubagentStop for closing text). Their notes go to the user, not to you, so **validate the return yourself** before
-acting. Pipe the spoke's final message in exactly as it came back:
+acting. Validate the copy the spoke wrote to its scratch dir (the brief asks for it):
 
 ```bash
-uv run --script .claude/hooks/delegation.py validate-return --agent <agent> - <<'RETURN'
-<the spoke's final message>
-RETURN
+uv run --script .claude/hooks/delegation.py validate-return --agent <agent> <scratch_dir>/return.json
 ```
+
+It prints `return ok: <agent> status <status>, head <sha>`. Check that the status and
+head match the report you were handed; a mismatch means a stale file. Only when the file
+is missing, pipe the spoke's final message in exactly as it came back (`-` and a
+heredoc) rather than re-typing it.
 
 Exit 1 means the round is `malformed-return`: retry once with a rewritten brief that
 appends the printed errors, or substitute an agent. Printed `warning:` lines are

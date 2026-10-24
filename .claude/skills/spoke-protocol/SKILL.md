@@ -101,6 +101,11 @@ shape:
 }
 ```
 
+Write the same JSON, without the fence, to `return.json` in your scratch dir (the brief
+names the path), and rewrite it whenever you fix the return. The coordinator validates
+that file instead of re-typing your message (#400). When you were briefed by a pointer
+("your brief is in …"), read that whole file first: it is your brief.
+
 If the hook says the return doesn't validate, don't redo the work: fix exactly what it
 lists and send the whole block again. You get two retries. If the message after them is
 still invalid, the coordinator records the round as `malformed-return`.

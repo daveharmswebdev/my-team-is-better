@@ -4,7 +4,7 @@
     "delegation.py's brief and return checks, and CLAUDE.md's Roles table (kept in step by",
     ".claude/hooks/tests/test_ownership.py). Globs are repo-relative: `dir/**` covers",
     "everything under dir; other patterns match segment by segment.",
-    "Anything no agent owns is coordinator-owned: CLAUDE.md, .claude/, .github/, docs/,",
+    "Anything no agent owns is coordinator-owned: CLAUDE.md, .claude/ (except hooks/, #400), .github/, docs/,",
     "render.yaml, root config, contracts.py, db/, cli.py, config.py and credit_math.py",
     "(shared by ratings and evidence).",
     "packages/cfb-engine/tests/ is shared by the engine spokes on purpose: the suite is",
@@ -57,6 +57,10 @@
         "packages/cfb-engine/src/cfb_strength/mcp_server/**",
         "packages/cfb-engine/tests/test_mcp_server_integration.py"
       ]
+    },
+    "hooks-agent": {
+      "kind": "implementation",
+      "owns": [".claude/hooks/**"]
     },
     "reviewer": {
       "kind": "read-only",

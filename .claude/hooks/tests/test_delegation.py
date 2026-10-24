@@ -673,3 +673,51 @@ def test_cli_validate_return_reads_a_fenced_message(tmp_path: Path) -> None:
     path.write_text(_fenced(_success()))
     result = _cli("validate-return", "--agent", "api-agent", str(path))
     assert result.returncode == 0, result.stderr
+
+
+# --- #400: briefs and returns travel through files, not the coordinator's context ----
+
+
+def test_render_brief_asks_for_a_copy_of_the_return_in_scratch() -> None:
+    brief = _brief()
+    brief["scratch_dir"] = "/tmp/scratchpad/999-api-r1/"
+    text = delegation.render_brief(brief, OWNERSHIP)
+    assert "`/tmp/scratchpad/999-api-r1/return.json`" in text
+
+
+def test_cli_render_brief_out_writes_the_brief_and_prints_only_a_pointer(tmp_path: Path) -> None:
+    out = tmp_path / "briefs" / "999-api-agent-r1.prompt.md"
+    result = _cli("render-brief", str(EXAMPLES / "brief.api-agent.json"), "--out", str(out))
+    assert result.returncode == 0, result.stderr
+    brief = _load("brief.api-agent.json")
+    assert out.read_text() == delegation.render_brief(brief, delegation.load_ownership())
+    pointer = result.stdout
+    assert "## OBJECTIVE" not in pointer
+    assert str(out) in pointer
+    assert "api-agent" in pointer and "#999" in pointer
+    assert len(pointer) < 600  # the point is to keep the brief out of the coordinator
+
+
+def test_cli_render_brief_out_writes_nothing_for_an_invalid_brief(tmp_path: Path) -> None:
+    brief = _brief()
+    brief["scope"] = ["apps/web/**"]
+    path = tmp_path / "brief.json"
+    path.write_text(json.dumps(brief))
+    out = tmp_path / "prompt.md"
+    result = _cli("render-brief", str(path), "--out", str(out))
+    assert result.returncode == 1
+    assert not out.exists()
+    assert result.stdout == ""
+
+
+def test_cli_validate_return_names_what_it_checked(tmp_path: Path) -> None:
+    """The coordinator validates the spoke's return.json, not the delivered message, so
+    the output says which return it was: a stale file from an earlier round shows up."""
+    data = _success()
+    path = tmp_path / "return.json"
+    path.write_text(json.dumps(data))
+    result = _cli("validate-return", "--agent", "api-agent", str(path))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        f"return ok: {data['agent']} status {data['status']}, head {data['head_sha']}"
+    )

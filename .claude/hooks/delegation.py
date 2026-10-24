@@ -4,14 +4,16 @@
 # ///
 """The delegation contract, checked by code.
 
-    uv run --script .claude/hooks/delegation.py render-brief <brief.json>
+    uv run --script .claude/hooks/delegation.py render-brief <brief.json> [--out <prompt.md>]
     uv run --script .claude/hooks/delegation.py validate-brief <brief.json>
     uv run --script .claude/hooks/delegation.py validate-return --agent <name> <file>
     uv run --script .claude/hooks/delegation.py pre-handback     (PreToolUse hook, stdin)
     uv run --script .claude/hooks/delegation.py subagent-stop    (SubagentStop hook, stdin)
 
 `render-brief` validates a brief against brief.schema.json and the ownership map, then
-prints the prompt to hand to the Agent tool. The two hooks validate a spoke's return
+prints the prompt to hand to the Agent tool. With `--out` it writes that prompt to a file
+and prints only a short pointer to it, so the brief reaches the spoke without passing
+through the coordinator's context twice (#400). The two hooks validate a spoke's return
 against return.schema.json plus the rules a schema can't express, and ask the spoke to
 fix an invalid one, with the errors as feedback, up to MAX_RETURN_RETRIES times.
 `pre-handback` checks a SubagentHandback report before it is delivered and denies an
@@ -42,6 +44,8 @@ __all__ = [
     "load_ownership",
     "pre_handback",
     "render_brief",
+    "render_pointer",
+    "return_path",
     "subagent_stop",
     "validate_brief",
     "validate_return",
@@ -278,9 +282,30 @@ def render_brief(brief: dict[str, Any], ownership: Ownership | None = None) -> s
         "---\nFinish with exactly one fenced ```json block conforming to "
         "`.claude/schemas/return.schema.json`, with nothing outside it; your preloaded "
         "spoke-protocol skill has the rules. A hook validates it when you hand it back and "
-        "tells you what to fix."
+        "tells you what to fix. Write the same JSON, unfenced, to "
+        f"`{return_path(brief)}` as well: the coordinator validates that file (#400)."
     )
     return "\n\n".join(sections) + "\n"
+
+
+def return_path(brief: dict[str, Any]) -> str:
+    """Where the spoke leaves a copy of its return for the coordinator to validate."""
+    return f"{brief['scratch_dir'].rstrip('/')}/return.json"
+
+
+def render_pointer(brief: dict[str, Any], prompt_path: Path) -> str:
+    """The Agent prompt when the brief itself is on disk: who it's for, and where."""
+    who = brief["agent"]
+    if brief.get("round"):
+        who += f", round {brief['round']}"
+    if brief["issue"] is not None:
+        who += f", issue #{brief['issue']}"
+    return (
+        f"Your brief ({who}) is in `{prompt_path}`. Read that whole file with the Read "
+        "tool before doing anything else: it is your complete task (objective, contract, "
+        "scope, rubric, base commit, scratch dir and the return contract), and nothing in "
+        "this message replaces it.\n"
+    )
 
 
 def _final_output(payload: dict[str, Any]) -> tuple[str, bool]:
@@ -462,6 +487,9 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     for name in ("render-brief", "validate-brief"):
         commands.add_parser(name).add_argument("brief")
+    commands.choices["render-brief"].add_argument(
+        "--out", type=Path, help="write the prompt here and print only a pointer to it"
+    )
     validate = commands.add_parser("validate-return")
     validate.add_argument("--agent", required=True)
     validate.add_argument("path", help="a .json return, or a message with one ```json block")
@@ -490,7 +518,14 @@ def main(argv: list[str] | None = None) -> int:
         if brief_errors:
             print("\n".join(brief_errors), file=sys.stderr)
             return 1
-        print(render_brief(brief, ownership) if args.command == "render-brief" else "brief ok")
+        if args.command == "validate-brief":
+            print("brief ok")
+        elif args.out is None:
+            print(render_brief(brief, ownership))
+        else:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(render_brief(brief, ownership))
+            print(render_pointer(brief, args.out.resolve()), end="")
         return 0
 
     text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
@@ -508,7 +543,8 @@ def main(argv: list[str] | None = None) -> int:
     if check.errors:
         print("\n".join(check.errors), file=sys.stderr)
         return 1
-    print("return ok")
+    assert isinstance(data, dict)  # validate_return reports a non-object as an error
+    print(f"return ok: {data['agent']} status {data['status']}, head {data.get('head_sha')}")
     return 0
 
 
