@@ -756,7 +756,8 @@ _SHORT_TYPOS_403 = (
     ("Tula", "Tulane", "Tulsa"),
     ("ULA", "Tulane", "UCLA"),
     ("UF", "Buffalo", "UCF"),
-    ("AUB", "Auburn", "UAB"),
+    # "AUB" left this list with #411: it is Auburn's own CFBD alias, so it
+    # resolves to Auburn (see test_issue_411_...), no longer a UAB typo.
     ("UB", "Auburn", "UAB"),
     ("SU", "LSU", "SMU"),
     ("Ary", "Maryland", "Army"),
@@ -795,7 +796,7 @@ def test_a_short_typo_inside_a_longer_name_never_resolves_to_it(
 @pytest.mark.parametrize(
     ("sport", "year", "query", "wrong"),
     [
-        ("cfb", 2019, "UK", "Duke"),
+        # "UK" (asked [Duke] here) left with #411: Kentucky's CFBD alias.
         ("cfb", 2005, "oston", "Houston"),
         ("cfb", 2019, "oston", "Houston"),
         ("cfb", 2005, "uth", "Utah"),
@@ -814,12 +815,13 @@ def test_a_query_whose_hits_are_all_mid_word_never_resolves(
     query: str,
     wrong: str,
 ) -> None:
-    """#403 round 2: a query that sits only mid-word in rated names ("uk"
-    in Duke, "oston" in Boston College) points at no one school, and no
+    """#403 round 2: a query that sits only mid-word in rated names ("tlan"
+    in Tulane, "oston" in Boston College) points at no one school, and no
     other rated name is one edit from it. It asks, offering the hits; it
-    never answers -- not the hit ("UK" is Kentucky, not Duke) and not a
-    fuzzy lookalike outside the hits ("oston" -> Houston, measured on
-    7d45fd7)."""
+    never answers -- not the hit and not a fuzzy lookalike outside the hits
+    ("oston" -> Houston, measured on 7d45fd7). A rated team's CFBD alias is
+    the one exception, answered before this stage (#411: "UK" is Kentucky,
+    never Duke)."""
     conn = rated_398_conns[sport]
     try:
         team_id = resolve_team(conn, year, query, method="keener", sport=sport)
@@ -830,16 +832,44 @@ def test_a_query_whose_hits_are_all_mid_word_never_resolves(
 
 
 @pytest.mark.parametrize("year", [2005, 2019])
-def test_sc_asks_instead_of_answering_usc(
+def test_sc_is_south_carolina_never_usc(
     rated_398_conns: dict[str, sqlite3.Connection], year: int
 ) -> None:
     """ "SC" sits mid-word in USC, and teams.alternate_names gives it to
-    South Carolina: a silent USC is a wrong-school risk. It asks, as on
-    cef4ade (['USC', 'Wisconsin'])."""
+    South Carolina: a silent USC is a wrong-school risk. #403 made it ask
+    (['USC', 'Wisconsin'] on cef4ade); #411's alias stage answers South
+    Carolina, the one rated team carrying "SC" (CFBD's other "SC", Santa
+    Clara, is never rated in the golden years)."""
     conn = rated_398_conns["cfb"]
-    with pytest.raises(AmbiguousTeamError) as exc_info:
-        resolve_team(conn, year, "SC", method="keener")
-    assert "USC" in exc_info.value.candidates
+    expected = resolve_team(conn, year, "South Carolina", method="keener")
+    assert resolve_team(conn, year, "SC", method="keener") == expected
+
+
+@pytest.mark.parametrize(
+    ("year", "query", "intended"),
+    [
+        (2019, "UK", "Kentucky"),
+        (2019, "UGA", "Georgia"),
+        (2017, "FSU", "Florida State"),
+        (2019, "LT", "Louisiana Tech"),
+        (2005, "uk", "Kentucky"),
+        (2005, " FSU ", "Florida State"),
+        # Asked [Auburn, UAB] on 19e11b1 (#403: a typo of UAB?); CFBD
+        # gives "AUB" to Auburn alone.
+        (2005, "AUB", "Auburn"),
+        (2019, "AUB", "Auburn"),
+    ],
+)
+def test_issue_411_abbreviations_resolve_through_cfbd_aliases(
+    regression_conn: sqlite3.Connection, year: int, query: str, intended: str
+) -> None:
+    """Issue #411's table: each asked a question naming only other schools
+    (UK [Duke], UGA [UAB], FSU [LSU, SMU], LT [Vanderbilt]) on 19e11b1. The
+    committed fixture's teams.alternate_names carries each abbreviation for
+    exactly one rated team."""
+    compute_and_store(regression_conn, year, "keener")
+    expected = resolve_team(regression_conn, year, intended, method="keener")
+    assert resolve_team(regression_conn, year, query, method="keener") == expected
 
 
 @pytest.mark.parametrize(

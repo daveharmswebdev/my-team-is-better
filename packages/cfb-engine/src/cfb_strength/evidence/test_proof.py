@@ -64,10 +64,12 @@ def _insert_team(
     school: str,
     classification: str | None = None,
     sport: str = "cfb",
+    alternate_names: str | None = None,
 ) -> None:
     conn.execute(
-        "INSERT INTO teams (id, school, classification, sport) VALUES (?, ?, ?, ?)",
-        (team_id, school, classification, sport),
+        "INSERT INTO teams (id, school, classification, sport, alternate_names)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (team_id, school, classification, sport, alternate_names),
     )
 
 
@@ -2405,3 +2407,174 @@ def test_elo_step_needs_no_game_lookup_outside_pre_2008_neutral_cfb(
 
     assert case.elo_ledger is not None
     assert [s.venue_reliable for s in case.elo_ledger.steps] == [expected]
+
+
+# ---------------------------------------------------------------------------
+# issue #411 -- a rated team's CFBD abbreviations (teams.alternate_names)
+# reach it: "UK" is Kentucky, never a question offering only Duke
+# ---------------------------------------------------------------------------
+
+ALIAS_YEAR = 2019
+
+# (team_id, school, alternate_names as stored, rated this season?)
+_ALIAS_TEAMS: tuple[tuple[int, str, str | None, bool], ...] = (
+    (401, "Kentucky", '["UK", "Kentucky"]', True),
+    (402, "Duke", '["Duke"]', True),
+    (403, "Georgia", '["UGA", "Georgia"]', True),
+    (404, "UAB", '["UAB"]', True),
+    (405, "Florida", '["FLA", "Florida"]', True),
+    (406, "Buffalo", '["Buffalo"]', True),
+    (407, "UCF", '["UCF"]', True),
+    # A shared alias inside no rated name: only the alias stage can find it.
+    (408, "Mount Bravo", '["MB"]', True),
+    (409, "Mesa Basin", '["MB"]', True),
+    # An alias equal to another rated school's name, exactly and loosely.
+    (410, "South Florida", '["USF", "South Florida"]', True),
+    (411, "South Florida Stars", '["South Florida"]', True),
+    (412, "Miami (OH)", '["M-OH"]', True),
+    (413, "Miami Ohio Club", '["Miami OH"]', True),
+    # No aliases, in every shape the column can hold.
+    (414, "Null Tech", None, True),
+    (415, "Empty State", "[]", True),
+    (416, "Blank College", "", True),
+    (417, "Broken College", "not json", True),
+    # Known but unrated this season, each carrying a rated query's alias.
+    (420, "Findlay", '["UF"]', False),
+    (421, "Kentucky Wesleyan", '["UK"]', False),
+    # An unrated school whose name is a rated team's alias (#411 round 2).
+    (418, "Harbor State", '["HBST", "Lakeside"]', True),
+    (422, "Lakeside", '["LKS"]', False),
+)
+
+
+@pytest.fixture
+def alias_conn(tmp_path: Path) -> sqlite3.Connection:
+    c = get_conn(_make_db(tmp_path))
+    rank = 0
+    for tid, school, aliases, rated in _ALIAS_TEAMS:
+        _insert_team(c, tid, school, classification="fbs", alternate_names=aliases)
+        if rated:
+            rank += 1
+            _insert_rating(c, ALIAS_YEAR, METHOD, tid, 1.0 / rank, rank, 0, 0)
+    # An NFL team rated the same season with a CFB school's alias.
+    _insert_team(c, 430, "Kansas City Chiefs", sport="nfl", alternate_names='["UK"]')
+    _insert_rating(c, ALIAS_YEAR, METHOD, 430, 0.5, 1, 0, 0, sport="nfl")
+    c.commit()
+    return c
+
+
+def _alias_id(school: str) -> int:
+    return next(tid for tid, name, _, _ in _ALIAS_TEAMS if name == school)
+
+
+@pytest.mark.parametrize(
+    ("query", "intended"),
+    [("UK", "Kentucky"), ("UGA", "Georgia"), ("FLA", "Florida"), ("USF", "South Florida")],
+)
+def test_a_rated_teams_unique_alias_resolves_to_it(
+    alias_conn: sqlite3.Connection, query: str, intended: str
+) -> None:
+    """Before #411 "UK" asked [Duke] (mid-word in Duke) and "UGA" asked
+    [UAB] (one edit): resolve_team never read teams.alternate_names. The
+    unrated Kentucky Wesleyan's "UK" and the Chiefs' NFL "UK" don't count."""
+    assert resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD) == _alias_id(intended)
+
+
+@pytest.mark.parametrize(
+    ("query", "intended"),
+    [("uk", "Kentucky"), ("  UK  ", "Kentucky"), ("Uk", "Kentucky"), ("\tuga ", "Georgia")],
+)
+def test_alias_match_ignores_case_and_surrounding_whitespace(
+    alias_conn: sqlite3.Connection, query: str, intended: str
+) -> None:
+    assert resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD) == _alias_id(intended)
+
+
+@pytest.mark.parametrize("query", ["MB", " mb "])
+def test_a_shared_rated_alias_asks_with_every_school_carrying_it(
+    alias_conn: sqlite3.Connection, query: str
+) -> None:
+    """Two rated teams carry "MB": a coin toss, so it asks with both (as
+    CFBD's shared "LAM", "MAC", "UNI" ... do), never the first hit."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD)
+    assert exc_info.value.candidates == ["Mesa Basin", "Mount Bravo"]
+
+
+def test_an_alias_only_an_unrated_team_carries_changes_nothing(
+    alias_conn: sqlite3.Connection,
+) -> None:
+    """CFBD gives "UF" to Findlay alone, unrated here. The alias stage reads
+    rated teams only, so "UF" is neither Findlay nor UnknownTeamError: it
+    gets exactly the answer it gets with Findlay's alias gone."""
+
+    def outcome(query: str) -> object:
+        try:
+            return resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD)
+        except AmbiguousTeamError as e:
+            return ("ask", tuple(e.candidates))
+
+    with_alias = outcome("UF")
+    alias_conn.execute("UPDATE teams SET alternate_names = NULL WHERE id = 420")
+    assert outcome("UF") == with_alias
+    assert with_alias != _alias_id("Findlay")
+    assert resolve_team(alias_conn, ALIAS_YEAR, "Florida", method=METHOD) == _alias_id("Florida")
+    # Findlay itself is still a known-but-unrated team (#123).
+    with pytest.raises(UnknownTeamError):
+        resolve_team(alias_conn, ALIAS_YEAR, "Findlay", method=METHOD)
+
+
+@pytest.mark.parametrize(
+    ("query", "school"),
+    [
+        ("South Florida", "South Florida"),
+        ("south florida", "South Florida"),
+        ("South-Florida", "South Florida"),
+        ("Miami OH", "Miami (OH)"),
+        ("miami oh", "Miami (OH)"),
+    ],
+)
+def test_a_school_name_beats_another_rated_teams_identical_alias(
+    alias_conn: sqlite3.Connection, query: str, school: str
+) -> None:
+    """ "South Florida" is South Florida Stars' alias and "Miami OH" is
+    Miami Ohio Club's; the exact and loose-exact stages run first, so the
+    school whose name it is wins."""
+    assert resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD) == _alias_id(school)
+
+
+def test_null_empty_and_malformed_alias_rows_are_harmless(
+    alias_conn: sqlite3.Connection,
+) -> None:
+    """NULL, '[]', '' and a non-JSON value all read as "no aliases": those
+    teams resolve by name, the alias stage still answers for the rest, and
+    the malformed text is no alias of anyone."""
+    for school in ("Null Tech", "Empty State", "Blank College", "Broken College"):
+        assert resolve_team(alias_conn, ALIAS_YEAR, school, method=METHOD) == _alias_id(school)
+    assert resolve_team(alias_conn, ALIAS_YEAR, "UK", method=METHOD) == _alias_id("Kentucky")
+    with pytest.raises((AmbiguousTeamError, UnknownTeamError)):
+        resolve_team(alias_conn, ALIAS_YEAR, "not json", method=METHOD)
+
+
+def test_alias_stage_is_scoped_by_sport(alias_conn: sqlite3.Connection) -> None:
+    """The Chiefs' "UK" answers an NFL query and never a CFB one (#57/#58)."""
+    assert resolve_team(alias_conn, ALIAS_YEAR, "UK", method=METHOD, sport="nfl") == 430
+    assert resolve_team(alias_conn, ALIAS_YEAR, "UK", method=METHOD) == _alias_id("Kentucky")
+
+
+@pytest.mark.parametrize("query", ["Lakeside", "  lakeside ", "LAKESIDE", "Lake-side"])
+def test_an_unrated_schools_own_name_beats_a_rated_teams_identical_alias(
+    alias_conn: sqlite3.Connection, query: str
+) -> None:
+    """#411 round 2 (reviewer): "Lakeside" names a known school with no
+    rating this season, and is also rated Harbor State's alias. A school's
+    name beats an alias, so the known-but-unrated stage (#123) answers
+    first: UnknownTeamError, never Harbor State. Measured on f1949cf, where
+    the alias stage ran first: it resolved to Harbor State."""
+    with pytest.raises(UnknownTeamError):
+        resolve_team(alias_conn, ALIAS_YEAR, query, method=METHOD)
+    # Harbor State's other alias still resolves, and the unrated school's
+    # own alias ("LKS") is no answer.
+    assert resolve_team(alias_conn, ALIAS_YEAR, "HBST", method=METHOD) == _alias_id("Harbor State")
+    with pytest.raises((AmbiguousTeamError, UnknownTeamError)):
+        resolve_team(alias_conn, ALIAS_YEAR, "LKS", method=METHOD)
