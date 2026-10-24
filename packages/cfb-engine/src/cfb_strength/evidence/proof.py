@@ -98,6 +98,14 @@ COMMON_TAIL_WORDS = {
 FUZZY_TAIL_STRIPPED_CUTOFF = 0.75
 FUZZY_TAIL_WORD_CUTOFF = 0.75
 
+# Issue #403 round 2: a lone substring hit starting mid-word resolves only
+# when the query runs to the end of the name and is at least this long
+# ("Cuse" -> Syracuse, "Boys" -> Dallas Cowboys; never "MU" -> SMU, a
+# fragment too short to point at one school). See
+# `_ends_the_name`. Measured over #398's typo sweep: 0 wrong in every CFB
+# and NFL year, and every NFL one-edit typo resolves as on cef4ade.
+MID_WORD_TAIL_MIN_CHARS = 4
+
 # How `build_comparison`'s verdict prints a rating, per registered method
 # (issue #95). A rating's scale is the method's, so its precision is too:
 #
@@ -574,11 +582,18 @@ def resolve_team(
          has no rating row here, exactly or in the loose sense of stage 2
          -> UnknownTeamError (issue #123).
       4. Substring match, case-insensitive, on the expanded query. A query
-         inside rated names: several hits ask; one hit resolves only when the
-         query as typed is inside it, and asks when only the expanded form
-         is ("SE St." -> "SE State" sits inside "Boise State"), or when a
-         query ending in a school word starts mid-word in the name and its
-         distinctive part disagrees (typed "SE State"; #398). A rated name
+         inside rated names: one hit resolves only when the query as typed
+         is inside it, starts on a word of it, and no other rated name is
+         one edit from the query (#403: "Tula" starts Tulane but is a typo
+         of Tulsa; "SU" sits mid-word in LSU). Two exceptions to "on a
+         word": #398's, a query ending in a school word whose distinctive
+         part agrees with the name's ("hio State" in Ohio State), and a
+         query of MID_WORD_TAIL_MIN_CHARS+ characters with no school word
+         that runs to the end of the name ("Cuse" -> Syracuse). Any
+         other forward hit asks and never reaches stage 5, listing every
+         hit and one-edit rival, plus stage 5's close names when the hits
+         are all mid-word ("SC" in USC, "oston" in Boston College; "SE St."
+         -> "SE State" sits mid-word in "Boise State"). A rated name
          inside the query (the reverse direction) never resolves on its
          own (#393: "Miami FL" contains "Miami" but is a guess) -- any such
          hit asks, listing every substring hit plus the fuzzy stage's close
@@ -654,24 +669,51 @@ def resolve_team(
         # lead, so the intended school can be picked.
         offered = {str(r["school"]) for r in forward + reverse + close}
         raise AmbiguousTeamError(query, sorted(offered))
-    # A lone forward hit resolves only when the query as typed is inside the
-    # name. One found only through the expansion asks: "SE St." expands to
-    # "SE State", which sits inside "Boise State" (#393 round 2). Typed
-    # "SE State" sits inside "Boise State" too, sharing only "se State"
-    # (#398): a query ending in a school word that starts mid-word in the
-    # name resolves only when its distinctive part agrees with the name's
-    # ("hio State" is a typo of Ohio State; "Diego State" starts on a word).
+    # Issue #403, the one rule for a forward hit: it resolves only when it is
+    # the only one, the query *as typed* starts on a word of it, and no other
+    # rated name is one edit from the query.
+    #
+    # - As typed: "SE St." is inside "Boise State" only once expanded
+    #   (#393 round 2).
+    # - On a word: a query starting mid-word is a fragment of some other
+    #   word, not a name ("SU" in LSU when SMU was meant, "Due" in Purdue,
+    #   "SE State" in Boise State, "UK" in Duke). Two exceptions, both a
+    #   name with its first letters dropped: #398's, a query ending in a
+    #   school word whose distinctive part agrees with the name's ("hio
+    #   State"), and `_ends_the_name`, a 4+ character query with no school
+    #   word that runs to the end of the name ("Cuse", "Boys").
+    # - No one-edit rival: "Tula" starts Tulane but is a typo of Tulsa,
+    #   "AUB" starts Auburn but is UAB transposed. Prefix or typo is a coin
+    #   toss there, so it asks with both.
+    #
+    # Any other forward hit asks and never falls through to the fuzzy
+    # stage: a query sitting in several names, or only mid-word, points at
+    # no one school, and the fuzzy stage would answer a lookalike outside
+    # the hits ("oston" -> Houston, not Boston College) or the one mid-word
+    # hit ("SC" -> USC, though teams.alternate_names gives "SC" to South
+    # Carolina; #403 round 2). The question lists the hits, every one-edit
+    # rival and the fuzzy stage's close names.
+    #
+    # Measured over #398's typo sweep (CFB 7 golden years, NFL 4): wrong
+    # answers 9-10 per CFB year -> 0; see the #403 PR for what now asks.
+    aligned = [r for r in forward if _starts_on_a_word(e_lower, str(r["school"]).lower())]
+    rivals = [r for r in candidates if _within_one_edit(q_lower, str(r["school"]).lower())]
     if (
         len(forward) == 1
         and q_lower in forward[0]["school"].lower()
+        and all(r["team_id"] == forward[0]["team_id"] for r in rivals)
         and (
             _starts_on_a_word(q_lower, str(forward[0]["school"]).lower())
-            or _distinctive_parts_agree(q, str(forward[0]["school"]))
+            or _tail_typo_agrees(q, str(forward[0]["school"]))
+            or _ends_the_name(q_lower, str(forward[0]["school"]).lower())
         )
     ):
         return int(forward[0]["team_id"])
+    if aligned:
+        raise AmbiguousTeamError(query, sorted({str(r["school"]) for r in forward + rivals}))
     if forward:
-        raise AmbiguousTeamError(query, sorted(r["school"] for r in forward))
+        offered = {str(r["school"]) for r in forward + rivals + close}
+        raise AmbiguousTeamError(query, sorted(offered))
 
     top_score = scored[0][0] if scored else 0.0
     runner_up_score = scored[1][0] if len(scored) > 1 else 0.0
@@ -779,18 +821,60 @@ def _split_tail(name: str) -> tuple[str, str | None, str]:
 
 
 def _starts_on_a_word(q_lower: str, name_lower: str) -> bool:
-    """For a query inside a name (both lowercased): False only when the
-    query ends in a COMMON_TAIL_WORDS word and no occurrence of it in the
-    name starts on a word ("se state" in "boise state"; issue #398). A query
-    without a school word is left to the substring stage as before."""
-    if _split_tail(q_lower)[1] is None:
-        return True
+    """For a query inside a name (both lowercased): whether some occurrence
+    of it in the name starts on a word -- at the name's start or after a
+    non-alphanumeric character ("steelers" in "pittsburgh steelers", "a&m"
+    in "texas a&m"), never mid-word ("su" in "lsu", "se state" in "boise
+    state"; issues #398, #403)."""
     start = name_lower.find(q_lower)
     while start != -1:
         if start == 0 or not name_lower[start - 1].isalnum():
             return True
         start = name_lower.find(q_lower, start + 1)
     return False
+
+
+def _tail_typo_agrees(q: str, name: str) -> bool:
+    """#398's exception for a mid-word hit: a query ending in a school word
+    ("hio State" inside "Ohio State") whose distinctive part agrees with the
+    name's is a first-letter typo of it. A query without a school word has
+    no distinctive part to compare, so it never qualifies ("su" in "lsu")."""
+    return _split_tail(q.lower())[1] is not None and _distinctive_parts_agree(q, name)
+
+
+def _ends_the_name(q_lower: str, name_lower: str) -> bool:
+    """The other mid-word exception (#403 round 2): a query of at least
+    MID_WORD_TAIL_MIN_CHARS characters, with no school word, that runs to
+    the end of the name is the name with its first letters dropped
+    ("cuse" -> Syracuse, "boys" -> Dallas Cowboys, "ittsburgh Steelers").
+    Not "sc" (USC: too short to point anywhere) nor "oston" (Boston
+    College: it stops mid-name). A query ending in a school word is #398's
+    rule's to judge ("e State" is no more Boise State than Kent State)."""
+    return (
+        len(q_lower) >= MID_WORD_TAIL_MIN_CHARS
+        and _split_tail(q_lower)[1] is None
+        and name_lower.endswith(q_lower)
+    )
+
+
+def _within_one_edit(a: str, b: str) -> bool:
+    """Whether `a` becomes `b` by at most one deletion, insertion,
+    substitution or swap of adjacent characters -- the typos #398's sweep
+    generates ("tula"/"tulsa", "aub"/"uab"; issue #403)."""
+    if a == b:
+        return True
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    if len(a) < len(b):
+        return a[i:] == b[i + 1 :]
+    return a[i + 1 :] == b[i + 1 :] or (
+        i + 1 < len(a) and a[i] == b[i + 1] and a[i + 1] == b[i] and a[i + 2 :] == b[i + 2 :]
+    )
 
 
 def _distinctive_parts_agree(q: str, name: str) -> bool:
