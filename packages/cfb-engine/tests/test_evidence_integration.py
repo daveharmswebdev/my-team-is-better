@@ -746,6 +746,98 @@ def test_real_typos_still_fuzzy_resolve_after_398(
 
 
 # ---------------------------------------------------------------------------
+# issue #403 -- a short query inside a longer name is not that name. A lone
+# substring hit resolved "Tula" to Tulane (Tulsa meant) and "SU" to LSU (SMU
+# meant). Every case below was measured resolving to `wrong` on cef4ade, in
+# #398's one-edit typo sweep of every rated name.
+# ---------------------------------------------------------------------------
+
+_SHORT_TYPOS_403 = (
+    ("Tula", "Tulane", "Tulsa"),
+    ("ULA", "Tulane", "UCLA"),
+    ("UF", "Buffalo", "UCF"),
+    ("AUB", "Auburn", "UAB"),
+    ("UB", "Auburn", "UAB"),
+    ("SU", "LSU", "SMU"),
+    ("Ary", "Maryland", "Army"),
+    ("Due", "Purdue", "Duke"),
+    ("Rce", "Air Force", "Rice"),
+)
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "query", "wrong", "intended"),
+    [("cfb", year, *case) for year in (2005, 2019) for case in _SHORT_TYPOS_403]
+    + [("cfb", 2005, "TUC", "Kentucky", "TCU")],
+)
+def test_a_short_typo_inside_a_longer_name_never_resolves_to_it(
+    rated_398_conns: dict[str, sqlite3.Connection],
+    sport: Sport,
+    year: int,
+    query: str,
+    wrong: str,
+    intended: str,
+) -> None:
+    """The query is a one-edit typo of `intended` that also sits inside
+    `wrong`'s name. It resolves to the intended school or asks with it
+    offered; it never answers `wrong`."""
+    conn = rated_398_conns[sport]
+    expected = resolve_team(conn, year, intended, method="keener", sport=sport)
+    try:
+        team_id = resolve_team(conn, year, query, method="keener", sport=sport)
+    except AmbiguousTeamError as e:
+        assert intended in e.candidates, f"{query!r} asks without {intended!r}: {e.candidates}"
+        return
+    name = conn.execute("SELECT school FROM teams WHERE id = ?", (team_id,)).fetchone()[0]
+    assert team_id == expected, f"{query!r} resolved silently to {name!r} (base: {wrong!r})"
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "query", "intended"),
+    [
+        ("cfb", 2019, "Michigan St", "Michigan State"),
+        ("cfb", 2019, "Texas A&M", "Texas A&M"),
+        ("cfb", 2019, "Texas AM", "Texas A&M"),
+        ("cfb", 2019, "A&M", "Texas A&M"),
+        ("cfb", 2019, "Penn", "Penn State"),
+        ("cfb", 2019, "Boise", "Boise State"),
+        ("cfb", 2019, "Notre", "Notre Dame"),
+        ("cfb", 2019, "Wake", "Wake Forest"),
+        ("cfb", 2019, "Coastal", "Coastal Carolina"),
+        ("cfb", 2019, "Bowling", "Bowling Green"),
+        ("cfb", 2019, "Western Mich", "Western Michigan"),
+        ("cfb", 2019, "Minn", "Minnesota"),
+        ("cfb", 2019, "Wisc", "Wisconsin"),
+        ("cfb", 2019, "Neb", "Nebraska"),
+        ("cfb", 2019, "Pitt", "Pittsburgh"),
+        ("cfb", 2005, "Alab", "Alabama"),
+        ("nfl", 2022, "Steelers", "Pittsburgh Steelers"),
+        ("nfl", 2022, "Colts", "Indianapolis Colts"),
+        ("nfl", 2022, "Packers", "Green Bay Packers"),
+        ("nfl", 2022, "49ers", "San Francisco 49ers"),
+        ("nfl", 2022, "Pittsburgh", "Pittsburgh Steelers"),
+        ("nfl", 2022, "Green Bay", "Green Bay Packers"),
+        ("nfl", 2022, "Vegas", "Las Vegas Raiders"),
+        ("nfl", 2022, "Tampa", "Tampa Bay Buccaneers"),
+        ("nfl", 2022, "Kansas City", "Kansas City Chiefs"),
+    ],
+)
+def test_word_aligned_partials_still_resolve_after_403(
+    rated_398_conns: dict[str, sqlite3.Connection],
+    sport: Sport,
+    year: int,
+    query: str,
+    intended: str,
+) -> None:
+    """Each resolved to `intended` on cef4ade: the query starts on a word of
+    exactly one rated name and is no one-edit typo of another, so #403 keeps
+    it an answer."""
+    conn = rated_398_conns[sport]
+    expected = resolve_team(conn, year, intended, method="keener", sport=sport)
+    assert resolve_team(conn, year, query, method="keener", sport=sport) == expected
+
+
+# ---------------------------------------------------------------------------
 # issue #95 -- Keener's verdict text, pinned exactly against real ratings
 # ---------------------------------------------------------------------------
 

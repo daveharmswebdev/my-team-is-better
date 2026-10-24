@@ -788,6 +788,49 @@ def test_forward_substring_still_resolves_on_a_single_hit(abbrev_conn: sqlite3.C
     assert resolve_team(abbrev_conn, ABBREV_YEAR, "Alab", method=METHOD) == _id_of("Alabama")
 
 
+_SHORT_NAMES = {501: "Tulane", 502: "Tulsa", 503: "LSU", 504: "SMU", 505: "Purdue", 506: "Duke"}
+
+
+@pytest.fixture
+def short_name_conn(tmp_path: Path) -> sqlite3.Connection:
+    """CFBD names whose short typos sit inside longer names (issue #403)."""
+    c = get_conn(_make_db(tmp_path))
+    for rank, (tid, school) in enumerate(_SHORT_NAMES.items(), start=1):
+        _insert_team(c, tid, school, classification="fbs")
+        _insert_rating(c, ABBREV_YEAR, METHOD, tid, 1.0 / rank, rank, 0, 0)
+    c.commit()
+    return c
+
+
+@pytest.mark.parametrize(
+    ("query", "wrong", "intended"),
+    [("Tula", "Tulane", "Tulsa"), ("SU", "LSU", "SMU"), ("Due", "Purdue", "Duke")],
+)
+def test_a_lone_substring_hit_never_answers_for_a_short_typo(
+    short_name_conn: sqlite3.Connection, query: str, wrong: str, intended: str
+) -> None:
+    """#403: "Tula" starts "Tulane" but is one edit from "Tulsa"; "SU" and
+    "Due" sit mid-word inside "LSU" and "Purdue". A lone substring hit
+    resolves only when it starts on a word of the name and no other rated
+    name is one edit away, so each resolves to the intended school or asks
+    with it offered -- never `wrong`."""
+    intended_id = next(t for t, n in _SHORT_NAMES.items() if n == intended)
+    try:
+        team_id = resolve_team(short_name_conn, ABBREV_YEAR, query, method=METHOD)
+    except AmbiguousTeamError as e:
+        assert intended in e.candidates
+        assert e.candidates == sorted(e.candidates)
+        return
+    assert team_id == intended_id, f"{query!r} resolved to {_SHORT_NAMES[team_id]!r}"
+
+
+def test_a_word_aligned_substring_with_no_one_edit_rival_resolves(
+    short_name_conn: sqlite3.Connection,
+) -> None:
+    """ "Tulan" starts Tulane's only word and is two edits from "Tulsa"."""
+    assert resolve_team(short_name_conn, ABBREV_YEAR, "Tulan", method=METHOD) == 501
+
+
 @pytest.mark.parametrize("query", ["Alabma", "alabma", "Michgan State"])
 def test_typos_still_resolve(abbrev_conn: sqlite3.Connection, query: str) -> None:
     expected = "Alabama" if "lab" in query.lower() else "Michigan State"
