@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.ts'
 import type { Locator, Page } from '@playwright/test'
 import { fillYear } from './fillYear.ts'
 

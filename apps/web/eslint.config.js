@@ -194,5 +194,28 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Issue #242: every e2e spec runs under `e2e/fixtures.ts`'s `test`, which
+    // answers third-party requests itself so no page load waits on the
+    // internet. Importing Playwright's own `test` would skip that silently.
+    name: 'e2e/harness-test',
+    files: ['e2e/**/*.ts'],
+    ignores: ['e2e/fixtures.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              importNames: ['test'],
+              message:
+                "Import `test` from './fixtures.ts': it keeps e2e page loads off the internet (issue #242).",
+            },
+          ],
+        },
+      ],
+    },
+  },
   eslintConfigPrettier,
 )

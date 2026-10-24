@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.ts'
 
 // Issue #268: one uncaught page error must not blank the whole app. This
 // reproduces the #227 failure for real: AboutPage's hash-scroll effect calls

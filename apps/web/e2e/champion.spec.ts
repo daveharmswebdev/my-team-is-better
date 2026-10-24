@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.ts'
 import { fillYear } from './fillYear.ts'
 
 // Golden-path smoke spec (issue #39) for the "champion" question type,

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.ts'
 import type { Locator, Page } from '@playwright/test'
 
 // Issue #301: the NFL player comparison, end to end against the real API on

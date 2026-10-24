@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures.ts'
 import type { Locator, Page } from '@playwright/test'
 
 // Issue #296: the NFL leaders and a player's career page, end to end against
