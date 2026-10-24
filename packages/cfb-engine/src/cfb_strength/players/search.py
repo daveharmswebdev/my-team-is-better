@@ -99,7 +99,7 @@ def search_players(
     if "\x00" in stripped:
         # SQLite's LIKE stops reading its pattern at a NUL, which would widen the
         # match; no name contains one, so the literal answer is no rows (#301 review).
-        return PlayerSearch(sport=sport, query=stripped, limit=limit, group=group, rows=[])
+        return PlayerSearch(sport=sport, query=stripped, limit=limit, rows=[])
     params: dict[str, str | int] = {
         "sport": sport,
         "pattern": _like_substring(stripped),
@@ -120,4 +120,4 @@ def search_players(
         )
         for r in conn.execute(sql, params).fetchall()
     ]
-    return PlayerSearch(sport=sport, query=stripped, limit=limit, group=group, rows=rows)
+    return PlayerSearch(sport=sport, query=stripped, limit=limit, rows=rows)

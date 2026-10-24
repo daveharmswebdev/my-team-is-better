@@ -67,7 +67,7 @@ def test_matching_is_a_case_insensitive_substring(db: PlayerDb) -> None:
 def test_the_stripped_query_and_limit_are_echoed(db: PlayerDb) -> None:
     _passer(db, "Eli Manning")
     result = search_players(conn_of(db), sport="nfl", query="  eli \t", limit=5)
-    assert (result.sport, result.query, result.limit, result.group) == ("nfl", "eli", 5, None)
+    assert (result.sport, result.query, result.limit) == ("nfl", "eli", 5)
     assert [r.display_name for r in result.rows] == ["Eli Manning"]
 
 
@@ -160,7 +160,6 @@ def test_a_group_keeps_exactly_the_players_whose_label_maps_to_it(
     expected = [ids[label] for label in labels]
     assert [r.player_id for r in result.rows] == expected
     assert all(r.group == group for r in result.rows)
-    assert result.group == group
 
 
 def test_rb_includes_fb_and_excludes_every_other_label(db: PlayerDb) -> None:
@@ -197,7 +196,6 @@ def test_no_group_is_the_unfiltered_result(db: PlayerDb) -> None:
         conn, sport="nfl", query="pos", limit=PLAYER_SEARCH_MAX_LIMIT, group=None
     )
     assert default == explicit
-    assert default.group is None
     # The first page of every label, by name, whatever its group.
     expected = sorted(f"Pos {label or 'none'}" for label in [*_MEASURED_LABELS, None])
     assert [r.display_name for r in default.rows] == expected[:PLAYER_SEARCH_MAX_LIMIT]
@@ -206,12 +204,12 @@ def test_no_group_is_the_unfiltered_result(db: PlayerDb) -> None:
 @pytest.mark.parametrize("group", ["", "qb", "FB", "K", "HB", "QB ", 1])
 def test_an_invalid_group_raises(db: PlayerDb, group: object) -> None:
     with pytest.raises(ValueError):
-        search_players(conn_of(db), sport="nfl", query="ab", group=group)  # type: ignore[arg-type]
+        search_players(conn_of(db), sport="nfl", query="ab", group=group)  # type: ignore[arg-type]  # deliberately not a PlayerPositionGroup
 
 
-def test_a_nul_query_with_a_group_echoes_the_group(db: PlayerDb) -> None:
+def test_a_nul_query_with_a_group_finds_nobody(db: PlayerDb) -> None:
     result = search_players(conn_of(db), sport="nfl", query="a\x00b", group="TE")
-    assert (result.group, result.rows) == ("TE", [])
+    assert result.rows == []
 
 
 # --- who qualifies ------------------------------------------------------------

@@ -865,8 +865,6 @@ class PlayerSearch:
     # The query as matched: stripped of surrounding whitespace.
     query: str
     limit: int
-    # The group filter as given (#428); None means unfiltered.
-    group: PlayerPositionGroup | None
     rows: list[PlayerSearchRow]
 
 
