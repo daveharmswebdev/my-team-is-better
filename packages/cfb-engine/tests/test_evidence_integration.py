@@ -755,7 +755,8 @@ def test_real_typos_still_fuzzy_resolve_after_398(
 _SHORT_TYPOS_403 = (
     ("Tula", "Tulane", "Tulsa"),
     ("ULA", "Tulane", "UCLA"),
-    ("UF", "Buffalo", "UCF"),
+    # "UF" left this list with #417: ingest's committed alias supplement
+    # gives it to Florida (see tests/test_ingest_team_alias_overrides.py).
     # "AUB" left this list with #411: it is Auburn's own CFBD alias, so it
     # resolves to Auburn (see test_issue_411_...), no longer a UAB typo.
     ("UB", "Auburn", "UAB"),
