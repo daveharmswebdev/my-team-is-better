@@ -53,6 +53,13 @@ it, the names derived from them were the lexical grounding check's
 catalog twice on a cache miss. `tests/test_verdict_catalog_reads.py` counts
 the reads on the request's own connection and checks that the records reach
 the narration layer intact.
+
+Issue #155 adds a third piece to each envelope, composed here after the
+narration and never handed to it: `other_method_ranks` (and, on /compare,
+one list per side), the `ratings.rank` of every other registered method that
+rated the team that season, from `api.repositories.ratings`. The persona's
+fact block and cache key are untouched by it
+(`tests/test_other_method_ranks.py`).
 """
 
 from __future__ import annotations
@@ -95,6 +102,7 @@ from api.persona.budget import CallBudget
 from api.persona.cache import NarrationCacheStore
 from api.persona.claude_client import Narrator
 from api.persona.service import narrate_comparison, narrate_team_case
+from api.repositories.ratings import other_method_ranks
 from api.repositories.teams import TeamRecord, list_team_records
 
 router = APIRouter(prefix="/api/verdict", tags=["verdict"])
@@ -261,7 +269,17 @@ def champion(
         narrator=narrator,
         budget=budget,
     )
-    return TeamCaseEnvelope(evidence=case_out, narration=narration)
+    return TeamCaseEnvelope(
+        evidence=case_out,
+        narration=narration,
+        other_method_ranks=other_method_ranks(
+            conn,
+            year=payload.year,
+            sport=payload.sport,
+            team_id=case_out.team_id,
+            method=payload.method,
+        ),
+    )
 
 
 @router.post("/team-case", response_model=TeamCaseEnvelope, responses=TEAM_CASE_ERROR_RESPONSES)
@@ -290,7 +308,17 @@ def team_case(
         narrator=narrator,
         budget=budget,
     )
-    return TeamCaseEnvelope(evidence=case_out, narration=narration)
+    return TeamCaseEnvelope(
+        evidence=case_out,
+        narration=narration,
+        other_method_ranks=other_method_ranks(
+            conn,
+            year=payload.year,
+            sport=payload.sport,
+            team_id=case_out.team_id,
+            method=payload.method,
+        ),
+    )
 
 
 @router.post("/compare", response_model=ComparisonEnvelope, responses=COMPARISON_ERROR_RESPONSES)
@@ -323,4 +351,21 @@ def compare(
         narrator=narrator,
         budget=budget,
     )
-    return ComparisonEnvelope(evidence=comparison_out, narration=narration)
+    return ComparisonEnvelope(
+        evidence=comparison_out,
+        narration=narration,
+        team_a_other_method_ranks=other_method_ranks(
+            conn,
+            year=payload.year,
+            sport=payload.sport,
+            team_id=comparison_out.team_a.team_id,
+            method=payload.method,
+        ),
+        team_b_other_method_ranks=other_method_ranks(
+            conn,
+            year=payload.year,
+            sport=payload.sport,
+            team_id=comparison_out.team_b.team_id,
+            method=payload.method,
+        ),
+    )
