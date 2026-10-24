@@ -153,6 +153,45 @@ PlayerSeasonType = Literal["regular", "postseason"]
 (nflverse's "REG"/"POST") is translated at ingest, never stored."""
 
 
+# ---------------------------------------------------------------------------
+# position groups (issue #428, epic #372 step 1): /nfl/compare compares a
+# player only with another of the same group.
+#
+# Founder decisions (#372, 2026-10-20): the group comes from the player's
+# `players.position` label (nflverse's single latest value), not from what
+# he did, so a running QB is a QB and Taysom Hill (TE) is a TE. This
+# iteration has QB, RB (FB included), WR and TE; every other label, and a
+# NULL one, has no group.
+#
+# Measured over the committed raw cache (players.csv, 24,824 rows): 25
+# labels, none of them an unmapped back or receiver spelling such as `HB`;
+# the stat CSVs add only ''.
+#
+# `search_players(..., group=...)` (players-agent) keeps only the rows whose
+# `group` equals it, applied before `limit`; group=None (the default) is
+# today's unfiltered search. A group outside `PlayerPositionGroup` raises
+# ValueError.
+# ---------------------------------------------------------------------------
+
+PlayerPositionGroup = Literal["QB", "RB", "WR", "TE"]
+"""The position groups /nfl/compare compares within, in display order."""
+
+POSITION_GROUP_BY_LABEL: Mapping[str, PlayerPositionGroup] = MappingProxyType(
+    {"QB": "QB", "RB": "RB", "FB": "RB", "WR": "WR", "TE": "TE"}
+)
+"""Every `players.position` label that has a group. A label missing here
+has none."""
+
+
+def position_group(position: str | None) -> PlayerPositionGroup | None:
+    """The group of a `players.position` label, or None for a label with no
+    group (K, LB, OT, ...) and for a NULL label. Exact match: labels are
+    stored as the source spells them, upper case."""
+    if position is None:
+        return None
+    return POSITION_GROUP_BY_LABEL.get(position)
+
+
 def _require_non_empty(value: str, row: str, name: str) -> None:
     if not value:
         raise ValueError(f"{row}.{name} must be non-empty")
@@ -700,6 +739,12 @@ class PlayerCareer:
     regular_season: PlayerCareerTotals | None
     postseason: PlayerCareerTotals | None
 
+    @property
+    def group(self) -> PlayerPositionGroup | None:
+        """`position_group(self.position)`: derived, so it can't disagree
+        with the label (#428)."""
+        return position_group(self.position)
+
 
 class UnknownPlayerError(ValueError):
     """Raised by `players.get_player_career` when no player has that id in
@@ -724,9 +769,11 @@ class UnknownPlayerError(ValueError):
 #       `a`, `b` (checked in that order) with no `players` row in that sport.
 #
 #   def search_players(conn: sqlite3.Connection, *, sport: Sport, query: str,
-#                      limit: int = 10) -> PlayerSearch: ...
-#       Raises ValueError unless 1 <= limit <= PLAYER_SEARCH_MAX_LIMIT and
-#       `query.strip()` has at least PLAYER_SEARCH_MIN_QUERY_LENGTH characters.
+#                      limit: int = 10,
+#                      group: PlayerPositionGroup | None = None) -> PlayerSearch: ...
+#       Raises ValueError unless 1 <= limit <= PLAYER_SEARCH_MAX_LIMIT,
+#       `query.strip()` has at least PLAYER_SEARCH_MIN_QUERY_LENGTH characters,
+#       and `group` is None or a `PlayerPositionGroup` (#428).
 #
 # Rules:
 #   * `PlayerComparison.a` and `.b` equal `get_player_career` for those ids.
@@ -805,6 +852,11 @@ class PlayerSearchRow:
     # so two players with one name can be told apart.
     first_season: int
     last_season: int
+
+    @property
+    def group(self) -> PlayerPositionGroup | None:
+        """`position_group(self.position)` (#428)."""
+        return position_group(self.position)
 
 
 @dataclass(frozen=True)
