@@ -43,7 +43,10 @@ export interface VerdictModalProps {
  * - **Focus** moves to the close button on open. It goes back there whenever
  *   the element holding it disappears, for example a correction pill
  *   replaced by the loading state. Returning focus after close is the
- *   parent's job, since only the parent knows where it should go.
+ *   parent's job, since only the parent knows where it should go. It must
+ *   happen in an effect (as `HomePage` and `PlayerComparePage` do), which
+ *   runs after `ModalDialog` has closed the dialog: until then the page is
+ *   inert and a `focus()` call there does nothing (#216).
  */
 export function VerdictModal({
   open,

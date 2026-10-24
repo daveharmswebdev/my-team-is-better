@@ -23,6 +23,16 @@ export interface ModalDialogProps {
    * disappears. Without it, the browser's `showModal()` default applies.
    */
   initialFocusRef?: RefObject<HTMLElement | null>
+  /**
+   * Where focus goes when the parent closes the dialog, right after
+   * `close()`. It can't be done any earlier: while the dialog is open,
+   * everything outside it is inert, so a `focus()` call there does nothing.
+   * Without it, the browser restores focus to whatever held it before
+   * `showModal()`, which may be nothing (a tap on Safari/iOS doesn't focus
+   * the button tapped). A parent that restores focus itself must do it in
+   * an effect, which runs after this component's.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>
   className?: string
   id?: string
   'aria-label'?: string
@@ -87,14 +97,16 @@ function tabbablesIn(dialog: HTMLDialogElement): HTMLElement[] {
  *   up the component tree even though the DOM events don't bubble, and a
  *   click on the inner backdrop bubbles -- are ignored here.
  * - **Focus** goes to `initialFocusRef` on open, and back there whenever the
- *   element holding it disappears. Returning focus after close is the
- *   parent's job, since only the parent knows where it should go.
+ *   element holding it disappears. On close it goes to `returnFocusRef`,
+ *   once the dialog is closed and the page is no longer inert. Without one,
+ *   returning focus is the parent's job, in an effect.
  */
 export function ModalDialog({
   open,
   onClose,
   children,
   initialFocusRef,
+  returnFocusRef,
   className,
   id,
   'aria-label': ariaLabel,
@@ -122,8 +134,10 @@ export function ModalDialog({
       dialog.showModal()
     } else if (!open && dialog.open) {
       dialog.close()
+      returnFocusRef?.current?.focus()
     }
-  }, [open])
+    // A ref object is stable, and a rerun with `open` unchanged does nothing.
+  }, [open, returnFocusRef])
 
   // Runs after every render. While open, focus belongs inside. If it isn't
   // there (just opened, or its element was replaced), put it back.
@@ -175,10 +189,16 @@ export function ModalDialog({
   /**
    * The dialog closed without the parent asking, which a browser can do
    * without a `cancel` event. The parent hears about it, so its state and the
-   * page agree again.
+   * page agree again. The event comes in a later task, so after a quick
+   * close and reopen it can arrive stale, on a dialog that is open again:
+   * that one is ignored.
    */
   function handleNativeClose(event: SyntheticEvent<HTMLDialogElement>) {
-    if (event.target === event.currentTarget && openRef.current) {
+    if (
+      event.target === event.currentTarget &&
+      !event.currentTarget.open &&
+      openRef.current
+    ) {
       onCloseRef.current()
     }
   }

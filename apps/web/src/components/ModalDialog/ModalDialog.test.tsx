@@ -117,6 +117,52 @@ describe('ModalDialog (issue #216)', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('ignores a close event that arrives after it has opened again', () => {
+    // The browser fires `close` in a later task. A quick close-then-reopen
+    // means that stale event lands on a dialog that is open again.
+    const onClose = vi.fn()
+    render(<Example onClose={onClose} />)
+
+    screen.getByRole('dialog').dispatchEvent(new Event('close'))
+
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('focuses returnFocusRef once the parent has closed it', () => {
+    function WithReturn({ open }: { open: boolean }) {
+      const returnRef = useRef<HTMLButtonElement>(null)
+      return (
+        <>
+          <button ref={returnRef} type="button">
+            Opener
+          </button>
+          <ModalDialog
+            open={open}
+            onClose={vi.fn()}
+            aria-label="Returns"
+            returnFocusRef={returnRef}
+          >
+            <button type="button">Inside</button>
+          </ModalDialog>
+        </>
+      )
+    }
+    const close = vi.spyOn(HTMLDialogElement.prototype, 'close')
+    const { rerender } = render(<WithReturn open />)
+    const opener = screen.getByRole('button', { name: 'Opener' })
+    const focus = vi.spyOn(opener, 'focus')
+
+    rerender(<WithReturn open={false} />)
+
+    expect(opener).toHaveFocus()
+    expect(focus).toHaveBeenCalledTimes(1)
+    // After the dialog closed, never before: an open modal's page is inert.
+    expect(close.mock.invocationCallOrder[0]).toBeLessThan(
+      focus.mock.invocationCallOrder[0] ?? 0,
+    )
+    close.mockRestore()
+  })
+
   describe('with a modal dialog open inside it', () => {
     function renderNested() {
       const outerClose = vi.fn()

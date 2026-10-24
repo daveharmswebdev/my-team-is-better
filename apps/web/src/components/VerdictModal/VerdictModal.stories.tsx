@@ -353,7 +353,9 @@ export const TouchRatingPanelIsModal: Story = {
       name: 'The verdict',
     })
     const trigger = within(verdict).getByRole('button', { name: '1,661' })
-    await userEvent.click(trigger)
+    // A tap that never focuses the trigger, as on Safari and iOS.
+    trigger.blur()
+    trigger.click()
     const panel = await within(verdict).findByRole('dialog', {
       name: 'Texas Elo rating, game by game',
     })
@@ -377,6 +379,18 @@ export const TouchRatingPanelIsModal: Story = {
     )
     await expect(args.onClose).not.toHaveBeenCalled()
     await expect(verdict).toHaveAttribute('open')
+    // Back on the rating, not on the verdict's close button or the page.
+    await expect(trigger).toHaveFocus()
+
+    trigger.blur()
+    trigger.click()
+    const reopened = await within(verdict).findByRole('dialog', {
+      name: 'Texas Elo rating, game by game',
+    })
+    await userEvent.click(
+      within(reopened).getByRole('button', { name: /close/i }),
+    )
+    await expect(args.onClose).not.toHaveBeenCalled()
     await expect(trigger).toHaveFocus()
   },
 }

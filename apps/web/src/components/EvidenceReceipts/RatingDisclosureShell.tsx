@@ -234,11 +234,6 @@ export function RatingDisclosureShell({
     setOpen(false)
   }
 
-  function closeAndRefocus() {
-    close()
-    triggerRef.current?.focus()
-  }
-
   // Desktop: hover shows/hides the popover. On a touch device there is no
   // hover, so these are no-ops there (tap uses handleTriggerClick instead).
   function handleMouseEnter() {
@@ -317,7 +312,7 @@ export function RatingDisclosureShell({
             ref={closeButtonRef}
             type="button"
             className={styles.closeButton}
-            onClick={closeAndRefocus}
+            onClick={close}
             aria-label={closeLabel}
           >
             &times;
@@ -363,8 +358,12 @@ export function RatingDisclosureShell({
       {isTouch && (
         <ModalDialog
           open={open}
-          onClose={closeAndRefocus}
+          onClose={close}
           initialFocusRef={closeButtonRef}
+          // Focus goes back to the trigger only once the modal has closed:
+          // while it is open the trigger is inert and can't take focus, and
+          // a tap on Safari/iOS never focused it for the browser to restore.
+          returnFocusRef={triggerRef}
           id={panelId}
           aria-label={title}
           className={classes(styles.overlay, framed && styles.framed)}
