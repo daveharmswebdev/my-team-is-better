@@ -64,6 +64,9 @@ BRANCH_PREFIX = "worktree-agent-"
 ARCHIVE_PREFIX = "refs/archive/worktree-agent/"
 DEFAULT_MAIN = "origin/main"
 DEFAULT_MIN_AGE_HOURS = 24.0
+MAIN_BRANCH = "main"  # the base a PR must have merged into for the gh check
+# Per call; /orient runs this at session start, so a slow gh mustn't stall it long.
+GH_TIMEOUT_SECONDS = 15
 
 CURRENT = "the worktree this command runs in"
 LOCKED = "locked"
@@ -106,18 +109,33 @@ def _in_main(repo: Path, main_ref: str, rev: str) -> bool:
 
 
 def merged_pr_via_gh(repo: Path, sha: str) -> int | None:
-    """The number of a merged PR whose commits include `sha`, or None. Search alone can
-    match the sha in a PR's text, so the PR's commit list must hold it too."""
+    """The number of a PR merged into main whose commits include `sha`, or None. Search
+    alone can match the sha in a PR's text, so the PR's commit list must hold it too,
+    and a PR merged into another branch (a stacked PR's base) doesn't count."""
     try:
         result = subprocess.run(
-            ["gh", "pr", "list", "--state", "merged", "--search", sha, "--json", "number,commits"],
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "merged",
+                "--base",
+                MAIN_BRANCH,
+                "--search",
+                sha,
+                "--json",
+                "number,baseRefName,commits",
+            ],
             cwd=repo,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=GH_TIMEOUT_SECONDS,
         )
         prs = json.loads(result.stdout) if result.returncode == 0 else []
         for pr in prs:
+            if pr.get("baseRefName") != MAIN_BRANCH:
+                continue
             if any(commit.get("oid") == sha for commit in pr.get("commits", [])):
                 return int(pr["number"])
     except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, AttributeError):

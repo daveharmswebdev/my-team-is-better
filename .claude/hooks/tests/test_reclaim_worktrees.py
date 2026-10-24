@@ -352,9 +352,13 @@ def test_no_github_flag_skips_the_lookup(repo: Path, no_github: list[str]) -> No
 @pytest.mark.parametrize(
     ("returncode", "stdout", "expected"),
     [
-        (0, '[{"number": 383, "commits": [{"oid": "TIP"}, {"oid": "other"}]}]', 383),
+        (0, '[{"number": 383, "baseRefName": "main", "commits": [{"oid": "TIP"}]}]', 383),
         # Search matched the sha in some other text, but the PR doesn't hold the commit.
-        (0, '[{"number": 12, "commits": [{"oid": "other"}]}]', None),
+        (0, '[{"number": 12, "baseRefName": "main", "commits": [{"oid": "other"}]}]', None),
+        # Merged into a feature branch (a stacked PR), so its work isn't in main.
+        (0, '[{"number": 9, "baseRefName": "issue-1", "commits": [{"oid": "TIP"}]}]', None),
+        # A failed gh never counts, whatever it printed.
+        (1, '[{"number": 383, "baseRefName": "main", "commits": [{"oid": "TIP"}]}]', None),
         (0, "[]", None),
         # gh missing, offline or unauthenticated: every error keeps.
         (1, "", None),
@@ -379,6 +383,7 @@ def test_merged_pr_via_gh_parses_and_fails_closed(
     assert rw.merged_pr_via_gh(tmp_path, "TIP") == expected
     assert calls and calls[0][:4] == ["gh", "pr", "list", "--state"]
     assert "TIP" in calls[0]
+    assert calls[0][calls[0].index("--base") + 1] == "main"
 
 
 def test_merged_pr_via_gh_without_gh_installed(
