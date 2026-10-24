@@ -16,6 +16,7 @@ them.
 from __future__ import annotations
 
 import itertools
+import shutil
 import sqlite3
 import typing
 from collections import Counter
@@ -36,7 +37,7 @@ from cfb_strength.contracts import (
     UnknownTeamError,
     UnknownYearError,
 )
-from cfb_strength.db.connection import ensure_schema
+from cfb_strength.db.connection import ensure_schema, get_conn
 from cfb_strength.evidence import proof
 from cfb_strength.evidence.proof import (
     build_comparison,
@@ -45,6 +46,7 @@ from cfb_strength.evidence.proof import (
     resolve_team,
 )
 from cfb_strength.ratings.compute_ratings import compute_and_store
+from tests.conftest import NFL_REGRESSION_FIXTURE_DB, REGRESSION_FIXTURE_DB
 
 
 @pytest.fixture
@@ -630,6 +632,117 @@ def test_miami_with_a_trailing_word_asks_instead_of_answering_miami(
     with pytest.raises(AmbiguousTeamError) as exc_info:
         resolve_team(rated_conn, 2005, "Miami FL", method="keener")
     assert "Miami" in exc_info.value.candidates
+
+
+# ---------------------------------------------------------------------------
+# issue #398 -- the fuzzy stage never answers with a different school because
+# the query and the name share a common word (" State", "St", a city prefix).
+# Every wrong case below was measured resolving silently on 54236e5.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def rated_398_conns(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> typing.Iterator[dict[str, sqlite3.Connection]]:
+    """Copies of both regression fixtures, rated for CFB 2005/2019 and NFL
+    2022 by the real pipeline, shared by this section's cases (each case
+    only reads, so one rating run per module is enough)."""
+    out = tmp_path_factory.mktemp("issue_398")
+    conns: dict[str, sqlite3.Connection] = {}
+    for sport, src in (("cfb", REGRESSION_FIXTURE_DB), ("nfl", NFL_REGRESSION_FIXTURE_DB)):
+        dest = out / src.name
+        shutil.copy(src, dest)
+        conns[sport] = get_conn(dest)
+    compute_and_store(conns["cfb"], 2005, "keener")
+    compute_and_store(conns["cfb"], 2019, "keener")
+    compute_and_store(conns["nfl"], 2022, "keener", sport="nfl")
+    yield conns
+    for c in conns.values():
+        c.close()
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "query", "wrong"),
+    [
+        ("cfb", 2005, "Wichita State", "Michigan State"),
+        ("cfb", 2005, "West State", "Kent State"),
+        ("cfb", 2005, "New State", "NC State"),
+        ("cfb", 2005, "SE State", "Boise State"),
+        ("cfb", 2005, "The State", "Utah State"),
+        ("cfb", 2005, "Northeastern St", "Northwestern"),
+        ("cfb", 2005, "Southern St", "Southern Miss"),
+        ("cfb", 2005, "Southern St.", "Southern Miss"),
+        ("cfb", 2019, "Wichita State", "Michigan State"),
+        ("cfb", 2019, "Northeastern St", "Northwestern"),
+        ("cfb", 2019, "Southern St", "Southern Miss"),
+        ("cfb", 2019, "Southern St.", "Southern Miss"),
+        ("nfl", 2022, "Pittsburgh St", "Pittsburgh Steelers"),
+        ("nfl", 2022, "Pittsburgh State", "Pittsburgh Steelers"),
+        ("nfl", 2022, "Indianapolis St", "Indianapolis Colts"),
+        ("nfl", 2022, "Indianapolis St.", "Indianapolis Colts"),
+        ("nfl", 2022, "Jacksonville St", "Jacksonville Jaguars"),
+    ],
+)
+def test_a_shared_common_word_never_fuzzy_resolves_to_another_school(
+    rated_398_conns: dict[str, sqlite3.Connection],
+    sport: Sport,
+    year: int,
+    query: str,
+    wrong: str,
+) -> None:
+    """None of these queries names a rated team; each scored >= 0.8 against
+    a different school only through the word they share ("State", or the
+    city of an NFL "City Nickname"). It asks or is unknown, never an
+    answer."""
+    conn = rated_398_conns[sport]
+    try:
+        team_id = resolve_team(conn, year, query, method="keener", sport=sport)
+    except (AmbiguousTeamError, UnknownTeamError):
+        return
+    name = conn.execute("SELECT school FROM teams WHERE id = ?", (team_id,)).fetchone()[0]
+    pytest.fail(f"{query!r} resolved silently to {name!r} (measured on base: {wrong!r})")
+
+
+@pytest.mark.parametrize(
+    ("sport", "year", "query", "intended"),
+    [
+        ("cfb", 2005, "Alabma", "Alabama"),
+        ("cfb", 2005, "Michgan State", "Michigan State"),
+        ("cfb", 2005, "Oklaoma State", "Oklahoma State"),
+        ("cfb", 2005, "Kent Stae", "Kent State"),
+        ("cfb", 2005, "Kemt State", "Kent State"),
+        ("cfb", 2005, "Bal State", "Ball State"),
+        ("cfb", 2005, "Penn Sate", "Penn State"),
+        ("cfb", 2005, "Boise Stat", "Boise State"),
+        ("cfb", 2005, "Mississippi Stte", "Mississippi State"),
+        ("cfb", 2005, "Bostn College", "Boston College"),
+        ("cfb", 2005, "Boston Colege", "Boston College"),
+        ("cfb", 2005, "Georga Tech", "Georgia Tech"),
+        ("cfb", 2005, "Wscnsn", "Wisconsin"),
+        ("cfb", 2019, "Michgan State", "Michigan State"),
+        ("nfl", 2022, "Pittsburgh Steelrs", "Pittsburgh Steelers"),
+        ("nfl", 2022, "Pittsburg Steelers", "Pittsburgh Steelers"),
+        ("nfl", 2022, "Indianaplis Colts", "Indianapolis Colts"),
+        ("nfl", 2022, "Jacksonvile Jaguars", "Jacksonville Jaguars"),
+        ("nfl", 2022, "Kansas Cty Chiefs", "Kansas City Chiefs"),
+        ("nfl", 2022, "Green Bay Packrs", "Green Bay Packers"),
+        ("nfl", 2022, "New York Jest", "New York Jets"),
+        ("nfl", 2022, "Dallas Cowbys", "Dallas Cowboys"),
+    ],
+)
+def test_real_typos_still_fuzzy_resolve_after_398(
+    rated_398_conns: dict[str, sqlite3.Connection],
+    sport: Sport,
+    year: int,
+    query: str,
+    intended: str,
+) -> None:
+    """Each of these resolved to the intended team on base (54236e5); the
+    #398 guard must not turn them into questions."""
+    conn = rated_398_conns[sport]
+    expected = resolve_team(conn, year, intended, method="keener", sport=sport)
+    assert resolve_team(conn, year, query, method="keener", sport=sport) == expected
 
 
 # ---------------------------------------------------------------------------
