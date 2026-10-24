@@ -722,6 +722,62 @@ def test_state_abbreviation_never_fuzzy_resolves_to_an_nfl_team(tmp_path: Path) 
     assert exc_info.value.candidates == ["Pittsburgh Steelers"]
 
 
+@pytest.mark.parametrize(
+    ("query", "wrong"),
+    [
+        ("Wichita State", "Michigan State"),
+        ("West State", "Kent State"),
+        ("New State", "NC State"),
+        ("SE State", "Boise State"),
+        ("Wichita Stae", "Michigan State"),
+    ],
+)
+def test_a_shared_state_word_never_fuzzy_resolves(
+    abbrev_conn: sqlite3.Connection, query: str, wrong: str
+) -> None:
+    """#398: "Wichita State" scores >= 0.8 against "Michigan State" only
+    through the " State" they share; the distinctive parts ("Wichita",
+    "Michigan") are far apart. It asks or is unknown, never an answer."""
+    try:
+        team_id = resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD)
+    except (AmbiguousTeamError, UnknownTeamError):
+        return
+    pytest.fail(f"{query!r} resolved silently to {_ABBREV_SCHOOLS.get(team_id)!r} (not {wrong!r})")
+
+
+@pytest.mark.parametrize("query", ["Pittsburgh St", "Pittsburgh State", "Pittsburgh Tech"])
+def test_a_shared_city_with_a_school_word_never_fuzzy_resolves_to_an_nfl_team(
+    tmp_path: Path, query: str
+) -> None:
+    """#398: "Pittsburgh St" scored 0.8125 against "Pittsburgh Steelers"
+    through the city alone. A query ending in a school word (State, St,
+    Tech, College) that the name lacks names some other team: it asks."""
+    c = get_conn(_make_db(tmp_path))
+    for tid, school in ((401, "Pittsburgh Steelers"), (402, "Kansas City Chiefs")):
+        _insert_team(c, tid, school, sport="nfl")
+        _insert_rating(c, ABBREV_YEAR, METHOD, tid, 0.5, tid - 400, 0, 0, sport="nfl")
+    c.commit()
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(c, ABBREV_YEAR, query, method=METHOD, sport="nfl")
+    assert exc_info.value.candidates == ["Pittsburgh Steelers"]
+
+
+@pytest.mark.parametrize(
+    ("query", "intended"),
+    [
+        ("Kent Stae", "Kent State"),
+        ("Michgan State", "Michigan State"),
+        ("Kemt State", "Kent State"),
+    ],
+)
+def test_typos_of_a_state_school_still_resolve(
+    abbrev_conn: sqlite3.Connection, query: str, intended: str
+) -> None:
+    """A typo in either part of "<X> State" still resolves (#398 must not
+    turn them into questions)."""
+    assert resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD) == _id_of(intended)
+
+
 @pytest.mark.parametrize("school", list(_ABBREV_SCHOOLS.values()))
 def test_exact_names_still_resolve(abbrev_conn: sqlite3.Connection, school: str) -> None:
     assert resolve_team(abbrev_conn, ABBREV_YEAR, school, method=METHOD) == _id_of(school)
