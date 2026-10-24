@@ -528,8 +528,12 @@ def resolve_team(
     rating row for `year`/`method`/`sport` (a team without a rating can't have
     a TeamCase built for it anyway).
 
-    Before any stage after the first, a trailing "St." or "St" word in the
-    query is read as "State" ("Ohio St." -> "Ohio State"; issue #393).
+    Stages 2-4 also read a trailing "St." or "St" word in the query as
+    "State" ("Ohio St." -> "Ohio State"; issue #393). Stage 5 never does:
+    the fuzzy stage scores the query as typed, because an expanded "<X>
+    State" scores high against every other "... State" ("Wichita St." would
+    resolve to Michigan State). The expansion resolves only through the
+    loose-exact stage 2; any other match it finds asks.
 
     Resolution order:
       1. Exact match (case-insensitive, whitespace-trimmed), as typed.
@@ -540,14 +544,17 @@ def resolve_team(
          has no rating row here, exactly or in the loose sense of stage 2
          -> UnknownTeamError (issue #123).
       4. Substring match, case-insensitive, on the expanded query. A query
-         inside rated names: one hit resolves, several ask. A rated name
+         inside rated names: several hits ask; one hit resolves only when the
+         query as typed is inside it, and asks when only the expanded form
+         is ("SE St." -> "SE State" sits inside "Boise State"). A rated name
          inside the query (the reverse direction) never resolves on its
          own (#393: "Miami FL" contains "Miami" but is a guess) -- any such
          hit asks, listing every substring hit plus the fuzzy stage's close
          names. Only a query that differs from a name by whitespace or
          punctuation alone resolves to it, and stage 2 already did that.
-      5. Fuzzy match (difflib ratio, the better of case-sensitive and
-         lowercased): resolves only when the top name scores
+      5. Fuzzy match on the query as typed, never the expanded form
+         (difflib ratio, the better of case-sensitive and lowercased):
+         resolves only when the top name scores
          >= FUZZY_RESOLVE_CUTOFF and the runner-up < FUZZY_RUNNER_UP_CUTOFF;
          any other result with a name >= FUZZY_MATCH_CUTOFF asks, listing
          at most FUZZY_MATCH_LIMIT of them.
@@ -573,11 +580,13 @@ def resolve_team(
     if len(exact) > 1:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in exact))
 
-    # Issue #393: "Ohio St." is Ohio State. Every later stage works on the
-    # expanded query, so the substring stage can't find "ohio" inside it.
-    q = _expand_state_abbreviation(q)
-    q_lower = q.lower()
-    loose_forms = {_loose(query), _loose(q)} - {""}
+    # Issue #393: "Ohio St." is Ohio State. The loose, known-team and
+    # substring stages work on the expanded query, so the substring stage
+    # can't find "ohio" inside it. The fuzzy stage keeps `q` as typed: an
+    # expanded "Wichita State" scores 0.8+ against "Michigan State".
+    expanded = _expand_state_abbreviation(q)
+    e_lower = expanded.lower()
+    loose_forms = {_loose(query), _loose(expanded)} - {""}
 
     loose = [row for row in candidates if _loose(str(row["school"])) in loose_forms]
     if len(loose) == 1:
@@ -593,11 +602,11 @@ def resolve_team(
     if _is_known_team(conn, query.strip().lower(), loose_forms, sport):
         raise UnknownTeamError(query, year, sport)
 
-    forward = [row for row in candidates if q_lower in row["school"].lower()]
+    forward = [row for row in candidates if e_lower in row["school"].lower()]
     reverse = [
         row
         for row in candidates
-        if row["school"].lower() in q_lower and q_lower not in row["school"].lower()
+        if row["school"].lower() in e_lower and e_lower not in row["school"].lower()
     ]
     scored = _fuzzy_scores(q, candidates)
     # A name scoring below FUZZY_MATCH_CUTOFF is no match; the cap keeps a
@@ -611,9 +620,12 @@ def resolve_team(
         # lead, so the intended school can be picked.
         offered = {str(r["school"]) for r in forward + reverse + close}
         raise AmbiguousTeamError(query, sorted(offered))
-    if len(forward) == 1:
+    # A lone forward hit resolves only when the query as typed is inside the
+    # name. One found only through the expansion asks: "SE St." expands to
+    # "SE State", which sits inside "Boise State" (#393 round 2).
+    if len(forward) == 1 and q_lower in forward[0]["school"].lower():
         return int(forward[0]["team_id"])
-    if len(forward) > 1:
+    if forward:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in forward))
 
     top_score = scored[0][0] if scored else 0.0

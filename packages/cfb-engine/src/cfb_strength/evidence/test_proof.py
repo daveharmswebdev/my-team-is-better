@@ -564,6 +564,10 @@ _ABBREV_SCHOOLS = {
     208: "Kansas",
     209: "Kansas State",
     210: "Arkansas State",
+    211: "Kent State",
+    212: "NC State",
+    213: "Boise State",
+    214: "Iowa State",
 }
 
 
@@ -668,6 +672,54 @@ def test_state_abbreviation_of_a_known_unrated_school_is_unknown(
     for query in ("Ohio St.", "Ohio St", "Ohio-State"):
         with pytest.raises(UnknownTeamError):
             resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD)
+
+
+@pytest.mark.parametrize(
+    ("query", "wrong"),
+    [
+        ("Wichita St.", "Michigan State"),
+        ("West St.", "Kent State"),
+        ("East St.", "Kent State"),
+        ("New St.", "NC State"),
+        ("SE St.", "Boise State"),
+    ],
+)
+def test_state_abbreviation_of_an_unrated_school_never_fuzzy_resolves(
+    abbrev_conn: sqlite3.Connection, query: str, wrong: str
+) -> None:
+    """#393 round 2: the expanded "Wichita State" scores >= 0.8 against
+    "Michigan State", so fuzzy-matching the expanded form silently answered
+    a different school. The fuzzy stage scores the query as typed, so with
+    no Wichita State rated it asks or is unknown -- never an answer."""
+    try:
+        team_id = resolve_team(abbrev_conn, ABBREV_YEAR, query, method=METHOD)
+    except (AmbiguousTeamError, UnknownTeamError):
+        return
+    pytest.fail(f"{query!r} resolved silently to {_ABBREV_SCHOOLS.get(team_id)!r} (not {wrong!r})")
+
+
+def test_short_state_abbreviation_asks_with_only_the_state_school(
+    abbrev_conn: sqlite3.Connection,
+) -> None:
+    """ "Mich St." matches nothing exactly; as typed it fuzzy-matches only
+    Michigan State, as on base. Scoring the expanded "Mich State" offered
+    every "X State" in the pool instead."""
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(abbrev_conn, ABBREV_YEAR, "Mich St.", method=METHOD)
+    assert exc_info.value.candidates == ["Michigan State"]
+
+
+def test_state_abbreviation_never_fuzzy_resolves_to_an_nfl_team(tmp_path: Path) -> None:
+    """NFL pool: "Pittsburgh St." expanded is "Pittsburgh State", which
+    scores >= 0.8 against "Pittsburgh Steelers". It asks (as on base)."""
+    c = get_conn(_make_db(tmp_path))
+    for tid, school in ((401, "Pittsburgh Steelers"), (402, "Kansas City Chiefs")):
+        _insert_team(c, tid, school, sport="nfl")
+        _insert_rating(c, ABBREV_YEAR, METHOD, tid, 0.5, tid - 400, 0, 0, sport="nfl")
+    c.commit()
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(c, ABBREV_YEAR, "Pittsburgh St.", method=METHOD, sport="nfl")
+    assert exc_info.value.candidates == ["Pittsburgh Steelers"]
 
 
 @pytest.mark.parametrize("school", list(_ABBREV_SCHOOLS.values()))

@@ -583,6 +583,45 @@ def test_texas_st_is_texas_state_never_texas(regression_conn: sqlite3.Connection
         resolve_team(regression_conn, 2005, "Texas St.", method="keener")
 
 
+@pytest.mark.parametrize(
+    ("year", "query", "wrong"),
+    [
+        (2005, "Wichita St.", "Michigan State"),
+        (2005, "West St.", "Kent State"),
+        (2005, "East St.", "Kent State"),
+        (2005, "New St.", "NC State"),
+        (2005, "SE St.", "Boise State"),
+        (2019, "Wichita St.", "Michigan State"),
+    ],
+)
+def test_state_abbreviation_never_fuzzy_resolves_to_another_state_school(
+    regression_conn: sqlite3.Connection, year: int, query: str, wrong: str
+) -> None:
+    """#393 round 2, measured by the reviewer: fuzzy-matching the expanded
+    "<X> State" resolved each of these to a different real school."""
+    compute_and_store(regression_conn, year, "keener")
+    wrong_id = resolve_team(regression_conn, year, wrong, method="keener")
+    try:
+        team_id = resolve_team(regression_conn, year, query, method="keener")
+    except (AmbiguousTeamError, UnknownTeamError):
+        return
+    assert team_id != wrong_id, f"{query!r} resolved silently to {wrong!r}"
+    pytest.fail(f"{query!r} resolved silently to team_id {team_id}")
+
+
+def test_mich_st_asks_with_only_michigan_state(rated_conn: sqlite3.Connection) -> None:
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(rated_conn, 2005, "Mich St.", method="keener")
+    assert exc_info.value.candidates == ["Michigan State"]
+
+
+def test_pittsburgh_st_is_not_the_steelers(nfl_regression_conn: sqlite3.Connection) -> None:
+    compute_and_store(nfl_regression_conn, 2022, "keener", sport="nfl")
+    with pytest.raises(AmbiguousTeamError) as exc_info:
+        resolve_team(nfl_regression_conn, 2022, "Pittsburgh St.", method="keener", sport="nfl")
+    assert exc_info.value.candidates == ["Pittsburgh Steelers"]
+
+
 def test_miami_with_a_trailing_word_asks_instead_of_answering_miami(
     rated_conn: sqlite3.Connection,
 ) -> None:
