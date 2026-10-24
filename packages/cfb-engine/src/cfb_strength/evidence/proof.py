@@ -11,6 +11,7 @@ import-linter's independence contract).
 from __future__ import annotations
 
 import difflib
+import json
 import sqlite3
 from typing import Literal, cast
 
@@ -566,8 +567,8 @@ def resolve_team(
     rating row for `year`/`method`/`sport` (a team without a rating can't have
     a TeamCase built for it anyway).
 
-    Stages 2-4 also read a trailing "St." or "St" word in the query as
-    "State" ("Ohio St." -> "Ohio State"; issue #393). Stage 5 never does:
+    Stages 2, 4 and 5 also read a trailing "St." or "St" word in the query
+    as "State" ("Ohio St." -> "Ohio State"; issue #393). Stage 6 never does:
     the fuzzy stage scores the query as typed, because an expanded "<X>
     State" scores high against every other "... State" ("Wichita St." would
     resolve to Michigan State). The expansion resolves only through the
@@ -578,10 +579,17 @@ def resolve_team(
       2. Loose exact match: the query, as typed or with "St." expanded,
          equals a rated name once case, whitespace and punctuation are
          ignored ("Ohio St." -> Ohio State, "Miami OH" -> Miami (OH)).
-      3. Known but unrated: the query names a `teams` row of this sport that
+      3. Alias match (issue #411): the query, case-insensitive and
+         whitespace-trimmed, equals an entry of a rated team's
+         `teams.alternate_names` (CFBD's "UK" -> Kentucky, "UGA" ->
+         Georgia). One rated team carrying it resolves; several ask, listing
+         them. Unrated teams' aliases are never read ("UF" is only
+         Findlay's, so it falls through unchanged). After stages 1-2, so a
+         school's own name beats another team's identical alias.
+      4. Known but unrated: the query names a `teams` row of this sport that
          has no rating row here, exactly or in the loose sense of stage 2
          -> UnknownTeamError (issue #123).
-      4. Substring match, case-insensitive, on the expanded query. A query
+      5. Substring match, case-insensitive, on the expanded query. A query
          inside rated names: one hit resolves only when the query as typed
          is inside it, starts on a word of it, and no other rated name is
          one edit from the query (#403: "Tula" starts Tulane but is a typo
@@ -590,16 +598,16 @@ def resolve_team(
          part agrees with the name's ("hio State" in Ohio State), and a
          query of MID_WORD_TAIL_MIN_CHARS+ characters with no school word
          that runs to the end of the name ("Cuse" -> Syracuse). Any
-         other forward hit asks and never reaches stage 5, listing every
-         hit and one-edit rival, plus stage 5's close names when the hits
-         are all mid-word ("SC" in USC, "oston" in Boston College; "SE St."
+         other forward hit asks and never reaches stage 6, listing every
+         hit and one-edit rival, plus stage 6's close names when the hits
+         are all mid-word ("MU" in SMU, "oston" in Boston College; "SE St."
          -> "SE State" sits mid-word in "Boise State"). A rated name
          inside the query (the reverse direction) never resolves on its
          own (#393: "Miami FL" contains "Miami" but is a guess) -- any such
          hit asks, listing every substring hit plus the fuzzy stage's close
          names. Only a query that differs from a name by whitespace or
          punctuation alone resolves to it, and stage 2 already did that.
-      5. Fuzzy match on the query as typed, never the expanded form
+      6. Fuzzy match on the query as typed, never the expanded form
          (difflib ratio, the better of case-sensitive and lowercased):
          resolves only when the top name scores
          >= FUZZY_RESOLVE_CUTOFF, the runner-up < FUZZY_RUNNER_UP_CUTOFF,
@@ -642,6 +650,16 @@ def resolve_team(
         return int(loose[0]["team_id"])
     if len(loose) > 1:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in loose))
+
+    # Issue #411: the query is an abbreviation CFBD stores for a rated team
+    # ("UK" -> Kentucky, "UGA" -> Georgia). Rated teams only: an unrated
+    # team's alias ("UF" is Findlay's) neither answers nor reaches the
+    # known-team guard below. Several rated teams carrying it is a question.
+    aliased = _rated_alias_hits(conn, year, method, sport, q_lower)
+    if len(aliased) == 1:
+        return aliased[0][0]
+    if len(aliased) > 1:
+        raise AmbiguousTeamError(query, sorted(school for _, school in aliased))
 
     # Issue #123: the query names a real team of this sport that has no rating
     # row for year/method -- an FCS school in a season it wasn't rated, or a
@@ -751,6 +769,51 @@ def _expand_state_abbreviation(q: str) -> str:
     if len(words) >= 2 and words[-1].lower() in ("st", "st."):
         words[-1] = "State"
     return " ".join(words) if len(words) >= 2 else q
+
+
+def _decode_alternate_names(raw: object) -> tuple[str, ...]:
+    """A `teams.alternate_names` value as its alias strings. NULL, '', '[]'
+    and anything that isn't a JSON array of strings decode to no aliases:
+    the column is search metadata ingest fills from CFBD, and a malformed
+    value must not break name lookup (apps/api's teams repository reads it
+    the same way)."""
+    if not isinstance(raw, str) or not raw.strip():
+        return ()
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return ()
+    if not isinstance(decoded, list):
+        return ()
+    return tuple(alias for alias in decoded if isinstance(alias, str) and alias)
+
+
+def _rated_alias_hits(
+    conn: sqlite3.Connection, year: int, method: str, sport: str, q_lower: str
+) -> list[tuple[int, str]]:
+    """(team_id, school) of every team rated for year/method/sport whose
+    `alternate_names` holds `q_lower` (case-insensitive, trimmed; issue
+    #411). Scoped by sport like `_rated_teams` (#57/#58): an NFL team's
+    alias says nothing about a CFB query."""
+    if not q_lower:
+        return []
+    rows = conn.execute(
+        """
+        SELECT t.id AS team_id, t.school AS school, t.alternate_names AS alternate_names
+        FROM ratings r
+        JOIN teams t ON t.id = r.team_id
+        WHERE r.year = ? AND r.method = ? AND r.sport = ?
+        """,
+        (year, method, sport),
+    ).fetchall()
+    return [
+        (int(row["team_id"]), str(row["school"]))
+        for row in rows
+        if any(
+            alias.strip().lower() == q_lower
+            for alias in _decode_alternate_names(row["alternate_names"])
+        )
+    ]
 
 
 def _loose(name: str) -> str:
