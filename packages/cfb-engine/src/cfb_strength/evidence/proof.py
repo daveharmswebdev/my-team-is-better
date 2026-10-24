@@ -68,6 +68,36 @@ FUZZY_RESOLVE_CUTOFF = 0.8
 FUZZY_RUNNER_UP_CUTOFF = 0.75
 FUZZY_MATCH_LIMIT = 10
 
+# Issue #398: a whole-name score can clear FUZZY_RESOLVE_CUTOFF on a shared
+# common word alone ("Wichita State" vs "Michigan State" 0.815, "Pittsburgh
+# St" vs "Pittsburgh Steelers" 0.8125), so the fuzzy winner must also agree
+# with the query on its *distinctive* part before it may resolve. A trailing
+# word in this map is a school word, keyed to its class ("St" and "St." are
+# "State"):
+#
+# - both end in the same class: the parts before it must score
+#   >= FUZZY_TAIL_STRIPPED_CUTOFF ("Wichita" vs "Michigan" 0.667 asks,
+#   "Kemt" vs "Kent" 0.75 still resolves);
+# - only the query ends in one: the query names a school the name isn't
+#   ("Southern St" vs Southern Miss, "Jacksonville St" vs the Jaguars), so
+#   it asks;
+# - only the name ends in one: the query's last word is a typo of it when
+#   it scores >= FUZZY_TAIL_WORD_CUTOFF against that word ("Stae", "Colege"),
+#   and the first rule applies; otherwise the whole-name score stands.
+#
+# Never a reason to resolve, only to ask: a name failing this stays in the
+# "did you mean" list. Measured before/after on every one-edit typo of each
+# rated name (CFB 7 golden years, NFL 4): see the #398 PR for the table.
+COMMON_TAIL_WORDS = {
+    "state": "state",
+    "st": "state",
+    "st.": "state",
+    "tech": "tech",
+    "college": "college",
+}
+FUZZY_TAIL_STRIPPED_CUTOFF = 0.75
+FUZZY_TAIL_WORD_CUTOFF = 0.75
+
 # How `build_comparison`'s verdict prints a rating, per registered method
 # (issue #95). A rating's scale is the method's, so its precision is too:
 #
@@ -546,7 +576,9 @@ def resolve_team(
       4. Substring match, case-insensitive, on the expanded query. A query
          inside rated names: several hits ask; one hit resolves only when the
          query as typed is inside it, and asks when only the expanded form
-         is ("SE St." -> "SE State" sits inside "Boise State"). A rated name
+         is ("SE St." -> "SE State" sits inside "Boise State"), or when a
+         query ending in a school word starts mid-word in the name and its
+         distinctive part disagrees (typed "SE State"; #398). A rated name
          inside the query (the reverse direction) never resolves on its
          own (#393: "Miami FL" contains "Miami" but is a guess) -- any such
          hit asks, listing every substring hit plus the fuzzy stage's close
@@ -555,7 +587,9 @@ def resolve_team(
       5. Fuzzy match on the query as typed, never the expanded form
          (difflib ratio, the better of case-sensitive and lowercased):
          resolves only when the top name scores
-         >= FUZZY_RESOLVE_CUTOFF and the runner-up < FUZZY_RUNNER_UP_CUTOFF;
+         >= FUZZY_RESOLVE_CUTOFF, the runner-up < FUZZY_RUNNER_UP_CUTOFF,
+         and the two agree on more than a shared school word ("Wichita
+         State" is not Michigan State; issue #398, see COMMON_TAIL_WORDS);
          any other result with a name >= FUZZY_MATCH_CUTOFF asks, listing
          at most FUZZY_MATCH_LIMIT of them.
 
@@ -622,15 +656,30 @@ def resolve_team(
         raise AmbiguousTeamError(query, sorted(offered))
     # A lone forward hit resolves only when the query as typed is inside the
     # name. One found only through the expansion asks: "SE St." expands to
-    # "SE State", which sits inside "Boise State" (#393 round 2).
-    if len(forward) == 1 and q_lower in forward[0]["school"].lower():
+    # "SE State", which sits inside "Boise State" (#393 round 2). Typed
+    # "SE State" sits inside "Boise State" too, sharing only "se State"
+    # (#398): a query ending in a school word that starts mid-word in the
+    # name resolves only when its distinctive part agrees with the name's
+    # ("hio State" is a typo of Ohio State; "Diego State" starts on a word).
+    if (
+        len(forward) == 1
+        and q_lower in forward[0]["school"].lower()
+        and (
+            _starts_on_a_word(q_lower, str(forward[0]["school"]).lower())
+            or _distinctive_parts_agree(q, str(forward[0]["school"]))
+        )
+    ):
         return int(forward[0]["team_id"])
     if forward:
         raise AmbiguousTeamError(query, sorted(r["school"] for r in forward))
 
     top_score = scored[0][0] if scored else 0.0
     runner_up_score = scored[1][0] if len(scored) > 1 else 0.0
-    if top_score >= FUZZY_RESOLVE_CUTOFF and runner_up_score < FUZZY_RUNNER_UP_CUTOFF:
+    if (
+        top_score >= FUZZY_RESOLVE_CUTOFF
+        and runner_up_score < FUZZY_RUNNER_UP_CUTOFF
+        and _distinctive_parts_agree(q, str(scored[0][1]["school"]))
+    ):
         return int(scored[0][1]["team_id"])
 
     # Anything else that came close asks rather than guesses (issue #123):
@@ -708,6 +757,57 @@ def _fuzzy_scores(q: str, candidates: list[sqlite3.Row]) -> list[tuple[float, sq
         scored.append((max(as_typed.ratio(), lowered.ratio()), row))
     scored.sort(key=lambda pair: (-pair[0], str(pair[1]["school"])))
     return scored
+
+
+def _fuzzy_ratio(a: str, b: str) -> float:
+    """`_fuzzy_scores`'s per-name score for one pair: the better of the
+    case-sensitive and lowercased difflib ratios (`a` as seq1)."""
+    return max(
+        difflib.SequenceMatcher(None, a, b).ratio(),
+        difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio(),
+    )
+
+
+def _split_tail(name: str) -> tuple[str, str | None, str]:
+    """(the words before the last, the last word's COMMON_TAIL_WORDS class
+    or None, the last word). A one-word name has no tail: "State" alone is
+    not "<X> State"."""
+    words = name.split()
+    if len(words) < 2:
+        return name, None, ""
+    return " ".join(words[:-1]), COMMON_TAIL_WORDS.get(words[-1].lower()), words[-1]
+
+
+def _starts_on_a_word(q_lower: str, name_lower: str) -> bool:
+    """For a query inside a name (both lowercased): False only when the
+    query ends in a COMMON_TAIL_WORDS word and no occurrence of it in the
+    name starts on a word ("se state" in "boise state"; issue #398). A query
+    without a school word is left to the substring stage as before."""
+    if _split_tail(q_lower)[1] is None:
+        return True
+    start = name_lower.find(q_lower)
+    while start != -1:
+        if start == 0 or not name_lower[start - 1].isalnum():
+            return True
+        start = name_lower.find(q_lower, start + 1)
+    return False
+
+
+def _distinctive_parts_agree(q: str, name: str) -> bool:
+    """Whether the fuzzy winner `name` matches the query `q` on more than a
+    shared school word (issue #398). The rules and cutoffs are at
+    COMMON_TAIL_WORDS."""
+    q_head, q_tail, q_word = _split_tail(q)
+    n_head, n_tail, n_word = _split_tail(name)
+    if q_tail is None and n_tail is not None and q_word:
+        # "Kent Stae": a typo of the name's school word is still that word.
+        if _fuzzy_ratio(n_word, q_word) >= FUZZY_TAIL_WORD_CUTOFF:
+            q_tail = n_tail
+    if q_tail is None:
+        return True
+    if q_tail != n_tail:
+        return False
+    return _fuzzy_ratio(n_head, q_head) >= FUZZY_TAIL_STRIPPED_CUTOFF
 
 
 def _require_title_game_column(conn: sqlite3.Connection) -> None:
