@@ -470,6 +470,24 @@ export function PlayerComparePage() {
   let answer: ReactNode = null
   /** What the form says while it has not been asked about a pair. */
   let prompt: ReactNode = null
+  /** The players the fields hold, picked or seeded, typed text aside. */
+  const held = SLOTS.flatMap((slot) => {
+    const { pick } = slots[slot]
+    return pick === null ? [] : [pick]
+  })
+  /**
+   * A lone link's career failure is about that pick alone (issue #367): it
+   * stands only while the fields hold just that player. Once they hold
+   * anyone else, the prompt follows the fields like everywhere else (#324).
+   */
+  const loneCareerFailure =
+    loneId !== null &&
+    held.length === 1 &&
+    held[0]?.player_id === loneId &&
+    currentCareer !== null &&
+    currentCareer.status !== 'success'
+      ? currentCareer
+      : null
   if (askedPair) {
     if (pickA === 'invalid' || pickB === 'invalid') {
       answer = <NotFound />
@@ -511,22 +529,18 @@ export function PlayerComparePage() {
   } else if (pickA === 'invalid' || pickB === 'invalid') {
     // A lone id that can't be one: still nothing asked, so still on the form.
     prompt = <NotFound />
-  } else if (loneId !== null && currentCareer?.status === 'not_found') {
+  } else if (loneCareerFailure?.status === 'not_found') {
     prompt = <NotFound />
-  } else if (loneId !== null && currentCareer?.status === 'error') {
+  } else if (loneCareerFailure?.status === 'error') {
     prompt = (
       <p role="alert" className={styles.error}>
-        {currentCareer.message}
+        {loneCareerFailure.message}
       </p>
     )
   } else {
     // Otherwise the prompt follows the fields, not the URL (issue #324): a
     // close empties the URL while the fields keep the pair, and a field
     // holding a player must not be asked for one.
-    const held = SLOTS.flatMap((slot) => {
-      const { pick } = slots[slot]
-      return pick === null ? [] : [pick]
-    })
     if (held.length === 1) {
       prompt = (
         <p className={styles.prompt}>

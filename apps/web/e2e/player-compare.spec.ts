@@ -482,3 +482,32 @@ test('on a phone, a share link opens its comparison full screen with the first l
   await expect(page.getByLabel('Player A', { exact: true })).toBeInViewport()
   await expect.poll(() => new URL(page.url()).search).toBe('')
 })
+
+// Issue #367: a lone link's failed career lookup is about that pick alone.
+// Once a second player is picked, the narrator's line goes and the form reads
+// like any other two-player form.
+test("a lone link's career failure goes once a second player is picked", async ({
+  page,
+}) => {
+  await page.route(
+    (url) => url.pathname === `/api/players/${WARNER}`,
+    (route) => route.abort('failed'),
+  )
+  await page.goto(`/nfl/compare?a=${WARNER}`)
+
+  const alert = page.getByRole('alert')
+  await expect(alert).toContainText('Lost you there')
+  const playerA = page.getByLabel('Player A', { exact: true })
+  const playerB = page.getByLabel('Player B', { exact: true })
+  await expect(playerA).toHaveValue(`Player #${WARNER}`)
+
+  await playerB.pressSequentially('McNair')
+  await page.getByRole('option', { name: /Steve McNair/ }).click()
+
+  await expect(playerB).toHaveValue('Steve McNair')
+  await expect(
+    page.getByRole('button', { name: 'Compare', exact: true }),
+  ).toBeEnabled()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(page.getByText(PICK_TWO_COPY)).toHaveCount(0)
+})

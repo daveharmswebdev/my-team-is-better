@@ -32,6 +32,14 @@ passes. A branch with any change main lacks, or one that conflicts with main, fa
 including a change main later reverted. Every error is in the keep direction. Main
 is `origin/main`, so fetch first. A stale ref can only keep more.
 
+That test alone kept every finished spoke in practice (#391): a coordinator usually
+fixes a spoke's files in a review round before the PR merges, so the spoke tip
+conflicts with main. A second signal clears it: the tip is a commit of a merged PR
+(`gh pr list --state merged --search <sha>`, then the PR's own commit list must hold
+the sha). It runs only after the tree test fails, never overrides the other guards,
+and any `gh` error (missing, offline, unauthenticated) counts as "no PR", so it keeps.
+`--no-github` skips it.
+
 Only a `worktree-agent-*` branch is ever deleted. An `agent-*` worktree holding any
 other branch (a fork's `issue-339-...`) loses the worktree, and the branch stays. Before
 a branch is deleted, its tip is saved under `refs/archive/worktree-agent/<branch>`, so
@@ -41,10 +49,12 @@ its commits stay reachable, the same as the founder's 2026-10-19 cleanup.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -54,6 +64,9 @@ BRANCH_PREFIX = "worktree-agent-"
 ARCHIVE_PREFIX = "refs/archive/worktree-agent/"
 DEFAULT_MAIN = "origin/main"
 DEFAULT_MIN_AGE_HOURS = 24.0
+MAIN_BRANCH = "main"  # the base a PR must have merged into for the gh check
+# Per call; /orient runs this at session start, so a slow gh mustn't stall it long.
+GH_TIMEOUT_SECONDS = 15
 
 CURRENT = "the worktree this command runs in"
 LOCKED = "locked"
@@ -70,6 +83,10 @@ class Entry:
     branch: str | None
     path: Path | None
     reason: str | None  # None: safe to reclaim
+    merged_pr: int | None = None  # the merged PR holding the tip, when that cleared it
+
+
+MergedPr = Callable[[Path, str], int | None]
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -89,6 +106,51 @@ def _in_main(repo: Path, main_ref: str, rev: str) -> bool:
     return merged.stdout.split("\n", 1)[0].strip() == _out(
         repo, "rev-parse", f"{main_ref}^{{tree}}"
     )
+
+
+def merged_pr_via_gh(repo: Path, sha: str) -> int | None:
+    """The number of a PR merged into main whose commits include `sha`, or None. Search
+    alone can match the sha in a PR's text, so the PR's commit list must hold it too,
+    and a PR merged into another branch (a stacked PR's base) doesn't count."""
+    try:
+        result = subprocess.run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--state",
+                "merged",
+                "--base",
+                MAIN_BRANCH,
+                "--search",
+                sha,
+                "--json",
+                "number,baseRefName,commits",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_SECONDS,
+        )
+        prs = json.loads(result.stdout) if result.returncode == 0 else []
+        for pr in prs:
+            if pr.get("baseRefName") != MAIN_BRANCH:
+                continue
+            if any(commit.get("oid") == sha for commit in pr.get("commits", [])):
+                return int(pr["number"])
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, AttributeError):
+        pass
+    return None
+
+
+def _not_in_main(
+    repo: Path, main_ref: str, rev: str, merged_pr: MergedPr | None
+) -> tuple[str | None, int | None]:
+    """(reason, merged PR) for a ref old enough and clean enough to reclaim."""
+    if _in_main(repo, main_ref, rev):
+        return None, None
+    number = merged_pr(repo, _out(repo, "rev-parse", rev)) if merged_pr else None
+    return (None, number) if number is not None else (NOT_IN_MAIN, None)
 
 
 def _touched(repo: Path, ref: str, *paths: Path) -> float:
@@ -121,6 +183,7 @@ def survey(
     main_ref: str = DEFAULT_MAIN,
     min_age_hours: float = DEFAULT_MIN_AGE_HOURS,
     now: float | None = None,
+    merged_pr: MergedPr | None = None,
 ) -> list[Entry]:
     """Every spoke worktree and orphan spoke branch, with the reason to keep it, if any."""
     now = time.time() if now is None else now
@@ -139,6 +202,7 @@ def survey(
         if path.parent != spoke_root or not path.name.startswith(WORKTREE_PREFIX):
             continue
         reason: str | None = None
+        pr: int | None = None
         if path == current:
             reason = CURRENT
         elif "locked" in record:
@@ -151,21 +215,20 @@ def survey(
             # The directory's mtime covers a spoke that hasn't moved HEAD yet.
             if _touched(path, "HEAD", path) > cutoff:
                 reason = RECENT
-            elif not _in_main(repo, main_ref, record["HEAD"]):
-                reason = NOT_IN_MAIN
-        entries.append(Entry("worktree", path.name, branch, path, reason))
+            else:
+                reason, pr = _not_in_main(repo, main_ref, record["HEAD"], merged_pr)
+        entries.append(Entry("worktree", path.name, branch, path, reason, pr))
 
     refs = _out(repo, "for-each-ref", "--format=%(refname:short)", f"refs/heads/{BRANCH_PREFIX}*")
     for branch in refs.splitlines():
         if branch in checked_out:
             continue
+        pr = None
         if _touched(repo, f"refs/heads/{branch}") > cutoff:
             reason = RECENT
-        elif not _in_main(repo, main_ref, branch):
-            reason = NOT_IN_MAIN
         else:
-            reason = None
-        entries.append(Entry("branch", branch, branch, None, reason))
+            reason, pr = _not_in_main(repo, main_ref, branch, merged_pr)
+        entries.append(Entry("branch", branch, branch, None, reason, pr))
     return entries
 
 
@@ -188,16 +251,25 @@ def main(argv: list[str] | None = None, now: float | None = None) -> int:
     parser.add_argument("--main", default=DEFAULT_MAIN, help="ref holding main's work")
     parser.add_argument("--min-age-hours", type=float, default=DEFAULT_MIN_AGE_HOURS)
     parser.add_argument("--apply", action="store_true", help="remove the 'reclaim' rows")
+    parser.add_argument(
+        "--no-github", action="store_true", help="skip the merged-PR check; tree test only"
+    )
     args = parser.parse_args(argv)
 
     if _git(args.repo, "rev-parse", "--verify", "--quiet", args.main, check=False).returncode:
         print(f"reclaim_worktrees.py: no ref {args.main!r}; run git fetch", file=sys.stderr)
         return 2
 
-    entries = survey(args.repo, args.main, args.min_age_hours, now)
+    lookup = None if args.no_github else merged_pr_via_gh
+    entries = survey(args.repo, args.main, args.min_age_hours, now, lookup)
     for entry in entries:
         action = "reclaim" if entry.reason is None else "keep"
-        detail = "" if entry.reason is None else f"  ({entry.reason})"
+        if entry.reason is not None:
+            detail = f"  ({entry.reason})"
+        elif entry.merged_pr is not None:
+            detail = f"  (merged in #{entry.merged_pr})"
+        else:
+            detail = ""
         print(f"{action:<8} {entry.kind:<9} {entry.name}{detail}")
         if entry.reason is None and args.apply:
             reclaim(args.repo, entry)
