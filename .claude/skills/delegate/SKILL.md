@@ -88,8 +88,11 @@ it back puts every brief in your context twice (#400).
 
 - Parallel spokes: put all the Agent calls in one message. Give writers that could touch
   the same checkout `isolation: "worktree"`.
-- Coordinator-owned code in `.claude/hooks/` goes to `hooks-agent` like any other spoke,
-  not inline. The skills, CLAUDE.md and settings that call it stay with you.
+- Coordinator-owned code in `.claude/hooks/` goes to `hooks-agent`, not inline. Always
+  launch it with `isolation: "worktree"`, even alone. The live hooks run from the
+  session's checkout, so an unisolated hooks-agent would edit the checks that judge its
+  own return. Its brief needs a `gate`; `render-brief` refuses one without. The skills,
+  CLAUDE.md and settings that call the hooks stay with you.
 - Reviewer: brief it with the diff range (`<base_sha>...<head>`) and the implementation
   brief's objective and rubric only. Never include the implementer's return or your
   reasoning; it reviews as an independent instance.
@@ -99,16 +102,18 @@ it back puts every brief in your context twice (#400).
 The return hooks have already made the spoke fix an invalid return before it was
 delivered, up to two retries (`pre-handback` for a `SubagentHandback` report,
 SubagentStop for closing text). Their notes go to the user, not to you, so **validate the return yourself** before
-acting. Validate the copy the spoke wrote to its scratch dir (the brief asks for it):
+acting. Point the check at the spoke's task output file, the `output_file` in its launch
+result and completion notice. It reads the report the spoke actually delivered, so
+nothing needs re-typing (#400):
 
 ```bash
-uv run --script .claude/hooks/delegation.py validate-return --agent <agent> <scratch_dir>/return.json
+uv run --script .claude/hooks/delegation.py validate-return --agent <agent> --transcript <output_file>
 ```
 
-It prints `return ok: <agent> status <status>, head <sha>`. Check that the status and
-head match the report you were handed; a mismatch means a stale file. Only when the file
-is missing, pipe the spoke's final message in exactly as it came back (`-` and a
-heredoc) rather than re-typing it.
+It prints `return ok: <agent> status <status>, head <sha>`. For a spoke resumed for a
+later round it checks that round's report, the latest one. Never read the output file
+yourself; it is the whole transcript. With no output file, pipe the final message in
+with `-` and a heredoc.
 
 Exit 1 means the round is `malformed-return`: retry once with a rewritten brief that
 appends the printed errors, or substitute an agent. Printed `warning:` lines are

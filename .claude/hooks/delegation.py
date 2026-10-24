@@ -7,6 +7,7 @@
     uv run --script .claude/hooks/delegation.py render-brief <brief.json> [--out <prompt.md>]
     uv run --script .claude/hooks/delegation.py validate-brief <brief.json>
     uv run --script .claude/hooks/delegation.py validate-return --agent <name> <file>
+    uv run --script .claude/hooks/delegation.py validate-return --agent <name> --transcript <out>
     uv run --script .claude/hooks/delegation.py pre-handback     (PreToolUse hook, stdin)
     uv run --script .claude/hooks/delegation.py subagent-stop    (SubagentStop hook, stdin)
 
@@ -45,13 +46,15 @@ __all__ = [
     "pre_handback",
     "render_brief",
     "render_pointer",
-    "return_path",
     "subagent_stop",
     "validate_brief",
     "validate_return",
 ]
 
 MAX_RETURN_RETRIES = 2
+# Agents whose every brief must carry a `gate`: hooks-agent edits the enforcement layer
+# itself, so a round without a threat model and stopping rule is mis-scoped (#400).
+GATED_AGENTS = frozenset({"hooks-agent"})
 HANDBACK_TOOL = "SubagentHandback"
 SCHEMAS_DIR = CLAUDE_DIR / "schemas"
 
@@ -204,6 +207,11 @@ def validate_brief(data: object, ownership: Ownership) -> list[str]:
                     f"scope/{index}: {scope!r} is outside {agent}'s ownership "
                     f"({', '.join(entry.owns)}). Split the round, or route that part to its owner"
                 )
+    if agent in GATED_AGENTS and data["gate"] is None:
+        errors.append(
+            f"gate: every {agent} round changes the enforcement layer itself, so it needs a "
+            "gate (threat model, blocking definition, max_review_rounds)"
+        )
     if Path(data["scratch_dir"].rstrip("/")).name == "scratchpad":
         errors.append(
             "scratch_dir: give this spoke its own subdirectory (e.g. "
@@ -282,15 +290,9 @@ def render_brief(brief: dict[str, Any], ownership: Ownership | None = None) -> s
         "---\nFinish with exactly one fenced ```json block conforming to "
         "`.claude/schemas/return.schema.json`, with nothing outside it; your preloaded "
         "spoke-protocol skill has the rules. A hook validates it when you hand it back and "
-        "tells you what to fix. Write the same JSON, unfenced, to "
-        f"`{return_path(brief)}` as well: the coordinator validates that file (#400)."
+        "tells you what to fix."
     )
     return "\n\n".join(sections) + "\n"
-
-
-def return_path(brief: dict[str, Any]) -> str:
-    """Where the spoke leaves a copy of its return for the coordinator to validate."""
-    return f"{brief['scratch_dir'].rstrip('/')}/return.json"
 
 
 def render_pointer(brief: dict[str, Any], prompt_path: Path) -> str:
@@ -492,7 +494,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     validate = commands.add_parser("validate-return")
     validate.add_argument("--agent", required=True)
-    validate.add_argument("path", help="a .json return, or a message with one ```json block")
+    source = validate.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "path", nargs="?", help="a .json return, a message with one ```json block, or -"
+    )
+    source.add_argument(
+        "--transcript",
+        type=Path,
+        help="a spoke's task output file: validates the report it delivered (#400)",
+    )
     commands.add_parser("subagent-stop")
     commands.add_parser("pre-handback")
     args = parser.parse_args(argv)
@@ -528,7 +538,14 @@ def main(argv: list[str] | None = None) -> int:
             print(render_pointer(brief, args.out.resolve()), end="")
         return 0
 
-    text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
+    missing = args.transcript if args.transcript is not None else Path(args.path)
+    if args.path != "-" and not missing.is_file():
+        print(f"validate-return: no such file: {missing}", file=sys.stderr)
+        return 2
+    if args.transcript is not None:
+        text, _ = _final_output({"agent_transcript_path": str(args.transcript)})
+    else:
+        text = sys.stdin.read() if args.path == "-" else Path(args.path).read_text()
     errors: list[str] = []
     if text.lstrip().startswith("{"):
         data: object = json.loads(text)

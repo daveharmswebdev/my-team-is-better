@@ -18,9 +18,14 @@ it.
 
 These scripts are the enforcement layer, and a hook that weakens itself passes its own
 tests. So:
-- A change that loosens a guard or a validation rule (`guard_*.py`, `delegation.py`'s
-  checks, `ownership.py`) needs a `gate` in its brief. Without one, return
-  `brief-mis-scoped`.
+- Every brief you get carries a `gate` (threat model, blocking definition, review cap);
+  `render-brief` refuses a hooks-agent brief without one. Judge "loosens a guard or a
+  validation rule" against it. That covers `guard_*.py`, `delegation.py`'s checks and
+  `ownership.py`.
+- You run in your own worktree. The live hooks run from the coordinator's checkout,
+  and your edits don't touch them until they merge. If your checkout is the primary
+  one (`git rev-parse --git-dir` has no `/worktrees/`), stop and return
+  `tool-or-environment-failure`.
 - Every error path keeps the safe direction: a broken hook must never trap a spoke, and
   a failed lookup must never delete or allow something.
 - No test may reach the network, GitHub or the real repository's worktrees. Build a

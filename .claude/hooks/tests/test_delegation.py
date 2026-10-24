@@ -678,13 +678,6 @@ def test_cli_validate_return_reads_a_fenced_message(tmp_path: Path) -> None:
 # --- #400: briefs and returns travel through files, not the coordinator's context ----
 
 
-def test_render_brief_asks_for_a_copy_of_the_return_in_scratch() -> None:
-    brief = _brief()
-    brief["scratch_dir"] = "/tmp/scratchpad/999-api-r1/"
-    text = delegation.render_brief(brief, OWNERSHIP)
-    assert "`/tmp/scratchpad/999-api-r1/return.json`" in text
-
-
 def test_cli_render_brief_out_writes_the_brief_and_prints_only_a_pointer(tmp_path: Path) -> None:
     out = tmp_path / "briefs" / "999-api-agent-r1.prompt.md"
     result = _cli("render-brief", str(EXAMPLES / "brief.api-agent.json"), "--out", str(out))
@@ -710,14 +703,107 @@ def test_cli_render_brief_out_writes_nothing_for_an_invalid_brief(tmp_path: Path
     assert result.stdout == ""
 
 
-def test_cli_validate_return_names_what_it_checked(tmp_path: Path) -> None:
-    """The coordinator validates the spoke's return.json, not the delivered message, so
-    the output says which return it was: a stale file from an earlier round shows up."""
+def _task_output(tmp_path: Path, *entries: dict[str, Any]) -> Path:
+    path = tmp_path / "agent.output"
+    path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    return path
+
+
+def _handback_entry(message: str, call_id: str = "call-1") -> dict[str, Any]:
+    return {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "id": call_id,
+                    "name": delegation.HANDBACK_TOOL,
+                    "input": {"message": message},
+                }
+            ]
+        },
+    }
+
+
+def test_cli_validate_return_reads_the_delivered_report_from_the_task_output(
+    tmp_path: Path,
+) -> None:
+    """The coordinator re-checks the report the spoke actually delivered, read from the
+    task's output file, instead of re-typing it into a heredoc."""
     data = _success()
-    path = tmp_path / "return.json"
-    path.write_text(json.dumps(data))
-    result = _cli("validate-return", "--agent", "api-agent", str(path))
+    path = _task_output(tmp_path, _handback_entry(_fenced(data)))
+    result = _cli("validate-return", "--agent", "api-agent", "--transcript", str(path))
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == (
         f"return ok: {data['agent']} status {data['status']}, head {data['head_sha']}"
     )
+
+
+def test_cli_validate_return_from_a_transcript_still_catches_what_slipped_past_the_hook(
+    tmp_path: Path,
+) -> None:
+    """A malformed report delivered past the retry cap, and out-of-scope files, are what
+    the coordinator's re-check is for (#400 review)."""
+    data = _success()
+    data["files_changed"].append({"path": "apps/web/src/App.tsx", "change_type": "modified"})
+    scoped = _cli(
+        "validate-return",
+        "--agent",
+        "api-agent",
+        "--transcript",
+        str(_task_output(tmp_path, _handback_entry(_fenced(data)))),
+    )
+    assert scoped.returncode == 0
+    assert "apps/web/src/App.tsx is outside api-agent's ownership" in scoped.stderr
+    malformed = _cli(
+        "validate-return",
+        "--agent",
+        "api-agent",
+        "--transcript",
+        str(_task_output(tmp_path, _handback_entry("All done!"))),
+    )
+    assert malformed.returncode == 1
+    assert "no fenced" in malformed.stderr
+
+
+def test_cli_validate_return_reads_the_latest_report_of_a_resumed_spoke(tmp_path: Path) -> None:
+    first, second = _success(), _success()
+    second["head_sha"] = "f00dbabe"
+    path = _task_output(
+        tmp_path, _handback_entry(_fenced(first), "a"), _handback_entry(_fenced(second), "b")
+    )
+    result = _cli("validate-return", "--agent", "api-agent", "--transcript", str(path))
+    assert result.returncode == 0, result.stderr
+    assert "head f00dbabe" in result.stdout
+
+
+@pytest.mark.parametrize("flag", [(), ("--transcript",)])
+def test_cli_validate_return_reports_a_missing_file_without_a_traceback(
+    tmp_path: Path, flag: tuple[str, ...]
+) -> None:
+    result = _cli("validate-return", "--agent", "api-agent", *flag, str(tmp_path / "nope"))
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
+    assert "nope" in result.stderr
+
+
+def test_hooks_agent_brief_needs_a_gate() -> None:
+    """#400 review: hooks-agent edits the enforcement layer itself, so every round
+    carries a threat model and a stopping rule, checked rather than written down."""
+    ownership = Ownership(
+        agents={
+            **OWNERSHIP.agents,
+            "hooks-agent": AgentEntry("implementation", (".claude/hooks/**",)),
+        },
+        edit_scope_mode="warn",
+    )
+    brief = _brief()
+    brief.update(agent="hooks-agent", scope=[".claude/hooks/**"], gate=None)
+    assert any("gate" in e for e in delegation.validate_brief(brief, ownership))
+    brief["gate"] = {
+        "threat_model": "Stops accidental erosion; deliberate evasion must leave a visible trace.",
+        "blocking_definition": "An accidental escape, a false positive, or a vacuous check.",
+        "out_of_scope": [],
+        "max_review_rounds": 3,
+    }
+    assert delegation.validate_brief(brief, ownership) == []

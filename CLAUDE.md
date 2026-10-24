@@ -206,7 +206,7 @@ this architecture.
 | Persona *voice/tone quality* ("does this read as a good bar-stool guy?") | **coordinator directly** — a continuous, subjective, iterative judgment, not a scoped task | all spokes, until there is a specific, scoped prompt change to delegate |
 | A prompt-facing change (persona prompt, tool schema descriptions, retry feedback, MCP tool descriptions), or a narrator misbehavior that keeps recurring | `prompt-engineer` for scores and proposed diffs; the coordinator makes the voice call, then `api-agent` / `mcp-agent` implements | reviewer, validator (they gate a diff, not a prompt's quality) |
 | Why a ranking disagrees with known outcomes | **coordinator directly** | ratings-agent, until there's a specific hypothesis to implement |
-| A code change in `.claude/hooks/` | `hooks-agent` (plus a `gate` when it loosens a guard or check); the coordinator keeps the skills and settings that call it | — |
+| A code change in `.claude/hooks/` | `hooks-agent`, always in a worktree, with a `gate` (checked); the coordinator keeps the skills and settings that call it | — |
 | Typo, rename, one-line fix, config change | **nobody** — coordinator does it inline | all |
 | A contract (shared type/schema) needs a new field | coordinator amends and commits it, then re-delegates every affected spoke | — |
 
