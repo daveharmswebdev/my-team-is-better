@@ -836,3 +836,135 @@ def test_fresh_db_has_conference_championship_column_from_the_ddl(tmp_path: Path
     assert cols["conference_championship"]["dflt_value"] == "0"
 
     conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Issue #386: the one-time warning above fires only on the open that adds
+# games.conference_championship. Every later open found the column present and
+# stayed quiet, though the migration had backfilled every title game to 0 and
+# the narrator called them regular-season finales until the season was
+# re-ingested. So ensure_schema also warns, on every open, about each
+# completed CFB season that held its title games and has none flagged.
+# ---------------------------------------------------------------------------
+
+
+def _seed_cfb_season(
+    conn: sqlite3.Connection,
+    *,
+    season: int,
+    games: int,
+    postseason: bool = True,
+    flagged: bool = False,
+    sport: str = "cfb",
+    first_id: int = 1,
+) -> None:
+    """`games` completed games in `season`: regular-season games, then one
+    completed postseason game when `postseason`, with the first one flagged as
+    a title game when `flagged`."""
+    conn.execute(
+        "INSERT OR IGNORE INTO teams (id, school, classification, sport) "
+        "VALUES (251, 'Texas', 'fbs', ?)",
+        (sport,),
+    )
+    for i in range(games):
+        season_type = "postseason" if postseason and i == games - 1 else "regular"
+        conn.execute(
+            """
+            INSERT INTO games (
+                id, season, week, season_type, completed, home_team_id, away_team_id,
+                home_team, away_team, home_points, away_points, raw_json, sport,
+                conference_championship
+            ) VALUES (?, ?, 1, ?, 1, 251, 251, 'Texas', 'Texas', 41, 38, '{}', ?, ?)
+            """,
+            (first_id + i, season, season_type, sport, int(flagged and i == 0)),
+        )
+
+
+def _current_db_with(tmp_path: Path, **season: int | bool | str) -> Path:
+    db = tmp_path / "current.sqlite3"
+    conn = get_conn(db)
+    ensure_schema(conn)
+    _seed_cfb_season(conn, **season)  # type: ignore[arg-type]  # test-only kwargs passthrough
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_unflagged_title_games_warn_on_every_open_not_only_the_migrating_one(
+    tmp_path: Path,
+) -> None:
+    db = _current_db_with(tmp_path, season=2005, games=600)
+
+    for _ in range(2):
+        stale = _stale_warnings_from_ensure_schema(db)
+        assert len(stale) == 1
+        message = str(stale[0].message)
+        assert "conference_championship" in message
+        assert "2005" in message
+        assert "Re-ingest those seasons" in message
+        # `cfb doctor` has no title-game check, so pointing at it would
+        # contradict this warning (#386 review).
+        assert "cfb doctor" not in message
+
+
+def test_unflagged_title_game_warning_names_every_affected_season(tmp_path: Path) -> None:
+    db = tmp_path / "two_seasons.sqlite3"
+    conn = get_conn(db)
+    ensure_schema(conn)
+    _seed_cfb_season(conn, season=2005, games=600)
+    _seed_cfb_season(conn, season=2013, games=600, first_id=1001)
+    _seed_cfb_season(conn, season=2019, games=600, flagged=True, first_id=2001)
+    conn.commit()
+    conn.close()
+
+    (warning,) = _stale_warnings_from_ensure_schema(db)
+    message = str(warning.message)
+    assert "2005, 2013" in message
+    assert "2019" not in message
+
+
+@pytest.mark.parametrize(
+    "season",
+    [
+        pytest.param({"season": 2005, "games": 600, "flagged": True}, id="flagged"),
+        pytest.param({"season": 2026, "games": 600, "postseason": False}, id="in_progress"),
+        pytest.param({"season": 2005, "games": 20}, id="small_synthetic_season"),
+        pytest.param({"season": 2005, "games": 600, "sport": "nfl"}, id="nfl"),
+    ],
+)
+def test_unflagged_title_game_warning_stays_quiet_when_nothing_is_missing(
+    tmp_path: Path, season: dict[str, int | bool | str]
+) -> None:
+    """A flagged season is current; a season with no completed postseason may
+    not have played its title games yet; a small hand-built test season holds
+    no title game to flag; and NFL rows are always 0."""
+    db = _current_db_with(tmp_path, **season)
+
+    assert _stale_warnings_from_ensure_schema(db) == []
+
+
+def test_migrating_a_populated_db_warns_once_naming_both_signals(tmp_path: Path) -> None:
+    """The open that adds the column already warns; it names the unflagged
+    seasons too rather than warning twice."""
+    db = tmp_path / "pre_300.sqlite3"
+    conn = sqlite3.connect(db)
+    conn.executescript(_PRE_51_SCHEMA)
+    conn.execute("INSERT INTO teams (id, school, classification) VALUES (251, 'Texas', 'fbs')")
+    for i in range(600):
+        conn.execute(
+            """
+            INSERT INTO games (
+                id, season, week, season_type, completed, home_team_id, away_team_id,
+                home_team, away_team, home_points, away_points, raw_json
+            ) VALUES (?, 2005, 1, ?, 1, 251, 251, 'Texas', 'Texas', 41, 38, '{}')
+            """,
+            (i + 1, "postseason" if i == 599 else "regular"),
+        )
+    conn.commit()
+    conn.close()
+
+    (warning,) = _stale_warnings_from_ensure_schema(db)
+    message = str(warning.message)
+    assert "predates the current schema" in message
+    assert "games.conference_championship" in message
+    assert "2005" in message
