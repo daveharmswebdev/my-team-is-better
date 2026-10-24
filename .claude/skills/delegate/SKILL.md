@@ -49,6 +49,22 @@ another in-flight branch touching it, sequence the work rather than racing it.
   grep -rlE "<role|testid|copy|selector>" apps/web/e2e/
   ```
   e2e is a blocking CI job (since #230), so a missed spec fails CI, not just the spoke.
+- **Check "green at base"** before the brief claims it (#282). Run the owning package's
+  gate commands at `base_sha` and paste the result into `contract`. When a contract
+  commit leaves known failures for the spoke to fix, name each one exactly, as #428's
+  brief did with its two mypy errors.
+- **Grep for every test that pins a changed symbol, in every package**, not only the
+  owner's (#282). "Only X uses it" and "unchanged tests stay green" are premises:
+  #428 broke an apps/api test the brief said couldn't see the change, and #427 left a
+  route out of scope. Search by name, then for whole-shape tests that no name grep
+  finds (`dataclasses.fields`, `set(body) ==`, field-for-field comparisons), and paste
+  the list into `contract` as "must stay green" or "will change":
+  ```bash
+  grep -rn "<Symbol>" packages/*/tests apps/api/tests apps/web/src apps/web/e2e
+  ```
+- **Measure a data fact where it's true**, not in whichever db is handy. A fixture's
+  minimum isn't production's: #386's "smallest season is 709 games" held only for the
+  fixture, and a full build has 593.
 
 ## 4. Write the brief as JSON
 
