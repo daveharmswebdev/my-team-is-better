@@ -92,6 +92,13 @@
   color: var(--ink-muted);
 }
 
+/* The live region holding that line. It stays in the page (and in the
+   accessibility tree) while empty, so it takes back the column gap it would
+   otherwise add rather than hiding. */
+.bLine:empty {
+  margin-top: calc(-1 * var(--sp-6));
+}
+
 /* Who Player B can be, once Player A is picked (issue #436). */
 .restriction {
   margin: 0;

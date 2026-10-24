@@ -893,6 +893,10 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
   beforeEach(() => {
     mockedCompare.mockReset()
     mockedCareer.mockReset()
+    // After a failed link closes, Player A's group is looked up (#436 round
+    // 3). Held out here, so these tests see the fields as the answers left
+    // them; the #436 describe below settles it.
+    mockedCareer.mockReturnValue(new Promise(() => {}))
     mockedSearch.mockReset()
     mockedCredits.mockReset()
     mockedCredits.mockResolvedValue({
@@ -1543,5 +1547,135 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
   it('a tight end as Player A gets the tight-end restriction', async () => {
     renderPage(`?a=${WYCHECK}`)
     expect(await screen.findByText(restrictionCopy('TE'))).toBeInTheDocument()
+  })
+
+  /**
+   * Round 3 (reviewer): a failed pair link never strands Player B. Closing
+   * it leaves both picks in the fields; Player A's group is then looked up,
+   * so Player B can be cleared and picked again within it.
+   */
+  it.each([
+    [
+      'an unknown player (404)',
+      `?a=${WARNER}&b=1`,
+      () =>
+        Promise.reject(
+          new PlayerApiError(404, {
+            error: 'unknown_player',
+            player_id: 1,
+            sport: 'nfl',
+          }),
+        ),
+    ],
+    [
+      'a network failure',
+      `?a=${WARNER}&b=${MCNAIR}`,
+      () => Promise.reject(new VerdictNetworkError(NETWORK_ERROR_COPY)),
+    ],
+    [
+      'a 5xx',
+      `?a=${WARNER}&b=${MCNAIR}`,
+      () => Promise.reject(new VerdictHttpError(503, '')),
+    ],
+    ['the same player twice', `?a=${WARNER}&b=${WARNER}`, undefined],
+  ] as const)(
+    'after closing a link that failed with %s, Player B can be cleared and picked again',
+    async (_case, search, answer) => {
+      const user = userEvent.setup()
+      if (answer !== undefined) {
+        mockedCompare.mockImplementation(answer)
+      }
+      mockedSearch.mockResolvedValue(SEARCH_MCNAIR)
+
+      renderPage(search)
+      const dialog = await screen.findByRole('dialog')
+      await within(dialog).findByRole('alert')
+      await user.click(
+        within(dialog).getByRole('button', { name: 'Close the comparison' }),
+      )
+
+      await user.click(
+        await screen.findByRole('button', { name: 'Clear Player B' }),
+      )
+      expect(playerB()).toHaveValue('')
+      await waitFor(() => {
+        expect(playerB()).toBeEnabled()
+      })
+      await pick(user, playerB(), 'McNair', /Steve McNair/)
+
+      expect(playerB()).toHaveValue('Steve McNair')
+      expect(mockedSearch).toHaveBeenLastCalledWith('McNair', {
+        signal: expect.any(AbortSignal) as AbortSignal,
+        group: 'QB',
+      })
+      expect(compareButton()).toBeEnabled()
+    },
+  )
+
+  it("still lets Player B's pick be cleared when Player A's group can't be looked up", async () => {
+    const user = userEvent.setup()
+    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCareer.mockReset()
+    mockedCareer.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByRole('alert')
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Close the comparison' }),
+    )
+    await waitFor(() => {
+      expect(mockedCareer).toHaveBeenCalledWith(WARNER)
+    })
+
+    expect(playerB()).toHaveValue(`Player #${MCNAIR}`)
+    expect(playerB()).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Clear Player B' }))
+    expect(playerB()).toHaveValue('')
+  })
+
+  /** Round 3 (reviewer): assistive tech hears who Player B can be, and why not. */
+  it('describes Player B by the restriction line, announced politely once Player A is picked', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    expect(playerB()).not.toHaveAccessibleDescription(restrictionCopy('RB'))
+
+    await pick(user, playerA(), 'faulk', /Marshall Faulk/)
+
+    const line = screen.getByText(restrictionCopy('RB'))
+    expect(playerB()).toHaveAccessibleDescription(restrictionCopy('RB'))
+    const live = line.closest('[aria-live="polite"]')
+    expect(live).not.toBeNull()
+    expect(live).not.toHaveAttribute('role', 'alert')
+  })
+
+  it('describes a disabled Player B by the uncomparable line, announced politely', async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    await pick(user, playerA(), 'wilkins', /Jeff Wilkins/)
+
+    expect(playerB()).toBeDisabled()
+    expect(playerB()).toHaveAccessibleDescription(uncomparableCopy('K'))
+    const live = screen
+      .getByText(uncomparableCopy('K'))
+      .closest('[aria-live="polite"]')
+    expect(live).not.toBeNull()
+  })
+
+  it('keeps the polite region in the page before anything is in it, so the line is announced', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    const regions = () =>
+      Array.from(document.querySelectorAll('[aria-live="polite"]'))
+    const before = regions()
+
+    await pick(user, playerA(), 'faulk', /Marshall Faulk/)
+
+    const holder = regions().find((region) =>
+      (region.textContent ?? '').includes(restrictionCopy('RB')),
+    )
+    expect(holder).toBeDefined()
+    expect(before).toContain(holder)
   })
 })

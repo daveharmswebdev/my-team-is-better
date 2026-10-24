@@ -489,17 +489,81 @@ export function PlayerComparePage() {
   const aProfile =
     slots.a.pick === null ? undefined : profiles[slots.a.pick.player_id]
   const aGroup = aProfile?.group
+  /** Player B searches only within Player A's known group. */
+  const bGroup = aGroup ?? undefined
   /**
    * Player B waits for a Player A whose group is known, and for a Player A
-   * with no group, for good: there is nobody to compare him with yet.
+   * with no group, for good: there is nobody to compare him with yet. But a
+   * Player B already holding a pick or text -- a failed link's, say -- stays
+   * live, so it can always be cleared or typed over (round 3).
    */
-  const bDisabled = aGroup === undefined || aGroup === null
+  /**
+   * The line under the fields: the restriction once Player A has a group,
+   * the uncomparable line once he has none (his label arrives with his
+   * career or search row; until then there is nothing true to say).
+   */
+  const bLine =
+    aGroup === undefined
+      ? null
+      : aGroup !== null
+        ? restrictionCopy(aGroup)
+        : aProfile?.position === undefined
+          ? null
+          : uncomparableCopy(aProfile.position)
+  const bLineId = `${noteId}-b-line`
+  const bHolds = slots.b.pick !== null || slots.b.text !== ''
+  const bDisabled = bGroup === undefined && !bHolds
 
   const searchA = usePlayerSearch(slots.a.pick === null ? slots.a.text : '')
   const searchB = usePlayerSearch(
-    !bDisabled && slots.b.pick === null ? slots.b.text : '',
-    aGroup ?? undefined,
+    bGroup !== undefined && slots.b.pick === null ? slots.b.text : '',
+    bGroup,
   )
+
+  /**
+   * A Player A whose group nobody has said yet, on the form with no pair
+   * asked: a failed link's (a 404, a network error, a 5xx, the same player
+   * twice), whose answer never named him. His career says, so Player B can
+   * be picked again (round 3). A lone link's own lookup above covers that
+   * case; each player is looked up once.
+   */
+  const pairInUrl = pickA !== null && pickB !== null
+  const aLookupId =
+    !pairInUrl &&
+    slots.a.pick !== null &&
+    aGroup === undefined &&
+    slots.a.pick.player_id !== loneId
+      ? slots.a.pick.player_id
+      : null
+  const lookedUpRef = useRef(new Set<number>())
+  useEffect(() => {
+    if (aLookupId === null || lookedUpRef.current.has(aLookupId)) {
+      return
+    }
+    lookedUpRef.current.add(aLookupId)
+    fetchPlayerCareer(aLookupId).then(
+      (career) => {
+        const answered = { [career.player_id]: career.display_name }
+        setNames((known) => ({ ...known, ...answered }))
+        setProfiles(
+          learned({
+            [career.player_id]: {
+              group: career.group,
+              position: career.position,
+            },
+          }),
+        )
+        setSeeded((current) => ({
+          ...current,
+          slots: nameSlots(current.slots, answered),
+        }))
+      },
+      () => {
+        // Nothing learned: Player B can still be cleared, and a new
+        // Player A picked from the list brings his group with him.
+      },
+    )
+  }, [aLookupId])
 
   /**
    * Sets one field. Player B is picked against Player A's group, so whatever
@@ -508,6 +572,16 @@ export function PlayerComparePage() {
    */
   function updateSlot(slot: Slot, next: SlotState) {
     setDismissedRefusalKey(location.key)
+    if (refusalOf(location.state) !== null) {
+      // The refusal is dismissed for good: drop it from the entry's state,
+      // so a reload doesn't bring it back. Same URL, `replace`, and the
+      // `closedFrom` mark keeps the fields as they are rather than
+      // re-seeding them from the URL (see `closedFromKey`).
+      setSearchParams(searchParams, {
+        replace: true,
+        state: { closedFrom: location.key },
+      })
+    }
     setSeeded((current) => ({
       ...current,
       slots:
@@ -781,12 +855,9 @@ export function PlayerComparePage() {
       </p>
     )
   } else if (aGroup === null) {
-    // A Player A with no group (issue #436). His label arrives with his
-    // career or his search row; until then there is nothing true to say.
-    prompt =
-      aProfile?.position === undefined ? null : (
-        <p className={styles.prompt}>{uncomparableCopy(aProfile.position)}</p>
-      )
+    // A Player A with no group (issue #436): the uncomparable line under the
+    // fields (`bLine`) says it all, so no pick-one-more prompt.
+    prompt = null
   } else {
     // Otherwise the prompt follows the fields, not the URL (issue #324): a
     // close empties the URL while the fields keep the pair, and a field
@@ -839,12 +910,20 @@ export function PlayerComparePage() {
           onClear={() => handleClear('b')}
           placeholder="Type a name"
           disabled={bDisabled}
+          describedBy={bLine === null ? undefined : bLineId}
         />
       </div>
 
-      {aGroup !== undefined && aGroup !== null && (
-        <p className={styles.restriction}>{restrictionCopy(aGroup)}</p>
-      )}
+      {/* Who Player B can be, or why nobody can be yet (issue #436). Always
+          in the page, so a polite live region announces the line when it
+          appears or changes; Player B is described by it. */}
+      <div aria-live="polite" className={styles.bLine}>
+        {bLine !== null && (
+          <p id={bLineId} className={styles.restriction}>
+            {bLine}
+          </p>
+        )}
+      </div>
 
       <div className={styles.actions}>
         <button

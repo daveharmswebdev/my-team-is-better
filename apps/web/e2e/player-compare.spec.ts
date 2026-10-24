@@ -319,6 +319,16 @@ test('a link to players from different position groups is refused, keeping Playe
   await expect(
     page.getByRole('button', { name: 'Compare', exact: true }),
   ).toBeEnabled()
+
+  // Dismissed for good: a reload of ?a=<Warner> doesn't bring it back.
+  await page.reload()
+  await expect(playerA).toHaveValue('Kurt Warner')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  // Player B is described by the restriction line, for assistive tech too.
+  await expect(playerB).toHaveAccessibleDescription(
+    'Comparing quarterbacks. Player B has to be a quarterback too.',
+  )
 })
 
 // Issue #436: Player B waits for Player A, then searches only Player A's
@@ -527,8 +537,15 @@ test('a link whose comparison failed can be asked again after closing it', async
   await expect(page.getByRole('dialog')).toHaveCount(0)
   const playerA = page.getByLabel('Player A', { exact: true })
   const playerB = page.getByLabel('Player B', { exact: true })
-  await expect(playerA).toHaveValue(`Player #${WARNER}`)
+  // Player A's group is looked up after the close (#436), and his career
+  // names him; nothing has named Player B, so he still reads by id.
+  await expect(playerA).toHaveValue('Kurt Warner')
   await expect(playerB).toHaveValue(`Player #${MCNAIR}`)
+  // Player B is never stranded: it can be cleared or typed over.
+  await expect(playerB).toBeEnabled()
+  await expect(
+    page.getByRole('button', { name: 'Clear Player B' }),
+  ).toBeVisible()
   const compare = page.getByRole('button', { name: 'Compare', exact: true })
   await expect(compare).toBeEnabled()
   await expect(compare).toBeFocused()

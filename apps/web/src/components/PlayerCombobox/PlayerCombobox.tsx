@@ -29,6 +29,11 @@ export interface PlayerComboboxProps {
    * for Player A). Whatever `value` holds still shows.
    */
   disabled?: boolean
+  /**
+   * The id of an element outside the field that also describes it, read
+   * after `hint` (issue #436: who Player B can be, or why he can't be).
+   */
+  describedBy?: string
 }
 
 const SEPARATOR = ' · '
@@ -79,6 +84,7 @@ export function PlayerCombobox({
   hint,
   placeholder,
   disabled = false,
+  describedBy,
 }: PlayerComboboxProps) {
   const generatedId = useId()
   const inputId = `${generatedId}-input`
@@ -197,7 +203,11 @@ export function PlayerCombobox({
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={activeDescendant}
-          aria-describedby={hint === undefined ? undefined : hintId}
+          aria-describedby={
+            [hint === undefined ? undefined : hintId, describedBy]
+              .filter((id) => id !== undefined)
+              .join(' ') || undefined
+          }
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           onClick={() => setIsExpanded(true)}

@@ -302,6 +302,30 @@ describe('PlayerCombobox re-entry (issue #304)', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('is described by the element the parent names, alongside its own hint (#436)', () => {
+    render(
+      <>
+        <p id="restriction">Comparing receivers.</p>
+        <PlayerCombobox
+          label="Player B"
+          value=""
+          options={[]}
+          status="error"
+          hint="Can't look anybody up."
+          describedBy="restriction"
+          disabled
+          onChange={vi.fn()}
+          onSelect={vi.fn()}
+          onClear={vi.fn()}
+        />
+      </>,
+    )
+
+    expect(
+      screen.getByLabelText('Player B', { exact: true }),
+    ).toHaveAccessibleDescription("Can't look anybody up. Comparing receivers.")
+  })
+
   it('the clear button is reachable from the keyboard', async () => {
     const user = userEvent.setup()
     const onClear = vi.fn()
