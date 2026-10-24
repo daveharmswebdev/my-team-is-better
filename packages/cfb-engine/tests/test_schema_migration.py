@@ -901,7 +901,10 @@ def test_unflagged_title_games_warn_on_every_open_not_only_the_migrating_one(
         message = str(stale[0].message)
         assert "conference_championship" in message
         assert "2005" in message
-        assert "re-ingest" in message
+        assert "Re-ingest those seasons" in message
+        # `cfb doctor` has no title-game check, so pointing at it would
+        # contradict this warning (#386 review).
+        assert "cfb doctor" not in message
 
 
 def test_unflagged_title_game_warning_names_every_affected_season(tmp_path: Path) -> None:

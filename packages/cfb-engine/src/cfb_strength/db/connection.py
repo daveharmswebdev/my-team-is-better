@@ -280,9 +280,9 @@ def _migrate_player_stat_columns(conn: sqlite3.Connection) -> list[str]:
     return added
 
 
-# Issue #386: the smallest real CFB season the engine ingests holds 709
-# completed games (2001, the regression fixture), and every season of the
-# committed raw cache (1998-2025) has 3-10 title games. A hand-built test
+# Issue #386: the smallest real CFB season the engine ingests holds 593
+# completed games (2020; a full build from the committed raw cache), and every
+# season of that cache (1998-2025) has 3-10 title games. A hand-built test
 # season is far smaller, so this bound tells a real season from one.
 _FULL_CFB_SEASON_MIN_GAMES = 500
 
@@ -360,19 +360,17 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             f"{db_file} predates the current schema: ensure_schema just added "
             f"{', '.join(added)} to a database that already holds games, so its data "
             "may predate the current schema too (e.g. no NFL rows, no team mascots), "
-            "which no migration can backfill."
+            "which no migration can backfill. Run `cfb doctor --db-path "
+            f"{db_file}` to check it, or rebuild it from the committed raw cache."
         )
     if unflagged:
+        # No doctor pointer here: `cfb doctor` has no title-game check, so it
+        # would call this db current (#386 review).
+        seasons = ", ".join(str(season) for season in unflagged)
         parts.append(
-            f"{db_file} has no conference title game flagged in CFB season(s) "
-            f"{', '.join(str(season) for season in unflagged)} "
+            f"{db_file} has no conference title game flagged in CFB season(s) {seasons} "
             "(games.conference_championship is 0 throughout), so each title game reads as "
-            "the regular-season finale; re-ingest those seasons."
+            f"the regular-season finale. Re-ingest those seasons (`cfb ingest --years ...`) "
+            "or rebuild the db from the committed raw cache."
         )
-    warnings.warn(
-        StaleDatabaseWarning(
-            " ".join(parts) + f" Run `cfb doctor --db-path {db_file}` to check it, "
-            "or rebuild it from the committed raw cache."
-        ),
-        stacklevel=2,
-    )
+    warnings.warn(StaleDatabaseWarning(" ".join(parts)), stacklevel=2)
