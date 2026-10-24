@@ -30,6 +30,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+# `group` (the players API's `PlayerPositionGroup`, #433) is deliberately not
+# here yet: apps/web's vocabularies.test.ts requires its decision table's keys
+# to equal this file's keys exactly, so a new vocabulary would fail web CI
+# from an api-only change. Epic #372 step 3 (web) adds it on both sides at once.
 VOCABULARY_NAMES: Final[tuple[str, ...]] = ("method", "sport")
 
 UNCONSTRAINED_LOCATIONS: Final[Mapping[tuple[str, str], str]] = {
