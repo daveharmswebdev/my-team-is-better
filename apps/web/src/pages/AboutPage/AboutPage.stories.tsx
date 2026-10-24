@@ -13,6 +13,9 @@ import { AboutPage } from './AboutPage'
  * `mockCredits` mirrors the live payload's shape and ordering: `methodologies`
  * is a list, Keener's method first and Elo second, and the page renders them
  * in that order.
+ *
+ * The Typefaces credit (issue #409) is static copy, so every story --
+ * Loaded, Loading and Error alike -- shows it under the a11y addon.
  */
 const mockCredits: CreditsOut = {
   methodologies: [
