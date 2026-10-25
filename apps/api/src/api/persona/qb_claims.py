@@ -58,10 +58,11 @@ in the prose, or a placeholder that refers to a player) is that player
 error when the last player reference before it is the other player. That
 reference carries across a sentence break ("Warner? His career started in
 {cs}" can't be McNair's); with none before it at all, it passes. A margin
-prints no name either, but it isn't tied to the last name (#457: "Warner
-beats McNair by {m}" and "McNair trails by {m}" are true); the verdict
-backstop reads it as a mention of its measure instead, so "McNair is ahead
-by {m}" is still rejected.
+prints no name either, and the player the prose puts ahead by it must be its
+winner: the last player named, unless he trails ("McNair trails by {m}") or
+is the object of a verb ("{wb} beats McNair by {m}"), #457. So "McNair's
+ahead by {m}" and "McNair, by {m}" are rejected. The verdict backstop also
+reads a margin after a win verb as a mention of its measure.
 
 **The verdict goes through claims** (D1 on #451). Every narration holds a
 `year` claim; a conclusive one holds one `winner` both claim or a `winner`
@@ -206,7 +207,12 @@ _HEDGE_ERROR: Final = (
 # with the math).
 _SPECULATION_RE: Final = re.compile(
     r"\bwould(?:'ve|’ve|\s+have)\s+(?:flipped|changed|swung|won|turned|been\s+different)\b"
-    r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included)\b"
+    # About the data or the seasons it lacks, within three words: "if we had
+    # his rookie year", "if the books had McNair's early years"; never "if
+    # you had McNair, you'd be crying" (#457 round 2).
+    r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included|added|got)\b"
+    r"(?=\s+(?:[\w'’]+\s+){0,3}?(?:early|earlier|missing|first|rookie|old|seasons?|years?"
+    r"|data|numbers|stats)\b)"
     r"|\bwith\s+(?:those|the\s+missing|his\s+early|his\s+missing)\s+(?:years|seasons)\b"
     # D2 on #451.
     # "That might change your mind" is about the listener, not the seasons
@@ -279,6 +285,47 @@ _GOES_TO_RE: Final = re.compile(
     r"(?:goes|went|belongs|falls|fell)\s+to\b",
     re.IGNORECASE,
 )
+# Who a margin belongs to (`_margin_holder`, #457 round 2): a trail word
+# between the last name and the margin makes the other player the one ahead;
+# a verb or "over" right before the last name makes it an object.
+_TRAIL_RE: Final = re.compile(
+    r"\b(?:trails?|trailed|trailing|behind|short|lags?|lagged|lagging|loses|lost|down)\b",
+    re.IGNORECASE,
+)
+_OBJECT_BEFORE_RE: Final = re.compile(
+    r"\b(?:beats|beat|beating|tops|topped|topping|edges|edged|edging|over|past|than"
+    r"|outplays|outplayed|outscores|outscored|outdoes|outdid|leads|led|ahead\s+of"
+    r"|in\s+front\s+of|clears|cleared)\s+\Z",
+    re.IGNORECASE,
+)
+# A coordinated new verb starts its own attribution for margin words (#457
+# round 2): "runs away with the career and takes the peak".
+_COORDINATED_VERB_RE: Final = re.compile(
+    r"\b(?:and|then)\s+(?:then\s+)?(?:he\s+)?"
+    r"(?!(?:his|its|this|thus|as|us|plus|less|yes)\b)"
+    r"(?:[a-z]+(?:s|ed)|took|won|ran|got|had|is|was)\b",
+    re.IGNORECASE,
+)
+# An appositive list of measures after the clause ("runs away with it,
+# career and peak"; "with the career, and the peak too"): the phrase covers
+# every listed measure, as the backstop's colon rule does (#457 round 2).
+_APPOSITIVE_RE: Final = re.compile(
+    r"\s*(?:[,:—–]|\s-\s)\s*(?P<list>(?:(?:and|the|both|too|also|career|peak)\b[\s,]*)+?)"
+    r"(?=[.!?;,]|\s*\Z)",
+    re.IGNORECASE,
+)
+# A negated extreme is no use of it ("no photo finish here", "this was no
+# squeaker", "doesn't run away with it", "forget by a nose"; #457 round 2).
+_MARGIN_NEGATOR_RE: Final = re.compile(
+    r"\b(?:no|not|never|nothing|nobody|forget)\b|n['’]t\b", re.IGNORECASE
+)
+_MARGIN_NEGATOR_WORDS: Final = 3
+# A clause that opens on an imperative conditional ("Give him those years and
+# it's a different story") governs the clause it is coordinated with.
+_IMPERATIVE_CUE_RE: Final = re.compile(
+    r"\s*(?:give|count|add|throw|put|hand|toss|let|credit)\b", re.IGNORECASE
+)
+_AND_RE: Final = re.compile(r"\band\b", re.IGNORECASE)
 
 # Margin size (the coordinator's voice call on #457, 2026-10-25): any margin
 # is a win, and the words scale with it. Each measure's margin, as printed
@@ -301,10 +348,17 @@ MARGIN_BANDS: Final[Mapping[str, tuple[Decimal, Decimal]]] = {
 _RUNAWAY_RE: Final = re.compile(
     r"\b(?:runs|ran|running|run)\s+away\b|\brunaway\b|\bblow[\s-]?outs?\b"
     r"|\b(?:blows|blew|blowing|blow)\s+(?:[\w'’]+\s+)?out\b|\bno\s+contest\b"
-    r"|\bnot\s+(?:even\s+)?close\b|n['’]t\s+(?:even\s+)?close\b"
+    # The adjective only ("it isn't close", "wasn't even close"), never the
+    # verb with an object ("can't close the gap", "couldn't close it out")
+    # or "close to" (#457 round 2).
+    r"|(?:\bnot|n['’]t)\s+(?:even\s+)?close\b"
+    r"(?!\s+(?:to|the|a|an|it|out|that|this|his|her|their|them|him|ground|in|down|off|any"
+    r"|gaps?|distance|deals?|shop|up)\b)"
     r"|(?<!victory\s)\blaps\b|\blapped\b|\blapping\b|\blandslide\b|\brout(?:s|ed)?\b"
     r"|\b(?:buries|buried|burying)\b|\b(?:walks|walked|walking)\s+away\s+with\b"
-    r"|\bin\s+a\s+walk\b|\bby\s+(?:a\s+mile|miles)\b|\bmiles\s+ahead\b|\bcakewalk\b",
+    r"|\bin\s+a\s+walk\b|\bby\s+(?:a\s+mile|miles)\b|\bmiles\s+ahead\b|\bcakewalk\b"
+    # The review's probes (#457 round 2).
+    r"|\bgoing\s+away\b|\b(?:cruises|cruised|cruising)\b",
     re.IGNORECASE,
 )
 _PHOTO_FINISH_RE: Final = re.compile(
@@ -1045,11 +1099,13 @@ def _resolve_margin(
             f"({_score_text(high)}), so there is no margin to state; {ahead.called} is still "
             'ahead, so say he took it without a number ("by a nose")'
         ]
-    # Not attributed (#457): "Warner beats McNair by {m}" and "McNair trails
-    # by {m}" are true though McNair is named last. "McNair is ahead by {m}"
-    # (R2, #451) is still rejected: the verdict backstop reads a margin
-    # placeholder after a win verb as a mention of its measure.
-    return (block.shown_margin(measure, winner), "none", winner), []
+    # Attributed to the winner (R2, #451): "McNair's ahead by {m}" must not
+    # print Warner's margin beside McNair. #457 exempts a loser who trails or
+    # is the object of the winner's verb (`_margin_beside_loser_is_true`):
+    # "{wb} beats McNair by {m}" and "McNair trails by {m}" are true. The
+    # verdict backstop also reads a margin after a win verb as a mention of
+    # its measure ("McNair is ahead by {m}").
+    return (block.shown_margin(measure, winner), "attributed", winner), []
 
 
 # ---------------------------------------------------------------------------
@@ -1111,18 +1167,35 @@ def _check_prose(
     # one, so "Warner? His career started in {cs}" can't print McNair's (R3).
     nearest: Side | None = None
     last: Side | None = None
+    # Every player reference so far, as (offset, side), for a margin's
+    # trail/object exemption (#457 round 2).
+    history: list[tuple[int, Side]] = []
     for start, side, claim_id in walk:
         at = bisect.bisect_right(breaks, start)
         if at != sentence:
             sentence, nearest = at, None
         if claim_id is None:
             nearest = last = side
+            if side is not None:
+                history.append((start, side))
             continue
         mode, claim_side = modes.get(claim_id, ("none", None))
         if claim_side is None or mode == "none":
             continue
         if mode == "name" and nearest != claim_side:
             named_at.add(start)
+        is_margin = claim_id in claim_measures and claim_measures[claim_id].kind == "margin"
+        if is_margin:
+            holder = _margin_holder(masked, start, history)
+            if holder is not None and holder != claim_side:
+                player, other = block.players[claim_side], block.players[holder]
+                errors.append(
+                    f"{{{claim_id}}} is {player.name}'s figure, but the prose puts {other.name} "
+                    f"ahead by it; name {player.called} as the one ahead"
+                )
+            # A margin names nobody: "Warner beats McNair by {m}" leaves
+            # McNair the last player named.
+            continue
         if mode == "attributed" and last is not None and last != claim_side:
             player, other = block.players[claim_side], block.players[last]
             errors.append(
@@ -1130,10 +1203,27 @@ def _check_prose(
                 f"is {other.name}; name {player.called} right before it"
             )
         nearest = last = claim_side
+        history.append((start, claim_side))
 
     errors.extend(_verdict_backstop(masked, walk, modes, claim_measures, breaks, block))
     errors.extend(_margin_word_errors(masked, placeholders, claim_measures, breaks, block))
     return errors, named_at
+
+
+def _margin_holder(masked: str, start: int, history: Sequence[tuple[int, Side]]) -> Side | None:
+    """Who the prose says is ahead by the margin at `start` (#457 round 2):
+    the last player named before it, unless he trails ("McNair trails by
+    {m}", "McNair is behind by {m}": the other one is ahead) or is the
+    object of a verb ("{wb} beats McNair by {m}", "Warner over McNair by
+    {m}": the player before him is ahead). None when nobody is named."""
+    if not history:
+        return None
+    at, side = history[-1]
+    if _OBJECT_BEFORE_RE.search(masked[max(0, at - 30) : at]):
+        return history[-2][1] if len(history) > 1 else None
+    if _TRAIL_RE.search(masked, at, start):
+        return _OTHER[side]
+    return side
 
 
 def _sentence_bounds(masked: str, start: int, breaks: Sequence[int]) -> tuple[int, int]:
@@ -1169,9 +1259,21 @@ def _speculation_matches(masked: str, breaks: Sequence[int]) -> list[re.Match[st
         found.append(match)
     for match in _DIFFERENT_STORY_RE.finditer(masked):
         left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
-        if _STORY_AFTER_RE.match(masked, match.end()) or _STORY_CUE_RE.search(
-            masked, left, match.start()
-        ):
+        # The cue must govern the phrase (#457 round 2): its own coordinated
+        # clause ("With his early stuff it's a different story", "it'd be a
+        # different story"), or a coordinated clause before it that opens on
+        # an imperative conditional ("Give him those years and it's a
+        # different story"); not an earlier "with" ("Warner takes it with
+        # room to spare and McNair's a different story").
+        ands = list(_AND_RE.finditer(masked, left, match.start()))
+        own = ands[-1].end() if ands else left
+        previous = ands[-2].end() if len(ands) > 1 else left
+        conditional = (
+            _STORY_AFTER_RE.match(masked, match.end())
+            or _STORY_CUE_RE.search(masked, own, match.start())
+            or (ands and _IMPERATIVE_CUE_RE.match(masked, previous))
+        )
+        if conditional:
             found.append(match)
     return sorted(found, key=lambda match: match.start())
 
@@ -1340,6 +1442,10 @@ def _margin_word_errors(
         ("photo-finish", _PHOTO_FINISH_RE, "close"),
     ):
         for match in pattern.finditer(masked):
+            left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
+            words = masked[left : match.start()].split()[-_MARGIN_NEGATOR_WORDS:]
+            if any(_MARGIN_NEGATOR_RE.search(word) for word in words):
+                continue
             for measure in _phrase_measures(match, mentions, masked, breaks):
                 band = block.band(measure)
                 if band != fits:
@@ -1354,7 +1460,32 @@ def _phrase_measures(
     breaks: Sequence[int],
 ) -> tuple[str, ...]:
     left, right, s_left, s_right = _clause_bounds(masked, match.start(), match.end(), breaks)
+    # The phrase's own verb phrase (#457 round 2): a coordinated new verb
+    # ("... the career and takes the peak") starts another attribution.
+    for coordinated in _COORDINATED_VERB_RE.finditer(masked, left, match.start()):
+        left = coordinated.start()
+    cut = _COORDINATED_VERB_RE.search(masked, match.end(), right)
+    listed: tuple[str, ...] = ()
+    if cut:
+        right = cut.start()
+    else:
+        apposition = _APPOSITIVE_RE.match(masked, right)
+        if apposition:
+            listed = tuple(
+                found.group(0).casefold() for found in _MEASURE_RE.finditer(apposition["list"])
+            )
+    named = _nearest_measures(match, mentions, left, right, s_left, s_right)
+    return tuple(dict.fromkeys((*(named or ()), *listed))) or MEASURES
 
+
+def _nearest_measures(
+    match: re.Match[str],
+    mentions: Sequence[tuple[int, tuple[str, ...]]],
+    left: int,
+    right: int,
+    s_left: int,
+    s_right: int,
+) -> tuple[str, ...] | None:
     before = [(match.start() - at, ms) for at, ms in mentions if left <= at < match.start()]
     after = [(at - match.end(), ms) for at, ms in mentions if match.end() <= at < right]
     if after and (not before or min(after)[0] < min(before)[0]):
@@ -1368,7 +1499,7 @@ def _phrase_measures(
     if before:
         return min(before)[1]
     after = [(at - match.end(), ms) for at, ms in mentions if match.end() <= at < s_right]
-    return min(after)[1] if after else MEASURES
+    return min(after)[1] if after else None
 
 
 def _margin_word_error(
