@@ -207,12 +207,9 @@ _HEDGE_ERROR: Final = (
 # with the math).
 _SPECULATION_RE: Final = re.compile(
     r"\bwould(?:'ve|’ve|\s+have)\s+(?:flipped|changed|swung|won|turned|been\s+different)\b"
-    # About the data or the seasons it lacks, within three words: "if we had
-    # his rookie year", "if the books had McNair's early years"; never "if
-    # you had McNair, you'd be crying" (#457 round 2).
-    r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included|added|got)\b"
-    r"(?=\s+(?:[\w'’]+\s+){0,3}?(?:early|earlier|missing|first|rookie|old|seasons?|years?"
-    r"|data|numbers|stats)\b)"
+    # The listener shape "if you had McNair, you'd be crying" is exempted in
+    # `_speculation_matches` (#457 round 3), not here.
+    r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included)\b"
     r"|\bwith\s+(?:those|the\s+missing|his\s+early|his\s+missing)\s+(?:years|seasons)\b"
     # D2 on #451.
     # "That might change your mind" is about the listener, not the seasons
@@ -289,9 +286,14 @@ _GOES_TO_RE: Final = re.compile(
 # between the last name and the margin makes the other player the one ahead;
 # a verb or "over" right before the last name makes it an object.
 _TRAIL_RE: Final = re.compile(
-    r"\b(?:trails?|trailed|trailing|behind|short|lags?|lagged|lagging|loses|lost|down)\b",
+    r"\b(?:trails?|trailed|trailing|behind|short|lags?|lagged|lagging|loses|lost|down)\b"
+    # The passive (#457 round 3): "McNair gets beat by {m}".
+    r"|\b(?:gets?|got|was|is|been|getting)\s+beat(?:en)?\b",
     re.IGNORECASE,
 )
+# A trail word right after the margin: "McNair falls {m} short", "finishes
+# {m} behind" (#457 round 3).
+_TRAIL_AFTER_RE: Final = re.compile(r"\s+(?:short|behind|back)\b", re.IGNORECASE)
 _OBJECT_BEFORE_RE: Final = re.compile(
     r"\b(?:beats|beat|beating|tops|topped|topping|edges|edged|edging|over|past|than"
     r"|outplays|outplayed|outscores|outscored|outdoes|outdid|leads|led|ahead\s+of"
@@ -316,16 +318,23 @@ _APPOSITIVE_RE: Final = re.compile(
 )
 # A negated extreme is no use of it ("no photo finish here", "this was no
 # squeaker", "doesn't run away with it", "forget by a nose"; #457 round 2).
+# The negator must govern the phrase: right before it, with at most an
+# auxiliary, "even" or "a" between (round 3), so "No doubt Manning runs away"
+# is still a runaway.
 _MARGIN_NEGATOR_RE: Final = re.compile(
-    r"\b(?:no|not|never|nothing|nobody|forget)\b|n['’]t\b", re.IGNORECASE
+    r"(?:\b(?:no|not|never|nobody|forget|nothing\s+like)|n['’]t)\s+"
+    r"(?:(?:even|a|an|is|was|be|been|do|does|did|really|ever|just)\s+){0,2}\Z",
+    re.IGNORECASE,
 )
-_MARGIN_NEGATOR_WORDS: Final = 3
 # A clause that opens on an imperative conditional ("Give him those years and
 # it's a different story") governs the clause it is coordinated with.
 _IMPERATIVE_CUE_RE: Final = re.compile(
     r"\s*(?:give|count|add|throw|put|hand|toss|let|credit)\b", re.IGNORECASE
 )
 _AND_RE: Final = re.compile(r"\band\b", re.IGNORECASE)
+# The listener shape of "if you had": "If you had McNair, you'd be crying"
+# (#457 round 3) is about the fan, not the missing seasons.
+_IF_YOU_HAD_RE: Final = re.compile(r"if\s+you\s+had", re.IGNORECASE)
 
 # Margin size (the coordinator's voice call on #457, 2026-10-25): any margin
 # is a win, and the words scale with it. Each measure's margin, as printed
@@ -1134,7 +1143,8 @@ def _check_prose(
         errors.append(f"the prose {what} {quote(match.group(0))}; {rule}. {holdings}")
     for match in _HEDGE_RE.finditer(masked):
         errors.append(f"the prose says {quote(match.group(0))}; {_HEDGE_ERROR}")
-    for match in _speculation_matches(masked, breaks):
+    names = [form for player in block.players.values() for form in player.forms]
+    for match in _speculation_matches(masked, breaks, names):
         errors.append(f"the prose says {quote(match.group(0))}; {_SPECULATION_ERROR}")
     for match in _JARGON_RE.finditer(masked):
         errors.append(f"the prose says {quote(match.group(0))}; {_JARGON_ERROR}")
@@ -1186,7 +1196,7 @@ def _check_prose(
             named_at.add(start)
         is_margin = claim_id in claim_measures and claim_measures[claim_id].kind == "margin"
         if is_margin:
-            holder = _margin_holder(masked, start, history)
+            holder = _margin_holder(masked, start, history, breaks)
             if holder is not None and holder != claim_side:
                 player, other = block.players[claim_side], block.players[holder]
                 errors.append(
@@ -1210,18 +1220,27 @@ def _check_prose(
     return errors, named_at
 
 
-def _margin_holder(masked: str, start: int, history: Sequence[tuple[int, Side]]) -> Side | None:
+def _margin_holder(
+    masked: str, start: int, history: Sequence[tuple[int, Side]], breaks: Sequence[int]
+) -> Side | None:
     """Who the prose says is ahead by the margin at `start` (#457 round 2):
     the last player named before it, unless he trails ("McNair trails by
-    {m}", "McNair is behind by {m}": the other one is ahead) or is the
-    object of a verb ("{wb} beats McNair by {m}", "Warner over McNair by
-    {m}": the player before him is ahead). None when nobody is named."""
+    {m}", "McNair is behind by {m}", "McNair gets beat by {m}", "McNair falls
+    {m} short": the other one is ahead) or is the object of a verb ("{wb}
+    beats McNair by {m}", "Warner over McNair by {m}": the player before him
+    is ahead). A trail word counts only in the margin's own clause (round 3:
+    "McNair went down swinging, but he's ahead by {m}" puts McNair ahead).
+    None when nobody is named."""
     if not history:
         return None
     at, side = history[-1]
     if _OBJECT_BEFORE_RE.search(masked[max(0, at - 30) : at]):
         return history[-2][1] if len(history) > 1 else None
-    if _TRAIL_RE.search(masked, at, start):
+    left, _, _, _ = _clause_bounds(masked, start, start, breaks)
+    end = start
+    while end < len(masked) and masked[end] == MASK:
+        end += 1
+    if _TRAIL_RE.search(masked, max(at, left), start) or _TRAIL_AFTER_RE.match(masked, end):
         return _OTHER[side]
     return side
 
@@ -1246,11 +1265,20 @@ def _clause_bounds(
     return left, (after.start() if after else s_right), s_left, s_right
 
 
-def _speculation_matches(masked: str, breaks: Sequence[int]) -> list[re.Match[str]]:
+def _speculation_matches(
+    masked: str, breaks: Sequence[int], names: Collection[str]
+) -> list[re.Match[str]]:
     """`_SPECULATION_RE`'s matches, less a would/could/might one behind a
-    negator, plus a "different story" that is a conditional (#457)."""
+    negator and the listener shape "if you had McNair, ..." (`names` are the
+    block's name forms), plus a "different story" that is a conditional
+    (#457)."""
     found: list[re.Match[str]] = []
     for match in _SPECULATION_RE.finditer(masked):
+        if _IF_YOU_HAD_RE.fullmatch(match.group(0)) and any(
+            re.match(rf"\s+{re.escape(name)}\s*(?:[,;:.!?—–]|\Z)", masked[match.end() :])
+            for name in names
+        ):
+            continue
         if _MODAL_RE.match(masked, match.start()):
             left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
             words = masked[left : match.start()].split()[-_NEGATOR_WORDS:]
@@ -1268,6 +1296,11 @@ def _speculation_matches(masked: str, breaks: Sequence[int]) -> list[re.Match[st
         ands = list(_AND_RE.finditer(masked, left, match.start()))
         own = ands[-1].end() if ands else left
         previous = ands[-2].end() if len(ands) > 1 else left
+        s_left, _ = _sentence_bounds(masked, match.start(), breaks)
+        if ands and len(ands) == 1 and not masked[left : ands[0].start()].strip() and left > s_left:
+            # ", and it's a different story": the coordinated clause before it
+            # is the clause before the comma (#457 round 3).
+            previous, _, _, _ = _clause_bounds(masked, left - 1, left - 1, breaks)
         conditional = (
             _STORY_AFTER_RE.match(masked, match.end())
             or _STORY_CUE_RE.search(masked, own, match.start())
@@ -1443,8 +1476,7 @@ def _margin_word_errors(
     ):
         for match in pattern.finditer(masked):
             left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
-            words = masked[left : match.start()].split()[-_MARGIN_NEGATOR_WORDS:]
-            if any(_MARGIN_NEGATOR_RE.search(word) for word in words):
+            if _MARGIN_NEGATOR_RE.search(masked[left : match.start()]):
                 continue
             for measure in _phrase_measures(match, mentions, masked, breaks):
                 band = block.band(measure)
