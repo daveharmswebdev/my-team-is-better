@@ -719,9 +719,13 @@ class PlayerCoverage:
 
     @property
     def cut_off(self) -> bool:
-        """Either end is cut off: the totals are a slice of the career, so a
-        client marks no "larger number" on them (founder decision, #443)."""
-        return self.cut_off_before or self.cut_off_after
+        """The totals are missing whole seasons of the career, so a client
+        marks no "larger number" on them (founder decision, #443). Only
+        `cut_off_before` counts (founder, #446): a career past the data's last
+        season is an active player in a season still being played, whose
+        totals keep their marks; a client says "stats through
+        <data_last_season>" instead."""
+        return self.cut_off_before
 
 
 @dataclass(frozen=True)

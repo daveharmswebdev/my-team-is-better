@@ -79,7 +79,7 @@ MAHOMES_COVERAGE = {
     "career_seasons": 10,
     "cut_off_before": False,
     "cut_off_after": True,
-    "cut_off": True,
+    "cut_off": False,
 }
 COUCH_COVERAGE = {
     "career_first_season": 1999,

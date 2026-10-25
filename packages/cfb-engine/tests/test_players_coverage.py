@@ -111,7 +111,9 @@ def test_a_career_running_past_the_data_is_cut_off_after(db: PlayerDb) -> None:
 
     assert cov.cut_off_before is False
     assert cov.cut_off_after is True
-    assert cov.cut_off is True
+    # A season still being played isn't a cut-off career (founder, #446):
+    # its totals keep their marks; the web says "stats through <year>".
+    assert cov.cut_off is False
     assert cov.career_seasons == 9
     assert cov.covered_seasons == 2
 
@@ -237,7 +239,7 @@ def test_every_leaders_row_carries_its_own_players_coverage(db: PlayerDb) -> Non
             row.coverage == get_player_career(conn, sport="nfl", player_id=row.player_id).coverage
         )
     by_id = {r.player_id: r.coverage for r in rows}
-    assert [by_id[pid].cut_off for pid in ids] == [True, False, False, True]
+    assert [by_id[pid].cut_off for pid in ids] == [True, False, False, False]
 
 
 def test_leaders_carry_the_data_span_even_on_an_empty_board(db: PlayerDb) -> None:

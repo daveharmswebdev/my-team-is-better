@@ -921,14 +921,17 @@ class PlayerCoverageOut(BaseModel):
     )
     cut_off_after: bool = Field(
         description=(
-            "The real career runs past this db's last season, so its later "
-            "seasons are missing here. False when either season is unknown."
+            "The real career runs past this db's last season: an active player "
+            "whose current season isn't in the data yet. Informational: it "
+            "doesn't set cut_off, and a client says 'stats through "
+            "<data_last_season>' instead. False when either season is unknown."
         )
     )
     cut_off: bool = Field(
         description=(
-            "cut_off_before or cut_off_after: this player's totals are a slice "
-            "of his career, not the whole of it. A client must not mark a "
+            "Equal to cut_off_before: the career began before this db's data, so "
+            "this player's totals are missing whole seasons and are a slice of "
+            "the career, not the whole of it. A client must not mark a "
             "'larger number' on them, and must not present them as career totals."
         )
     )

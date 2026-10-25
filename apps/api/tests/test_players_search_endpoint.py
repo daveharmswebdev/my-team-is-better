@@ -149,7 +149,7 @@ def test_a_non_passer_is_found_and_carries_its_own_position(client: TestClient) 
                 "career_seasons": 9,
                 "cut_off_before": False,
                 "cut_off_after": True,
-                "cut_off": True,
+                "cut_off": False,
             },
         }
     ]
