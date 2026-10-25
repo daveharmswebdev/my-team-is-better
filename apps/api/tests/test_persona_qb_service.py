@@ -133,6 +133,45 @@ def test_a_qb_prompt_version_bump_misses(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(narrator.calls) == 1
 
 
+def test_the_grounding_version_is_bumped_for_the_margin_bands() -> None:
+    # #457: the bands and the matcher fixes accept and reject differently.
+    assert QB_GROUNDING_VERSION == "qb-claims-v2"
+
+
+def test_a_narration_cached_before_the_margin_bands_is_not_served() -> None:
+    # Production holds a Brady/Manning "runs away with the peak" row written
+    # under qb-claims-v1 and the block without bands (#457). Seed that key
+    # exactly as #451's release wrote it: the release must miss it.
+    evidence = _evidence()
+    old_block = evidence.model_dump_json(exclude=service.QB_FACT_BLOCK_EXCLUDE)
+    assert old_block != qb_fact_block_json(evidence)
+    old_key = qb_cache_key(
+        sport="nfl",
+        a=KURT_WARNER,
+        b=STEVE_MCNAIR,
+        qb_score_version=evidence.qb_score.version,
+        prompt_version=QB_PROMPT_VERSION,
+        fact_block_json=old_block,
+        grounding_version="qb-claims-v1",
+    )
+    assert old_key != _key()
+    cache = InMemoryNarrationCache()
+    cache.set(old_key, CachedNarration(text="Warner runs away with it.", contested=False))
+    narrator = FakeNarrator([ACCEPTED])
+    result = _ask(cache, narrator)
+    assert result == NarrationOut(text=ACCEPTED_TEXT, contested=False, cached=False)
+    assert len(narrator.calls) == 1
+
+
+def test_a_grounding_version_bump_misses(monkeypatch: pytest.MonkeyPatch) -> None:
+    cache = InMemoryNarrationCache()
+    _ask(cache, FakeNarrator([ACCEPTED]))
+    monkeypatch.setattr(service, "QB_GROUNDING_VERSION", QB_GROUNDING_VERSION + "-next")
+    narrator = FakeNarrator([ACCEPTED])
+    assert _ask(cache, narrator).cached is False
+    assert len(narrator.calls) == 1
+
+
 # ---------------------------------------------------------------------------
 # hits, misses and the fallback
 # ---------------------------------------------------------------------------

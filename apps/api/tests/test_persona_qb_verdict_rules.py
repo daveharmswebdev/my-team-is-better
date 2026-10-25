@@ -26,6 +26,7 @@ from cfb_strength.players import get_qb_score
 from fixtures.player_api_fixture import fixture_conn
 from fixtures.qb_blocks import (
     KURT_WARNER,
+    PEYTON_MANNING,
     RANDALL_CUNNINGHAM,
     STEVE_MCNAIR,
     assert_an_error_says,
@@ -97,7 +98,9 @@ def test_r2_a_margin_beside_the_loser_is_rejected() -> None:
         {"id": "m", "kind": "margin", "measure": "career", "player": "Warner"},
         YEAR,
     )
-    assert_an_error_says(errors, "{m}", "Kurt Warner's figure", "Steve McNair")
+    # Since #457 a margin is checked through the verdict backstop, not as an
+    # attributed figure: "McNair trails by {m}" is true.
+    assert_an_error_says(errors, "McNair", "the career goes to Warner")
 
 
 def test_r3_an_attributed_figure_follows_a_name_across_a_sentence_break() -> None:
@@ -277,8 +280,6 @@ def test_d3_a_roman_numeral_is_rejected_on_the_qb_path() -> None:
 @pytest.mark.parametrize(
     "text",
     [
-        "Warner takes the career by a nose.",
-        "Warner takes the career by a nose, and the books only open in {yr}.",
         "First off, the math is the math.",
         "No one at this bar is arguing.",
         "Warner by half a step, no more.",
@@ -290,6 +291,21 @@ def test_d3_a_roman_numeral_is_rejected_on_the_qb_path() -> None:
 def test_ordinary_on_voice_sentences_pass(text: str) -> None:
     claims = [YEAR] if "{yr}" in text else []
     rendered = qb_rendered_verdict(_wm(), text, *claims)
+    assert rendered == text.replace("{yr}", "1999")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Manning takes the career by a nose.",
+        "Manning takes the career by a nose, and the books only open in {yr}.",
+    ],
+)
+def test_by_a_nose_passes_on_a_close_career(text: str) -> None:
+    # Moved off Warner/McNair (a clear 1.65 career margin) by #457: "by a
+    # nose" fits a close margin only. Manning/McNair's career is 0.83, close.
+    claims = [YEAR] if "{yr}" in text else []
+    rendered = qb_rendered_verdict(qb_block(PEYTON_MANNING, STEVE_MCNAIR), text, *claims)
     assert rendered == text.replace("{yr}", "1999")
 
 

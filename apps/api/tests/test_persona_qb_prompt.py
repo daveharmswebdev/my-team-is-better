@@ -13,6 +13,7 @@ McNair's peak) and the inconclusive one is Warner/Cunningham.
 
 from __future__ import annotations
 
+import json
 import re
 
 from fixtures.qb_blocks import (
@@ -26,6 +27,7 @@ from fixtures.qb_blocks import (
     qb_rejected,
     qb_rendered,
     qb_rendered_verdict,
+    rescored_evidence,
     split_evidence,
 )
 
@@ -102,20 +104,40 @@ def test_the_sweep_example_renders() -> None:
     assert text is not None and text.startswith("Mercer takes both, the career and the peak, ")
 
 
+_SPLIT_CLAIMS: tuple[dict[str, object], ...] = (
+    {"id": "wc", "kind": "winner", "measure": "career"},
+    {"id": "mc", "kind": "margin", "measure": "career", "player": "Mercer"},
+    {"id": "wp", "kind": "winner", "measure": "peak"},
+    YEAR,
+)
+
+
+def _close_split() -> QbVerdictEvidenceOut:
+    # The example's case since #457: a close career (1.00 to 0.60, 0.40), so
+    # its "photo finish" fits; Holloway takes the peak.
+    return rescored_evidence(KURT_WARNER, STEVE_MCNAIR, career=(1.0, 0.6), peak=(0.45, 0.5))
+
+
 def test_the_split_example_renders() -> None:
-    block = _fictional(split_evidence(), cut_off=(False, True))
+    block = _fictional(_close_split(), cut_off=(False, True))
+    assert json.loads(block)["qb_score"]["career_band"] == "close"
     text, errors = _check(
-        block,
-        _text("good_example", "split, close, one cut-off career"),
-        {"id": "wc", "kind": "winner", "measure": "career"},
-        {"id": "mc", "kind": "margin", "measure": "career", "player": "Mercer"},
-        {"id": "wp", "kind": "winner", "measure": "peak"},
-        YEAR,
+        block, _text("good_example", "split, close, one cut-off career"), *_SPLIT_CLAIMS
     )
     assert errors == ()
     assert text is not None
     assert text.startswith("Mercer takes the career by ")
     assert "Holloway grabs the peak" in text and "starts in 1999" in text
+
+
+def test_the_split_examples_photo_finish_is_rejected_on_a_clear_career() -> None:
+    # The same text on `split_evidence` (Mercer's career by 1.65, a clear
+    # margin): the example's words depend on its band.
+    block = _fictional(split_evidence(), cut_off=(False, True))
+    _, errors = _check(
+        block, _text("good_example", "split, close, one cut-off career"), *_SPLIT_CLAIMS
+    )
+    assert_an_error_says(errors, '"photo finish"', "the career margin is 1.65, a clear one")
 
 
 def test_the_inconclusive_example_renders() -> None:

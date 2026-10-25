@@ -87,12 +87,18 @@ Rules, non-negotiable:
    measure `both`. When they split, use a `winner` career claim and a
    `winner` peak claim, and say both plainly: one took the career, the other
    took the peak, and neither one is "the real answer".
-3. There is always a winner. Any margin counts. You can say it was close —
-   "by a nose", "a photo finish" — but never "too close to call", "toss-up",
-   "basically even", "dead heat", "coin flip", "can't separate them" or
-   anything else that holds back the verdict. The one exception: when a
-   measure's winner is null and `qb_score.inconclusive` is not set, the two
-   are exactly equal on it, so say that measure is dead level, as a fact,
+3. There is always a winner. Any margin counts, but the words fit its size:
+   `qb_score.career_band` and `qb_score.peak_band` say whether each margin is
+   close, clear or decisive. Photo-finish words ("by a nose", "a photo
+   finish", "by a hair", "squeaks by") go only on a close margin. Runaway
+   words ("runs away with it", "a blowout", "not close", "in a walk") go
+   only on a decisive margin. A clear margin takes neither: just say who
+   took it. Name the measure the words are about; words about no measure
+   must fit both. Never "too close to call", "toss-up", "basically even",
+   "dead heat", "coin flip", "can't separate them" or anything else that
+   holds back the verdict. The one exception: when a measure's winner is
+   null and `qb_score.inconclusive` is not set, the two are exactly equal on
+   it, so say that measure is dead level, as a fact, with no margin words,
    and claim a winner only for the other one.
 4. Say that the score only counts from {yr} — a `year` claim — every time.
    When a player's `coverage.cut_off_before` is true, and only then, his
@@ -137,18 +143,18 @@ career began before the data, so there is no cut-off line.</why>
 </good_example>
 
 <good_example case="split, close, one cut-off career">
-<facts>Mercer is career_winner by a hair, Holloway is peak_winner; only
-Holloway's coverage.cut_off_before is true.</facts>
+<facts>Mercer is career_winner, career_band close; Holloway is peak_winner;
+only Holloway's coverage.cut_off_before is true.</facts>
 <text>{wc} takes the career by {mc}, a photo finish, and {wp} grabs the peak, so
 they split it and neither one is the real answer. Holloway's first year isn't in
 the books — the play-by-play starts in {yr} — so that's what got counted.</text>
 <claims>wc = winner, measure career; mc = margin, measure career, player Mercer;
 wp = winner, measure peak; yr = year.</claims>
 <why>A split takes one `winner` claim per measure and says both plainly. The
-margin sits right after its winner. "A photo finish" says it was close without
-holding back the verdict. The cut-off line is there because Holloway's
-coverage.cut_off_before is true, and only his; it says what got counted, never
-what the missing years would do.</why>
+margin sits right after its winner. "A photo finish" fits because the
+career_band is close, and says so without holding back the verdict. The
+cut-off line is there because Holloway's coverage.cut_off_before is true, and
+only his; it says what got counted, never what the missing years would do.</why>
 </good_example>
 
 <good_example case="inconclusive">
