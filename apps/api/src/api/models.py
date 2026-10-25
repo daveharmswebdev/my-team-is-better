@@ -37,6 +37,7 @@ from cfb_strength.contracts import (
     PlayerCareer,
     PlayerCareerTotals,
     PlayerComparison,
+    PlayerCoverage,
     PlayerHeadToHead,
     PlayerHeadToHeadGame,
     PlayerLeaderCategory,
@@ -856,6 +857,106 @@ class PlayerStatsOut(BaseModel):
         )
 
 
+class PlayerCoverageOut(BaseModel):
+    """How much of a player's career this db holds (#446, epic #443):
+    `contracts.PlayerCoverage`, its seven fields plus its four derived
+    properties published as plain keys, computed by the engine and never
+    here. Two spans are in play and must not be confused: the *career* span
+    is what the source's roster says the player played; the *data* span is
+    the seasons this db has player stats for at all."""
+
+    career_first_season: int | None = Field(
+        description=(
+            "First season of the player's real career, from the source's roster "
+            "(not from this db's stat rows). Null when the source does not say."
+        )
+    )
+    career_last_season: int | None = Field(
+        description=(
+            "Last season of the player's real career, from the source's roster "
+            "(not from this db's stat rows). Null when the source does not say."
+        )
+    )
+    data_first_season: int | None = Field(
+        description=(
+            "First regular season this db holds player stats for in this sport, "
+            "for every player (1999 for the NFL). Null on a db with no stat rows."
+        )
+    )
+    data_last_season: int | None = Field(
+        description=(
+            "Last regular season this db holds player stats for in this sport, "
+            "for every player. Null on a db with no stat rows."
+        )
+    )
+    covered_first_season: int | None = Field(
+        description=(
+            "First season of this player's own lines in this db, either season "
+            "type. Null when he has none."
+        )
+    )
+    covered_last_season: int | None = Field(
+        description=(
+            "Last season of this player's own lines in this db, either season "
+            "type. Null when he has none."
+        )
+    )
+    covered_seasons: int = Field(
+        description=(
+            "How many distinct seasons this player has a line for in this db: the "
+            "'6' in 'his last 6 of 15 seasons'. 0 when he has none."
+        )
+    )
+    career_seasons: int | None = Field(
+        description=(
+            "Length of the real career, career_last_season - career_first_season "
+            "+ 1: the '15' in '6 of 15 seasons'. Null without both ends."
+        )
+    )
+    cut_off_before: bool = Field(
+        description=(
+            "The real career began before this db's data does, so its early "
+            "seasons are missing here. False when either season is unknown."
+        )
+    )
+    cut_off_after: bool = Field(
+        description=(
+            "The real career runs past this db's last season, so its later "
+            "seasons are missing here. False when either season is unknown."
+        )
+    )
+    cut_off: bool = Field(
+        description=(
+            "cut_off_before or cut_off_after: this player's totals are a slice "
+            "of his career, not the whole of it. A client must not mark a "
+            "'larger number' on them, and must not present them as career totals."
+        )
+    )
+
+    @classmethod
+    def from_dataclass(cls, coverage: PlayerCoverage) -> PlayerCoverageOut:
+        return cls(
+            career_first_season=coverage.career_first_season,
+            career_last_season=coverage.career_last_season,
+            data_first_season=coverage.data_first_season,
+            data_last_season=coverage.data_last_season,
+            covered_first_season=coverage.covered_first_season,
+            covered_last_season=coverage.covered_last_season,
+            covered_seasons=coverage.covered_seasons,
+            career_seasons=coverage.career_seasons,
+            cut_off_before=coverage.cut_off_before,
+            cut_off_after=coverage.cut_off_after,
+            cut_off=coverage.cut_off,
+        )
+
+
+_COVERAGE_DESCRIPTION = (
+    "How much of this player's real career (the source's roster span) this db's "
+    "stats (the db's data span) hold. When cut_off is true, every total here is a "
+    "slice of the career, so a client must not mark a larger number on it."
+)
+
+
 class PlayerLeaderRowOut(BaseModel):
     # The engine's competition rank over the whole qualifying population;
     # null when the sort value is null (those rows come last).
@@ -868,6 +969,7 @@ class PlayerLeaderRowOut(BaseModel):
     games: int | None
     record: StarterRecordOut
     stats: PlayerStatsOut
+    coverage: PlayerCoverageOut = Field(description=_COVERAGE_DESCRIPTION)
 
     @classmethod
     def from_dataclass(cls, row: PlayerLeaderRow) -> PlayerLeaderRowOut:
@@ -881,6 +983,7 @@ class PlayerLeaderRowOut(BaseModel):
             games=row.games,
             record=StarterRecordOut.from_dataclass(row.record),
             stats=PlayerStatsOut.from_dataclass(row.stats),
+            coverage=PlayerCoverageOut.from_dataclass(row.coverage),
         )
 
 
@@ -899,6 +1002,20 @@ class PlayerLeadersOut(BaseModel):
     # `fg_pct` board (#315) that is only the kickers at the engine's attempts
     # minimum, and may be 0.
     total: int
+    data_first_season: int | None = Field(
+        description=(
+            "First regular season this db holds player stats for in this sport "
+            "(the db's data span, not any player's career), so a board can say "
+            "'since 1999' even with no rows. Null on a db with no stat rows."
+        )
+    )
+    data_last_season: int | None = Field(
+        description=(
+            "Last regular season this db holds player stats for in this sport "
+            "(the db's data span, not any player's career). Null on a db with "
+            "no stat rows."
+        )
+    )
     rows: list[PlayerLeaderRowOut]
 
     @classmethod
@@ -911,6 +1028,8 @@ class PlayerLeadersOut(BaseModel):
             limit=leaders.limit,
             offset=leaders.offset,
             total=leaders.total,
+            data_first_season=leaders.data_first_season,
+            data_last_season=leaders.data_last_season,
             rows=[PlayerLeaderRowOut.from_dataclass(row) for row in leaders.rows],
         )
 
@@ -970,6 +1089,7 @@ class PlayerCareerOut(BaseModel):
     # Null when the player has no season line of that type.
     regular_season: PlayerCareerTotalsOut | None
     postseason: PlayerCareerTotalsOut | None
+    coverage: PlayerCoverageOut = Field(description=_COVERAGE_DESCRIPTION)
 
     @classmethod
     def from_dataclass(cls, career: PlayerCareer) -> PlayerCareerOut:
@@ -990,6 +1110,7 @@ class PlayerCareerOut(BaseModel):
                 if career.postseason is not None
                 else None
             ),
+            coverage=PlayerCoverageOut.from_dataclass(career.coverage),
         )
 
 
@@ -1085,6 +1206,7 @@ class PlayerSearchRowOut(BaseModel):
     group: PlayerPositionGroup | None
     first_season: int
     last_season: int
+    coverage: PlayerCoverageOut = Field(description=_COVERAGE_DESCRIPTION)
 
     @classmethod
     def from_dataclass(cls, row: PlayerSearchRow) -> PlayerSearchRowOut:
@@ -1095,6 +1217,7 @@ class PlayerSearchRowOut(BaseModel):
             group=row.group,
             first_season=row.first_season,
             last_season=row.last_season,
+            coverage=PlayerCoverageOut.from_dataclass(row.coverage),
         )
 
 

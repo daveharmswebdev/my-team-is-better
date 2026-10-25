@@ -176,6 +176,8 @@ ROW_KEYS = {
     "games",
     "record",
     "stats",
+    # #446: how much of the career the db holds.
+    "coverage",
 }
 
 
@@ -215,7 +217,9 @@ def test_default_leaders_are_regular_season_passing_yards_page_one(client: TestC
         "offset": 0,
         "total": REGULAR_QUALIFYING,
     }
-    assert set(body) == {*keys, "rows"}
+    # #446: the db's data span, so the board can say "since 1999".
+    assert set(body) == {*keys, "data_first_season", "data_last_season", "rows"}
+    assert (body["data_first_season"], body["data_last_season"]) == (1999, 2023)
     assert len(body["rows"]) == 50
     for row in body["rows"]:
         assert set(row) == ROW_KEYS
@@ -294,7 +298,7 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("postseason", "pt_inside_20"): [(1, "Tom Hutton"), (2, "Craig Hentrich")],
     ("regular", "def_sacks"): [(1, "T.J. Watt"), (2, "Josh Hines-Allen")],
     ("regular", "def_interceptions"): [(1, "DaRon Bland"), (2, "Donnie Abraham")],
-    ("regular", "def_tackles_solo"): [(1, "Ray Lewis"), (2, "Foye Oluokun")],
+    ("regular", "def_tackles_solo"): [(1, "Ray Lewis"), (2, "Foyesade Oluokun")],
     ("regular", "def_fumbles_forced"): [(1, "Tony Brackens"), (2, "Jevon Kearse")],
     ("regular", "def_pass_defended"): [(1, "Donnie Abraham"), (2, "Brian Dawkins")],
     ("postseason", "def_sacks"): [(1, "Aidan Hutchinson"), (1, "George Karlaftis")],
@@ -752,7 +756,7 @@ DEFENSE_TOP: dict[tuple[str, str], list[tuple[int, str, str, int | float]]] = {
     ],
     ("regular", "def_tackles_solo"): [
         (1, "Ray Lewis", "ILB", 95),
-        (2, "Foye Oluokun", "LB", 91),
+        (2, "Foyesade Oluokun", "LB", 91),
         (3, "Donnie Edwards", "OLB", 87),
         (3, "Wali Rainer", "LB", 87),
         (3, "Zaire Franklin", "OLB", 87),

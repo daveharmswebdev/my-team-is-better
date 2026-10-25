@@ -132,6 +132,7 @@ def test_warner_1999_lines_disclose_the_game_without_stat_lines(client: TestClie
         "seasons",
         "regular_season",
         "postseason",
+        "coverage",
     }
     assert (body["sport"], body["player_id"], body["display_name"], body["position"]) == (
         "nfl",

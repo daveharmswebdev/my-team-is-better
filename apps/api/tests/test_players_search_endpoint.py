@@ -107,6 +107,20 @@ def test_a_row_carries_the_engines_fields(client: TestClient) -> None:
             "group": "QB",
             "first_season": 1999,
             "last_season": 1999,
+            # #446: McNair played 1995-2007; the slice holds his 1999.
+            "coverage": {
+                "career_first_season": 1995,
+                "career_last_season": 2007,
+                "data_first_season": 1999,
+                "data_last_season": 2023,
+                "covered_first_season": 1999,
+                "covered_last_season": 1999,
+                "covered_seasons": 1,
+                "career_seasons": 13,
+                "cut_off_before": True,
+                "cut_off_after": False,
+                "cut_off": True,
+            },
         }
     ]
 
@@ -123,6 +137,20 @@ def test_a_non_passer_is_found_and_carries_its_own_position(client: TestClient) 
             "group": None,
             "first_season": 2023,
             "last_season": 2023,
+            # #446: an active career runs past the slice's 2023.
+            "coverage": {
+                "career_first_season": 2018,
+                "career_last_season": 2026,
+                "data_first_season": 1999,
+                "data_last_season": 2023,
+                "covered_first_season": 2023,
+                "covered_last_season": 2023,
+                "covered_seasons": 1,
+                "career_seasons": 9,
+                "cut_off_before": False,
+                "cut_off_after": True,
+                "cut_off": True,
+            },
         }
     ]
 
