@@ -31,4 +31,39 @@ describe('PlayerStatsCredit (issue #296)', () => {
       screen.getByRole('link', { name: 'How This Works' }),
     ).toHaveAttribute('href', '/about#data')
   })
+
+  describe('the EP model credit (issue #459)', () => {
+    const EP_CREDIT =
+      "The QB score's expected points come from nflfastR's EP model, by Ben Baldwin & Sebastian Carl."
+
+    it('credits the EP model next to the stats credit when a QB score is shown', () => {
+      render(
+        <MemoryRouter>
+          <PlayerStatsCredit credit={playerStats} epModel />
+        </MemoryRouter>,
+      )
+      expect(screen.getByText(EP_CREDIT)).toBeInTheDocument()
+      expect(
+        screen.getByRole('link', { name: playerStats.name }),
+      ).toBeInTheDocument()
+    })
+
+    it('credits it while the stats credit is unavailable too', () => {
+      render(
+        <MemoryRouter>
+          <PlayerStatsCredit credit={null} epModel />
+        </MemoryRouter>,
+      )
+      expect(screen.getByText(EP_CREDIT)).toBeInTheDocument()
+    })
+
+    it('says nothing of it without a QB score', () => {
+      render(
+        <MemoryRouter>
+          <PlayerStatsCredit credit={playerStats} />
+        </MemoryRouter>,
+      )
+      expect(screen.queryByText(/EP model/)).toBeNull()
+    })
+  })
 })

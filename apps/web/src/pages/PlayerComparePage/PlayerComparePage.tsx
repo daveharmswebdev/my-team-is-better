@@ -15,7 +15,11 @@ import {
   VerdictNetworkError,
   fetchPlayerCareer,
   fetchPlayerComparison,
+  fetchQbVerdict,
 } from '../../lib/api/client'
+import { QbScorePanel } from '../../components/QbScorePanel/QbScorePanel'
+import type { QbNarrationState } from '../../components/QbScorePanel/QbScorePanel'
+import { qbNarrationErrorCopy } from '../../lib/qbScore'
 import { isPlayerPositionGroup } from '../../lib/api/types'
 import type {
   PlayerCareerTotalsOut,
@@ -160,6 +164,16 @@ function refusalOf(state: unknown): Refusal | null {
   return { aGroup, bGroup, bPosition }
 }
 
+/** The latest QB narration answer, tagged with the pair it narrates. */
+interface NarrationAnswer {
+  key: string
+  state: Exclude<QbNarrationState, { status: 'loading' }>
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
 /** The latest lone-player answer, tagged with the id it answers. */
 type CareerAnswer = { id: number } & ({ status: 'success' } | Failure)
 
@@ -292,6 +306,8 @@ export function PlayerComparePage() {
   const [comparisonAnswer, setComparisonAnswer] =
     useState<ComparisonAnswer | null>(null)
   const [careerAnswer, setCareerAnswer] = useState<CareerAnswer | null>(null)
+  const [narrationAnswer, setNarrationAnswer] =
+    useState<NarrationAnswer | null>(null)
   const credit = usePlayerStatsCredit()
   const noteId = useId()
   const pickHintId = `${noteId}-pick-hint`
@@ -665,6 +681,59 @@ export function PlayerComparePage() {
     loneId !== null && careerAnswer?.id === loneId ? careerAnswer : null
 
   /**
+   * Two quarterbacks on screen (issue #459): the comparison carries their QB
+   * score, and the narration of it is asked for once the score is up -- the
+   * verdict call is the slower one, so the panel never waits on it. Any other
+   * pair has `qb_score: null` and asks nothing. Keyed like the comparison, and
+   * dropped with it, so a re-ask of the same pair loads afresh (#308).
+   */
+  const qbPairKey =
+    currentComparison?.status === 'success' &&
+    currentComparison.comparison.qb_score !== null
+      ? currentComparison.key
+      : null
+  if (qbPairKey === null && narrationAnswer !== null) {
+    setNarrationAnswer(null)
+  }
+  useEffect(() => {
+    // The key is non-null only while the URL names this numbered pair.
+    if (
+      qbPairKey === null ||
+      typeof pickA !== 'number' ||
+      typeof pickB !== 'number'
+    ) {
+      return
+    }
+    const key = qbPairKey
+    const controller = new AbortController()
+    fetchQbVerdict(pickA, pickB, { signal: controller.signal }).then(
+      (envelope) => {
+        setNarrationAnswer({
+          key,
+          state: { status: 'success', text: envelope.narration.text },
+        })
+      },
+      (error: unknown) => {
+        // A close or a new pair abandoned it: nothing to say.
+        if (isAbortError(error) || controller.signal.aborted) {
+          return
+        }
+        setNarrationAnswer({
+          key,
+          state: { status: 'error', message: qbNarrationErrorCopy(error) },
+        })
+      },
+    )
+    return () => {
+      controller.abort()
+    }
+  }, [qbPairKey, pickA, pickB])
+  const narration: QbNarrationState =
+    narrationAnswer !== null && narrationAnswer.key === qbPairKey
+      ? narrationAnswer.state
+      : { status: 'loading' }
+
+  /**
    * Both slots named in the URL: the page has been asked about a pair, so
    * whatever it has to say -- loading, the comparison, an unknown player, the
    * narrator's error line, or the same player twice -- is an answer, and every
@@ -827,9 +896,14 @@ export function PlayerComparePage() {
           <Comparison
             comparison={currentComparison.comparison}
             noteId={noteId}
+            narration={narration}
           />
-          {/* The credit travels with the numbers it credits (issue #296). */}
-          <PlayerStatsCredit credit={credit} />
+          {/* The credit travels with the numbers it credits (issue #296),
+              the EP model's too when a QB score is up (#459). */}
+          <PlayerStatsCredit
+            credit={credit}
+            epModel={currentComparison.comparison.qb_score !== null}
+          />
           {shareUrl !== undefined && (
             <ShareButton url={shareUrl} label="Share this comparison" />
           )}
@@ -982,9 +1056,12 @@ function NotFound() {
 function Comparison({
   comparison,
   noteId,
+  narration,
 }: {
   comparison: PlayerComparisonOut
   noteId: string
+  /** The QB narration's state; shown only with a `qb_score`. */
+  narration: QbNarrationState
 }) {
   const { a, b } = comparison
   const undercount = compareUndercountNote(a, b)
@@ -1049,6 +1126,17 @@ function Comparison({
         <p id={calloutId} role="status" className={styles.callout}>
           {callout}
         </p>
+      )}
+
+      {/* Two quarterbacks (#459): the engine's era-adjusted score, before
+          the counting totals. Every other pair has no qb_score. */}
+      {comparison.qb_score !== null && (
+        <QbScorePanel
+          qbScore={comparison.qb_score}
+          dataFirstSeason={a.coverage.data_first_season}
+          cutOff={{ a: a.coverage.cut_off, b: b.coverage.cut_off }}
+          narration={narration}
+        />
       )}
 
       <div className={styles.notes}>

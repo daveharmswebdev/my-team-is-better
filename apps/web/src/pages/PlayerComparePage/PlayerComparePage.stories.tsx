@@ -27,6 +27,7 @@ import {
   fixtureCoverage,
 } from '../../lib/playerFixtures'
 import { NETWORK_ERROR_COPY } from '../../lib/api/client'
+import { WARNER_VS_MCNAIR_VERDICT } from '../../lib/qbScoreFixtures'
 import { PLAYER_NOT_FOUND_COPY } from '../../lib/playerStats'
 import { PlayerComparePage } from './PlayerComparePage'
 
@@ -34,6 +35,8 @@ type Handler = () => Promise<Response>
 
 interface Handlers {
   compare?: Handler
+  /** `POST /api/players/compare/verdict` (#459); never answers when not given. */
+  verdict?: Handler
   /** Gets the id asked for, for a story that looks up more than one. */
   career?: (playerId: number) => Promise<Response>
   /** `/api/players/search`; the fixture's McNair row when not given. */
@@ -58,6 +61,9 @@ function installFetch(handlers: Handlers) {
     )
     if (url.pathname === '/api/players/compare') {
       return (handlers.compare ?? never)()
+    }
+    if (url.pathname === '/api/players/compare/verdict') {
+      return (handlers.verdict ?? never)()
     }
     if (url.pathname === '/api/players/search') {
       return handlers.search === undefined
@@ -609,6 +615,64 @@ export const BothCareersCutOff: Story = {
       name: 'Kurt Warner and Steve McNair, playoffs',
     })
     await expect(modal.getByText(/^Hold on\. Both of these guys/)).toBeVisible()
+  },
+}
+
+/**
+ * Two quarterbacks (#459): the QB score from the comparison, the narration
+ * after it, and the EP model's credit beside the stats credit. The narration
+ * is the fixture db's, as the e2e run serves it.
+ */
+export const QuarterbacksScored: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
+      verdict: () => jsonResponse(200, WARNER_VS_MCNAIR_VERDICT),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const modal = within(dialog)
+    const panel = await modal.findByRole('region', { name: 'QB score' })
+    await expect(
+      within(panel).getByRole('table', { name: /QB score/ }),
+    ).toHaveTextContent('Kurt Warner by 1.65')
+    await waitFor(() =>
+      expect(
+        within(panel).getByRole('region', { name: 'The take' }),
+      ).toHaveTextContent(WARNER_VS_MCNAIR_VERDICT.narration.text),
+    )
+    await expect(modal.getByText(/nflfastR's EP model/)).toBeVisible()
+  },
+}
+
+/** The narration can't be had (#459): the narrator says so, and the score stays. */
+export const QuarterbackNarrationFailed: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
+      verdict: () => jsonResponse(503, { detail: { error: 'stale_database' } }),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const panel = await within(dialog).findByRole('region', {
+      name: 'QB score',
+    })
+    await waitFor(() =>
+      expect(
+        within(panel).getByRole('region', { name: 'The take' }),
+      ).toHaveTextContent(/Something broke in the back/),
+    )
+    await expect(
+      within(panel).getByRole('table', { name: /QB score/ }),
+    ).toBeVisible()
   },
 }
 

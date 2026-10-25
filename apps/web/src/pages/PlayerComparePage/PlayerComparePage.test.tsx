@@ -20,7 +20,9 @@ import { PLAYER_POSITION_GROUPS } from '../../lib/api/types'
 import type {
   PlayerComparisonOut,
   PlayerPositionGroup,
+  QbVerdictEnvelope,
 } from '../../lib/api/types'
+import { WARNER_VS_MCNAIR_VERDICT } from '../../lib/qbScoreFixtures'
 import {
   BRADY_VS_MANNING,
   BRADY_VS_QUINN,
@@ -74,6 +76,9 @@ vi.mock('../../lib/api/client', async () => {
     fetchPlayerCareer: vi.fn(),
     searchPlayers: vi.fn(),
     fetchCredits: vi.fn(),
+    // Never answers unless a test says otherwise: a QB pair's comparison
+    // asks for its narration (#459), which most tests here don't look at.
+    fetchQbVerdict: vi.fn(() => new Promise(() => {})),
   }
 })
 
@@ -81,9 +86,11 @@ import {
   fetchCredits,
   fetchPlayerCareer,
   fetchPlayerComparison,
+  fetchQbVerdict,
   searchPlayers,
 } from '../../lib/api/client'
 
+const mockedVerdict = vi.mocked(fetchQbVerdict)
 const mockedCompare = vi.mocked(fetchPlayerComparison)
 const mockedCareer = vi.mocked(fetchPlayerCareer)
 const mockedSearch = vi.mocked(searchPlayers)
@@ -1795,5 +1802,151 @@ describe('PlayerComparePage: careers cut off by the data (issue #448)', () => {
         "Stats through 2023. This season isn't in our books yet.",
       ),
     ).toBeInTheDocument()
+  })
+})
+
+describe('PlayerComparePage: the QB score (issue #459)', () => {
+  const FAULK = 2252790861
+  const FARMER = 2039946310
+
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedVerdict.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+  })
+
+  it('a QB pair shows the score from the comparison, then the narration', async () => {
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+    let answer: (envelope: QbVerdictEnvelope) => void = () => {}
+    mockedVerdict.mockReturnValue(
+      new Promise((resolve) => {
+        answer = resolve
+      }),
+    )
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    // The score is in before the narration is.
+    const panel = await screen.findByRole('region', { name: 'QB score' })
+    expect(
+      within(panel).getByRole('table', { name: /QB score/ }),
+    ).toHaveTextContent('Kurt Warner by 1.65')
+    const take = within(panel).getByRole('region', { name: 'The take' })
+    expect(take).toHaveTextContent("Hang on, I'm reading the numbers…")
+    expect(mockedVerdict).toHaveBeenCalledTimes(1)
+    expect(mockedVerdict.mock.calls[0]?.slice(0, 2)).toEqual([WARNER, MCNAIR])
+
+    answer(WARNER_VS_MCNAIR_VERDICT)
+
+    await waitFor(() => {
+      expect(take).toHaveTextContent(WARNER_VS_MCNAIR_VERDICT.narration.text)
+    })
+    expect(take).toHaveAttribute('aria-busy', 'false')
+  })
+
+  it('credits the EP model beside the stats credit for a QB pair', async () => {
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+    mockedVerdict.mockResolvedValue(WARNER_VS_MCNAIR_VERDICT)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      await within(dialog).findByText(
+        /nflfastR's EP model, by Ben Baldwin & Sebastian Carl/,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it.each([
+    [
+      '400',
+      new PlayersNotComparableError(400, {
+        error: 'players_not_comparable',
+        a_group: 'QB',
+        b_group: 'RB',
+      }),
+      /I only call these for two quarterbacks/,
+    ],
+    [
+      '404',
+      new PlayerApiError(404, {
+        error: 'unknown_player',
+        player_id: 1,
+        sport: 'nfl',
+      }),
+      /I lost one of these two in my book/,
+    ],
+    [
+      '422',
+      new VerdictHttpError(422, '{}'),
+      /Your question came through garbled/,
+    ],
+    ['503', new VerdictHttpError(503, '{}'), /Something broke in the back/],
+    [
+      'network or timeout',
+      new VerdictNetworkError(NETWORK_ERROR_COPY),
+      /Lost you there, pal\. My two cents/,
+    ],
+  ])(
+    'a narration %s failure is said in voice, and the score stays',
+    async (_name, error, copy) => {
+      mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+      mockedVerdict.mockRejectedValue(error)
+
+      renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+      const panel = await screen.findByRole('region', { name: 'QB score' })
+      const take = within(panel).getByRole('region', { name: 'The take' })
+      await waitFor(() => {
+        expect(take).toHaveTextContent(copy)
+      })
+      expect(take).not.toHaveTextContent(/\b(400|404|422|503)\b/)
+      expect(
+        within(panel).getByRole('table', { name: /QB score/ }),
+      ).toHaveTextContent('Kurt Warner by 1.65')
+      // The comparison itself is still all there.
+      expect(
+        screen.getByRole('table', {
+          name: 'Kurt Warner and Steve McNair, regular season',
+        }),
+      ).toBeInTheDocument()
+    },
+  )
+
+  it('a non-QB pair gets no panel and no verdict request', async () => {
+    mockedCompare.mockResolvedValue(FAULK_VS_FARMER)
+
+    renderPage(`?a=${FAULK}&b=${FARMER}`)
+
+    await screen.findByRole('table', {
+      name: 'Marshall Faulk and Robert Farmer, regular season',
+    })
+    expect(screen.queryByRole('region', { name: 'QB score' })).toBeNull()
+    expect(screen.queryByText(/EP model/)).toBeNull()
+    expect(mockedVerdict).not.toHaveBeenCalled()
+  })
+
+  it('abandons the narration request when the comparison closes', async () => {
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+    mockedVerdict.mockReturnValue(new Promise(() => {}))
+    const user = userEvent.setup()
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+    await screen.findByRole('region', { name: 'QB score' })
+    const options = mockedVerdict.mock.calls[0]?.[2]
+    expect(options?.signal?.aborted).toBe(false)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Close the comparison' }),
+    )
+
+    expect(options?.signal?.aborted).toBe(true)
   })
 })

@@ -26,6 +26,11 @@ type Story = StoryObj<typeof meta>
 /** The live `nflverse_player_stats` credit. */
 export const Credited: Story = {}
 
+/** A QB score on screen (#459): the EP model credited beside the stats. */
+export const WithEpModel: Story = {
+  args: { epModel: true },
+}
+
 /** No credit in hand (loading, or `/api/credits` failed): a link to the About page's data. */
 export const Unavailable: Story = {
   args: { credit: null },

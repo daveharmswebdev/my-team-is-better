@@ -25,6 +25,10 @@ import type {
   PlayerCoverageOut,
   PlayerStatsOut,
 } from './api/types'
+import {
+  WARNER_VS_MANNING_QB_SCORE,
+  WARNER_VS_MCNAIR_QB_SCORE,
+} from './qbScoreFixtures'
 
 /** The committed fixture db's player-stats span (measured for #448). */
 export const FIXTURE_DATA_FIRST_SEASON = 1999
@@ -1208,6 +1212,7 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
       },
     ],
   },
+  qb_score: WARNER_VS_MCNAIR_QB_SCORE,
 }
 
 /**
@@ -1229,6 +1234,7 @@ export const NEVER_MET_COMPARISON: PlayerComparisonOut = {
     record: { wins: 0, losses: 0, ties: 0, starts: 0 },
     games: [],
   },
+  qb_score: null,
 }
 
 const WARNER_MCNAIR_WEEK_8 = WARNER_VS_MCNAIR.regular_season_head_to_head
@@ -1440,6 +1446,7 @@ export const WARNER_VS_MANNING: PlayerComparisonOut = {
     record: { wins: 0, losses: 0, ties: 0, starts: 0 },
     games: [],
   },
+  qb_score: WARNER_VS_MANNING_QB_SCORE,
 }
 
 /** `GET /api/players/search?q=Manning&sport=nfl` on the committed fixture. */
@@ -1586,6 +1593,8 @@ export const BRADY_VS_QUINN: PlayerComparisonOut = {
   a: TOM_BRADY_CAREER,
   b: BRADY_QUINN_CAREER,
   ...NEVER_MET_HEAD_TO_HEADS,
+  // Invented careers: no QB score (see BRADY_VS_MANNING).
+  qb_score: null,
 }
 
 /**
@@ -1597,6 +1606,9 @@ export const BRADY_VS_MANNING: PlayerComparisonOut = {
   a: TOM_BRADY_CAREER,
   b: PEYTON_MANNING_CAREER,
   ...NEVER_MET_HEAD_TO_HEADS,
+  // The invented careers carry no QB score: the real Brady/Manning one, from
+  // production, is `qbScoreFixtures.BRADY_VS_MANNING_QB_SCORE`.
+  qb_score: null,
 }
 
 // ---------------------------------------------------------------------------
@@ -2355,6 +2367,7 @@ export const HARRISON_VS_JAMES: PlayerComparisonOut = {
   a: MARVIN_HARRISON_CAREER,
   b: EDGERRIN_JAMES_CAREER,
   ...NEVER_MET_HEAD_TO_HEADS,
+  qb_score: null,
 }
 
 /** Invented pairing of real careers: a kicker and a punter, who never met. */
@@ -2363,6 +2376,7 @@ export const MARE_VS_GOWIN: PlayerComparisonOut = {
   a: OLINDO_MARE_CAREER,
   b: TOBY_GOWIN_CAREER,
   ...NEVER_MET_HEAD_TO_HEADS,
+  qb_score: null,
 }
 
 // ---------------------------------------------------------------------------
@@ -2804,6 +2818,7 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
     },
     games: [],
   },
+  qb_score: null,
 }
 
 export const TYREEK_HILL_CAREER: PlayerCareerOut = HILL_VS_LAMB.a
@@ -3144,6 +3159,7 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
     },
     games: [],
   },
+  qb_score: null,
 }
 
 export const MARSHALL_FAULK_CAREER: PlayerCareerOut = FAULK_VS_FARMER.a
@@ -5207,4 +5223,5 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
     },
     games: [],
   },
+  qb_score: null,
 }

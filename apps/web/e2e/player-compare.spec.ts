@@ -752,3 +752,107 @@ test("a lone link's career failure goes once another player is picked", async ({
   await expect(page.getByRole('alert')).toHaveCount(0)
   await expect(page.getByText(PICK_TWO_COPY)).toHaveCount(0)
 })
+
+// Issue #459 (epic #439): two quarterbacks get the engine's era-adjusted QB
+// score, from the comparison's qb_score, and the narration of it from
+// POST /api/players/compare/verdict. On the fixture db each QB has one
+// qualifying season, 1999: Warner's composite 2.25 to McNair's 0.60, so
+// Warner sweeps (career by 1.65, peak by 0.33, peak filled with 4 average
+// slots). The narration is StubNarrator's, which the API answers with its
+// own fallback text: rendered as sent, so this reads it off the response.
+const isVerdictPost = (request: { url(): string; method(): string }) =>
+  new URL(request.url()).pathname === '/api/players/compare/verdict' &&
+  request.method() === 'POST'
+
+test('two quarterbacks get the QB score panel, its explanation by keyboard, and the narration', async ({
+  page,
+}) => {
+  const verdict = page.waitForResponse((response) =>
+    isVerdictPost(response.request()),
+  )
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  const panel = dialog.getByRole('region', { name: 'QB score' })
+  const scores = panel.getByRole('table', { name: /QB score/ })
+  await expect(scores.getByRole('row')).toHaveText([
+    'MeasureKurt WarnerSteve McNairEdge',
+    'Career2.250.60Kurt Warner by 1.65',
+    'Peak0.450.12Kurt Warner by 0.33',
+  ])
+  // Both careers began before 1999 (#448's signal): the floor, said louder.
+  await expect(
+    panel.getByText(
+      "Both careers started before 1999, and the play-by-play doesn't go back that far: only their seasons from 1999 on are scored.",
+    ),
+  ).toBeVisible()
+
+  const response = await verdict
+  expect(response.status()).toBe(200)
+  const body = (await response.json()) as { narration: { text: string } }
+  expect(body.narration.text.length).toBeGreaterThan(0)
+  const take = panel.getByRole('region', { name: 'The take' })
+  await expect(take).toContainText(body.narration.text)
+  await expect(take).toHaveAttribute('aria-busy', 'false')
+
+  // The explanation, from the keyboard alone.
+  const toggle = panel.getByRole('button', { name: 'How the QB score works' })
+  await toggle.focus()
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  const how = panel.getByRole('region', { name: 'How the QB score works' })
+  await expect(how).toContainText(
+    'Season score = 0.826 × passing EPA per dropback z + 0.174 × rushing EPA per play z',
+  )
+  await expect(how).toContainText(
+    'Kurt Warner: 1 counting season. Career 2.25. Peak 0.45, with 4 of 5 slots filled with 0.',
+  )
+
+  // Both credits, the stats and the EP model.
+  await expect(dialog.getByRole('link', { name: /nflfastR/ })).toBeVisible()
+  await expect(
+    dialog.getByText(/nflfastR's EP model, by Ben Baldwin & Sebastian Carl/),
+  ).toBeVisible()
+})
+
+test('a quarterback with no qualifying season makes the QB score inconclusive, in voice', async ({
+  page,
+}) => {
+  // Randall Cunningham's 1999 is 214 dropbacks, under the 224 rule.
+  await page.goto(`/nfl/compare?a=${WARNER}&b=2024782845`)
+
+  const panel = comparisonModal(
+    page,
+    'Kurt Warner and Randall Cunningham',
+  ).getByRole('region', { name: 'QB score' })
+  await expect(
+    panel.getByText(
+      "Randall Cunningham has no season in our books with 224 or more dropbacks, so there's no score to put up. The body of work isn't there — inconclusive.",
+    ),
+  ).toBeVisible()
+  await expect(panel.getByRole('table', { name: /QB score/ })).toHaveCount(0)
+})
+
+test('two running backs get no QB score panel and no verdict request', async ({
+  page,
+}) => {
+  const verdictPosts: string[] = []
+  page.on('request', (request) => {
+    if (isVerdictPost(request)) {
+      verdictPosts.push(request.url())
+    }
+  })
+  await page.goto(`/nfl/compare?a=${FAULK}&b=${FARMER}`)
+
+  const dialog = comparisonModal(page, 'Marshall Faulk and Robert Farmer')
+  await expect(
+    dialog.getByRole('table', {
+      name: 'Marshall Faulk and Robert Farmer, regular season',
+    }),
+  ).toBeVisible()
+  await expect(dialog.getByRole('region', { name: 'QB score' })).toHaveCount(0)
+  await expect(dialog.getByText(/EP model/)).toHaveCount(0)
+  // Give a stray request the time a real one takes to leave.
+  await page.waitForLoadState('networkidle')
+  expect(verdictPosts).toEqual([])
+})
