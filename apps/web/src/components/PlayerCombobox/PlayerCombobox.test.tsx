@@ -3,7 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlayerSearchRowOut } from '../../lib/api/types'
-import { SEARCH_MC, SEARCH_MCNAIR } from '../../lib/playerFixtures'
+import {
+  SEARCH_MC,
+  SEARCH_MCNAIR,
+  fixtureCoverage,
+} from '../../lib/playerFixtures'
 import { PlayerCombobox } from './PlayerCombobox'
 import type { PlayerSearchStatus } from './PlayerCombobox'
 
@@ -89,7 +93,8 @@ describe('PlayerCombobox (issue #301)', () => {
     await user.type(screen.getByRole('combobox'), 'mc')
 
     expect(optionLabels()).toEqual([
-      'Steve McNair · QB, 1999',
+      // A career that began before the data reads its real span (#448).
+      'Steve McNair · QB, 1995–2007 · stats from 1999',
       'Mike Tomczak · QB, 1999',
       'Cade McNown · QB, 1999',
       'Donovan McNabb · QB, 1999',
@@ -110,6 +115,7 @@ describe('PlayerCombobox (issue #301)', () => {
             group: 'QB',
             first_season: 1999,
             last_season: 2004,
+            coverage: fixtureCoverage(1999, 2004, 1999, 2004),
           },
           {
             player_id: 2,
@@ -118,6 +124,7 @@ describe('PlayerCombobox (issue #301)', () => {
             group: null,
             first_season: 2023,
             last_season: 2023,
+            coverage: fixtureCoverage(2023, 2023, 2023, 2023),
           },
         ]}
       />,
@@ -128,6 +135,41 @@ describe('PlayerCombobox (issue #301)', () => {
     expect(optionLabels()).toEqual([
       'Mike Smith · QB, 1999–2004',
       'Mike Smith · position not recorded, 2023',
+    ])
+  })
+
+  it('gives a career cut off by the data its real span and where its stats start (#448)', async () => {
+    const user = userEvent.setup()
+    render(
+      <Harness
+        options={[
+          {
+            player_id: 2249533020,
+            display_name: 'Emmitt Smith',
+            position: 'RB',
+            group: 'RB',
+            first_season: 1999,
+            last_season: 2004,
+            coverage: fixtureCoverage(1990, 2004, 1999, 2004),
+          },
+          {
+            player_id: 2052934910,
+            display_name: 'Tyreek Hill',
+            position: 'WR',
+            group: 'WR',
+            first_season: 2016,
+            last_season: 2023,
+            coverage: fixtureCoverage(2016, 2025, 2016, 2023),
+          },
+        ]}
+      />,
+    )
+
+    await user.type(screen.getByRole('combobox'), 'smith')
+
+    expect(optionLabels()).toEqual([
+      'Emmitt Smith · RB, 1990–2004 · stats from 1999',
+      'Tyreek Hill · WR, 2016–2023',
     ])
   })
 

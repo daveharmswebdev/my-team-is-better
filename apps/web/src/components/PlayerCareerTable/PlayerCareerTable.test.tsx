@@ -4,9 +4,11 @@ import type { PlayerStatsOut } from '../../lib/api/types'
 import {
   CAREER_WITH_NULL_STATS,
   EDGERRIN_JAMES_CAREER,
+  FAULK_VS_FARMER,
   KURT_WARNER_CAREER,
   MARVIN_HARRISON_CAREER,
   OLINDO_MARE_CAREER,
+  SMITH_VS_PETERSON,
   TJ_WATT_CAREER,
   TOBY_GOWIN_CAREER,
   WARNER_1999_POSTSEASON,
@@ -433,5 +435,56 @@ describe('PlayerCareerTable (issue #296)', () => {
       /^not recorded$/,
     )
     expect(cellUnder(row, 'Rushing first downs')).toHaveTextContent(/^80$/)
+  })
+})
+
+describe('PlayerCareerTable and a career cut off by the data (#448)', () => {
+  const smith = SMITH_VS_PETERSON.a
+
+  function renderSmith(seasonType: 'regular' | 'postseason') {
+    render(
+      <PlayerCareerTable
+        caption="Emmitt Smith"
+        lines={smith.seasons.filter((line) => line.season_type === seasonType)}
+        totals={
+          seasonType === 'regular' ? smith.regular_season : smith.postseason
+        }
+        coverage={smith.coverage}
+      />,
+    )
+  }
+
+  it("doesn't call a cut-off total a career: it reads the slice", () => {
+    renderSmith('regular')
+
+    expect(
+      screen.getByRole('rowheader', {
+        name: 'Seasons in our books: 6 of 15 (1999–2004)',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/^Career, /)).not.toBeInTheDocument()
+  })
+
+  it('keeps the playoff count plain, still not a career', () => {
+    renderSmith('postseason')
+
+    expect(
+      screen.getByRole('rowheader', { name: /^In our books, \d+ seasons?$/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('reads a career inside the data as a career', () => {
+    render(
+      <PlayerCareerTable
+        caption="Kurt Warner, regular season"
+        lines={[WARNER_1999_REGULAR]}
+        totals={KURT_WARNER_CAREER.regular_season}
+        coverage={FAULK_VS_FARMER.b.coverage}
+      />,
+    )
+
+    expect(
+      screen.getByRole('rowheader', { name: 'Career, 1 season' }),
+    ).toBeInTheDocument()
   })
 })

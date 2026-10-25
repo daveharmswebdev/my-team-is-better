@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest'
 import type { PlayerCareerTotalsOut } from '../../lib/api/types'
 import {
   CAREER_WITH_NULL_STATS,
+  FAULK_VS_FARMER,
   HILL_VS_LAMB,
   KURT_WARNER_CAREER,
   MARE_VS_GOWIN,
   SMITH_VS_PETERSON,
   STEVE_MCNAIR_CAREER,
   TJ_WATT_CAREER,
+  fixtureCoverage,
 } from '../../lib/playerFixtures'
 import { MARK_SCREEN_READER_TEXT } from '../../lib/playerCompare'
 import {
@@ -21,6 +23,12 @@ import type { PlayerComparisonTableProps } from './PlayerComparisonTable'
 const WARNER_REGULAR = KURT_WARNER_CAREER.regular_season!
 const MCNAIR_REGULAR = STEVE_MCNAIR_CAREER.regular_season!
 
+/**
+ * A career wholly inside the data, so the marking tests below see the
+ * #301 rule alone; the #448 cut-off rule has its own tests.
+ */
+const IN_THE_BOOKS = fixtureCoverage(1999, 1999, 1999, 1999)
+
 function renderTable(
   a: PlayerCareerTotalsOut | null = WARNER_REGULAR,
   b: PlayerCareerTotalsOut | null = MCNAIR_REGULAR,
@@ -29,8 +37,8 @@ function renderTable(
   render(
     <PlayerComparisonTable
       caption="Kurt Warner and Steve McNair, regular season"
-      a={{ name: 'Kurt Warner', totals: a }}
-      b={{ name: 'Steve McNair', totals: b }}
+      a={{ name: 'Kurt Warner', totals: a, coverage: IN_THE_BOOKS }}
+      b={{ name: 'Steve McNair', totals: b, coverage: IN_THE_BOOKS }}
       noTotalsCopy="No regular-season games on record."
       group="QB"
       {...extra}
@@ -284,5 +292,61 @@ describe('PlayerComparisonTable (issue #301)', () => {
       name: 'Kurt Warner and Steve McNair, regular season',
     })
     expect(region).toHaveAttribute('tabindex', '0')
+  })
+})
+
+describe('PlayerComparisonTable and a career cut off by the data (#448)', () => {
+  function renderPair(
+    pair: typeof FAULK_VS_FARMER,
+    seasonType: 'regular_season' | 'postseason' = 'regular_season',
+  ) {
+    const { a, b } = pair
+    render(
+      <PlayerComparisonTable
+        caption="The pair"
+        a={{
+          name: a.display_name,
+          totals: a[seasonType],
+          coverage: a.coverage,
+        }}
+        b={{
+          name: b.display_name,
+          totals: b[seasonType],
+          coverage: b.coverage,
+        }}
+        noTotalsCopy="No regular-season games on record."
+        group={a.group}
+      />,
+    )
+    return screen.getByRole('table', { name: 'The pair' })
+  }
+
+  it('marks no total when one side is cut off, and reads his seasons as a slice', () => {
+    const table = renderPair(FAULK_VS_FARMER)
+
+    expect(table).not.toHaveTextContent(MARK_SCREEN_READER_TEXT)
+    const [faulk, farmer] = cellsOf(table, 'Seasons')
+    expect(faulk).toHaveTextContent(/^1 of 13 \(1999\)$/)
+    expect(farmer).toHaveTextContent(/^1$/)
+  })
+
+  it('marks no total when both are cut off', () => {
+    const table = renderPair({
+      ...FAULK_VS_FARMER,
+      a: KURT_WARNER_CAREER,
+      b: STEVE_MCNAIR_CAREER,
+    })
+
+    expect(table).not.toHaveTextContent(MARK_SCREEN_READER_TEXT)
+    expect(cellsOf(table, 'Seasons').map((cell) => cell.textContent)).toEqual([
+      '1 of 12 (1999)',
+      '1 of 13 (1999)',
+    ])
+  })
+
+  it('keeps the marks for careers that only run past the data', () => {
+    const table = renderPair(HILL_VS_LAMB)
+
+    expect(table).toHaveTextContent(MARK_SCREEN_READER_TEXT)
   })
 })

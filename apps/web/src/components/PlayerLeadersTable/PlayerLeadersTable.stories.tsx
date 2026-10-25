@@ -62,6 +62,23 @@ export const TiedRanks: Story = {
   args: { leaders: LEADERS_BY_TDS },
 }
 
+/**
+ * Kurt Warner's career began in 1998, before the data (#448): his seasons
+ * carry a small mark, named "career began before 1999" for assistive tech.
+ */
+export const CareerCutOff: Story = {
+  args: { leaders: LEADERS_BY_TDS },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByTitle('career began before 1999')).toBeVisible()
+    await expect(
+      canvas.getByText(/career began before 1999/, {
+        selector: 'span:not([title])',
+      }),
+    ).toBeInTheDocument()
+  },
+}
+
 /** Stats the source didn't track read "not recorded", never 0 or blank. */
 export const NullStats: Story = {
   args: { leaders: LEADERS_WITH_NULL_STATS },

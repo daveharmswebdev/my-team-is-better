@@ -22,8 +22,104 @@ import type {
   PlayerSearchRowOut,
   PlayerSeasonLineOut,
   PlayerSeasonType,
+  PlayerCoverageOut,
   PlayerStatsOut,
 } from './api/types'
+
+/** The committed fixture db's player-stats span (measured for #448). */
+export const FIXTURE_DATA_FIRST_SEASON = 1999
+export const FIXTURE_DATA_LAST_SEASON = 2023
+
+/**
+ * A coverage as the API derives it (`contracts.PlayerCoverage`, #446): a
+ * career span from the source's roster against the fixture's data span.
+ * `coveredSeasons` defaults to every season of the covered span.
+ */
+export function fixtureCoverage(
+  careerFirst: number | null,
+  careerLast: number | null,
+  coveredFirst: number | null,
+  coveredLast: number | null,
+  coveredSeasons: number = coveredFirst === null || coveredLast === null
+    ? 0
+    : coveredLast - coveredFirst + 1,
+  data: { first: number; last: number } = {
+    first: FIXTURE_DATA_FIRST_SEASON,
+    last: FIXTURE_DATA_LAST_SEASON,
+  },
+): PlayerCoverageOut {
+  const before =
+    careerFirst !== null && careerLast !== null && careerFirst < data.first
+  const after =
+    careerFirst !== null && careerLast !== null && careerLast > data.last
+  return {
+    career_first_season: careerFirst,
+    career_last_season: careerLast,
+    data_first_season: data.first,
+    data_last_season: data.last,
+    covered_first_season: coveredFirst,
+    covered_last_season: coveredLast,
+    covered_seasons: coveredSeasons,
+    career_seasons:
+      careerFirst === null || careerLast === null
+        ? null
+        : careerLast - careerFirst + 1,
+    cut_off_before: before,
+    cut_off_after: after,
+    cut_off: before,
+  }
+}
+
+/**
+ * The real career spans (the source's roster, measured on the committed
+ * fixture db for #448) of the fixture players whose career runs outside
+ * the fixture's data. Every other fixture career spans its own lines.
+ */
+const REAL_CAREER_SPANS: Record<number, readonly [number, number]> = {
+  2249533020: [1990, 2004], // Emmitt Smith
+  2252790861: [1994, 2006], // Marshall Faulk
+  2044124519: [1998, 2009], // Kurt Warner
+  2385180619: [1995, 2007], // Steve McNair
+  2153701690: [1998, 2015], // Peyton Manning
+  2004710164: [1985, 2004], // Jerry Rice
+  2052934910: [2016, 2025], // Tyreek Hill
+  2170634393: [2020, 2026], // CeeDee Lamb
+}
+
+/** A leader or search row's coverage: its real span when known, else its own. */
+function rowCoverage(
+  playerId: number,
+  first: number,
+  last: number,
+): PlayerCoverageOut {
+  const span = REAL_CAREER_SPANS[playerId]
+  return fixtureCoverage(
+    span === undefined ? first : span[0],
+    span === undefined ? last : span[1],
+    first,
+    last,
+  )
+}
+
+/** A career with its coverage, worked out from its own season lines. */
+function withCoverage(
+  career: Omit<PlayerCareerOut, 'coverage'>,
+): PlayerCareerOut {
+  const seasons = [...new Set(career.seasons.map((line) => line.season))]
+  const first = seasons.length === 0 ? null : Math.min(...seasons)
+  const last = seasons.length === 0 ? null : Math.max(...seasons)
+  const span = REAL_CAREER_SPANS[career.player_id]
+  return {
+    ...career,
+    coverage: fixtureCoverage(
+      span === undefined ? first : span[0],
+      span === undefined ? last : span[1],
+      first,
+      last,
+      seasons.length,
+    ),
+  }
+}
 
 /** The six receiving stats (issue #314), in the API's order. */
 type ReceivingStats = Pick<
@@ -157,6 +253,7 @@ export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
     ...NO_KICKING,
     ...NO_DEFENSE,
   },
+  coverage: rowCoverage(2186969283, 2023, 2023),
 }
 
 export const JARED_GOFF: PlayerLeaderRowOut = {
@@ -186,6 +283,7 @@ export const JARED_GOFF: PlayerLeaderRowOut = {
     ...NO_DEFENSE,
     def_tackles_solo: 1,
   },
+  coverage: rowCoverage(2454577150, 2023, 2023),
 }
 
 export const DAK_PRESCOTT: PlayerLeaderRowOut = {
@@ -215,6 +313,7 @@ export const DAK_PRESCOTT: PlayerLeaderRowOut = {
     ...NO_DEFENSE,
     def_tackles_solo: 1,
   },
+  coverage: rowCoverage(2430128896, 2023, 2023),
 }
 
 export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
@@ -243,6 +342,7 @@ export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
     ...NO_KICKING,
     ...NO_DEFENSE,
   },
+  coverage: rowCoverage(2181942775, 1999, 1999),
 }
 
 export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
@@ -272,6 +372,7 @@ export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
     ...NO_DEFENSE,
     def_tackles_solo: 1,
   },
+  coverage: rowCoverage(2044124519, 1999, 1999),
 }
 
 export const JORDAN_LOVE: PlayerLeaderRowOut = {
@@ -300,6 +401,7 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
     ...NO_KICKING,
     ...NO_DEFENSE,
   },
+  coverage: rowCoverage(2058453876, 2023, 2023),
 }
 
 /** `?category=passing&sort=passing_yards`, regular season: the first four of 204. */
@@ -311,6 +413,8 @@ export const LEADERS_BY_YARDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 204,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [TUA_TAGOVAILOA, JARED_GOFF, DAK_PRESCOTT, STEVE_BEUERLEIN],
 }
 
@@ -323,6 +427,8 @@ export const LEADERS_BY_TDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 204,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [
     KURT_WARNER_REGULAR,
     { ...DAK_PRESCOTT, rank: 2 },
@@ -383,6 +489,8 @@ export const LEADERS_WITH_NULL_STATS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 3,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [
     TUA_TAGOVAILOA,
     {
@@ -399,6 +507,7 @@ export const LEADERS_WITH_NULL_STATS: PlayerLeadersOut = {
       games: null,
       record: { wins: 0, losses: 0, ties: 0, starts: 0 },
       stats: UNRECORDED_STATS,
+      coverage: rowCoverage(1001, 1999, 1999),
     },
   ],
 }
@@ -456,6 +565,7 @@ export const EDGERRIN_JAMES: PlayerLeaderRowOut = {
     ...nonPasserStats(369, 1553, 13, 80, 3, receiving(62, 86, 586, 4, 23, 1)),
     def_tackles_solo: 3,
   },
+  coverage: rowCoverage(2425879833, 1999, 1999),
 }
 
 export const CURTIS_MARTIN: PlayerLeaderRowOut = {
@@ -468,6 +578,7 @@ export const CURTIS_MARTIN: PlayerLeaderRowOut = {
   games: 16,
   record: NO_RECORD,
   stats: nonPasserStats(367, 1464, 5, 84, 0, receiving(45, 61, 259, 0, 9, 0)),
+  coverage: rowCoverage(2056460271, 1999, 1999),
 }
 
 export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
@@ -483,6 +594,7 @@ export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
     ...nonPasserStats(272, 1459, 14, 83, 2, receiving(67, 83, 564, 7, 31, 0)),
     def_tackles_solo: 2,
   },
+  coverage: rowCoverage(2034350752, 2023, 2023),
 }
 
 export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
@@ -495,6 +607,7 @@ export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
   games: 15,
   record: NO_RECORD,
   stats: nonPasserStats(209, 1012, 18, 59, 1, receiving(25, 32, 175, 3, 6, 0)),
+  coverage: rowCoverage(2254464124, 2023, 2023),
 }
 
 export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
@@ -510,6 +623,7 @@ export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
     ...nonPasserStats(290, 1405, 17, 85, 1, receiving(23, 28, 111, 0, 5, 0)),
     def_tackles_solo: 1,
   },
+  coverage: rowCoverage(2057513912, 1999, 1999),
 }
 
 /** A quarterback on the rushing board, tied at rank 3: he keeps his starter record. */
@@ -540,6 +654,7 @@ export const JALEN_HURTS: PlayerLeaderRowOut = {
     ...NO_DEFENSE,
     def_tackles_solo: 1,
   },
+  coverage: rowCoverage(2284636265, 2023, 2023),
 }
 
 export const JOSH_ALLEN: PlayerLeaderRowOut = {
@@ -568,6 +683,7 @@ export const JOSH_ALLEN: PlayerLeaderRowOut = {
     ...NO_KICKING,
     ...NO_DEFENSE,
   },
+  coverage: rowCoverage(2449461859, 2023, 2023),
 }
 
 /** `?category=rushing`, regular season: the top three of 653, the default sort. */
@@ -579,6 +695,8 @@ export const LEADERS_BY_RUSHING_YARDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 653,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [EDGERRIN_JAMES, CURTIS_MARTIN, CHRISTIAN_MCCAFFREY],
 }
 
@@ -591,6 +709,8 @@ export const LEADERS_BY_RUSHING_TDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 653,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [RAHEEM_MOSTERT, STEPHEN_DAVIS, JALEN_HURTS, JOSH_ALLEN],
 }
 
@@ -623,6 +743,7 @@ function receiverRow(
     games,
     record: NO_RECORD,
     stats,
+    coverage: rowCoverage(playerId, season, season),
   }
 }
 
@@ -685,6 +806,8 @@ export const LEADERS_BY_RECEIVING_YARDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 926,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [TYREEK_HILL, CEEDEE_LAMB, MARVIN_HARRISON],
 }
 
@@ -697,6 +820,8 @@ export const LEADERS_BY_RECEIVING_TDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 926,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [
     CRIS_CARTER,
     MIKE_EVANS,
@@ -719,6 +844,8 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
   limit: 2,
   offset: 920,
   total: 926,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [
     {
       rank: 885,
@@ -747,6 +874,7 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
         ...NO_DEFENSE,
         def_tackles_solo: 1,
       },
+      coverage: rowCoverage(2156385060, 2023, 2023),
     },
     receiverRow(
       885,
@@ -814,7 +942,7 @@ export const WARNER_1999_POSTSEASON: PlayerSeasonLineOut = {
 }
 
 /** `GET /api/players/2044124519?sport=nfl` on the committed fixture. */
-export const KURT_WARNER_CAREER: PlayerCareerOut = {
+export const KURT_WARNER_CAREER: PlayerCareerOut = withCoverage({
   sport: 'nfl',
   player_id: 2044124519,
   display_name: 'Kurt Warner',
@@ -835,13 +963,13 @@ export const KURT_WARNER_CAREER: PlayerCareerOut = {
     record: WARNER_1999_POSTSEASON.record,
     stats: WARNER_1999_POSTSEASON.stats,
   },
-}
+})
 
 /**
  * A career the source only partly tracked, with no playoff games at all.
  * Invented, since the committed fixture has no null stats.
  */
-export const CAREER_WITH_NULL_STATS: PlayerCareerOut = {
+export const CAREER_WITH_NULL_STATS: PlayerCareerOut = withCoverage({
   sport: 'nfl',
   player_id: 1001,
   display_name: 'Unrecorded Player',
@@ -866,7 +994,7 @@ export const CAREER_WITH_NULL_STATS: PlayerCareerOut = {
     stats: { ...UNRECORDED_STATS, passing_yards: 1210 },
   },
   postseason: null,
-}
+})
 
 /** `GET /api/credits` `data_sources` on the committed fixture, in the API's order. */
 export const DATA_SOURCES: CreditsDataSourceOut[] = [
@@ -950,7 +1078,7 @@ const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
 }
 
 /** `GET /api/players/2385180619?sport=nfl` on the committed fixture. */
-export const STEVE_MCNAIR_CAREER: PlayerCareerOut = {
+export const STEVE_MCNAIR_CAREER: PlayerCareerOut = withCoverage({
   sport: 'nfl',
   player_id: 2385180619,
   display_name: 'Steve McNair',
@@ -971,7 +1099,7 @@ export const STEVE_MCNAIR_CAREER: PlayerCareerOut = {
     record: MCNAIR_1999_POSTSEASON.record,
     stats: MCNAIR_1999_POSTSEASON.stats,
   },
-}
+})
 
 /** `GET /api/players/compare?a=2044124519&b=2385180619&sport=nfl` on the committed fixture. */
 export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
@@ -1144,6 +1272,7 @@ const STEVE_MCNAIR_ROW: PlayerSearchRowOut = {
   group: 'QB',
   first_season: 1999,
   last_season: 1999,
+  coverage: rowCoverage(2385180619, 1999, 1999),
 }
 
 /** `GET /api/players/search?q=McNair&sport=nfl` on the committed fixture. */
@@ -1170,6 +1299,7 @@ export const SEARCH_MC: PlayerSearchOut = {
       group: 'QB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2396327401, 1999, 1999),
     },
     {
       player_id: 2320243141,
@@ -1178,6 +1308,7 @@ export const SEARCH_MC: PlayerSearchOut = {
       group: 'QB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2320243141, 1999, 1999),
     },
     {
       player_id: 2363866023,
@@ -1186,6 +1317,7 @@ export const SEARCH_MC: PlayerSearchOut = {
       group: 'QB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2363866023, 1999, 1999),
     },
     {
       player_id: 2273944701,
@@ -1194,6 +1326,7 @@ export const SEARCH_MC: PlayerSearchOut = {
       group: 'QB',
       first_season: 2023,
       last_season: 2023,
+      coverage: rowCoverage(2273944701, 2023, 2023),
     },
     {
       player_id: 2014816368,
@@ -1202,6 +1335,7 @@ export const SEARCH_MC: PlayerSearchOut = {
       group: 'RB',
       first_season: 2023,
       last_season: 2023,
+      coverage: rowCoverage(2014816368, 2023, 2023),
     },
   ],
 }
@@ -1268,7 +1402,7 @@ const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
 }
 
 /** `GET /api/players/2153701690?sport=nfl` on the committed fixture. */
-export const PEYTON_MANNING_CAREER: PlayerCareerOut = {
+export const PEYTON_MANNING_CAREER: PlayerCareerOut = withCoverage({
   sport: 'nfl',
   player_id: 2153701690,
   display_name: 'Peyton Manning',
@@ -1289,7 +1423,7 @@ export const PEYTON_MANNING_CAREER: PlayerCareerOut = {
     record: MANNING_1999_POSTSEASON.record,
     stats: MANNING_1999_POSTSEASON.stats,
   },
-}
+})
 
 /** `GET /api/players/compare?a=2044124519&b=2153701690&sport=nfl` on the committed fixture: they never met. */
 export const WARNER_VS_MANNING: PlayerComparisonOut = {
@@ -1322,6 +1456,7 @@ export const SEARCH_MANNING: PlayerSearchOut = {
       group: 'QB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2153701690, 1999, 1999),
     },
   ],
 }
@@ -1340,6 +1475,7 @@ export const SEARCH_BRADY: PlayerSearchOut = {
       group: 'QB',
       first_season: 2001,
       last_season: 2001,
+      coverage: rowCoverage(1002, 2001, 2001),
     },
     {
       player_id: 1003,
@@ -1348,6 +1484,7 @@ export const SEARCH_BRADY: PlayerSearchOut = {
       group: 'QB',
       first_season: 2009,
       last_season: 2009,
+      coverage: rowCoverage(1003, 2009, 2009),
     },
   ],
 }
@@ -1358,7 +1495,7 @@ function inventedCareer(
   displayName: string,
   line: PlayerSeasonLineOut,
 ): PlayerCareerOut {
-  return {
+  return withCoverage({
     sport: 'nfl',
     player_id: playerId,
     display_name: displayName,
@@ -1373,7 +1510,7 @@ function inventedCareer(
       stats: line.stats,
     },
     postseason: null,
-  }
+  })
 }
 
 /** Invented. */
@@ -1504,6 +1641,7 @@ export const OLINDO_MARE: PlayerLeaderRowOut = {
     pt_inside_20: 0,
     def_tackles_solo: 3,
   }),
+  coverage: rowCoverage(2147978801, 1999, 1999),
 }
 
 export const BRANDON_AUBREY: PlayerLeaderRowOut = {
@@ -1529,6 +1667,7 @@ export const BRANDON_AUBREY: PlayerLeaderRowOut = {
     pt_long: null,
     pt_inside_20: 0,
   }),
+  coverage: rowCoverage(2050278267, 2023, 2023),
 }
 
 export const CAIRO_SANTOS: PlayerLeaderRowOut = {
@@ -1554,6 +1693,7 @@ export const CAIRO_SANTOS: PlayerLeaderRowOut = {
     pt_long: null,
     pt_inside_20: 0,
   }),
+  coverage: rowCoverage(2164193587, 2023, 2023),
 }
 
 export const GREG_ZUERLEIN: PlayerLeaderRowOut = {
@@ -1579,6 +1719,7 @@ export const GREG_ZUERLEIN: PlayerLeaderRowOut = {
     pt_long: null,
     pt_inside_20: 0,
   }),
+  coverage: rowCoverage(2445462571, 2023, 2023),
 }
 
 export const MATTHEW_WRIGHT: PlayerLeaderRowOut = {
@@ -1604,6 +1745,7 @@ export const MATTHEW_WRIGHT: PlayerLeaderRowOut = {
     pt_long: null,
     pt_inside_20: 0,
   }),
+  coverage: rowCoverage(2176014404, 2023, 2023),
 }
 
 export const MORRIS_UNUTOA: PlayerLeaderRowOut = {
@@ -1630,6 +1772,7 @@ export const MORRIS_UNUTOA: PlayerLeaderRowOut = {
     pt_inside_20: 0,
     def_tackles_solo: 2,
   }),
+  coverage: rowCoverage(2386441999, 1999, 1999),
 }
 
 export const TOBY_GOWIN: PlayerLeaderRowOut = {
@@ -1656,6 +1799,7 @@ export const TOBY_GOWIN: PlayerLeaderRowOut = {
     pt_inside_20: 24,
     def_tackles_solo: 4,
   }),
+  coverage: rowCoverage(2279601441, 1999, 1999),
 }
 
 export const THOMAS_MORSTEAD: PlayerLeaderRowOut = {
@@ -1684,6 +1828,7 @@ export const THOMAS_MORSTEAD: PlayerLeaderRowOut = {
     pt_long: 62,
     pt_inside_20: 36,
   }),
+  coverage: rowCoverage(2219362247, 2023, 2023),
 }
 
 export const CHRIS_GARDOCKI: PlayerLeaderRowOut = {
@@ -1710,6 +1855,7 @@ export const CHRIS_GARDOCKI: PlayerLeaderRowOut = {
     pt_inside_20: 20,
     def_tackles_solo: 1,
   }),
+  coverage: rowCoverage(2250235710, 1999, 1999),
 }
 
 export const BRYCE_BARINGER: PlayerLeaderRowOut = {
@@ -1736,6 +1882,7 @@ export const BRYCE_BARINGER: PlayerLeaderRowOut = {
     pt_inside_20: 38,
     def_tackles_solo: 1,
   }),
+  coverage: rowCoverage(2233457388, 2023, 2023),
 }
 
 /** The committed fixture's regular-season top four by field goals made (81 qualify). */
@@ -1747,6 +1894,8 @@ export const LEADERS_BY_FG_MADE: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 81,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [OLINDO_MARE, BRANDON_AUBREY, CAIRO_SANTOS, GREG_ZUERLEIN],
 }
 
@@ -1798,6 +1947,8 @@ export const LEADERS_BY_PT_YARDS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 83,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [THOMAS_MORSTEAD, CHRIS_GARDOCKI, BRYCE_BARINGER],
 }
 
@@ -1845,6 +1996,7 @@ function defenderRow(
     games,
     record: NO_RECORD,
     stats: { ...nonPasserStats(0, 0, 0, 0, 0, NO_RECEIVING), ...stats },
+    coverage: rowCoverage(playerId, season, season),
   }
 }
 
@@ -1910,6 +2062,8 @@ export const LEADERS_BY_DEF_SACKS: PlayerLeadersOut = {
   limit: 50,
   offset: 0,
   total: 2619,
+  data_first_season: FIXTURE_DATA_FIRST_SEASON,
+  data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [
     TJ_WATT,
     JOSH_HINES_ALLEN,
@@ -1949,6 +2103,7 @@ export const LEADERS_BY_DEF_SACKS_TAIL: PlayerLeadersOut = {
         ...nonPasserStats(0, 0, 0, 0, 0, receiving(2, 8, 38, 0, 2, 0)),
         def_tackles_solo: 1,
       },
+      coverage: rowCoverage(2147735944, 1999, 1999),
     },
     defenderRow(
       812,
@@ -2034,7 +2189,7 @@ function oneSeasonCareer(
   regular: PlayerSeasonLineOut,
   postseason: PlayerSeasonLineOut | null,
 ): PlayerCareerOut {
-  return {
+  return withCoverage({
     sport: 'nfl',
     player_id: playerId,
     display_name: displayName,
@@ -2043,7 +2198,7 @@ function oneSeasonCareer(
     seasons: postseason === null ? [regular] : [regular, postseason],
     regular_season: oneSeasonTotals(regular),
     postseason: postseason === null ? null : oneSeasonTotals(postseason),
-  }
+  })
 }
 
 /** One season line with no starts at quarterback. */
@@ -2219,7 +2374,7 @@ export const MARE_VS_GOWIN: PlayerComparisonOut = {
 /** `GET /api/players/compare?a=2052934910&b=2170634393&sport=nfl`: two receivers. */
 export const HILL_VS_LAMB: PlayerComparisonOut = {
   sport: 'nfl',
-  a: {
+  a: withCoverage({
     sport: 'nfl',
     player_id: 2052934910,
     display_name: 'Tyreek Hill',
@@ -2423,8 +2578,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
         def_pass_defended: 0,
       },
     },
-  },
-  b: {
+  }),
+  b: withCoverage({
     sport: 'nfl',
     player_id: 2170634393,
     display_name: 'CeeDee Lamb',
@@ -2628,7 +2783,7 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
         def_pass_defended: 0,
       },
     },
-  },
+  }),
   regular_season_head_to_head: {
     season_type: 'regular',
     record: {
@@ -2656,7 +2811,7 @@ export const TYREEK_HILL_CAREER: PlayerCareerOut = HILL_VS_LAMB.a
 /** `GET /api/players/compare?a=2252790861&b=2039946310&sport=nfl`: two backs. */
 export const FAULK_VS_FARMER: PlayerComparisonOut = {
   sport: 'nfl',
-  a: {
+  a: withCoverage({
     sport: 'nfl',
     player_id: 2252790861,
     display_name: 'Marshall Faulk',
@@ -2860,8 +3015,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
         def_pass_defended: 0,
       },
     },
-  },
-  b: {
+  }),
+  b: withCoverage({
     sport: 'nfl',
     player_id: 2039946310,
     display_name: 'Robert Farmer',
@@ -2968,7 +3123,7 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
       },
     },
     postseason: null,
-  },
+  }),
   regular_season_head_to_head: {
     season_type: 'regular',
     record: {
@@ -2994,7 +3149,7 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
 export const MARSHALL_FAULK_CAREER: PlayerCareerOut = FAULK_VS_FARMER.a
 
 /** `GET /api/players/2050106967?sport=nfl`: a kicker, who has no group. */
-export const JEFF_WILKINS_CAREER: PlayerCareerOut = {
+export const JEFF_WILKINS_CAREER: PlayerCareerOut = withCoverage({
   sport: 'nfl',
   player_id: 2050106967,
   display_name: 'Jeff Wilkins',
@@ -3198,10 +3353,10 @@ export const JEFF_WILKINS_CAREER: PlayerCareerOut = {
       def_pass_defended: 0,
     },
   },
-}
+})
 
 /** `GET /api/players/2230939598?sport=nfl`: a tight end. */
-export const FRANK_WYCHECK_CAREER: PlayerCareerOut = {
+export const FRANK_WYCHECK_CAREER: PlayerCareerOut = withCoverage({
   sport: 'nfl',
   player_id: 2230939598,
   display_name: 'Frank Wycheck',
@@ -3405,7 +3560,7 @@ export const FRANK_WYCHECK_CAREER: PlayerCareerOut = {
       def_pass_defended: 0,
     },
   },
-}
+})
 
 /** `GET /api/players/search?q=faulk&sport=nfl`: unfiltered. */
 export const SEARCH_FAULK: PlayerSearchOut = {
@@ -3421,6 +3576,7 @@ export const SEARCH_FAULK: PlayerSearchOut = {
       group: 'RB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2252790861, 1999, 1999),
     },
     {
       player_id: 2409520375,
@@ -3429,6 +3585,7 @@ export const SEARCH_FAULK: PlayerSearchOut = {
       group: 'RB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2409520375, 1999, 1999),
     },
   ],
 }
@@ -3447,6 +3604,7 @@ export const SEARCH_FARMER_RB: PlayerSearchOut = {
       group: 'RB',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2039946310, 1999, 1999),
     },
   ],
 }
@@ -3465,6 +3623,7 @@ export const SEARCH_WILKINS: PlayerSearchOut = {
       group: null,
       first_season: 2023,
       last_season: 2023,
+      coverage: rowCoverage(2149579607, 2023, 2023),
     },
     {
       player_id: 2050106967,
@@ -3473,6 +3632,7 @@ export const SEARCH_WILKINS: PlayerSearchOut = {
       group: null,
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2050106967, 1999, 1999),
     },
     {
       player_id: 2368116490,
@@ -3481,6 +3641,7 @@ export const SEARCH_WILKINS: PlayerSearchOut = {
       group: null,
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2368116490, 1999, 1999),
     },
     {
       player_id: 2409930021,
@@ -3489,6 +3650,7 @@ export const SEARCH_WILKINS: PlayerSearchOut = {
       group: 'WR',
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2409930021, 1999, 1999),
     },
     {
       player_id: 2179173877,
@@ -3497,6 +3659,7 @@ export const SEARCH_WILKINS: PlayerSearchOut = {
       group: null,
       first_season: 1999,
       last_season: 1999,
+      coverage: rowCoverage(2179173877, 1999, 1999),
     },
   ],
 }
@@ -3514,7 +3677,7 @@ export const SEARCH_WILKINS: PlayerSearchOut = {
  */
 export const SMITH_VS_PETERSON: PlayerComparisonOut = {
   sport: 'nfl',
-  a: {
+  a: withCoverage({
     sport: 'nfl',
     player_id: 2249533020,
     display_name: 'Emmitt Smith',
@@ -3968,8 +4131,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
         def_pass_defended: 0,
       },
     },
-  },
-  b: {
+  }),
+  b: withCoverage({
     sport: 'nfl',
     player_id: 2104182639,
     display_name: 'Adrian Peterson',
@@ -5023,7 +5186,7 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
         def_pass_defended: 0,
       },
     },
-  },
+  }),
   regular_season_head_to_head: {
     season_type: 'regular',
     record: {

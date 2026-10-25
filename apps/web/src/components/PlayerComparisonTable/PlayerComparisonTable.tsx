@@ -1,6 +1,7 @@
 import { useId } from 'react'
 import type {
   PlayerCareerTotalsOut,
+  PlayerCoverageOut,
   PlayerPositionGroup,
 } from '../../lib/api/types'
 import type { ComparisonRow } from '../../lib/playerCompare'
@@ -23,6 +24,11 @@ export interface ComparedPlayer {
   name: string
   /** The API's career totals of this table's season type, or `null` for none. */
   totals: PlayerCareerTotalsOut | null
+  /**
+   * How much of the career the data holds (#446). When either player's
+   * career began before the data, no total is marked (founder, #448).
+   */
+  coverage: PlayerCoverageOut
 }
 
 export interface PlayerComparisonTableProps {
@@ -138,7 +144,10 @@ function RowHeader({
  * Two players' career totals of one season type, side by side (issue #301):
  * a column per player, a row per total. In each row the larger of two
  * recorded, unequal numbers is marked, with a glyph and with words a screen
- * reader announces. Nothing is added up, averaged or declared.
+ * reader announces. Nothing is added up, averaged or declared. When either
+ * career began before the data (`coverage.cut_off`), no total is marked and
+ * the cut-off side's seasons read "6 of 15 (1999–2004)" (founder, #448);
+ * the page says why, above the table.
  *
  * The rows come from the position group both players share (issue #438):
  * two backs are compared on rushing then receiving, two receivers on
@@ -156,7 +165,10 @@ export function PlayerComparisonTable({
 }: PlayerComparisonTableProps) {
   const captionId = useId()
   const noteIdPrefix = useId()
-  const rows = comparisonRows(a.totals, b.totals, group)
+  const rows = comparisonRows(a.totals, b.totals, group, {
+    a: a.coverage,
+    b: b.coverage,
+  })
   const notes = statColumnNotes(rows)
   return (
     <>

@@ -1,11 +1,13 @@
 import { useId } from 'react'
 import type {
   PlayerCareerTotalsOut,
+  PlayerCoverageOut,
   PlayerSeasonLineOut,
   PlayerStatsOut,
   StarterRecordOut,
 } from '../../lib/api/types'
 import { formatRecord } from '../../lib/formatRecord'
+import { coveredSeasonsText } from '../../lib/playerCoverage'
 import type { TableStatColumn } from '../../lib/playerStats'
 import {
   DASH,
@@ -29,8 +31,30 @@ export interface PlayerCareerTableProps {
   lines: PlayerSeasonLineOut[]
   /** The API's career totals for this season type, or `null` for no totals row. */
   totals: PlayerCareerTotalsOut | null
-  /** The id of the note that explains the records (the pulled-early starter note). */
+  /** The ids of the notes that describe the table: the starter note, the cut-off callout. */
   describedBy?: string
+  /**
+   * How much of the career the data holds (#446). A career that began
+   * before the data gets no "Career" totals row: it reads as what's in the
+   * books (#448).
+   */
+  coverage?: PlayerCoverageOut
+}
+
+/** The totals row's header: a career, or, cut off by the data, what's in the books. */
+function totalsLabel(
+  totals: PlayerCareerTotalsOut,
+  coverage: PlayerCoverageOut | undefined,
+): string {
+  const count = `${totals.seasons} ${totals.seasons === 1 ? 'season' : 'seasons'}`
+  if (coverage === undefined || !coverage.cut_off) {
+    return `Career, ${count}`
+  }
+  const slice =
+    totals.season_type === 'regular' ? coveredSeasonsText(coverage) : null
+  return slice === null
+    ? `In our books, ${count}`
+    : `Seasons in our books: ${slice}`
 }
 
 function statCellClass(value: number | null): string | undefined {
@@ -161,6 +185,7 @@ export function PlayerCareerTable({
   lines,
   totals,
   describedBy,
+  coverage,
 }: PlayerCareerTableProps) {
   const captionId = useId()
   const noteIdPrefix = useId()
@@ -243,8 +268,7 @@ export function PlayerCareerTable({
             <tfoot>
               <tr>
                 <th scope="row" colSpan={2} className={styles.totals}>
-                  Career, {totals.seasons}{' '}
-                  {totals.seasons === 1 ? 'season' : 'seasons'}
+                  {totalsLabel(totals, coverage)}
                 </th>
                 <SharedCells
                   games={totals.games}

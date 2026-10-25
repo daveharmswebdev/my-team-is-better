@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import type { PlayerSearchRowOut } from '../../lib/api/types'
-import { formatSeasonSpan } from '../../lib/playerStats'
+import { searchSpanText } from '../../lib/playerCoverage'
 import styles from './PlayerCombobox.module.css'
 
 /** Where the parent's search for the typed text stands. */
@@ -251,7 +251,7 @@ export function PlayerCombobox({
                 <span className={styles.optionMeta}>
                   {SEPARATOR}
                   {player.position ?? 'position not recorded'},{' '}
-                  {formatSeasonSpan(player.first_season, player.last_season)}
+                  {searchSpanText(player)}
                 </span>
               </li>
             ))}

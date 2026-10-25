@@ -46,6 +46,12 @@ import {
   uncomparableCopy,
 } from '../../lib/playerCompare'
 import {
+  careerSpanText,
+  compareCallout,
+  dataSpanLine,
+  statsThroughLine,
+} from '../../lib/playerCoverage'
+import {
   PLAYER_NOT_FOUND_COPY,
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
@@ -999,6 +1005,21 @@ function Comparison({
   // show one: two receivers have no record row for it to describe (#352).
   const showsRecordNote = comparisonShowsRecord(a, b)
   const group = comparisonGroup(a, b)
+  // How much of each career the data holds (#448).
+  const callout = compareCallout(
+    { name: a.display_name, coverage: a.coverage },
+    { name: b.display_name, coverage: b.coverage },
+  )
+  const calloutId = `${noteId}-coverage`
+  const statsThrough = statsThroughLine([a.coverage, b.coverage])
+  const dataSpan = dataSpanLine(
+    a.coverage.data_first_season,
+    a.coverage.data_last_season,
+  )
+  const describedBy =
+    [callout === null ? null : calloutId, showsRecordNote ? noteId : null]
+      .filter((id) => id !== null)
+      .join(' ') || undefined
 
   return (
     <>
@@ -1014,17 +1035,34 @@ function Comparison({
             <span className={styles.position}>
               {player.position ?? 'Position not recorded'}
             </span>
+            {careerSpanText(player.coverage) !== null && (
+              <span className={styles.span}>
+                {careerSpanText(player.coverage)}
+              </span>
+            )}
           </li>
         ))}
       </ul>
 
-      <div className={styles.notes}>
-        <p>
-          <span aria-hidden="true" className={styles.glyph}>
-            {MARK_GLYPH}
-          </span>{' '}
-          {MARK_LEGEND}
+      {/* Above the numbers, not a footnote (#448): the tables are described by it. */}
+      {callout !== null && (
+        <p id={calloutId} role="status" className={styles.callout}>
+          {callout}
         </p>
+      )}
+
+      <div className={styles.notes}>
+        {/* With a cut-off career nothing is marked, so there's no mark to explain. */}
+        {callout === null && (
+          <p>
+            <span aria-hidden="true" className={styles.glyph}>
+              {MARK_GLYPH}
+            </span>{' '}
+            {MARK_LEGEND}
+          </p>
+        )}
+        {statsThrough !== null && <p>{statsThrough}</p>}
+        {dataSpan !== null && <p>{dataSpan}</p>}
         {showsRecordNote && <p id={noteId}>{STARTER_RECORD_NOTE}</p>}
         {undercount !== null && (
           <p className={styles.undercount}>{undercount}</p>
@@ -1048,11 +1086,19 @@ function Comparison({
             ) : (
               <PlayerComparisonTable
                 caption={`${a.display_name} and ${b.display_name}, ${label.toLowerCase()}`}
-                a={{ name: a.display_name, totals: aTotals }}
-                b={{ name: b.display_name, totals: bTotals }}
+                a={{
+                  name: a.display_name,
+                  totals: aTotals,
+                  coverage: a.coverage,
+                }}
+                b={{
+                  name: b.display_name,
+                  totals: bTotals,
+                  coverage: b.coverage,
+                }}
                 group={group}
                 noTotalsCopy={NO_TOTALS_COPY[seasonType]}
-                describedBy={showsRecordNote ? noteId : undefined}
+                describedBy={describedBy}
               />
             )}
           </section>

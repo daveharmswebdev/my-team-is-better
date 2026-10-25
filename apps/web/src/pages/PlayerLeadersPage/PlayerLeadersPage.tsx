@@ -19,6 +19,7 @@ import type {
   PlayerSeasonType,
 } from '../../lib/api/types'
 import { defaultSortFor } from '../../lib/api/types'
+import { cutOffLegend, dataSpanLine } from '../../lib/playerCoverage'
 import {
   LEADER_BOARD_COLUMNS,
   NOT_RECORDED_DISCLOSURE,
@@ -162,6 +163,14 @@ export function PlayerLeadersPage() {
   // and live in the box above the table; the table's covered headers point
   // at them by ids built from this prefix.
   const columnNoteIdPrefix = `${noteId}-column`
+  const dataSpan =
+    leaders === null
+      ? null
+      : dataSpanLine(leaders.data_first_season, leaders.data_last_season)
+  const legend =
+    leaders === null
+      ? null
+      : cutOffLegend(leaders.rows.map((row) => row.coverage))
   const describedBy =
     leaders === null
       ? undefined
@@ -199,6 +208,9 @@ export function PlayerLeadersPage() {
         />
         <p>{UNDERCOUNT_DISCLOSURE}</p>
         <p>{NOT_RECORDED_DISCLOSURE}</p>
+        {/* The db's data span and the cut-off key (#448) follow the board on screen. */}
+        {dataSpan !== null && <p>{dataSpan}</p>}
+        {legend !== null && <p>{legend}</p>}
       </section>
 
       <p role="status" className={styles.status}>

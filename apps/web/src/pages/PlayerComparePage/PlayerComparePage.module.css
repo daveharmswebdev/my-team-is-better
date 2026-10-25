@@ -162,6 +162,24 @@
   color: var(--ink);
 }
 
+/* A career's real span, from the source's roster (#448). */
+.span {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Above the numbers, in the narrator's voice: a career cut off by the data (#448). */
+.callout {
+  max-width: 72ch;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 4px solid var(--brick);
+  background: var(--surface-alt);
+  border-radius: var(--radius);
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .undercount {
   color: var(--brick);
 }

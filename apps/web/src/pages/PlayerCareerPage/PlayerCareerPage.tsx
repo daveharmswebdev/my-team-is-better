@@ -15,6 +15,12 @@ import type {
   PlayerSeasonType,
 } from '../../lib/api/types'
 import {
+  careerCallout,
+  careerSpanText,
+  dataSpanLine,
+  statsThroughLine,
+} from '../../lib/playerCoverage'
+import {
   PLAYER_NOT_FOUND_COPY,
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
@@ -149,6 +155,20 @@ function Career({
   // The note explains the starter record, so it shows only with one: a
   // receiver's page has no record column for it to describe (#352).
   const showsRecordNote = showsStarterRecord(career.seasons)
+  // How much of the career the data holds (#448).
+  const { coverage } = career
+  const span = careerSpanText(coverage)
+  const callout = careerCallout({ name: career.display_name, coverage })
+  const calloutId = `${noteId}-coverage`
+  const statsThrough = statsThroughLine([coverage])
+  const dataSpan = dataSpanLine(
+    coverage.data_first_season,
+    coverage.data_last_season,
+  )
+  const describedBy =
+    [callout === null ? null : calloutId, showsRecordNote ? noteId : null]
+      .filter((id) => id !== null)
+      .join(' ') || undefined
   return (
     <>
       <header className={styles.header}>
@@ -156,13 +176,26 @@ function Career({
         <p className={styles.position}>
           {career.position ?? 'Position not recorded'}
         </p>
+        {span !== null && <p className={styles.span}>{span}</p>}
       </header>
+
+      {/* Above the numbers, not a footnote (#448): the tables are described by it. */}
+      {callout !== null && (
+        <p id={calloutId} role="status" className={styles.callout}>
+          {callout}
+        </p>
+      )}
 
       <p className={styles.compare}>
         <Link to={`/nfl/compare?a=${career.player_id}`}>
           Compare {career.display_name} with another player
         </Link>
       </p>
+
+      {statsThrough !== null && (
+        <p className={styles.coverage}>{statsThrough}</p>
+      )}
+      {dataSpan !== null && <p className={styles.coverage}>{dataSpan}</p>}
 
       {showsRecordNote && (
         <p id={noteId} className={styles.note}>
@@ -193,7 +226,8 @@ function Career({
                 caption={`${career.display_name}, ${label.toLowerCase()}`}
                 lines={lines}
                 totals={totals}
-                describedBy={showsRecordNote ? noteId : undefined}
+                coverage={coverage}
+                describedBy={describedBy}
               />
             )}
           </section>

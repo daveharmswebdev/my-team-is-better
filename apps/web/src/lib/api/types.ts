@@ -496,6 +496,35 @@ export interface PlayerStatsOut {
   def_pass_defended: number | null
 }
 
+/**
+ * How much of a player's real career this db's stats hold (#446, epic #443),
+ * mirroring `PlayerCoverageOut`. Two spans: the *career* span is what the
+ * source's roster says he played; the *data* span is the seasons this db has
+ * player stats for at all. `cut_off` (== `cut_off_before`) means the career
+ * began before the data, so every total is a slice of it and must not carry
+ * a larger-number mark. `cut_off_after` alone (an active player whose current
+ * season isn't in yet) is informational: "stats through <data_last_season>".
+ */
+export interface PlayerCoverageOut {
+  /** From the source's roster, not this db's stat rows; `null` when it doesn't say. */
+  career_first_season: number | null
+  career_last_season: number | null
+  /** This db's player-stats span, the same for every player; `null` with no stat rows. */
+  data_first_season: number | null
+  data_last_season: number | null
+  /** This player's own lines in this db, either season type; `null` with none. */
+  covered_first_season: number | null
+  covered_last_season: number | null
+  /** Distinct seasons with a line here: the "6" in "his last 6 of 15 seasons". */
+  covered_seasons: number
+  /** `career_last_season - career_first_season + 1`: the "15"; `null` without both ends. */
+  career_seasons: number | null
+  cut_off_before: boolean
+  cut_off_after: boolean
+  /** Equal to `cut_off_before`. */
+  cut_off: boolean
+}
+
 export interface PlayerLeaderRowOut {
   /** Competition rank over the whole population (ties share it: 1, 2, 2, 4); `null` only when the sort value is `null`. */
   rank: number | null
@@ -507,6 +536,7 @@ export interface PlayerLeaderRowOut {
   games: number | null
   record: StarterRecordOut
   stats: PlayerStatsOut
+  coverage: PlayerCoverageOut
 }
 
 export interface PlayerLeadersOut {
@@ -524,6 +554,9 @@ export interface PlayerLeadersOut {
    * count, so it may be 0.
    */
   total: number
+  /** This db's player-stats span (not any player's career); `null` with no stat rows. */
+  data_first_season: number | null
+  data_last_season: number | null
   rows: PlayerLeaderRowOut[]
 }
 
@@ -558,6 +591,7 @@ export interface PlayerCareerOut {
   /** `null` when the player has no season line of that type. */
   regular_season: PlayerCareerTotalsOut | null
   postseason: PlayerCareerTotalsOut | null
+  coverage: PlayerCoverageOut
 }
 
 // `GET /api/players/compare` and `GET /api/players/search` (issue #301).
@@ -603,6 +637,7 @@ export interface PlayerSearchRowOut {
   group: PlayerPositionGroup | null
   first_season: number
   last_season: number
+  coverage: PlayerCoverageOut
 }
 
 export interface PlayerSearchOut {

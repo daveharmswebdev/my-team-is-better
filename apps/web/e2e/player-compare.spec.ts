@@ -87,9 +87,21 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
   const regular = dialog.getByRole('table', {
     name: 'Kurt Warner and Steve McNair, regular season',
   })
+  // Both careers began before the data (Warner 1998, McNair 1995): one
+  // callout above the tables, which they are described by, and no mark on
+  // any total (founder, #448).
+  const callout = dialog.getByText(
+    "Hold on. Both of these guys were playing before our books open in 1999. Kurt Warner: last 1 of 12 seasons. Steve McNair: last 1 of 13. Slices of careers, not careers. Nobody's crowning anybody on those totals.",
+  )
+  await expect(callout).toBeVisible()
+  await expect(callout).toHaveAttribute('role', 'status')
+  await expect(regular).toHaveAccessibleDescription(/^Hold on\. Both/)
+  await expect(valueCells(regular, 'Seasons')).toHaveText([
+    '1 of 12 (1999)',
+    '1 of 13 (1999)',
+  ])
   const yards = valueCells(regular, 'Passing yards')
-  await expect(yards.nth(0)).toContainText('4,044')
-  await expect(yards.nth(0)).toContainText('(larger number)')
+  await expect(yards.nth(0)).toHaveText('4,044')
   await expect(yards.nth(1)).toHaveText('2,179')
 
   const playoffs = dialog.getByRole('table', {
@@ -97,7 +109,9 @@ test("from Kurt Warner's career, Compare and Player B's typeahead put Kurt Warne
   })
   const games = valueCells(playoffs, 'Games')
   await expect(games.nth(0)).toHaveText('3')
-  await expect(games.nth(1)).toContainText('(larger number)')
+  await expect(games.nth(1)).toHaveText('4')
+  await expect(dialog.getByText('(larger number)')).toHaveCount(0)
+  await expect(dialog.getByText('NFL player stats: 1999–2023.')).toBeVisible()
 
   const headToHead = dialog.getByRole('region', { name: 'Head to head' })
   const regularGames = headToHead.getByRole('list', {
@@ -200,8 +214,10 @@ test('changing Player B and pressing Compare again puts Kurt Warner next to Peyt
   })
   const yards = valueCells(regular, 'Passing yards')
   await expect(yards.nth(0)).toHaveText('4,044')
-  await expect(yards.nth(1)).toContainText('4,135')
-  await expect(yards.nth(1)).toContainText('(larger number)')
+  // Manning's career began in 1998 too: no mark on the larger 4,135 (#448).
+  await expect(yards.nth(1)).toHaveText('4,135')
+  await expect(dialog.getByText('(larger number)')).toHaveCount(0)
+  await expect(dialog.getByText(/^Hold on\. Both of these guys/)).toBeVisible()
   await expect(warnerMcNair).toHaveCount(0)
   await expect(
     dialog
@@ -235,6 +251,12 @@ test('a link to two receivers compares their receiving, with no passing or recor
   await expect(yards.nth(0)).toContainText('1,799')
   await expect(yards.nth(0)).toContainText('(larger number)')
   await expect(yards.nth(1)).toHaveText('1,749')
+  // Both careers run past the data (#448): a plain line, no callout, and
+  // the marks stay.
+  await expect(
+    dialog.getByText("Stats through 2023. This season isn't in our books yet."),
+  ).toBeVisible()
+  await expect(dialog.getByText(/^Hold on\./)).toHaveCount(0)
   for (const gone of ['Passing yards', 'Completions', 'Starter record']) {
     await expect(
       regular.getByRole('rowheader', { name: gone, exact: true }),
@@ -297,6 +319,68 @@ test('two running backs are compared on rushing then receiving, with no passing,
   await expect(
     dialog.getByRole('region', { name: 'Head to head' }),
   ).toHaveCount(0)
+})
+
+// Issue #448 (founder, epic #443): Faulk's career began in 1994, before the
+// data, so his 1,327 yards aren't marked against Farmer's 0 and the
+// narrator says why, above the tables. Farmer's 1999 is all of his career.
+test('one career cut off by the data gets the callout above the tables and no larger-number marks', async ({
+  page,
+}) => {
+  await page.goto(`/nfl/compare?a=${FAULK}&b=${FARMER}`)
+
+  const dialog = comparisonModal(page, 'Marshall Faulk and Robert Farmer')
+  const regular = dialog.getByRole('table', {
+    name: 'Marshall Faulk and Robert Farmer, regular season',
+  })
+  const copy =
+    "Hold on. Marshall Faulk played 1994 to 2006, and our books open in 1999. That's his last 1 of 13 seasons up there, not the whole career. Nobody's crowning anybody on those totals."
+  const callout = dialog.getByText(copy)
+  await expect(callout).toBeVisible()
+  await expect(callout).toHaveAttribute('role', 'status')
+  await expect(regular).toHaveAccessibleDescription(copy)
+  // Above the numbers, not under them.
+  const calloutBox = await callout.boundingBox()
+  const tableBox = await regular.boundingBox()
+  expect(calloutBox!.y).toBeLessThan(tableBox!.y)
+
+  await expect(valueCells(regular, 'Rushing yards').nth(0)).toHaveText('1,327')
+  await expect(valueCells(regular, 'Seasons')).toHaveText([
+    '1 of 13 (1999)',
+    '1',
+  ])
+  await expect(dialog.getByText('(larger number)')).toHaveCount(0)
+  // His real span next to his name; the data's span from the API.
+  await expect(
+    dialog.getByRole('list', { name: 'Players compared' }),
+  ).toContainText('1994–2006')
+  await expect(dialog.getByText('NFL player stats: 1999–2023.')).toBeVisible()
+})
+
+// Issue #448: Emmitt Smith played 1990-2004; the fixture holds his 1999.
+test("Emmitt Smith's career page says his early seasons aren't here, and reads his totals as 1 of 15", async ({
+  page,
+}) => {
+  await page.goto('/nfl/players/2249533020')
+
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Emmitt Smith' }),
+  ).toBeVisible()
+  const copy =
+    "Emmitt Smith played 1990 to 2004. Our books open in 1999, so this is his last 1 of 15 seasons. The first 14 aren't here, and yelling at the bartender won't change it."
+  const callout = page.getByText(copy)
+  await expect(callout).toHaveAttribute('role', 'status')
+  const regular = page.getByRole('table', {
+    name: 'Emmitt Smith, regular season',
+  })
+  await expect(regular).toHaveAccessibleDescription(new RegExp(`^${copy}`))
+  await expect(
+    regular.getByRole('rowheader', {
+      name: 'Seasons in our books: 1 of 15 (1999)',
+    }),
+  ).toBeVisible()
+  await expect(page.getByText('1990–2004', { exact: true })).toBeVisible()
+  await expect(page.getByText('NFL player stats: 1999–2023.')).toBeVisible()
 })
 
 // Issue #436 (epic #372, step 3): a link to a quarterback and a safety (Kurt

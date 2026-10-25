@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
 import {
+  MARK_SCREEN_READER_TEXT,
   PICK_FROM_LIST_COPY,
   PICK_TWO_COPY,
   SAME_PLAYER_COPY,
@@ -13,6 +14,7 @@ import {
 } from '../../lib/playerCompare'
 import {
   DATA_SOURCES,
+  FAULK_VS_FARMER,
   HILL_VS_LAMB,
   JEFF_WILKINS_CAREER,
   KURT_WARNER_CAREER,
@@ -21,6 +23,7 @@ import {
   SEARCH_FARMER_RB,
   SEARCH_MCNAIR,
   WARNER_VS_MCNAIR,
+  fixtureCoverage,
 } from '../../lib/playerFixtures'
 import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import { PLAYER_NOT_FOUND_COPY } from '../../lib/playerStats'
@@ -102,6 +105,8 @@ const WARNER = KURT_WARNER_CAREER.player_id
 const MCNAIR = WARNER_VS_MCNAIR.b.player_id
 
 /** The modal's name before the answer names both players (issue #310). */
+/** A career wholly inside the data (#448), for the story with no cut-off. */
+const IN_THE_BOOKS = fixtureCoverage(1999, 1999, 1999, 1999)
 const COMPARISON_TITLE = 'The comparison'
 const WARNER_AND_MCNAIR = 'Kurt Warner and Steve McNair'
 
@@ -533,11 +538,96 @@ export const ReceiversCompared: Story = {
       name: 'Tyreek Hill and CeeDee Lamb',
     })
     const modal = within(dialog)
-    await modal.findByRole('table', {
+    const table = await modal.findByRole('table', {
       name: 'Tyreek Hill and CeeDee Lamb, regular season',
     })
     await expect(
       modal.queryByRole('region', { name: 'Head to head' }),
     ).toBeNull()
+    // Both run past the data (#448): a plain line, no callout, marks kept.
+    await expect(
+      modal.getByText(
+        "Stats through 2023. This season isn't in our books yet.",
+      ),
+    ).toBeVisible()
+    await expect(modal.queryByText(/^Hold on\./)).toBeNull()
+    await expect(table).toHaveTextContent(MARK_SCREEN_READER_TEXT)
+  },
+}
+
+/**
+ * Marshall Faulk's career began in 1994, before the data (#448): the
+ * narrator says so above the tables, which it describes, and no total is
+ * marked.
+ */
+export const OneCareerCutOff: Story = {
+  decorators: [
+    atSearch(
+      `?a=${FAULK_VS_FARMER.a.player_id}&b=${FAULK_VS_FARMER.b.player_id}`,
+      { compare: () => jsonResponse(200, FAULK_VS_FARMER) },
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Marshall Faulk and Robert Farmer',
+    })
+    const modal = within(dialog)
+    const table = await modal.findByRole('table', {
+      name: 'Marshall Faulk and Robert Farmer, regular season',
+    })
+    const callout = modal.getByText(/^Hold on\. Marshall Faulk played 1994/)
+    await expect(callout).toHaveAttribute('role', 'status')
+    await expect(table).toHaveAccessibleDescription(callout.textContent ?? '')
+    await expect(table).not.toHaveTextContent(MARK_SCREEN_READER_TEXT)
+  },
+}
+
+/** Warner (1998) and McNair (1995) both began before the data: one callout for both (#448). */
+export const BothCareersCutOff: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const modal = within(dialog)
+    await modal.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, playoffs',
+    })
+    await expect(modal.getByText(/^Hold on\. Both of these guys/)).toBeVisible()
+  },
+}
+
+/**
+ * Neither career cut off (here Warner and McNair as if both began in the
+ * data): no callout, and the larger numbers marked (#301).
+ */
+export const NeitherCareerCutOff: Story = {
+  decorators: [
+    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
+      compare: () =>
+        jsonResponse(200, {
+          ...WARNER_VS_MCNAIR,
+          a: { ...WARNER_VS_MCNAIR.a, coverage: IN_THE_BOOKS },
+          b: { ...WARNER_VS_MCNAIR.b, coverage: IN_THE_BOOKS },
+        }),
+    }),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const modal = within(dialog)
+    const table = await modal.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    })
+    await expect(modal.queryByText(/^Hold on\./)).toBeNull()
+    await expect(table).toHaveTextContent(MARK_SCREEN_READER_TEXT)
   },
 }

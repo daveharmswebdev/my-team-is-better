@@ -30,6 +30,8 @@ import {
   LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
+  FIXTURE_DATA_FIRST_SEASON,
+  FIXTURE_DATA_LAST_SEASON,
   LEADERS_WITH_NULL_STATS,
   TUA_TAGOVAILOA,
 } from '../../lib/playerFixtures'
@@ -69,7 +71,14 @@ function pageOf(query: PlayerLeadersQuery): PlayerLeadersOut {
       display_name: `Player ${query.offset + index + 1}`,
     }),
   )
-  return { sport: 'nfl', ...query, total: 204, rows }
+  return {
+    sport: 'nfl',
+    ...query,
+    total: 204,
+    data_first_season: FIXTURE_DATA_FIRST_SEASON,
+    data_last_season: FIXTURE_DATA_LAST_SEASON,
+    rows,
+  }
 }
 
 function LocationProbe() {
@@ -1211,5 +1220,43 @@ describe('PlayerLeadersPage, kicking and punting (issue #315)', () => {
       limit: 50,
       offset: 0,
     })
+  })
+})
+
+describe('PlayerLeadersPage: the data span (issue #448)', () => {
+  beforeEach(() => {
+    mockedFetchPlayerLeaders.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+  })
+
+  it("says which seasons the board's stats cover, from the API", async () => {
+    mockedFetchPlayerLeaders.mockResolvedValue({
+      ...LEADERS_BY_YARDS,
+      data_first_season: 2002,
+      data_last_season: 2025,
+    })
+
+    renderPage()
+
+    expect(
+      await screen.findByText('NFL player stats: 2002–2025.'),
+    ).toBeInTheDocument()
+  })
+
+  it('says nothing about a span the API has none of', async () => {
+    mockedFetchPlayerLeaders.mockResolvedValue({
+      ...LEADERS_BY_YARDS,
+      data_first_season: null,
+      data_last_season: null,
+    })
+
+    renderPage()
+
+    await screen.findByRole('table')
+    expect(screen.queryByText(/NFL player stats:/)).not.toBeInTheDocument()
   })
 })

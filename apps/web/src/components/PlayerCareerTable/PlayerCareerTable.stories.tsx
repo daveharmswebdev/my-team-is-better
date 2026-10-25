@@ -5,6 +5,7 @@ import {
   KURT_WARNER_CAREER,
   MARVIN_HARRISON_CAREER,
   OLINDO_MARE_CAREER,
+  SMITH_VS_PETERSON,
   TJ_WATT_CAREER,
   TOBY_GOWIN_CAREER,
   WARNER_1999_POSTSEASON,
@@ -35,6 +36,21 @@ export const Playoffs: Story = {
     caption: 'Kurt Warner, playoffs',
     lines: [WARNER_1999_POSTSEASON],
     totals: KURT_WARNER_CAREER.postseason,
+  },
+}
+
+/**
+ * A career that began before the data (#448): the totals row reads what's
+ * in the books, "Seasons in our books: 6 of 15 (1999–2004)", not a career.
+ */
+export const CareerCutOff: Story = {
+  args: {
+    caption: 'Emmitt Smith, regular season',
+    lines: SMITH_VS_PETERSON.a.seasons.filter(
+      (line) => line.season_type === 'regular',
+    ),
+    totals: SMITH_VS_PETERSON.a.regular_season,
+    coverage: SMITH_VS_PETERSON.a.coverage,
   },
 }
 
