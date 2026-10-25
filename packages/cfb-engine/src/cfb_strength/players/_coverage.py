@@ -23,9 +23,16 @@ from collections.abc import Iterable
 
 from cfb_strength.contracts import PlayerCoverage, Sport
 
+# Two scalar subqueries, not one `SELECT MIN(season), MAX(season)`: SQLite
+# turns a lone MIN or MAX into a single seek on
+# idx_player_season_stats_sport_type_season, but a SELECT holding both scans
+# every regular-season row of the sport.
 _DATA_SPAN_SQL = """
-SELECT MIN(season), MAX(season) FROM player_season_stats
-WHERE sport = :sport AND season_type = 'regular'
+SELECT
+    (SELECT MIN(season) FROM player_season_stats
+     WHERE sport = :sport AND season_type = 'regular'),
+    (SELECT MAX(season) FROM player_season_stats
+     WHERE sport = :sport AND season_type = 'regular')
 """
 
 # One row per requested player in `:sport`. The season-row and start halves
@@ -34,7 +41,9 @@ _COVERED_SQL = """
 WITH ids AS (SELECT DISTINCT value AS id FROM json_each(:ids)),
 covered AS (
     SELECT player_id, season FROM player_season_stats
-    WHERE sport = :sport AND player_id IN (SELECT id FROM ids)
+    -- `+sport`: found by the primary key's player_id, never by the
+    -- (sport, season_type, season) index, which would read the whole sport.
+    WHERE +sport = :sport AND player_id IN (SELECT id FROM ids)
     UNION
     SELECT s.player_id, g.season
     FROM game_starters s

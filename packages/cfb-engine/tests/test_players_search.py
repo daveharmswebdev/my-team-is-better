@@ -17,7 +17,6 @@ from cfb_strength.contracts import (
     position_group,
 )
 from cfb_strength.players import search_players
-from cfb_strength.players._coverage import data_span
 from tests.test_players_support import STAT_COLUMNS, PlayerDb, conn_of, full_stats
 
 
@@ -367,12 +366,10 @@ _NAME_SCAN = (
     " AND lower(display_name) LIKE lower('%needle%') ESCAPE '\\'"
 )
 
-# The second floor (#446): every row's `PlayerCoverage` carries the db's data
-# span, MIN/MAX regular season over the sport's `player_season_stats`, read
-# once per call. `player_season_stats` has no index on (sport, season_type,
-# season), so that one aggregate reads the whole table too; it is measured by
-# itself and subtracted like the name scan. Everything else must still scale
-# with the players who match.
+# Every row's `PlayerCoverage` (#446) adds the db's data span, a MIN and a MAX
+# that are each one seek on idx_player_season_stats_sport_type_season, and a
+# coverage lookup keyed by the matching players' ids. Neither is a floor: both
+# are inside the cost below and must not scale with non-matching players.
 
 
 def _steps(conn: sqlite3.Connection, run: Callable[[], object]) -> int:
@@ -397,8 +394,7 @@ def _cost_above_name_scan(db: PlayerDb) -> int:
     conn = conn_of(db)
     search = _steps(conn, lambda: search_players(conn, sport="nfl", query="needle"))
     scan = _steps(conn, lambda: conn.execute(_NAME_SCAN).fetchall())
-    span = _steps(conn, lambda: data_span(conn, sport="nfl"))
-    return search - scan - span
+    return search - scan
 
 
 def _db_with_bystanders(path: Path, bystanders: int) -> PlayerDb:

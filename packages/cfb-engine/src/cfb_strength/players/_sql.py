@@ -142,7 +142,14 @@ def lines_cte(*, by_player: bool, by_season_type: bool, by_name: bool = False) -
     (#368). Every total is per player, so dropping other players' lines
     changes no matching player's row."""
     starter_filters = ["s.sport = :sport", "g.sport = :sport", "s.position = 'QB'"]
-    row_filters = ["sport = :sport"]
+    # Keyed by player (one player, or the name matches), the season rows must
+    # be found through the primary key's leading `player_id`. The unary `+`
+    # keeps the planner off idx_player_season_stats_sport_type_season, which
+    # would otherwise read every row of the sport and make a name search cost
+    # a whole table again (#368, #446). A leaderboard keeps the plain filter
+    # so it can use that index.
+    keyed = by_player or by_name
+    row_filters = ["+sport = :sport" if keyed else "sport = :sport"]
     if by_player:
         starter_filters.append("s.player_id = :player_id")
         row_filters.append("player_id = :player_id")
