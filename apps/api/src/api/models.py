@@ -21,6 +21,8 @@ from __future__ import annotations
 from typing import Literal
 
 from cfb_strength.contracts import (
+    QB_SCORE_MIN_DROPBACKS,
+    QB_SCORE_PEAK_SEASONS,
     CommonOpponent,
     CommonOpponentMeeting,
     ComparisonResult,
@@ -50,6 +52,13 @@ from cfb_strength.contracts import (
     PlayerSeasonLine,
     PlayerSeasonType,
     PlayerStats,
+    QbMetricValue,
+    QbScore,
+    QbScoreComparison,
+    QbScoreInconclusiveReason,
+    QbScoreMetric,
+    QbScoreSeason,
+    QbScoreSide,
     RatingBreakdown,
     StarterRecord,
     TeamCase,
@@ -1178,6 +1187,213 @@ class PlayerHeadToHeadOut(BaseModel):
         )
 
 
+# ---------------------------------------------------------------------------
+# the era-adjusted QB score (issue #451, epic #439) -- `cfb_strength.players
+# .get_qb_score_comparison`'s dataclasses, published field for field on a
+# two-quarterback comparison. The API never rounds, recomputes or reorders
+# the engine's numbers. The only values it adds are the two contract
+# constants the engine's comparison does not carry (`min_dropbacks`,
+# `peak_seasons`), so a panel can show how every number was reached (#183).
+# Field-by-field builders, not `dataclasses.asdict`: `weights` is a
+# `MappingProxyType`, which `asdict` cannot copy.
+# ---------------------------------------------------------------------------
+
+
+class PlayerQbMetricValueOut(BaseModel):
+    value: float = Field(description="The metric's raw value for this QB in this regular season.")
+    season_mean: float | None = Field(
+        description=(
+            "The mean of this metric over that season's qualifying QBs: the era "
+            "baseline. Null when this season doesn't qualify (it isn't judged)."
+        )
+    )
+    season_sd: float | None = Field(
+        description=(
+            "The population standard deviation of this metric over that season's "
+            "qualifying QBs. Null when this season doesn't qualify."
+        )
+    )
+    z: float | None = Field(
+        description=(
+            "(value - season_mean) / season_sd: how many standard deviations above "
+            "(positive) or below (negative) that season's average qualifying QB. "
+            "0.0 when season_sd is 0. Null when this season doesn't qualify."
+        )
+    )
+
+    @classmethod
+    def from_dataclass(cls, metric: QbMetricValue) -> PlayerQbMetricValueOut:
+        return cls(
+            value=metric.value,
+            season_mean=metric.season_mean,
+            season_sd=metric.season_sd,
+            z=metric.z,
+        )
+
+
+def _qb_metric(metric: QbMetricValue | None) -> PlayerQbMetricValueOut | None:
+    return PlayerQbMetricValueOut.from_dataclass(metric) if metric is not None else None
+
+
+class PlayerQbScoreSeasonOut(BaseModel):
+    season: int = Field(description="The regular season.")
+    dropbacks: int = Field(description="Pass attempts plus sacks suffered.")
+    qualifies: bool = Field(
+        description=(
+            "True when dropbacks >= min_dropbacks. Only a qualifying season is "
+            "judged against its era and counts toward career and peak."
+        )
+    )
+    epa_per_dropback: PlayerQbMetricValueOut | None = Field(
+        description=(
+            "Passing EPA per dropback, scored with weight weights.epa_per_dropback. "
+            "Null when there are no dropbacks."
+        )
+    )
+    rush_epa_per_play: PlayerQbMetricValueOut | None = Field(
+        description=(
+            "Rushing EPA per play (dropbacks + carries), scored with weight "
+            "weights.rush_epa_per_play. Null when there are no plays."
+        )
+    )
+    any_a: PlayerQbMetricValueOut | None = Field(
+        description=(
+            "Adjusted net yards per attempt: shown for context, never scored (not "
+            "in composite). Null when there are no dropbacks or an input is missing."
+        )
+    )
+    composite: float | None = Field(
+        description=(
+            "The season's score: the sum over the scored metrics of weights[metric] "
+            "* z. 0 is a league-average season. Null when the season doesn't qualify."
+        )
+    )
+    in_peak: bool = Field(
+        description="True for the seasons whose composites make up the peak score."
+    )
+
+    @classmethod
+    def from_dataclass(cls, season: QbScoreSeason) -> PlayerQbScoreSeasonOut:
+        return cls(
+            season=season.season,
+            dropbacks=season.dropbacks,
+            qualifies=season.qualifies,
+            epa_per_dropback=_qb_metric(season.epa_per_dropback),
+            rush_epa_per_play=_qb_metric(season.rush_epa_per_play),
+            any_a=_qb_metric(season.any_a),
+            composite=season.composite,
+            in_peak=season.in_peak,
+        )
+
+
+class PlayerQbScoreOut(BaseModel):
+    sport: Sport = Field(description="The league.")
+    player_id: int = Field(description="The quarterback's player id.")
+    display_name: str = Field(description="The quarterback's name.")
+    version: str = Field(description="The QB score definition's version.")
+    seasons: list[PlayerQbScoreSeasonOut] = Field(
+        description=(
+            "Every regular season with a stat row, qualifying or not, in "
+            "chronological order, so a panel can show why a year didn't count."
+        )
+    )
+    qualifying_seasons: int = Field(description="How many of seasons qualify.")
+    career: float | None = Field(
+        description=(
+            "The sum of composite over the qualifying seasons: above-average years "
+            "add, below-average years subtract. Null with no qualifying season."
+        )
+    )
+    peak: float | None = Field(
+        description=(
+            "The mean of the best peak_seasons composites, with any missing slots "
+            "filled with 0.0 (league average). Null with no qualifying season."
+        )
+    )
+    peak_filled_with_average: int = Field(
+        description="How many of the peak_seasons peak slots were filled with 0.0."
+    )
+    first_season: int | None = Field(
+        description=(
+            "The first regular season with a season row or a QB start, any year. "
+            "Null when there is none."
+        )
+    )
+    first_scored_season: int | None = Field(
+        description=(
+            "The first season with EPA data that qualifies: later than first_season "
+            "when a career began before the data's EPA coverage. Null when none."
+        )
+    )
+
+    @classmethod
+    def from_dataclass(cls, score: QbScore) -> PlayerQbScoreOut:
+        return cls(
+            sport=score.sport,
+            player_id=score.player_id,
+            display_name=score.display_name,
+            version=score.version,
+            seasons=[PlayerQbScoreSeasonOut.from_dataclass(s) for s in score.seasons],
+            qualifying_seasons=score.qualifying_seasons,
+            career=score.career,
+            peak=score.peak,
+            peak_filled_with_average=score.peak_filled_with_average,
+            first_season=score.first_season,
+            first_scored_season=score.first_scored_season,
+        )
+
+
+class PlayerQbScoreComparisonOut(BaseModel):
+    sport: Sport = Field(description="The league.")
+    version: str = Field(
+        description="The QB score definition's version; it changes with the weights or rules."
+    )
+    a: PlayerQbScoreOut = Field(description="Player a's QB score.")
+    b: PlayerQbScoreOut = Field(description="Player b's QB score.")
+    career_winner: QbScoreSide | None = Field(
+        description=(
+            "The side with the higher career score; any margin counts. Null when "
+            "inconclusive or exactly tied."
+        )
+    )
+    peak_winner: QbScoreSide | None = Field(
+        description=(
+            "The side with the higher peak score; any margin counts. Null when "
+            "inconclusive or exactly tied."
+        )
+    )
+    career_margin: float | None = Field(description="a.career - b.career. Null when inconclusive.")
+    peak_margin: float | None = Field(description="a.peak - b.peak. Null when inconclusive.")
+    inconclusive: QbScoreInconclusiveReason | None = Field(
+        description=(
+            "Set exactly when either QB has no qualifying season, naming which side "
+            "(or both) lacks one; then neither measure has a winner."
+        )
+    )
+    weights: dict[QbScoreMetric, float] = Field(
+        description="Each scored metric's weight in a season's composite; they sum to 1."
+    )
+    min_dropbacks: int = Field(description="The fewest dropbacks a season needs to qualify.")
+    peak_seasons: int = Field(description="How many best seasons the peak score averages.")
+
+    @classmethod
+    def from_dataclass(cls, comparison: QbScoreComparison) -> PlayerQbScoreComparisonOut:
+        return cls(
+            sport=comparison.sport,
+            version=comparison.version,
+            a=PlayerQbScoreOut.from_dataclass(comparison.a),
+            b=PlayerQbScoreOut.from_dataclass(comparison.b),
+            career_winner=comparison.career_winner,
+            peak_winner=comparison.peak_winner,
+            career_margin=comparison.career_margin,
+            peak_margin=comparison.peak_margin,
+            inconclusive=comparison.inconclusive,
+            weights=dict(comparison.weights),
+            min_dropbacks=QB_SCORE_MIN_DROPBACKS,
+            peak_seasons=QB_SCORE_PEAK_SEASONS,
+        )
+
+
 class PlayerComparisonOut(BaseModel):
     sport: Sport
     a: PlayerCareerOut
@@ -1185,9 +1401,18 @@ class PlayerComparisonOut(BaseModel):
     # Always present: 0-0-0 with no games when the two never met.
     regular_season_head_to_head: PlayerHeadToHeadOut
     postseason_head_to_head: PlayerHeadToHeadOut
+    qb_score: PlayerQbScoreComparisonOut | None = Field(
+        description=(
+            "The engine's era-adjusted QB score for two quarterbacks (#451): each "
+            "QB's per-season breakdown, career and peak, and the verdict on each. "
+            "Null unless both players' group is QB."
+        )
+    )
 
     @classmethod
-    def from_dataclass(cls, comparison: PlayerComparison) -> PlayerComparisonOut:
+    def from_dataclass(
+        cls, comparison: PlayerComparison, *, qb_score: QbScoreComparison | None
+    ) -> PlayerComparisonOut:
         return cls(
             sport=comparison.sport,
             a=PlayerCareerOut.from_dataclass(comparison.a),
@@ -1197,6 +1422,11 @@ class PlayerComparisonOut(BaseModel):
             ),
             postseason_head_to_head=PlayerHeadToHeadOut.from_dataclass(
                 comparison.postseason_head_to_head
+            ),
+            qb_score=(
+                PlayerQbScoreComparisonOut.from_dataclass(qb_score)
+                if qb_score is not None
+                else None
             ),
         )
 

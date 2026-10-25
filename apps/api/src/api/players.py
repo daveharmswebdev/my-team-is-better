@@ -70,6 +70,7 @@ from cfb_strength.players import (
     get_player_career,
     get_player_comparison,
     get_player_leaders,
+    get_qb_score_comparison,
     search_players,
 )
 from fastapi import APIRouter, Depends, Query
@@ -241,7 +242,11 @@ def compare(
     a_group, b_group = comparison.a.group, comparison.b.group
     if a_group is None or b_group is None or a_group != b_group:
         raise PlayersNotComparableError(a_group, b_group)
-    return PlayerComparisonOut.from_dataclass(comparison)
+    # Two quarterbacks also get the engine's era-adjusted QB score (#451).
+    # The gate above already proved both groups equal, so one check covers
+    # both players, and the engine's `NotAQuarterbackError` cannot fire.
+    qb_score = get_qb_score_comparison(conn, sport=sport, a=a, b=b) if a_group == "QB" else None
+    return PlayerComparisonOut.from_dataclass(comparison, qb_score=qb_score)
 
 
 @router.get("/players/search", response_model=PlayerSearchOut)
