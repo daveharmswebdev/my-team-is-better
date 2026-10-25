@@ -627,6 +627,136 @@ export interface PlayerComparisonOut {
   /** Always present: 0-0-0 with no games when the two never met. */
   regular_season_head_to_head: PlayerHeadToHeadOut
   postseason_head_to_head: PlayerHeadToHeadOut
+  /**
+   * The engine's era-adjusted QB score (#451, epic #439). `null` unless both
+   * players' group is QB.
+   */
+  qb_score: PlayerQbScoreComparisonOut | null
+}
+
+// ---------------------------------------------------------------------------
+// The era-adjusted QB score (issue #451, epic #439) -- mirrors
+// `apps/api/src/api/models.py`'s `PlayerQbScore*Out`. The API never rounds,
+// recomputes or reorders the engine's numbers, and neither does apps/web:
+// winners and margins are read, never derived.
+// ---------------------------------------------------------------------------
+
+/** Mirrors `QbScoreSide`: which player, as the request named them. */
+export type QbScoreSide = 'a' | 'b'
+
+/** Mirrors `QbScoreInconclusiveReason`: who has no qualifying season. */
+export type QbScoreInconclusiveReason =
+  | 'a_no_qualifying_season'
+  | 'b_no_qualifying_season'
+  | 'neither_has_qualifying_season'
+
+/** Mirrors `QbScoreMetric`: the two scored metrics, the keys of `weights`. */
+export type QbScoreMetric = 'epa_per_dropback' | 'rush_epa_per_play'
+
+/**
+ * One metric in one season: the raw value against that season's qualifying
+ * QBs. The three era fields are `null` when the season doesn't qualify.
+ */
+export interface PlayerQbMetricValueOut {
+  value: number
+  season_mean: number | null
+  /** Population SD over that season's qualifying QBs. */
+  season_sd: number | null
+  /** `(value - season_mean) / season_sd`; 0.0 when `season_sd` is 0. */
+  z: number | null
+}
+
+export interface PlayerQbScoreSeasonOut {
+  season: number
+  /** Pass attempts plus sacks suffered. */
+  dropbacks: number
+  /** `dropbacks >= min_dropbacks`: only these are judged and counted. */
+  qualifies: boolean
+  /** Scored with `weights.epa_per_dropback`; `null` with no dropbacks. */
+  epa_per_dropback: PlayerQbMetricValueOut | null
+  /** Scored with `weights.rush_epa_per_play`; `null` with no plays. */
+  rush_epa_per_play: PlayerQbMetricValueOut | null
+  /** ANY/A: shown for context, never scored. */
+  any_a: PlayerQbMetricValueOut | null
+  /** The season's score, sum of `weights[metric] * z`; `null` unless it qualifies. */
+  composite: number | null
+  /** One of the seasons the peak averages. */
+  in_peak: boolean
+}
+
+export interface PlayerQbScoreOut {
+  sport: Sport
+  player_id: number
+  display_name: string
+  version: string
+  /** Every regular season with a stat row, qualifying or not, chronological. */
+  seasons: PlayerQbScoreSeasonOut[]
+  qualifying_seasons: number
+  /** Sum of the qualifying composites; `null` with no qualifying season. */
+  career: number | null
+  /** Mean of the best `peak_seasons` composites, empty slots 0.0; `null` with none. */
+  peak: number | null
+  /** How many of the peak slots were filled with 0.0 (league average). */
+  peak_filled_with_average: number
+  first_season: number | null
+  first_scored_season: number | null
+}
+
+export interface PlayerQbScoreComparisonOut {
+  sport: Sport
+  version: string
+  a: PlayerQbScoreOut
+  b: PlayerQbScoreOut
+  /** Any margin wins; `null` when inconclusive or exactly tied. */
+  career_winner: QbScoreSide | null
+  peak_winner: QbScoreSide | null
+  /** `a.career - b.career` (signed); `null` when inconclusive. */
+  career_margin: number | null
+  /** `a.peak - b.peak` (signed); `null` when inconclusive. */
+  peak_margin: number | null
+  /** Set exactly when either QB has no qualifying season. */
+  inconclusive: QbScoreInconclusiveReason | null
+  /** Each scored metric's weight in a composite; they sum to 1. */
+  weights: Record<QbScoreMetric, number>
+  /** The fewest dropbacks a season needs to qualify. */
+  min_dropbacks: number
+  /** How many best seasons the peak averages. */
+  peak_seasons: number
+}
+
+/** `POST /api/players/compare/verdict`'s body (`QbVerdictRequest`). */
+export interface QbVerdictPayload {
+  a: number
+  b: number
+  sport: Sport
+}
+
+export interface QbVerdictPlayerOut {
+  player_id: number
+  display_name: string
+  /** The last-name form the narration may use; `null` when ambiguous or one word. */
+  short_name: string | null
+  coverage: PlayerCoverageOut
+  regular_season_record: StarterRecordOut | null
+  postseason_record: StarterRecordOut | null
+}
+
+export interface QbVerdictEvidenceOut {
+  sport: Sport
+  /** Exactly `GET /api/players/compare`'s `qb_score` for this pair. */
+  qb_score: PlayerQbScoreComparisonOut
+  a: QbVerdictPlayerOut
+  b: QbVerdictPlayerOut
+  /** The first season the score can count (1999); `null` with no stat rows. */
+  data_first_season: number | null
+  regular_season_head_to_head: StarterRecordOut
+  postseason_head_to_head: StarterRecordOut
+}
+
+/** A 200 is always narratable: on a Claude failure the API serves its own fallback text. */
+export interface QbVerdictEnvelope {
+  evidence: QbVerdictEvidenceOut
+  narration: NarrationOut
 }
 
 export interface PlayerSearchRowOut {

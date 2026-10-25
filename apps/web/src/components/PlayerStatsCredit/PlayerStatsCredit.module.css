@@ -15,3 +15,7 @@
 .note {
   color: var(--ink-muted);
 }
+
+.ep {
+  font-weight: 600;
+}

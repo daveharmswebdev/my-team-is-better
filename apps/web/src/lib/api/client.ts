@@ -33,6 +33,8 @@ import type {
   PlayerSearchOut,
   PlayerSeasonType,
   PlayersNotComparableErrorBody,
+  QbVerdictEnvelope,
+  QbVerdictPayload,
   Sport,
   TeamCaseEnvelope,
   TeamsOut,
@@ -285,24 +287,35 @@ async function withDeadline<T>(
   }
 }
 
-/** One verdict request, bounded by `VERDICT_TIMEOUT_MS` and abortable by the caller. */
+/**
+ * One verdict request, bounded by `VERDICT_TIMEOUT_MS` and abortable by the
+ * caller. A non-OK `detail` becomes `typedError`'s error when it names one;
+ * the team verdicts' default is `VerdictApiError`.
+ */
 function postVerdict<T>(
   path: string,
   payload: unknown,
   options: VerdictRequestOptions = {},
+  typedError: TypedErrorMapper = teamVerdictError,
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`
   return withDeadline(
     VERDICT_TIMEOUT_MS,
-    (signal) => sendVerdict<T>(url, payload, signal),
+    (signal) => sendVerdict<T>(url, payload, signal, typedError),
     options.signal,
   )
+}
+
+/** The team verdict endpoints' typed errors (`apps/api/src/api/errors.py`). */
+function teamVerdictError(status: number, detail: unknown): Error | null {
+  return isVerdictErrorBody(detail) ? new VerdictApiError(status, detail) : null
 }
 
 async function sendVerdict<T>(
   url: string,
   payload: unknown,
   signal: AbortSignal,
+  typedError: TypedErrorMapper,
 ): Promise<T> {
   let response: Response
   try {
@@ -319,9 +332,9 @@ async function sendVerdict<T>(
   if (!response.ok) {
     // Read once as text, so the raw body survives even when it isn't JSON.
     const bodyText = await readBodyText(response, signal)
-    const detail = errorDetail(bodyText)
-    if (isVerdictErrorBody(detail)) {
-      throw new VerdictApiError(response.status, detail)
+    const typed = typedError(response.status, errorDetail(bodyText))
+    if (typed !== null) {
+      throw typed
     }
     throw unmappedHttpError(url, response.status, bodyText)
   }
@@ -393,6 +406,43 @@ export function fetchCompare(
     payload,
     options,
   )
+}
+
+/**
+ * `POST /api/players/compare/verdict` (issue #459, API #451): the QB score's
+ * verdict on two quarterbacks, narrated. A 200 is always narratable -- on a
+ * Claude failure or a spent call budget the API serves its own fallback text.
+ * Bounded by `VERDICT_TIMEOUT_MS`, like the team verdicts, and slower than
+ * the comparison, so callers render the score from the comparison's
+ * `qb_score` and the narration after. Errors are the comparison's: a typed
+ * 404 `unknown_player` is a `PlayerApiError`, a typed 400
+ * `players_not_comparable` (any pair that isn't two QBs) a
+ * `PlayersNotComparableError`; `a == b` is a request-validation 422, which
+ * stays a `VerdictHttpError`, as does a stale-db 503.
+ */
+export function fetchQbVerdict(
+  a: number,
+  b: number,
+  options?: VerdictRequestOptions,
+): Promise<QbVerdictEnvelope> {
+  const payload: QbVerdictPayload = { a, b, sport: 'nfl' }
+  return postVerdict<QbVerdictEnvelope>(
+    '/api/players/compare/verdict',
+    payload,
+    options,
+    playerError,
+  )
+}
+
+/** The player endpoints' typed errors: `unknown_player`, `players_not_comparable`. */
+function playerError(status: number, detail: unknown): Error | null {
+  if (isUnknownPlayerErrorBody(detail)) {
+    return new PlayerApiError(status, detail)
+  }
+  if (isPlayersNotComparableErrorBody(detail)) {
+    return new PlayersNotComparableError(status, detail)
+  }
+  return null
 }
 
 /**
@@ -533,15 +583,7 @@ export function fetchPlayerComparison(
   })
   return getJson<PlayerComparisonOut>(
     `${API_BASE_URL}/api/players/compare?${params.toString()}`,
-    (status, detail) => {
-      if (isUnknownPlayerErrorBody(detail)) {
-        return new PlayerApiError(status, detail)
-      }
-      if (isPlayersNotComparableErrorBody(detail)) {
-        return new PlayersNotComparableError(status, detail)
-      }
-      return null
-    },
+    playerError,
   )
 }
 

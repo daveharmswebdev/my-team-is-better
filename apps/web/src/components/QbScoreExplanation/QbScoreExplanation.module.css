@@ -1,0 +1,152 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* A plain-text disclosure button, at least 44px tall for touch. */
+.toggle {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: var(--sp-2) 0;
+  border: none;
+  background: none;
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.chevron {
+  display: inline-block;
+  width: 1ch;
+  text-decoration: none;
+}
+
+.region {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-3) var(--sp-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-left: var(--sp-4);
+  list-style: disc;
+  line-height: 1.5;
+}
+
+.formula {
+  font-weight: 600;
+}
+
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.playerName {
+  font-family: var(--font-label);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.summary {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fixed layout and wrapping cells: five columns fit a phone, no scrolling. */
+.table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.caption {
+  caption-side: top;
+  text-align: left;
+  padding-bottom: var(--sp-2);
+  font-family: var(--font-label);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--leather);
+}
+
+.table th,
+.table td {
+  padding: var(--sp-1);
+  border-top: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.table thead th {
+  font-family: var(--font-label);
+  font-weight: 600;
+  color: var(--ink-muted);
+  border-top: none;
+  border-bottom: 1px solid var(--rule-strong);
+  vertical-align: bottom;
+}
+
+/* The season cell's "dropbacks" fits a phone unbroken; the score is short. */
+.table thead th:first-child {
+  width: 24%;
+}
+
+.table thead th:last-child {
+  width: 16%;
+}
+
+.value,
+.era > span,
+.season,
+.sub,
+.peak {
+  display: block;
+}
+
+.season {
+  font-weight: 700;
+}
+
+.sub,
+.era {
+  color: var(--ink-muted);
+}
+
+.z {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.peak {
+  font-family: var(--font-label);
+  font-weight: 700;
+  color: var(--leather);
+}
+
+.score {
+  font-weight: 700;
+}
+
+/* A season under the dropback rule: greyed, and its cells say why. */
+.notCounted th,
+.notCounted td {
+  color: var(--ink-muted);
+  font-weight: 400;
+  background: var(--surface-alt);
+}
