@@ -49,7 +49,7 @@ must not be cached as if it were a real narration.
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import anthropic
@@ -72,6 +72,9 @@ MAX_FEEDBACK_ERRORS = 10
 MAX_FEEDBACK_CHARS = 8000
 
 REJECTED_HEADER = "Rejected, nothing was shown to the user. Fix exactly these and submit again:"
+
+# One `submit_narration` tool input in, the validator's verdict out.
+ClaimCheck = Callable[[object], ClaimOutcome]
 
 
 @dataclass(frozen=True)
@@ -128,11 +131,36 @@ def narrate(
     `is_fallback=True` so the caller knows not to cache it. Neither does a
     spent `budget`: a call it refuses is not made, and the result is the same
     fallback (issue #236).
+
+    The team verdicts' entry point: the team prompt and the team claim check
+    (`api.persona.claims.check_and_render`), run through `narrate_checked`.
     """
-    system_prompt = build_system_prompt(user_team)
-    messages: list[MessageParam] = [
-        {"role": "user", "content": build_user_message(fact_block_json, contested=contested)}
-    ]
+    return narrate_checked(
+        system_prompt=build_system_prompt(user_team),
+        user_message=build_user_message(fact_block_json, contested=contested),
+        check=lambda tool_input: check_and_render(tool_input, fact_block_json, catalog),
+        narrator=narrator,
+        fallback_text=fallback_text,
+        budget=budget,
+    )
+
+
+def narrate_checked(
+    *,
+    system_prompt: str,
+    user_message: str,
+    check: ClaimCheck,
+    narrator: Narrator,
+    fallback_text: str,
+    budget: CallBudget,
+) -> NarrationResult:
+    """The one narration loop (module docstring), for any prompt and any
+    claim check: `check` takes one `submit_narration` tool input and returns
+    its `ClaimOutcome`. `narrate` runs the team verdicts through it and
+    `api.persona.service.narrate_qb_comparison` the QB verdict (issue #451),
+    so both share the budget, the two attempts, the capped retry feedback and
+    the fallback."""
+    messages: list[MessageParam] = [{"role": "user", "content": user_message}]
     fallback = NarrationResult(text=fallback_text, is_fallback=True)
 
     if not budget.try_acquire():
@@ -144,7 +172,7 @@ def narrate(
         logger.warning("Claude API call failed, serving fallback narration: %s", exc)
         return fallback
 
-    first_outcome = _check(first, fact_block_json, catalog)
+    first_outcome = _check(first, check)
     if first_outcome.text is not None:
         return NarrationResult(text=first_outcome.text, is_fallback=False)
 
@@ -161,7 +189,7 @@ def narrate(
         logger.warning("Claude API call failed on the claim retry, serving fallback: %s", exc)
         return fallback
 
-    second_outcome = _check(second, fact_block_json, catalog)
+    second_outcome = _check(second, check)
     if second_outcome.text is not None:
         return NarrationResult(text=second_outcome.text, is_fallback=False)
 
@@ -179,9 +207,7 @@ def narrate(
     return fallback
 
 
-def _check(
-    reply: NarratorReply, fact_block_json: str, catalog: Sequence[TeamRecord]
-) -> ClaimOutcome:
+def _check(reply: NarratorReply, check: ClaimCheck) -> ClaimOutcome:
     """The validator's verdict on one reply; no tool call is a rejection."""
     if reply.tool_call is None:
         return ClaimOutcome(
@@ -191,7 +217,7 @@ def _check(
             ),
             text=None,
         )
-    return check_and_render(reply.tool_call.input, fact_block_json, catalog)
+    return check(reply.tool_call.input)
 
 
 def _retry_turns(reply: NarratorReply, errors: Sequence[str]) -> list[MessageParam]:

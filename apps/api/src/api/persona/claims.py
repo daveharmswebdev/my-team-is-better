@@ -1448,17 +1448,8 @@ def _check_prose(
             f"{holdings(match.start(), match.end())}"
         )
 
-    every_number = "every number must come from a claim placeholder"
-    for match in _DIGITS_RE.finditer(masked):
-        errors.append(typed("types the number", match, every_number))
-    words_masked = masked
-    for match in _WORD_RECORD_RE.finditer(masked):
-        errors.append(typed("spells out the number", match, every_number))
-        words_masked = _mask_span(words_masked, match.start(), match.end())
-    for match in _NUMBER_WORD_RE.finditer(words_masked):
-        errors.append(typed("spells out the number", match, every_number))
-    for match in _ORDINAL_RE.finditer(masked):
-        errors.append(typed("uses the ordinal", match, "a rank must come from a rank claim"))
+    for what, match, rule in typed_number_matches(masked):
+        errors.append(typed(what, match, rule))
     # On the masked text, so a `when` placeholder that prints "in the SEC
     # title game" is never mistaken for one typed by hand (#382).
     for match in _TIMING_RE.finditer(masked):
@@ -1541,6 +1532,33 @@ def _check_prose(
     walk_teams = _with_outside_aliases(masked, typed_teams, name_spans, alias_re, index)
     bare_at = _bare_offsets(placeholders, walk_teams, name_claims, pair_claims, break_ends)
     return errors, bare_at
+
+
+EVERY_NUMBER_RULE: Final = "every number must come from a claim placeholder"
+
+
+def typed_number_matches(masked: str) -> list[tuple[str, re.Match[str], str]]:
+    """Every number typed into placeholder-masked prose, in validator order:
+    digits, number-word records ("thirteen and oh"), the other number words,
+    then ordinals from "second" up. Each is `(what, match, rule)`, worded for
+    "the prose <what> <token>; <rule>". A number word inside a word record is
+    reported once, as the record.
+
+    The team check (`_check_prose`) and the QB check
+    (`api.persona.qb_claims`, issue #451) both read numbers through this one
+    function, so the two paths reject exactly the same typed numbers."""
+    found: list[tuple[str, re.Match[str], str]] = []
+    for match in _DIGITS_RE.finditer(masked):
+        found.append(("types the number", match, EVERY_NUMBER_RULE))
+    words_masked = masked
+    for match in _WORD_RECORD_RE.finditer(masked):
+        found.append(("spells out the number", match, EVERY_NUMBER_RULE))
+        words_masked = _mask_span(words_masked, match.start(), match.end())
+    for match in _NUMBER_WORD_RE.finditer(words_masked):
+        found.append(("spells out the number", match, EVERY_NUMBER_RULE))
+    for match in _ORDINAL_RE.finditer(masked):
+        found.append(("uses the ordinal", match, "a rank must come from a rank claim"))
+    return found
 
 
 def _with_outside_aliases(
@@ -1689,3 +1707,41 @@ def _quote(value: object) -> str:
 
 def _type_name(value: object) -> str:
     return "null" if value is None else type(value).__name__
+
+
+# ---------------------------------------------------------------------------
+# shared with the QB check (issue #451)
+# ---------------------------------------------------------------------------
+#
+# `api.persona.qb_claims` checks a QB narration's tool input with the same
+# placeholder syntax, the same masking and the same quoting as the team check
+# above, and reads typed numbers through `typed_number_matches`. These are the
+# names it imports; the team check keeps using its private ones, so nothing
+# above changed meaning.
+
+ID_PATTERN: Final = _ID_PATTERN
+ID_RE: Final = _ID_RE
+PLACEHOLDER_RE: Final = _PLACEHOLDER_RE
+MASK: Final = _MASK
+SENTENCE_BREAK_RE: Final = _SENTENCE_BREAK_RE
+SURROGATE: Final = _SURROGATE
+
+
+def has_surrogate(value: object) -> bool:
+    """Whether `value` is a string holding a lone surrogate."""
+    return _has_surrogate(value)
+
+
+def quote(value: object) -> str:
+    """`value` quoted for an error, capped and never a lone surrogate."""
+    return _quote(value)
+
+
+def type_name(value: object) -> str:
+    """A JSON-ish name for `value`'s type, for an error."""
+    return _type_name(value)
+
+
+def ap_number(number: int) -> str:
+    """AP style: words for zero through nine, numerals from 10."""
+    return _ap(number)

@@ -1522,6 +1522,143 @@ class ComparisonEnvelope(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# the QB verdict (issue #451, epic #439 step 2): `POST
+# /api/players/compare/verdict`, two quarterbacks' QB score with a narration.
+# `evidence.qb_score` is exactly `GET /api/players/compare`'s `qb_score` for
+# the pair; the rest of `evidence` is the context the narrator may cite, each
+# value copied from the engine's comparison (`PlayerComparison`), never
+# recomputed. The one value derived here is `short_name`, the last-name form
+# a narration may write a player by (`qb_short_names`).
+# ---------------------------------------------------------------------------
+
+# Generational and numeral suffixes left off a short name: "Odell Beckham
+# Jr." is "Beckham", "Robert Griffin III" is "Griffin".
+_NAME_SUFFIXES = frozenset({"jr", "jr.", "sr", "sr.", "ii", "iii", "iv", "v"})
+
+
+def _name_tokens(display_name: str) -> list[str]:
+    return display_name.split()
+
+
+def _last_name(display_name: str) -> str | None:
+    tokens = _name_tokens(display_name)
+    while len(tokens) > 1 and tokens[-1].casefold() in _NAME_SUFFIXES:
+        tokens = tokens[:-1]
+    return tokens[-1] if len(tokens) > 1 else None
+
+
+def qb_short_names(a_display_name: str, b_display_name: str) -> tuple[str | None, str | None]:
+    """The last-name form each player may be written by in a narration, or
+    None where the full `display_name` is the only form: a one-word name, or
+    a last name that is also any word of the other player's name ("Peyton
+    Manning" and "Eli Manning" are both written in full; so is "Josh Allen"
+    beside "Allen Robinson")."""
+    a_last, b_last = _last_name(a_display_name), _last_name(b_display_name)
+    a_words = {token.casefold() for token in _name_tokens(a_display_name)}
+    b_words = {token.casefold() for token in _name_tokens(b_display_name)}
+    return (
+        a_last if a_last is not None and a_last.casefold() not in b_words else None,
+        b_last if b_last is not None and b_last.casefold() not in a_words else None,
+    )
+
+
+class QbVerdictRequest(BaseModel):
+    """'Who's the better quarterback, a or b?' -- by the QB score."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    a: int = Field(description="The first quarterback's player id.")
+    b: int = Field(description="The second quarterback's player id; not a.")
+    sport: Sport = Field(default="nfl", description="The league; only one with player stats.")
+
+
+class QbVerdictPlayerOut(BaseModel):
+    player_id: int = Field(description="The quarterback's player id.")
+    display_name: str = Field(description="The quarterback's name, as the narration spells it.")
+    short_name: str | None = Field(
+        description=(
+            "The last-name form the narration may also write him by. Null when "
+            "it would be ambiguous between the two (a shared last name) or the "
+            "name is one word: then only display_name is used."
+        )
+    )
+    coverage: PlayerCoverageOut = Field(description=_COVERAGE_DESCRIPTION)
+    regular_season_record: StarterRecordOut | None = Field(
+        description=(
+            "His regular-season starter W-L-T over the seasons this db holds "
+            "(career page totals). Color only: the QB score does not count wins."
+        )
+    )
+    postseason_record: StarterRecordOut | None = Field(
+        description="His postseason starter W-L-T, as regular_season_record. Null with none."
+    )
+
+
+class QbVerdictEvidenceOut(BaseModel):
+    sport: Sport = Field(description="The league.")
+    qb_score: PlayerQbScoreComparisonOut = Field(
+        description="Exactly GET /api/players/compare's qb_score for this pair."
+    )
+    a: QbVerdictPlayerOut = Field(description="Player a's context.")
+    b: QbVerdictPlayerOut = Field(description="Player b's context.")
+    data_first_season: int | None = Field(
+        description=(
+            "The first season the score can count: this db's first season of "
+            "player stats (1999 for the NFL). Null on a db with no stat rows."
+        )
+    )
+    regular_season_head_to_head: StarterRecordOut = Field(
+        description="a's regular-season W-L-T against b as opposing starters."
+    )
+    postseason_head_to_head: StarterRecordOut = Field(
+        description="a's postseason W-L-T against b as opposing starters."
+    )
+
+    @classmethod
+    def from_dataclasses(
+        cls, comparison: PlayerComparison, qb_score: QbScoreComparison
+    ) -> QbVerdictEvidenceOut:
+        a_short, b_short = qb_short_names(comparison.a.display_name, comparison.b.display_name)
+        return cls(
+            sport=comparison.sport,
+            qb_score=PlayerQbScoreComparisonOut.from_dataclass(qb_score),
+            a=_qb_verdict_player(comparison.a, a_short),
+            b=_qb_verdict_player(comparison.b, b_short),
+            data_first_season=comparison.a.coverage.data_first_season,
+            regular_season_head_to_head=StarterRecordOut.from_dataclass(
+                comparison.regular_season_head_to_head.record
+            ),
+            postseason_head_to_head=StarterRecordOut.from_dataclass(
+                comparison.postseason_head_to_head.record
+            ),
+        )
+
+
+def _qb_verdict_player(career: PlayerCareer, short_name: str | None) -> QbVerdictPlayerOut:
+    return QbVerdictPlayerOut(
+        player_id=career.player_id,
+        display_name=career.display_name,
+        short_name=short_name,
+        coverage=PlayerCoverageOut.from_dataclass(career.coverage),
+        regular_season_record=(
+            StarterRecordOut.from_dataclass(career.regular_season.record)
+            if career.regular_season is not None
+            else None
+        ),
+        postseason_record=(
+            StarterRecordOut.from_dataclass(career.postseason.record)
+            if career.postseason is not None
+            else None
+        ),
+    )
+
+
+class QbVerdictEnvelope(BaseModel):
+    evidence: QbVerdictEvidenceOut
+    narration: NarrationOut
+
+
+# ---------------------------------------------------------------------------
 # error bodies (Architecture Brief §4.4 -- HTTP-response half only, no
 # persona copy here, that's issue #4's job)
 # ---------------------------------------------------------------------------

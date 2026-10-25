@@ -64,24 +64,46 @@ unchanged. This was chosen over a PROMPT_VERSION bump, which would discard
 every cached narration in both leagues to fix a handful of NFL rows, and it
 heals any later change to the contested lists the same way without a global
 bust. #151 changed neither the cache key nor `CachedNarration`.
+
+**The QB verdict (issue #451)** goes through the same rules:
+`narrate_qb_comparison` builds the QB fact block (`qb_fact_block_json`), its
+own key (`api.persona.cache.qb_cache_key`, under `QB_SCORE_VERSION`,
+`QB_PROMPT_VERSION` and `QB_GROUNDING_VERSION`) and its fallback, and runs
+`api.persona.narrate.narrate_checked` with the QB prompt and the QB claim
+check. The cache rules both share live in `_serve_cached`; the team entry
+points still reach `narrate` by name, exactly as before. A QB narration is
+never contested.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Collection, Sequence
 
 import psycopg
+from cfb_strength.contracts import QB_SCORE_VERSION
 from pydantic.main import IncEx
 
-from api.config import CONTESTED_YEARS, PROMPT_VERSION
-from api.models import ComparisonResultOut, NarrationOut, Sport, TeamCaseOut
+from api.config import CONTESTED_YEARS, PROMPT_VERSION, QB_PROMPT_VERSION
+from api.models import (
+    ComparisonResultOut,
+    NarrationOut,
+    QbVerdictEvidenceOut,
+    Sport,
+    TeamCaseOut,
+)
 from api.persona.budget import CallBudget
-from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key
+from api.persona.cache import CachedNarration, NarrationCacheStore, cache_key, qb_cache_key
 from api.persona.claims import GROUNDING_VERSION
 from api.persona.claude_client import Narrator
-from api.persona.fallback import comparison_fallback_text, team_case_fallback_text
-from api.persona.narrate import narrate
+from api.persona.fallback import (
+    comparison_fallback_text,
+    qb_comparison_fallback_text,
+    team_case_fallback_text,
+)
+from api.persona.narrate import NarrationResult, narrate, narrate_checked
+from api.persona.qb_claims import QB_GROUNDING_VERSION, check_and_render_qb
+from api.persona.qb_prompt import build_qb_system_prompt, build_qb_user_message
 from api.repositories.teams import TeamRecord
 
 logger = logging.getLogger(__name__)
@@ -261,7 +283,35 @@ def _cached_narration(
     #183 ledger exclusion cannot be bypassed here.
     """
     contested = is_contested(sport, year)
+    return _serve_cached(
+        key=key,
+        fallback_text=fallback_text,
+        contested=contested,
+        cache=cache,
+        produce=lambda: narrate(
+            fact_block_json=fact_block_json,
+            user_team=user_team,
+            contested=contested,
+            catalog=catalog,
+            narrator=narrator,
+            fallback_text=fallback_text,
+            budget=budget,
+        ),
+    )
 
+
+def _serve_cached(
+    *,
+    key: str,
+    fallback_text: str,
+    contested: bool,
+    cache: NarrationCacheStore,
+    produce: Callable[[], NarrationResult],
+) -> NarrationOut:
+    """The cache rules every verdict shares: a hit is served unless its text
+    is the fallback or its `contested` flag is stale; a miss calls `produce`
+    and writes the result unless it is the fallback; a cache error on either
+    side degrades to an uncached narration (module docstring)."""
     try:
         cached = cache.get(key)
     except psycopg.Error as exc:
@@ -270,15 +320,7 @@ def _cached_narration(
     if cached is not None and cached.text != fallback_text and cached.contested == contested:
         return NarrationOut(text=cached.text, contested=cached.contested, cached=True)
 
-    result = narrate(
-        fact_block_json=fact_block_json,
-        user_team=user_team,
-        contested=contested,
-        catalog=catalog,
-        narrator=narrator,
-        fallback_text=fallback_text,
-        budget=budget,
-    )
+    result = produce()
 
     if not result.is_fallback:
         try:
@@ -286,3 +328,78 @@ def _cached_narration(
         except psycopg.Error as exc:
             logger.warning("Narration cache write failed, narration not cached: %s", exc)
     return NarrationOut(text=result.text, contested=contested, cached=False)
+
+
+# ---------------------------------------------------------------------------
+# the QB verdict (issue #451)
+# ---------------------------------------------------------------------------
+
+# What the QB narrator reads is the evidence without the z-score machinery:
+# each season keeps only its year, dropbacks and whether it qualified, and the
+# weights and the score's version (which is in the cache key) are left out.
+# The narrator explains the score in bar words (the voice call on #451), and
+# a figure it may not cite is one it never sees.
+_QB_SEASON_EXCLUDE: dict[str, IncEx | bool] = {
+    "__all__": {
+        "epa_per_dropback": True,
+        "rush_epa_per_play": True,
+        "any_a": True,
+        "composite": True,
+        "in_peak": True,
+    }
+}
+_QB_SIDE_EXCLUDE: dict[str, IncEx | bool] = {"version": True, "seasons": _QB_SEASON_EXCLUDE}
+QB_FACT_BLOCK_EXCLUDE: dict[str, IncEx | bool] = {
+    "qb_score": {
+        "version": True,
+        "weights": True,
+        "a": _QB_SIDE_EXCLUDE,
+        "b": _QB_SIDE_EXCLUDE,
+    }
+}
+
+
+def qb_fact_block_json(evidence: QbVerdictEvidenceOut) -> str:
+    """The FACT BLOCK JSON the QB narrator and the QB claim check see. The
+    one definition, as `team_case_fact_block_json` is for the team verdicts."""
+    return evidence.model_dump_json(exclude=QB_FACT_BLOCK_EXCLUDE)
+
+
+def narrate_qb_comparison(
+    evidence: QbVerdictEvidenceOut,
+    *,
+    player_names: Collection[str],
+    cache: NarrationCacheStore,
+    narrator: Narrator,
+    budget: CallBudget,
+) -> NarrationOut:
+    """Narrate a QB-vs-QB verdict through the same loop and cache rules as
+    the team verdicts, with the QB prompt, the QB claim check
+    (`player_names` is the sport's player catalog, for a third player named
+    in the prose) and the QB cache key. Never contested: the flag is a team
+    season's."""
+    fact_block_json = qb_fact_block_json(evidence)
+    fallback_text = qb_comparison_fallback_text(evidence)
+    key = qb_cache_key(
+        sport=evidence.sport,
+        a=evidence.a.player_id,
+        b=evidence.b.player_id,
+        qb_score_version=QB_SCORE_VERSION,
+        prompt_version=QB_PROMPT_VERSION,
+        fact_block_json=fact_block_json,
+        grounding_version=QB_GROUNDING_VERSION,
+    )
+    return _serve_cached(
+        key=key,
+        fallback_text=fallback_text,
+        contested=False,
+        cache=cache,
+        produce=lambda: narrate_checked(
+            system_prompt=build_qb_system_prompt(),
+            user_message=build_qb_user_message(fact_block_json),
+            check=lambda tool_input: check_and_render_qb(tool_input, fact_block_json, player_names),
+            narrator=narrator,
+            fallback_text=fallback_text,
+            budget=budget,
+        ),
+    )

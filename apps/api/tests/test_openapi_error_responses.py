@@ -219,6 +219,12 @@ KNOWN_ROUTE_KINDS: dict[tuple[str, str], frozenset[type[BaseException]]] = {
     # one position group. Search raises only ValueError (a bad limit, query
     # or group), which the route's own validation rejects first.
     ("/api/players/compare", "get"): frozenset({UnknownPlayerError, PlayersNotComparableError}),
+    # Issue #451: the QB verdict runs compare's gates (UnknownPlayerError,
+    # and PlayersNotComparableError for any pair that isn't two QBs) before
+    # it narrates.
+    ("/api/players/compare/verdict", "post"): frozenset(
+        {UnknownPlayerError, PlayersNotComparableError}
+    ),
     ("/api/players/search", "get"): frozenset(),
     ("/health", "get"): frozenset(),
 }
@@ -922,4 +928,55 @@ def test_player_errors_validate_against_advertised_schema(
     assert not errors, (
         f"GET {path} {status}: the real response does not match the advertised schema\n"
         f"body: {body}\nschema: {schema}\nerrors: {[e.message for e in errors]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. the QB verdict (issue #451): a POST with a JSON body, posted here
+# ---------------------------------------------------------------------------
+
+QB_VERDICT_ROUTE = ("/api/players/compare/verdict", "post")
+# Kurt Warner, Steve McNair, Marshall Faulk (RB) and Edgerrin James (RB).
+QB_VERDICT_RUNTIME_CASES: list[tuple[dict[str, str | int], int, str | None]] = [
+    ({"a": 1, "b": 2044124519}, 404, "unknown_player"),
+    ({"a": 2044124519, "b": 2044124519}, 422, None),
+    ({"a": 2044124519, "b": 2385180619, "sport": "cfb"}, 422, None),
+    ({"a": 2252790861, "b": 2425879833}, 400, "players_not_comparable"),
+    ({"a": 2044124519, "b": 2252790861}, 400, "players_not_comparable"),
+]
+
+
+def test_qb_verdict_route_advertises_exactly_its_player_errors() -> None:
+    responses = _openapi()["paths"][QB_VERDICT_ROUTE[0]][QB_VERDICT_ROUTE[1]]["responses"]
+    assert _union_members(_json_schema(responses["404"])) == [UNKNOWN_PLAYER]
+    assert _union_members(_json_schema(responses["400"])) == [PLAYERS_NOT_COMPARABLE]
+    for status in sorted(s for s in responses if not s.startswith("2") and s not in {"400", "404"}):
+        leaked = _all_refs(responses[status]) & ENGINE_ERROR_COMPONENTS
+        assert not leaked, f"POST {QB_VERDICT_ROUTE[0]} {status} references engine errors: {leaked}"
+
+
+@pytest.mark.parametrize(
+    "payload,status,error",
+    QB_VERDICT_RUNTIME_CASES,
+    ids=[f"{s}-{e or 'request_validation'}-{p}" for p, s, e in QB_VERDICT_RUNTIME_CASES],
+)
+def test_qb_verdict_errors_validate_against_advertised_schema(
+    client: TestClient, payload: dict[str, str | int], status: int, error: str | None
+) -> None:
+    response = client.post(QB_VERDICT_ROUTE[0], json=payload)
+
+    assert response.status_code == status, response.text
+    body = response.json()
+    if error is None:
+        assert isinstance(body["detail"], list) and body["detail"], body
+    else:
+        assert body["detail"]["error"] == error, body
+
+    openapi = _openapi()
+    schema = _advertised_schema(openapi, QB_VERDICT_ROUTE[0], "post", str(status))
+    errors = sorted(_validator(openapi, schema).iter_errors(body), key=str)
+    assert not errors, (
+        f"POST {QB_VERDICT_ROUTE[0]} {status}: the real response does not match the "
+        f"advertised schema\nbody: {body}\nschema: {schema}\n"
+        f"errors: {[e.message for e in errors]}"
     )

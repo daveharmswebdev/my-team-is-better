@@ -143,6 +143,15 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # which the #145 key already misses on; the wording change is what moves this.
 PROMPT_VERSION = "persona-v13"
 
+# Issue #451: the QB-vs-QB narration's own prompt (`api.persona.qb_prompt`,
+# the NFL bar guy) and its own version in the QB cache key
+# (`api.persona.cache.qb_cache_key`). Bump it when that prompt's wording, or
+# the QB tool's description strings (`api.persona.qb_claims.qb_tool_schema`),
+# change. Independent of `PROMPT_VERSION`: a QB prompt change never busts a
+# team narration, and a team prompt change never busts a QB one.
+# qb-persona-v1: first version.
+QB_PROMPT_VERSION = "qb-persona-v1"
+
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),
     "nfl": frozenset(),

@@ -115,6 +115,39 @@ def cache_key(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def qb_cache_key(
+    *,
+    sport: str,
+    a: int,
+    b: int,
+    qb_score_version: str,
+    prompt_version: str,
+    fact_block_json: str,
+    grounding_version: str,
+) -> str:
+    """The QB verdict's cache key (issue #451): one per ordered pair of
+    player ids in `sport`, under `contracts.QB_SCORE_VERSION`,
+    `api.config.QB_PROMPT_VERSION`, sha256(the QB fact block) and
+    `api.persona.qb_claims.QB_GROUNDING_VERSION`. A refit of the score, a QB
+    prompt change, a changed block or tightened QB rules each miss on their
+    own. Its own function rather than `cache_key` with a QB `question_type`,
+    so the team keys stay byte-for-byte what they were; the `question_type`
+    in the payload keeps the two key spaces apart anyway. (a, b) and (b, a)
+    are two keys: their blocks, and so their narrations, differ."""
+    payload = {
+        "question_type": "qb_compare",
+        "sport": sport,
+        "a": a,
+        "b": b,
+        "qb_score_version": qb_score_version,
+        "prompt_version": prompt_version,
+        "fact_block_sha256": hashlib.sha256(fact_block_json.encode("utf-8")).hexdigest(),
+        "grounding_version": grounding_version,
+    }
+    canonical = json.dumps(payload, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 class InMemoryNarrationCache:
     """Dict-backed fake `NarrationCacheStore` -- the CI-safe unit test
     suite's only cache implementation; no live Postgres connection needed.
