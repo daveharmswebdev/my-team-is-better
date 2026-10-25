@@ -214,6 +214,7 @@ export function EloLedgerDisclosure({
         <ol
           className={styles.steps}
           aria-label="Games, in order"
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must take keyboard focus so it can be scrolled without a mouse (axe scrollable-region-focusable)
           tabIndex={0}
           data-min-visible-items={4}
         >

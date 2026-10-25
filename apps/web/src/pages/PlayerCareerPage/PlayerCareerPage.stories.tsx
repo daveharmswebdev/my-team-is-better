@@ -16,8 +16,14 @@ import { PlayerCareerPage } from './PlayerCareerPage'
  */
 function installFetch(career: () => Promise<Response>) {
   const realFetch = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(typeof input === 'string' ? input : input.toString())
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    )
     if (url.pathname.startsWith('/api/players/')) {
       return career()
     }
@@ -28,7 +34,7 @@ function installFetch(career: () => Promise<Response>) {
       })
     }
     return realFetch(input, init)
-  }) as typeof fetch
+  }
 }
 
 function jsonResponse(status: number, body: unknown): Promise<Response> {

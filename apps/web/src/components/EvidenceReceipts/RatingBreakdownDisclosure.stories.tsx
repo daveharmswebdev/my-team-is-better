@@ -171,6 +171,7 @@ export const TouchMode: Story = {
     // outer-scope binding from inside a component's render body -- this is
     // Storybook-demo-only, never part of the shipped component.
     (Story) => {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- saved only to be assigned back to window.matchMedia afterwards, never called detached
       const original = window.matchMedia
       window.matchMedia = touchMatchMediaStub
       const rendered = Story()

@@ -40,6 +40,7 @@ export function PlayerHeadToHead({
       <p className={styles.record}>
         {headToHeadRecordCopy(aName, bName, headToHead.record)}
       </p>
+      {/* eslint-disable-next-line jsx-a11y/no-redundant-roles -- `list-style: none` drops list semantics in Safari/VoiceOver, so role="list" is stated on purpose */}
       <ol
         className={styles.games}
         // Named explicitly, and `role` kept, since `list-style: none` drops

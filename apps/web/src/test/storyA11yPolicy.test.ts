@@ -7,6 +7,7 @@ import {
   setProjectAnnotations,
 } from '@storybook/react-vite'
 import { ESLint } from 'eslint'
+import tseslint from 'typescript-eslint'
 import { describe, expect, it } from 'vitest'
 import {
   A11Y_KNOBS,
@@ -143,10 +144,7 @@ const collected = collectedModules.flatMap((module) => module.stories)
 const baseline = collectStory(
   '(baseline)',
   'Baseline',
-  composeStory(
-    {},
-    { title: 'story-a11y-policy/baseline' },
-  ) as unknown as ComposedStoryShape,
+  composeStory({}, { title: 'story-a11y-policy/baseline' }),
 )
 
 const show = (value: unknown) => JSON.stringify(value)
@@ -442,7 +440,13 @@ describe('Storybook a11y policy (issue #90)', () => {
   )
 
   describe('eslint.config.js a11y rule', () => {
-    const eslint = new ESLint({ cwd: WEB_DIR })
+    // The real config, minus type information (issue #222): the probe paths
+    // below are made up, so the project service can't type them, and the a11y
+    // rules are syntax-only. `eslintTypeAware.test.ts` covers the typed layer.
+    const eslint = new ESLint({
+      cwd: WEB_DIR,
+      overrideConfig: tseslint.configs.disableTypeChecked,
+    })
 
     it('is configured as an error for story files, including new directories', async () => {
       for (const file of [
@@ -454,7 +458,9 @@ describe('Storybook a11y policy (issue #90)', () => {
         }
         for (const rule of A11Y_LINT_RULES) {
           const setting = config.rules?.[rule]
-          const severity = Array.isArray(setting) ? setting[0] : setting
+          const severity: unknown = Array.isArray(setting)
+            ? setting[0]
+            : setting
           expect(
             severity,
             `${file}: ${rule} must be an error (eslint.config.js)`,
@@ -481,7 +487,13 @@ describe('Storybook a11y policy (issue #90)', () => {
       'leaves ordinary code alone: %s',
       async (_description, filePath, code) => {
         const [result] = await eslint.lintText(code, { filePath })
-        const hits = (result?.messages ?? []).filter((message) =>
+        const messages = result?.messages ?? []
+        // A parse error has no rule id, so it would pass the check below.
+        expect(
+          messages.filter((message) => message.fatal),
+          `${filePath} did not parse`,
+        ).toEqual([])
+        const hits = messages.filter((message) =>
           A11Y_LINT_RULES.includes(message.ruleId ?? ''),
         )
         expect(hits, `false positive in ${filePath}: ${show(hits)}`).toEqual([])

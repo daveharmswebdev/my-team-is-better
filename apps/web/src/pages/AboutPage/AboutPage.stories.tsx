@@ -45,13 +45,18 @@ const mockCredits: CreditsOut = {
 
 function installCreditsFetch(handler: () => Promise<Response>) {
   const realFetch = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString()
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url
     if (url.includes('/api/credits')) {
       return handler()
     }
     return realFetch(input, init)
-  }) as typeof fetch
+  }
 }
 
 function jsonResponse(body: unknown): Promise<Response> {

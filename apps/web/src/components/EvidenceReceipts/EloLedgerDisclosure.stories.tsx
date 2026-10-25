@@ -76,6 +76,7 @@ type Story = StoryObj<typeof meta>
 
 /** Forces a coarse/touch pointer for the initial render (see RatingBreakdownDisclosure's TouchMode). */
 function touchDecorator(Story: () => ReturnType<NonNullable<Story['render']>>) {
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- saved only to be assigned back to window.matchMedia afterwards, never called detached
   const original = window.matchMedia
   window.matchMedia = touchMatchMediaStub
   const rendered = Story()
