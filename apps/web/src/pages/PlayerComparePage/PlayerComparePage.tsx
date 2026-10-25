@@ -143,7 +143,7 @@ function refusalOf(state: unknown): Refusal | null {
   if (typeof state !== 'object' || state === null || !('refused' in state)) {
     return null
   }
-  const { refused } = state as { refused: unknown }
+  const { refused } = state
   if (typeof refused !== 'object' || refused === null) {
     return null
   }
@@ -242,7 +242,7 @@ function closedFromKey(state: unknown): string | null {
   if (typeof state !== 'object' || state === null || !('closedFrom' in state)) {
     return null
   }
-  const { closedFrom } = state as { closedFrom: unknown }
+  const { closedFrom } = state
   return typeof closedFrom === 'string' ? closedFrom : null
 }
 

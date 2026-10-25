@@ -130,7 +130,7 @@ describe('VerdictModal (issue #198)', () => {
   it('calls onClose if the browser closes it on its own', () => {
     const { onClose } = renderModal()
 
-    ;(screen.getByRole('dialog') as HTMLDialogElement).close()
+    screen.getByRole<HTMLDialogElement>('dialog').close()
 
     expect(onClose).toHaveBeenCalledTimes(1)
   })

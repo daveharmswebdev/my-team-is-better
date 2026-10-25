@@ -186,7 +186,7 @@ describe('api client', () => {
 
       const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
       expect(url).toContain(`/api/verdict/${route}`)
-      expect(JSON.parse(String(init.body))).toMatchObject({ method: 'elo' })
+      expect(JSON.parse(init.body as string)).toMatchObject({ method: 'elo' })
     },
   )
 
