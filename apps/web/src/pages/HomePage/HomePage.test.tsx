@@ -576,8 +576,10 @@ describe('HomePage', () => {
       expect(within(dialog).getByRole('status')).toHaveTextContent(
         /getting the verdict/i,
       )
-      await act(async () => {
+      // Returning a promise keeps this an async act, which flushes the updates.
+      await act(() => {
         answer.resolve(envelopeFor('Texas', 'Texas, full stop.'))
+        return Promise.resolve()
       })
 
       const verdict = await within(dialog).findByRole('article')
@@ -696,10 +698,12 @@ describe('HomePage', () => {
       // Closing an in-flight question frees the form to ask again.
       await waitFor(() => expect(submitButton()).not.toBeDisabled())
 
-      await act(async () => {
+      // Returning a promise keeps this an async act, which flushes the updates.
+      await act(() => {
         answer.resolve(
           comparisonEnvelopeFor('Texas', 'USC', 'Texas edges USC.'),
         )
+        return Promise.resolve()
       })
 
       await expectThroughout(() => {
@@ -737,15 +741,18 @@ describe('HomePage', () => {
         await user.click(submitButton())
         await screen.findByRole('dialog', { name: 'The verdict' })
 
-        await act(async () => {
+        // Returning a promise keeps this an async act, which flushes the updates.
+        await act(() => {
           second.resolve(
             comparisonEnvelopeFor('Texas', 'USC', 'The second answer.'),
           )
+          return Promise.resolve()
         })
         expect(
           await within(verdictDialog()).findByText('The second answer.'),
         ).toBeInTheDocument()
-        await act(async () => {
+        // Returning a promise keeps this an async act, which flushes the updates.
+        await act(() => {
           if (settleFirst === 'resolve') {
             first.resolve(
               comparisonEnvelopeFor('Texas', 'USC', 'The first answer.'),
@@ -753,6 +760,7 @@ describe('HomePage', () => {
           } else {
             first.reject(new VerdictNetworkError(NETWORK_ERROR_COPY))
           }
+          return Promise.resolve()
         })
 
         await expectThroughout(() => {
@@ -792,8 +800,10 @@ describe('HomePage', () => {
       )
       // Focus stays inside the dialog even though the pill it was on is gone.
       expect(dialog).toContainElement(document.activeElement as HTMLElement)
-      await act(async () => {
+      // Returning a promise keeps this an async act, which flushes the updates.
+      await act(() => {
         corrected.resolve(envelopeFor('Texas', 'Texas, full stop.'))
+        return Promise.resolve()
       })
       expect(
         await within(dialog).findByText('Texas, full stop.'),

@@ -19,8 +19,13 @@ function installCatalogFetch(
   ) => Promise<Response>,
 ) {
   const realFetch = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString()
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url
     const params = new URL(url, 'http://localhost').searchParams
     if (url.includes('/api/years')) {
       return handler('/api/years', params)
@@ -29,7 +34,7 @@ function installCatalogFetch(
       return handler('/api/teams', params)
     }
     return realFetch(input, init)
-  }) as typeof fetch
+  }
 }
 
 function jsonResponse(body: unknown): Promise<Response> {

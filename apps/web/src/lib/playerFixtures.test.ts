@@ -15,10 +15,11 @@ function sackYardsLost(
     )
   }
   if (value !== null && typeof value === 'object') {
-    return Object.entries(value).flatMap(([key, child]) =>
-      key === 'sack_yards_lost'
-        ? [{ path: `${path}.${key}`, value: child }]
-        : sackYardsLost(child, `${path}.${key}`),
+    return Object.entries(value as Record<string, unknown>).flatMap(
+      ([key, child]) =>
+        key === 'sack_yards_lost'
+          ? [{ path: `${path}.${key}`, value: child }]
+          : sackYardsLost(child, `${path}.${key}`),
     )
   }
   return []

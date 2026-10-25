@@ -242,6 +242,7 @@ export function ModalDialog({
   return (
     // The backdrop click is only a pointer shortcut for Escape, which is the
     // keyboard way to do the same thing.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- the click is a pointer-only backdrop shortcut for Escape, and onKeyDown is the focus trap, both on a native modal <dialog>
     <dialog
       ref={dialogRef}
       id={id}

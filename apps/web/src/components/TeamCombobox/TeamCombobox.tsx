@@ -216,6 +216,7 @@ export function TeamCombobox({
             aria-label={`${label} suggestions`}
           >
             {matches.map((team, index) => (
+              // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- keyboard selection lives on the combobox input (arrow keys + Enter via aria-activedescendant); focus never reaches the option, so the click is the pointer path only
               <li
                 key={team.name}
                 ref={index === activeIndex ? activeOptionRef : null}

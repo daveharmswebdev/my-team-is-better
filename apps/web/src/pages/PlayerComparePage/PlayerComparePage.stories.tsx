@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { expect, userEvent, waitFor, within } from 'storybook/test'
+import type { queries } from 'storybook/test'
 import {
   MARK_SCREEN_READER_TEXT,
   PICK_FROM_LIST_COPY,
@@ -47,8 +48,14 @@ interface Handlers {
  */
 function installFetch(handlers: Handlers) {
   const realFetch = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(typeof input === 'string' ? input : input.toString())
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    )
     if (url.pathname === '/api/players/compare') {
       return (handlers.compare ?? never)()
     }
@@ -72,7 +79,7 @@ function installFetch(handlers: Handlers) {
       })
     }
     return realFetch(input, init)
-  }) as typeof fetch
+  }
 }
 
 function never(): Promise<Response> {
@@ -110,7 +117,9 @@ const IN_THE_BOOKS = fixtureCoverage(1999, 1999, 1999, 1999)
 const COMPARISON_TITLE = 'The comparison'
 const WARNER_AND_MCNAIR = 'Kurt Warner and Steve McNair'
 
-const playerB = (canvas: ReturnType<typeof within>) =>
+// `ReturnType<typeof within>` alone resolves `within`'s generic to its
+// constraint, whose queries are `any`; pin it to the default query set.
+const playerB = (canvas: ReturnType<typeof within<typeof queries>>) =>
   canvas.getByLabelText('Player B', { exact: true })
 
 const meta = {

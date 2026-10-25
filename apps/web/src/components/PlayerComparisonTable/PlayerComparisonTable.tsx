@@ -177,6 +177,7 @@ export function PlayerComparisonTable({
         role="region"
         aria-labelledby={captionId}
         // Focusable, so a keyboard user can scroll a table wider than the screen.
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must take keyboard focus so it can be scrolled without a mouse (axe scrollable-region-focusable)
         tabIndex={0}
       >
         <table className={styles.table} aria-describedby={describedBy}>

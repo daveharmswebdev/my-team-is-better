@@ -55,6 +55,7 @@ export const Default: Story = {
 export const TouchMode: Story = {
   decorators: [
     (Story) => {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- saved only to be assigned back to window.matchMedia afterwards, never called detached
       const original = window.matchMedia
       window.matchMedia = touchMatchMediaStub
       const rendered = Story()

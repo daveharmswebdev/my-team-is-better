@@ -110,7 +110,7 @@ describe('ModalDialog (issue #216)', () => {
     const onClose = vi.fn()
     const { rerender } = render(<Example onClose={onClose} />)
 
-    ;(screen.getByRole('dialog') as HTMLDialogElement).close()
+    screen.getByRole<HTMLDialogElement>('dialog').close()
     expect(onClose).toHaveBeenCalledTimes(1)
 
     rerender(<Example open={false} onClose={onClose} />)

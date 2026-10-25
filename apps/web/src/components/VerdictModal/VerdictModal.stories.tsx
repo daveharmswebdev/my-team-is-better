@@ -341,6 +341,7 @@ export const TouchRatingPanelIsModal: Story = {
     // Forces a coarse/touch pointer for the initial render, as
     // RatingDisclosureShell's TouchMode story does.
     (Story) => {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- saved only to be assigned back to window.matchMedia afterwards, never called detached
       const original = window.matchMedia
       window.matchMedia = touchMatchMediaStub
       const rendered = Story()

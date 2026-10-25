@@ -33,8 +33,14 @@ import { PlayerLeadersPage } from './PlayerLeadersPage'
  */
 function installFetch(leaders: (url: URL) => Promise<Response>) {
   const realFetch = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(typeof input === 'string' ? input : input.toString())
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    )
     if (url.pathname === '/api/players/leaders') {
       return leaders(url)
     }
@@ -42,7 +48,7 @@ function installFetch(leaders: (url: URL) => Promise<Response>) {
       return jsonResponse({ methodologies: [], data_sources: DATA_SOURCES })
     }
     return realFetch(input, init)
-  }) as typeof fetch
+  }
 }
 
 function jsonResponse(body: unknown): Promise<Response> {

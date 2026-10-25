@@ -231,6 +231,7 @@ export function PlayerCombobox({
             aria-label={`${label} suggestions`}
           >
             {options.map((player, index) => (
+              // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- keyboard selection lives on the combobox input (arrow keys + Enter via aria-activedescendant); focus never reaches the option, so the click is the pointer path only
               <li
                 key={player.player_id}
                 ref={index === activeIndex ? activeOptionRef : null}

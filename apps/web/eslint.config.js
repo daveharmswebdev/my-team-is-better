@@ -3,6 +3,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import storybook from 'eslint-plugin-storybook'
 import eslintConfigPrettier from 'eslint-config-prettier'
+import jsxA11y from 'eslint-plugin-jsx-a11y'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
@@ -117,7 +118,7 @@ export default tseslint.config(
   {
     extends: [
       js.configs.recommended,
-      ...tseslint.configs.recommended,
+      ...tseslint.configs.recommendedTypeChecked,
       reactHooks.configs.flat['recommended-latest'],
       reactRefresh.configs.vite,
     ],
@@ -125,7 +126,26 @@ export default tseslint.config(
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.browser,
+      // Issue #222: type-aware rules (floating promises, `any` leaking out
+      // of untyped values, ...). The project service finds each file's
+      // tsconfig through the solution `tsconfig.json`'s references.
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
+  },
+  {
+    // Issue #222: static accessibility checks on JSX (a click handler on a
+    // <div> with no key handler or role, a missing alt, ...). The storybook
+    // a11y addon checks rendered stories at run time; this catches the same
+    // mistakes in code no story renders. eslint-plugin-jsx-a11y 6.10.2 lists
+    // `eslint` up to ^9 as a peer; package.json's `overrides` points that
+    // peer at our ESLint 10 (the plugin uses none of the context APIs 10
+    // removed), and src/test/eslintTypeAware.test.ts proves its rules fire.
+    ...jsxA11y.flatConfigs.recommended,
+    name: 'jsx-a11y/recommended',
+    files: ['**/*.{jsx,tsx}'],
   },
   ...storybook.configs['flat/recommended'],
   {

@@ -66,9 +66,13 @@ function jsonResponse(status: number, body: unknown): Promise<Response> {
 
 function installFetch(handlers: Handlers) {
   const realFetch = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(
-      typeof input === 'string' ? input : input.toString(),
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
       window.location.href,
     )
     switch (url.pathname) {
@@ -85,7 +89,7 @@ function installFetch(handlers: Handlers) {
       default:
         return realFetch(input, init)
     }
-  }) as typeof fetch
+  }
 }
 
 function atSearch(search: string, handlers: Handlers = {}) {
