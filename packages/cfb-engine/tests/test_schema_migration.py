@@ -968,3 +968,68 @@ def test_migrating_a_populated_db_warns_once_naming_both_signals(tmp_path: Path)
     assert "predates the current schema" in message
     assert "games.conference_championship" in message
     assert "2005" in message
+
+
+# Issue #444 (epic #443): `players` gains the career span the source's roster
+# file states, so a career our 1999 floor cuts off can be told from a short one.
+_PRE_444_PLAYERS_DDL = """
+CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY,
+    sport TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    position TEXT,
+    birth_date TEXT
+);
+"""
+
+
+@pytest.fixture
+def pre_444_db(tmp_path: Path) -> Path:
+    """An otherwise-current db whose `players` lacks the career span columns,
+    holding one NFL player."""
+    dest = tmp_path / "pre_444.sqlite3"
+    conn = get_conn(dest)
+    ddl = SCHEMA_PATH.read_text()
+    start = ddl.index("CREATE TABLE IF NOT EXISTS players (")
+    end = ddl.index(";", start) + 1
+    conn.executescript(ddl[:start] + _PRE_444_PLAYERS_DDL + ddl[end:])
+    conn.execute(
+        "INSERT INTO players (id, sport, display_name, position) "
+        "VALUES (100, 'nfl', 'Emmitt Smith', 'RB')"
+    )
+    conn.commit()
+    conn.close()
+    return dest
+
+
+def test_migration_adds_career_span_columns_leaving_existing_players_null(
+    pre_444_db: Path,
+) -> None:
+    conn = get_conn(pre_444_db)
+    ensure_schema(conn)
+
+    row = conn.execute(
+        "SELECT display_name, career_first_season, career_last_season FROM players WHERE id = 100"
+    ).fetchone()
+    assert tuple(row) == ("Emmitt Smith", None, None)
+    conn.close()
+
+
+def test_career_span_migration_is_idempotent_when_run_twice(pre_444_db: Path) -> None:
+    conn = get_conn(pre_444_db)
+    ensure_schema(conn)
+    ensure_schema(conn)  # must not raise "duplicate column name"
+
+    assert conn.execute("SELECT COUNT(*) AS c FROM players").fetchone()["c"] == 1
+    conn.close()
+
+
+def test_fresh_db_has_career_span_columns_from_the_ddl(tmp_path: Path) -> None:
+    conn = get_conn(tmp_path / "fresh_span.sqlite3")
+    conn.executescript(SCHEMA_PATH.read_text())  # DDL only -- no migration
+
+    cols = {row["name"]: row for row in conn.execute("PRAGMA table_info(players)")}
+    for column in ("career_first_season", "career_last_season"):
+        assert cols[column]["type"] == "INTEGER"
+        assert cols[column]["notnull"] == 0
+    conn.close()
