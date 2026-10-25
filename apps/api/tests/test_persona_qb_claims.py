@@ -34,7 +34,9 @@ from fixtures.qb_blocks import (
     qb_block,
     qb_check,
     qb_rejected,
-    qb_rendered,
+)
+from fixtures.qb_blocks import (
+    qb_rendered_verdict as qb_rendered,
 )
 
 from api.models import qb_short_names
@@ -310,7 +312,7 @@ def test_a_full_on_voice_narration_renders() -> None:
         "the QBs of his own season. Manning's first year isn't in the books - the "
         "play-by-play starts in {yr} - and that's what got counted. Kurt Warner went {r} "
         "as a starter, but the score never counted wins.",
-        winner("wc", "career"),
+        winner("wc", "both"),
         score("sw", "Warner", "career"),
         score("sm", "Manning", "career"),
         YEAR,
@@ -378,7 +380,7 @@ def test_a_claim_about_a_third_player_is_rejected() -> None:
 @pytest.mark.parametrize(
     "text,needle",
     [
-        ("Warnr takes the career by a nose.", "did you mean"),
+        ("Look, Warnr takes the career by a nose.", "did you mean"),
         ("WARNER takes the career by a nose.", "Warner"),
         ("Look, Kurt takes the career by a nose.", "Kurt Warner"),
         ("Mcnair gets left behind.", "McNair"),

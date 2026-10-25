@@ -37,14 +37,14 @@ from api.persona.qb_prompt import build_qb_system_prompt
 from api.persona.service import narrate_qb_comparison, qb_fact_block_json
 
 ACCEPTED: dict[str, object] = {
-    "text": "{w} takes the career by {m}, counting since {yr}.",
+    "text": "{w} takes the career and the peak, the career by {m}, counting since {yr}.",
     "claims": [
-        {"id": "w", "kind": "winner", "measure": "career"},
+        {"id": "w", "kind": "winner", "measure": "both"},
         {"id": "m", "kind": "margin", "measure": "career", "player": "Warner"},
         {"id": "yr", "kind": "year"},
     ],
 }
-ACCEPTED_TEXT = "Warner takes the career by 1.65, counting since 1999."
+ACCEPTED_TEXT = "Warner takes the career and the peak, the career by 1.65, counting since 1999."
 REJECTED = "Warner wins by 987654."
 
 

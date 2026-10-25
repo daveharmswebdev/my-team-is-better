@@ -25,8 +25,9 @@ are not accepted here.
   decimals and unsigned, where `player` must be the one ahead. It is the
   difference of the two scores as printed, so it always matches the two
   numbers on screen; two scores that print the same have no margin to state.
-* `winner` {measure}: the measure's winner, printed by name. The verdict
-  itself, so the narrator can't name the wrong one.
+* `winner` {measure}: the measure's winner, printed by name, or with measure
+  "both" the one QB who takes career and peak (rejected on a split). The
+  verdict itself, so the narrator can't name the wrong one.
 * `year` {}: the first season the score can count (1999 for the NFL).
 * `career_start` {player}: the first season of the player's real career.
 * `count` {of}: `qualifying_seasons` (with `player`), `min_dropbacks` (the
@@ -41,27 +42,45 @@ or as its `short_name` (the last-name form, null when it would be ambiguous,
 In the prose, a name form in another case ("WARNER", "Mcnair"), a close
 misspelling of one ("Warnr"), or a player's other word alone ("Kurt", or
 "Manning" when the two share it) is rejected, and so is the full name of any
-other player in the sport's catalog ("Marshall Faulk"). A first name alone
-that opens a sentence is let through, because it is as often an English word
-("Will", for Will Levis); a lowercase name is prose; another player's last
-name alone ("Brady") is not caught. Those are accepted gaps.
+other player in the sport's catalog ("Marshall Faulk", "Marshall Faulk's").
+A word that opens a sentence is never taken for a misspelled name ("Meaning",
+"Warned", "Stove"), and a first name alone that opens one is let through,
+because it is as often an English word ("Will", for Will Levis); a lowercase
+name is prose; another player's last name alone ("Brady") is not caught.
+Those are accepted gaps.
 
 A score, record or head-to-head prints its player's name ("McNair 0.60")
 unless the nearest player reference before it in the sentence (a name typed
 in the prose, or a placeholder that refers to a player) is that player
 ("McNair sits at 0.60"), so a figure can't sit beside the wrong player. A
-`career_start` or a count of qualifying seasons prints no name, so it is an
-error when the nearest player reference before it in the sentence is the
-other player; with none before it (a pronoun), it passes.
+`career_start`, a count of qualifying seasons or a margin prints no name, so
+it is an error when the last player reference before it is the other player
+(a margin's player is the winner). That reference carries across a sentence
+break ("Warner? His career started in {cs}" can't be McNair's); with none
+before it at all, it passes.
+
+**The verdict goes through claims** (D1 on #451). Every narration holds a
+`year` claim; a conclusive one holds one `winner` both claim or a `winner`
+career plus a `winner` peak claim (a measure that is exactly level has none
+to claim). The backstop on a verdict typed in prose: within one sentence, a
+player reference, then a win verb ("takes", "wins", "edges", "beats", "tops",
+"grabs", "owns", "is ahead", "leads", "has the better"), then "career" or
+"peak" a few words on in the same clause, is rejected when that player isn't
+that measure's winner, and always on an inconclusive block. "Warner takes the
+career by a nose" passes for the winner; "Nobody beats Warner on the career"
+has no subject and passes; a pronoun subject is not caught.
 
 **The voice rules a check can see** (the coordinator's voice call on #451):
 there is always a winner, so a hedge that withholds the verdict ("too close
-to call", "toss-up", "basically even", "dead heat", "coin flip") is rejected;
-speculation about the seasons the data doesn't hold ("would've flipped", "if
-we had his rookie year", "with those years") is rejected; z-score jargon is
-rejected. On an inconclusive block a `winner` or `margin` claim is rejected,
-and so is a score for the side with no qualifying season. Whether the prose
-argues with the verdict in other words is the prompt's job, not a check here.
+to call", "toss-up", "basically even", "dead heat", "coin flip", "can't
+separate them", "even steven") is rejected; speculation about the seasons
+the data doesn't hold ("would've flipped", "if we had his rookie year",
+"could swing it", "a different story", "give him those years back") is
+rejected; z-score jargon is rejected; a Roman numeral ("Super Bowl XXXIV")
+is rejected as a number (QB path only, D3). On an inconclusive block a
+`winner` or `margin` claim is rejected, and so is a score for the side with
+no qualifying season. A starter record used to argue with the score is the
+prompt's job, not a check here.
 
 Pure: no IO, no database, no network, no logging. `QB_GROUNDING_VERSION` is
 these rules' version in the QB cache key.
@@ -69,9 +88,10 @@ these rules' version in the QB cache key.
 
 from __future__ import annotations
 
+import bisect
 import json
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final, Literal, cast
@@ -97,8 +117,9 @@ from api.persona.claims import (
 # reject a QB narration differently.
 QB_GROUNDING_VERSION: Final = "qb-claims-v1"
 
-# Two or three sentences need far fewer figures than a team case.
-MAX_QB_CLAIMS: Final = 6
+# The verdict alone takes two or three claims (the winners and the year, D1
+# on #451), so the cap leaves room for a few figures on top.
+MAX_QB_CLAIMS: Final = 8
 
 QB_KINDS: Final[tuple[str, ...]] = (
     "score",
@@ -111,6 +132,8 @@ QB_KINDS: Final[tuple[str, ...]] = (
     "head_to_head",
 )
 MEASURES: Final[tuple[str, ...]] = ("career", "peak")
+# A `winner` claim also takes "both": one QB who wins career and peak (D1).
+WINNER_MEASURES: Final[tuple[str, ...]] = (*MEASURES, "both")
 SEASON_TYPES: Final[tuple[str, ...]] = ("regular", "postseason")
 QB_COUNT_OF: Final[tuple[str, ...]] = ("qualifying_seasons", "min_dropbacks", "peak_seasons")
 
@@ -139,7 +162,11 @@ _Mode = Literal["name", "attributed", "reference", "none"]
 # The hedges that withhold the verdict (voice call on #451: always a winner).
 _HEDGE_RE: Final = re.compile(
     r"\btoo\s+close\s+to\s+call\b|\btoss[\s-]?ups?\b|\bbasically\s+(?:even|tied|a\s+tie)\b"
-    r"|\bdead\s+(?:heat|even)\b|\bcoin[\s-]?flips?\b|\bcall\s+it\s+(?:even|a\s+draw|a\s+tie)\b",
+    r"|\bdead\s+(?:heat|even)\b|\bcoin[\s-]?flips?\b|\bcall\s+it\s+(?:even|a\s+draw|a\s+tie)\b"
+    # D2 on #451, the prompt-engineer's probes. "Nobody gets to call it a
+    # toss-up" is a known, accepted false positive.
+    r"|\bcan(?:'t|’t|not)\s+(?:separate|split)\s+(?:them|these\s+two|the\s+two|'em)\b"
+    r"|\bno\s+separating\b|\beven[\s-]steven\b",
     re.IGNORECASE,
 )
 _HEDGE_ERROR: Final = (
@@ -151,9 +178,32 @@ _HEDGE_ERROR: Final = (
 _SPECULATION_RE: Final = re.compile(
     r"\bwould(?:'ve|’ve|\s+have)\s+(?:flipped|changed|swung|won|turned|been\s+different)\b"
     r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included)\b"
-    r"|\bwith\s+(?:those|the\s+missing|his\s+early|his\s+missing)\s+(?:years|seasons)\b",
+    r"|\bwith\s+(?:those|the\s+missing|his\s+early|his\s+missing)\s+(?:years|seasons)\b"
+    # D2 on #451.
+    r"|\b(?:could|might|would)(?:\s+easily)?\s+(?:swing|flip|change)\b"
+    r"|\bdifferent\s+story\b"
+    r"|\bgive\s+(?:[\w'’]+\s+){1,5}(?:years?|seasons?)\s+back\b",
     re.IGNORECASE,
 )
+# A Roman numeral ("Super Bowl XXXIV") is a number too, and the QB block holds
+# no Super Bowls (D3 on #451). QB path only: the team path's rules are
+# untouched. Two or more numeral letters, uppercase, as a whole word.
+_ROMAN_RE: Final = re.compile(
+    r"\b(?=[MDCLXVI]{2,}\b)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\b"
+)
+_ROMAN_ERROR: Final = (
+    "a Roman numeral is a number, and the FACT BLOCK holds no Super Bowls or numbered "
+    "games, so leave it out"
+)
+# D1's backstop: a win verb after a player, then a measure (`_verdict_backstop`).
+_WIN_VERB_RE: Final = re.compile(
+    r"\b(?:takes|wins|edges|beats|tops|grabs|owns|is\s+ahead|leads|has\s+the\s+better)\b",
+    re.IGNORECASE,
+)
+_MEASURE_RE: Final = re.compile(r"\b(?:career|peak)\b", re.IGNORECASE)
+_MEASURE_WINDOW: Final = 6
+_CLAUSE_END_RE: Final = re.compile(r"[,;:—–()]|\s-\s|\b(?:but|while|though|not)\b", re.IGNORECASE)
+_AND_BEFORE_RE: Final = re.compile(r"\b(?:and|while)\s+\Z", re.IGNORECASE)
 _SPECULATION_ERROR: Final = (
     "never speculate about the missing seasons: the score counts only the seasons in the "
     "books, so say what got counted, never what the missing seasons would do"
@@ -229,6 +279,22 @@ class _QbBlock:
     def unqualified(self) -> list[_Player]:
         return [p for p in self.players.values() if p.scores["career"] is None]
 
+    def verdict_text(self) -> str:
+        """The verdict in words, for feedback: who takes which measure."""
+        if self.inconclusive is not None:
+            names = " and ".join(p.name for p in self.unqualified())
+            return f"the verdict is inconclusive ({names} has no qualifying season)"
+        career, peak = self.winners["career"], self.winners["peak"]
+        if career is not None and career == peak:
+            return f"{self.players[career].called} takes both the career and the peak"
+        parts = [
+            f"{self.players[side].called} takes the {measure}"
+            if side is not None
+            else f"the {measure} is dead level"
+            for measure, side in (("career", career), ("peak", peak))
+        ]
+        return f"the two split it: {parts[0]} and {parts[1]}"
+
     def roster(self) -> str:
         a, b = self.players["a"], self.players["b"]
         return f"{a.described} and {b.described}"
@@ -289,10 +355,11 @@ def qb_tool_schema() -> dict[str, Any]:
         "description": (
             "Submit the narration. Write every score, margin, year, count or record as a {id} "
             "placeholder in text, and describe it with one claim; the server prints each value "
-            "from the fact block. The prose itself must contain no digits, no spelled-out "
-            "numbers and no ordinals, and must write each quarterback exactly as the fact "
-            "block spells his display_name or short_name. Use at most "
-            f"{MAX_QB_CLAIMS} claims."
+            "from the fact block. Name the verdict only through winner claims, and always "
+            "include one year claim. The prose itself must contain no digits, no spelled-out "
+            "numbers, no Roman numerals and no ordinals from second up, and must write each "
+            "quarterback exactly as the fact block spells his display_name or short_name. "
+            f"Use at most {MAX_QB_CLAIMS} claims."
         ),
         "input_schema": {
             "type": "object",
@@ -318,9 +385,11 @@ def qb_tool_schema() -> dict[str, Any]:
                                     "score, record and head_to_head print the value with "
                                     "the player's name, left off when the last player named "
                                     "before it in the sentence is the same one; winner "
-                                    "prints the measure's winner by name; margin takes the "
-                                    "player who is ahead; count needs of; year takes "
-                                    "nothing else."
+                                    "prints the measure's winner by name (measure both for "
+                                    "one QB who takes career and peak); margin takes the "
+                                    "player who is ahead; career_start and count print no "
+                                    "name, so name their player right before them; count "
+                                    "needs of; year takes nothing else."
                                 ),
                             },
                             "player": {
@@ -332,8 +401,11 @@ def qb_tool_schema() -> dict[str, Any]:
                             },
                             "measure": {
                                 "type": "string",
-                                "enum": list(MEASURES),
-                                "description": "Which score: the whole career or the peak.",
+                                "enum": list(WINNER_MEASURES),
+                                "description": (
+                                    "Which score: the whole career or the peak. Only a "
+                                    "winner claim takes both."
+                                ),
                             },
                             "season_type": {
                                 "type": "string",
@@ -402,6 +474,9 @@ def check_and_render_qb(
     rendered: dict[str, str] = {}
     modes: dict[str, tuple[_Mode, Side | None]] = {}
     claim_ids: list[str] = []
+    # The resolved claims that carry the verdict: "year", "winner:career",
+    # "winner:peak", "winner:both" (D1 on #451: the verdict goes through claims).
+    verdict_claims: set[str] = set()
     if "claims" not in tool_input:
         errors.append(f'{TOOL_NAME} needs "claims" (a list, which may be empty)')
     elif not isinstance(raw_claims, list):
@@ -445,6 +520,9 @@ def check_and_render_qb(
                 value, mode, side = resolved
                 rendered[claim_id] = value
                 modes[claim_id] = (mode, side)
+                kind = raw["kind"]
+                verdict_claims.add(f"winner:{raw['measure']}" if kind == "winner" else str(kind))
+        errors.extend(_required_claim_errors(verdict_claims, block))
 
     named_at: set[int] = set()
     if isinstance(text, str) and not has_surrogate(text):
@@ -659,7 +737,13 @@ def _shape_errors(where: str, kind: str, raw: dict[Any, Any]) -> list[str]:
     errors.extend(f'{where} ({kind}) needs "{key}"' for key in required if key not in raw)
     if "player" in raw and not isinstance(raw["player"], str):
         errors.append(f'{where}: "player" must be a name string, not {type_name(raw["player"])}')
-    if "measure" in raw and raw["measure"] not in MEASURES:
+    if kind == "winner":
+        if "measure" in raw and raw["measure"] not in WINNER_MEASURES:
+            errors.append(
+                f'{where}: a winner\'s "measure" must be career, peak or both, not '
+                f"{quote(raw['measure'])}"
+            )
+    elif "measure" in raw and raw["measure"] not in MEASURES:
         errors.append(f'{where}: "measure" must be career or peak, not {quote(raw["measure"])}')
     if "season_type" in raw and raw["season_type"] not in SEASON_TYPES:
         errors.append(
@@ -704,12 +788,53 @@ def _inconclusive_error(where: str, block: _QbBlock) -> str:
     )
 
 
+def _required_claim_errors(verdict_claims: Collection[str], block: _QbBlock) -> list[str]:
+    """D1 on #451: every narration holds a `year` claim, and a conclusive one
+    names its verdict through `winner` claims, either one `winner` both (a
+    sweep) or a `winner` career plus a `winner` peak. A measure that is
+    exactly level has no winner to claim. The errors say exactly what to add."""
+    errors: list[str] = []
+    if block.data_first_season is not None and "year" not in verdict_claims:
+        errors.append(
+            f"add a year claim: every narration says the score only counts from "
+            f"{block.data_first_season}"
+        )
+    if block.inconclusive is not None:
+        return errors
+    career, peak = block.winners["career"], block.winners["peak"]
+    if career is not None and career == peak:
+        if "winner:both" in verdict_claims or {"winner:career", "winner:peak"} <= set(
+            verdict_claims
+        ):
+            return errors
+        name = block.players[career].called
+        errors.append(
+            f"name the verdict through a winner claim: {name} takes both the career and the "
+            'peak, so add one winner claim with measure "both" (or one for career and one '
+            "for peak), and type no winner yourself"
+        )
+        return errors
+    for measure, side in (("career", career), ("peak", peak)):
+        if side is not None and f"winner:{measure}" not in verdict_claims:
+            errors.append(
+                f"name the verdict through winner claims: {block.verdict_text()}, so add a "
+                f'winner claim with measure "{measure}" ({block.players[side].called}); '
+                "neither measure is the real answer, so say both"
+            )
+    return errors
+
+
 def _resolve_winner(
     where: str, raw: dict[Any, Any], block: _QbBlock
 ) -> tuple[tuple[str, _Mode, Side | None] | None, list[str]]:
     if block.inconclusive is not None:
         return None, [_inconclusive_error(where, block)]
     measure = cast(str, raw["measure"])
+    if measure == "both":
+        career, peak = block.winners["career"], block.winners["peak"]
+        if career is None or career != peak:
+            return None, [f"{where}: {block.verdict_text()}, so there is no one winner of both"]
+        return (block.players[career].called, "reference", career), []
     winner = block.winners[measure]
     if winner is None:
         return None, [
@@ -758,7 +883,9 @@ def _resolve_margin(
             f"({_score_text(high)}), so there is no margin to state; {ahead.called} is still "
             'ahead, so say he took it without a number ("by a nose")'
         ]
-    return (block.shown_margin(measure, winner), "none", None), []
+    # Attributed to the winner (R2, #451): "McNair is ahead by {m}" must not
+    # print Warner's margin beside McNair.
+    return (block.shown_margin(measure, winner), "attributed", winner), []
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +917,12 @@ def _check_prose(
     ):
         for match in pattern.finditer(masked):
             errors.append(f"the prose says {quote(match.group(0))}; {message}")
+    # A block player's own suffix ("Robert Griffin III") is his name, not a number.
+    roman_text = masked
+    for player in block.players.values():
+        roman_text = roman_text.replace(player.name, MASK * len(player.name))
+    for match in _ROMAN_RE.finditer(roman_text):
+        errors.append(f"the prose types the Roman numeral {quote(match.group(0))}; {_ROMAN_ERROR}")
 
     third = _third_players(masked, block, player_names)
     for _, _, name in third:
@@ -807,27 +940,92 @@ def _check_prose(
     )
     named_at: set[int] = set()
     sentence = -1
+    # `nearest` is the sentence's last player reference, for a name-printing
+    # placeholder; `last` carries across sentence breaks, for an attributed
+    # one, so "Warner? His career started in {cs}" can't print McNair's (R3).
     nearest: Side | None = None
+    last: Side | None = None
     for start, side, claim_id in walk:
-        at = sum(1 for end in breaks if end <= start)
+        at = bisect.bisect_right(breaks, start)
         if at != sentence:
             sentence, nearest = at, None
         if claim_id is None:
-            nearest = side
+            nearest = last = side
             continue
         mode, claim_side = modes.get(claim_id, ("none", None))
         if claim_side is None or mode == "none":
             continue
         if mode == "name" and nearest != claim_side:
             named_at.add(start)
-        if mode == "attributed" and nearest is not None and nearest != claim_side:
-            player, other = block.players[claim_side], block.players[nearest]
+        if mode == "attributed" and last is not None and last != claim_side:
+            player, other = block.players[claim_side], block.players[last]
             errors.append(
                 f"{{{claim_id}}} is {player.name}'s figure, but the last player named before it "
-                f"in that sentence is {other.name}; name {player.called} right before it"
+                f"is {other.name}; name {player.called} right before it"
             )
-        nearest = claim_side
+        nearest = last = claim_side
+
+    errors.extend(_verdict_backstop(masked, walk, modes, breaks, block))
     return errors, named_at
+
+
+def _verdict_backstop(
+    masked: str,
+    walk: Sequence[tuple[int, Side | None, str | None]],
+    modes: Mapping[str, tuple[_Mode, Side | None]],
+    breaks: Sequence[int],
+    block: _QbBlock,
+) -> list[str]:
+    """D1's backstop on a verdict typed in prose (R1, #451): within one
+    sentence, a player reference (a typed name, or a `winner` placeholder),
+    then a win verb, then "career" or "peak" a few words later, is rejected
+    when that player isn't that measure's winner, and always on an
+    inconclusive block. The subject is the last reference before the verb, so
+    "McNair beats Warner on the career" is McNair's claim; "Nobody beats
+    Warner on the career" has no subject before its verb and passes."""
+    references = [
+        (start, side if claim_id is None else modes.get(claim_id, ("none", None))[1])
+        for start, side, claim_id in walk
+        if claim_id is None or modes.get(claim_id, ("none", None))[0] == "reference"
+    ]
+    errors: list[str] = []
+    for verb in _WIN_VERB_RE.finditer(masked):
+        sentence = bisect.bisect_right(breaks, verb.start())
+        left = breaks[sentence - 1] if sentence else 0
+        before = [
+            side for start, side in references if left <= start < verb.start() and side is not None
+        ]
+        if not before:
+            continue
+        subject = block.players[before[-1]]
+        stop = _CLAUSE_END_RE.search(masked, verb.end())
+        end = stop.start() if stop else len(masked)
+        # "McNair takes the career and Warner the peak": a reference after
+        # "and" starts its own (gapped) clause, so the peak isn't McNair's.
+        for start, _ in references:
+            if verb.end() <= start < end and _AND_BEFORE_RE.search(masked, verb.end(), start):
+                end = start
+                break
+        window = masked[verb.end() : end]
+        for measure_match in _MEASURE_RE.finditer(" ".join(window.split()[:_MEASURE_WINDOW])):
+            measure = measure_match.group(0).casefold()
+            said = f"{quote(subject.called + ' ' + verb.group(0) + ' ... ' + measure)}"
+            if block.inconclusive is not None:
+                errors.append(f"the prose says {said}, but {block.verdict_text()}: name no winner")
+                continue
+            winner = block.winners[measure]
+            if winner != subject.side:
+                goes = (
+                    f"the {measure} goes to {block.players[winner].called}"
+                    if winner is not None
+                    else f"the {measure} is dead level"
+                )
+                errors.append(
+                    f"the prose says {said}, but {goes}, not {subject.called}; name the "
+                    "winner through a winner claim and never type a verdict the block "
+                    "doesn't hold"
+                )
+    return errors
 
 
 def _third_players(
@@ -847,7 +1045,10 @@ def _third_players(
             gaps = [masked[run[k].end() : run[k + 1].start()] for k in range(len(run) - 1)]
             if not all(_NAME_GAP_RE.fullmatch(gap) for gap in gaps):
                 continue
-            candidate = masked[run[0].start() : run[-1].end()]
+            # "Marshall Faulk's pal" (R4, #451): the possessive is not the name.
+            tail = _POSSESSIVE_RE.search(run[-1].group(0))
+            end = run[-1].end() - (len(tail.group(0)) if tail else 0)
+            candidate = masked[run[0].start() : end]
             if candidate[:1].isupper() and candidate in player_names and candidate not in ours:
                 found.append((run[0].start(), run[-1].end(), candidate))
                 match_end = last
@@ -915,7 +1116,9 @@ def _name_references(
                     f"{quote(spelled)} ({_forms_text(player)})"
                 )
             continue
-        if len(word) < 4 or (opens and len(word) < 5):
+        # A sentence opener is as often an English word near a name
+        # ("Meaning", "Warned", "Stove") as a misspelling: never one (P3, #451).
+        if len(word) < 4 or opens:
             continue
         for token, players in words.items():
             if (

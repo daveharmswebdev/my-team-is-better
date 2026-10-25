@@ -26,9 +26,11 @@ from fixtures.qb_blocks import (
     MARSHALL_FAULK,
     RANDALL_CUNNINGHAM,
     STEVE_MCNAIR,
+    qb_evidence,
 )
 
 from api.persona.cache import InMemoryNarrationCache
+from api.persona.fallback import qb_comparison_fallback_text
 
 VERDICT = "/api/players/compare/verdict"
 COMPARE = "/api/players/compare"
@@ -41,9 +43,9 @@ def narrator(client: TestClient) -> Iterator[FakeNarrator]:
 
     fake = FakeNarrator(
         always={
-            "text": "{w} takes the career, and the books only open in {yr}.",
+            "text": "{w} takes both, and the books only open in {yr}.",
             "claims": [
-                {"id": "w", "kind": "winner", "measure": "career"},
+                {"id": "w", "kind": "winner", "measure": "both"},
                 {"id": "yr", "kind": "year"},
             ],
         }
@@ -72,7 +74,7 @@ def test_a_qb_pair_gets_the_score_and_a_narration(
         == (compare["regular_season_head_to_head"]["record"])
     )
     assert body["narration"] == {
-        "text": "Warner takes the career, and the books only open in 1999.",
+        "text": "Warner takes both, and the books only open in 1999.",
         "contested": False,
         "cached": False,
     }
@@ -82,27 +84,37 @@ def test_a_qb_pair_gets_the_score_and_a_narration(
     assert '"qb_score"' in call.user_texts[0]
 
 
-def test_the_default_narrator_answer_is_served_too(client: TestClient) -> None:
+def test_a_narration_without_the_verdict_claims_serves_the_fallback(client: TestClient) -> None:
+    # The conftest's default answer has no claims, so it names no winner and
+    # no year: the QB check rejects it twice (D1 on #451) and the in-voice
+    # fallback is served, uncached.
     response = client.post(VERDICT, json={"a": KURT_WARNER, "b": STEVE_MCNAIR, "sport": "nfl"})
     assert response.status_code == 200, response.text
-    assert response.json()["narration"]["text"] == ACCEPTED_NARRATION
+    narration = response.json()["narration"]
+    assert narration["text"] != ACCEPTED_NARRATION
+    assert narration == {
+        "text": qb_comparison_fallback_text(qb_evidence(KURT_WARNER, STEVE_MCNAIR)),
+        "contested": False,
+        "cached": False,
+    }
 
 
-def test_a_second_request_is_served_from_the_cache(client: TestClient) -> None:
-    from api.deps import get_narration_cache, get_narrator
+def test_a_second_request_is_served_from_the_cache(
+    client: TestClient, narrator: FakeNarrator
+) -> None:
+    from api.deps import get_narration_cache
     from api.main import app
 
     cache = InMemoryNarrationCache()
-    fake = FakeNarrator()
     app.dependency_overrides[get_narration_cache] = lambda: cache
-    app.dependency_overrides[get_narrator] = lambda: fake
 
     first = client.post(VERDICT, json={"a": KURT_WARNER, "b": STEVE_MCNAIR}).json()
     second = client.post(VERDICT, json={"a": KURT_WARNER, "b": STEVE_MCNAIR}).json()
 
     assert first["narration"]["cached"] is False
     assert second["narration"]["cached"] is True
-    assert len(fake.calls) == 1
+    assert second["narration"]["text"] == first["narration"]["text"]
+    assert len(narrator.calls) == 1
 
 
 def test_an_inconclusive_pair_is_still_a_200(client: TestClient, narrator: FakeNarrator) -> None:

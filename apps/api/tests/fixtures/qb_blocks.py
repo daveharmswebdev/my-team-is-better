@@ -23,6 +23,7 @@ Not part of the pytest suite itself (doesn't match `test_*.py`).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from functools import cache
 
@@ -61,6 +62,30 @@ def qb_block(a: int, b: int) -> str:
 
 
 @cache
+def split_evidence() -> QbVerdictEvidenceOut:
+    """Kurt Warner vs Steve McNair with McNair's peak raised to 0.5, so Warner
+    takes the career and McNair the peak. Every fixture QB has one season, so
+    no real fixture pair splits; this is the real block with that one change,
+    and the peak verdict and margin changed to match."""
+    evidence = qb_evidence(KURT_WARNER, STEVE_MCNAIR)
+    score = evidence.qb_score
+    assert score.a.peak is not None
+    b = score.b.model_copy(update={"peak": 0.5})
+    return evidence.model_copy(
+        update={
+            "qb_score": score.model_copy(
+                update={"b": b, "peak_winner": "b", "peak_margin": score.a.peak - 0.5}
+            )
+        }
+    )
+
+
+@cache
+def split_block() -> str:
+    return qb_fact_block_json(split_evidence())
+
+
+@cache
 def nfl_player_names() -> frozenset[str]:
     with fixture_conn() as conn:
         return list_player_names(conn, "nfl")
@@ -79,6 +104,37 @@ def qb_rendered(block: str, text: str, *claims: dict[str, object]) -> str:
     assert outcome.errors == (), outcome.errors
     assert outcome.text is not None
     return outcome.text
+
+
+def verdict_tail(block: str) -> tuple[str, list[dict[str, object]]]:
+    """A closing sentence carrying the claims every QB narration must hold
+    (D1 on #451): the `year`, and on a conclusive block the verdict through
+    `winner` claims. A test about one kind appends it with
+    `qb_rendered_verdict` so it only has to write the sentence it is about."""
+    score = json.loads(block)["qb_score"]
+    year: dict[str, object] = {"id": "vy", "kind": "year"}
+    if score["inconclusive"] is not None:
+        return "Counting since {vy}.", [year]
+    if score["career_winner"] == score["peak_winner"]:
+        return "{vw} takes both, counting since {vy}.", [
+            {"id": "vw", "kind": "winner", "measure": "both"},
+            year,
+        ]
+    return "{vc} takes the career, {vp} the peak, counting since {vy}.", [
+        {"id": "vc", "kind": "winner", "measure": "career"},
+        {"id": "vp", "kind": "winner", "measure": "peak"},
+        year,
+    ]
+
+
+def qb_rendered_verdict(block: str, text: str, *claims: dict[str, object]) -> str:
+    """`text` rendered with `verdict_tail` appended, and the tail's own
+    rendering cut back off, so the assertion is about `text` alone."""
+    tail, tail_claims = verdict_tail(block)
+    full = qb_rendered(block, f"{text} {tail}", *claims, *tail_claims)
+    shown_tail = qb_rendered(block, tail, *tail_claims)
+    assert full.endswith(f" {shown_tail}"), (full, shown_tail)
+    return full[: -len(shown_tail) - 1]
 
 
 def qb_rejected(block: str, text: str, *claims: dict[str, object]) -> tuple[str, ...]:
