@@ -43,6 +43,7 @@ import {
   TYREEK_HILL_CAREER,
   WARNER_VS_MCNAIR,
   ZAYNE_ANDERSON_CAREER,
+  fixtureCoverage,
 } from '../../lib/playerFixtures'
 import {
   HEAD_TO_HEAD_RULE,
@@ -232,7 +233,14 @@ describe('PlayerComparePage (issue #301)', () => {
   })
 
   it('puts Warner and McNair side by side, marking the larger number in each row', async () => {
-    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+    // Both careers really began before the data, which takes the marks off
+    // (#448, tested below); here both are inside it, for the #301 rule alone.
+    const inside = fixtureCoverage(1999, 1999, 1999, 1999)
+    mockedCompare.mockResolvedValue({
+      ...WARNER_VS_MCNAIR,
+      a: { ...WARNER_VS_MCNAIR.a, coverage: inside },
+      b: { ...WARNER_VS_MCNAIR.b, coverage: inside },
+    })
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
 
@@ -298,7 +306,10 @@ describe('PlayerComparePage (issue #301)', () => {
     }
     expect(cellsOf(regular, 'Rushing yards')[1]).toHaveTextContent('14,921')
     expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
-    expect(regular).not.toHaveAccessibleDescription()
+    // Described by Smith's cut-off callout alone (#448), not a record note.
+    expect(regular).toHaveAccessibleDescription(
+      "Hold on. Emmitt Smith played 1990 to 2004, and our books open in 1999. That's his last 6 of 15 seasons up there, not the whole career. Nobody's crowning anybody on those totals.",
+    )
   })
 
   it("links each player to the player's career page and discloses Warner's undercounted game", async () => {
@@ -794,9 +805,14 @@ describe('PlayerComparePage: the comparison modal (issue #310)', () => {
       within(dialog).getByRole('button', { name: 'Share this comparison' }),
     )
 
-    expect(await within(dialog).findByRole('status')).toHaveTextContent(
-      'Link copied',
-    )
+    // The share status, among the cut-off callout's (#448).
+    await waitFor(() => {
+      expect(
+        within(dialog)
+          .getAllByRole('status')
+          .some((status) => status.textContent?.includes('Link copied')),
+      ).toBe(true)
+    })
     expect(await navigator.clipboard.readText()).toBe(
       `${window.location.origin}/nfl/compare?a=${WARNER}&b=${MCNAIR}`,
     )
@@ -1696,5 +1712,88 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
     )
     expect(holder).toBeDefined()
     expect(before).toContain(holder)
+  })
+})
+
+describe('PlayerComparePage: careers cut off by the data (issue #448)', () => {
+  const FAULK = 2252790861
+  const FARMER = 2039946310
+  const HILL = 2052934910
+  const LAMB = 2170634393
+  const FAULK_CALLOUT =
+    "Hold on. Marshall Faulk played 1994 to 2006, and our books open in 1999. That's his last 1 of 13 seasons up there, not the whole career. Nobody's crowning anybody on those totals."
+
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+  })
+
+  it('says so above the tables when one career began before the data, and marks no total', async () => {
+    mockedCompare.mockResolvedValue(FAULK_VS_FARMER)
+
+    renderPage(`?a=${FAULK}&b=${FARMER}`)
+
+    const regular = await screen.findByRole('table', {
+      name: 'Marshall Faulk and Robert Farmer, regular season',
+    })
+    const callout = screen.getByText(FAULK_CALLOUT)
+    expect(callout).toHaveAttribute('role', 'status')
+    // Above the numbers, not a footnote under them.
+    expect(
+      callout.compareDocumentPosition(regular) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(regular).toHaveAccessibleDescription(
+      expect.stringContaining(FAULK_CALLOUT),
+    )
+    for (const table of screen.getAllByRole('table')) {
+      expect(table).not.toHaveTextContent(MARK_SCREEN_READER_TEXT)
+    }
+    expect(cellsOf(regular, 'Seasons')[0]).toHaveTextContent('1 of 13 (1999)')
+    // His real span, next to his name, and the data's span.
+    const players = screen.getByRole('list', { name: 'Players compared' })
+    expect(players).toHaveTextContent('1994–2006')
+    expect(screen.getByText('NFL player stats: 1999–2023.')).toBeInTheDocument()
+  })
+
+  it('says it once for both when both careers began before the data', async () => {
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    await screen.findByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    })
+    expect(
+      screen.getByText(
+        "Hold on. Both of these guys were playing before our books open in 1999. Kurt Warner: last 1 of 12 seasons. Steve McNair: last 1 of 13. Slices of careers, not careers. Nobody's crowning anybody on those totals.",
+      ),
+    ).toHaveAttribute('role', 'status')
+    for (const table of screen.getAllByRole('table')) {
+      expect(table).not.toHaveTextContent(MARK_SCREEN_READER_TEXT)
+    }
+  })
+
+  it('keeps the marks for careers that only run past the data, with a plain line', async () => {
+    mockedCompare.mockResolvedValue(HILL_VS_LAMB)
+
+    renderPage(`?a=${HILL}&b=${LAMB}`)
+
+    const regular = await screen.findByRole('table', {
+      name: 'Tyreek Hill and CeeDee Lamb, regular season',
+    })
+    expect(regular).toHaveTextContent(MARK_SCREEN_READER_TEXT)
+    expect(screen.queryByText(/^Hold on\./)).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Stats through 2023. This season isn't in our books yet.",
+      ),
+    ).toBeInTheDocument()
   })
 })

@@ -13,6 +13,8 @@ import {
   DATA_SOURCES,
   KURT_WARNER_CAREER,
   MARVIN_HARRISON_CAREER,
+  SMITH_VS_PETERSON,
+  TYREEK_HILL_CAREER,
 } from '../../lib/playerFixtures'
 import {
   PLAYER_NOT_FOUND_COPY,
@@ -94,8 +96,11 @@ describe('PlayerCareerPage (issue #296)', () => {
     ]) {
       expect(within(line).getByText(text)).toBeInTheDocument()
     }
+    // Warner's career began in 1998, before the data: not a career total (#448).
     expect(
-      within(table).getByRole('rowheader', { name: 'Career, 1 season' }),
+      within(table).getByRole('rowheader', {
+        name: 'Seasons in our books: 1 of 12 (1999)',
+      }),
     ).toBeInTheDocument()
   })
 
@@ -112,7 +117,7 @@ describe('PlayerCareerPage (issue #296)', () => {
     expect(within(line).getByText('1,063')).toBeInTheDocument()
     expect(within(line).getByText('3-0')).toBeInTheDocument()
     expect(
-      within(table).getByRole('rowheader', { name: 'Career, 1 season' }),
+      within(table).getByRole('rowheader', { name: 'In our books, 1 season' }),
     ).toBeInTheDocument()
   })
 
@@ -182,10 +187,16 @@ describe('PlayerCareerPage (issue #296)', () => {
       name: 'Kurt Warner, regular season',
     })
     expect(screen.getAllByText(STARTER_RECORD_NOTE)).toHaveLength(1)
-    expect(regular).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
+    // After the cut-off callout (#448), which describes them too.
+    expect(regular).toHaveAccessibleDescription(
+      expect.stringMatching(/^Kurt Warner played 1998 to 2009\. /),
+    )
+    expect(regular).toHaveAccessibleDescription(
+      expect.stringContaining(STARTER_RECORD_NOTE),
+    )
     expect(
       screen.getByRole('table', { name: 'Kurt Warner, playoffs' }),
-    ).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
+    ).toHaveAccessibleDescription(expect.stringContaining(STARTER_RECORD_NOTE))
   })
 
   it("shows a receiver's receiving columns, and no passing column or starter-record note (#352)", async () => {
@@ -306,5 +317,69 @@ describe('PlayerCareerPage (issue #296)', () => {
     expect(
       await screen.findByRole('link', { name: DATA_SOURCES[2]!.name }),
     ).toHaveAttribute('href', 'https://github.com/nflverse/nflfastR')
+  })
+})
+
+describe('PlayerCareerPage: a career cut off by the data (issue #448)', () => {
+  const SMITH_CALLOUT =
+    "Emmitt Smith played 1990 to 2004. Our books open in 1999, so this is his last 6 of 15 seasons. The first 9 aren't here, and yelling at the bartender won't change it."
+
+  beforeEach(() => {
+    mockedFetchPlayerCareer.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+  })
+
+  it('says so above the tables, which it describes, with the real span under his name', async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(SMITH_VS_PETERSON.a)
+
+    renderPage('/nfl/players/2249533020')
+
+    const regular = await screen.findByRole('table', {
+      name: 'Emmitt Smith, regular season',
+    })
+    const callout = screen.getByText(SMITH_CALLOUT)
+    expect(callout).toHaveAttribute('role', 'status')
+    expect(
+      callout.compareDocumentPosition(regular) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    for (const table of screen.getAllByRole('table')) {
+      expect(table).toHaveAccessibleDescription(
+        expect.stringContaining(SMITH_CALLOUT),
+      )
+    }
+    expect(
+      within(regular).getByRole('rowheader', {
+        name: 'Seasons in our books: 6 of 15 (1999–2004)',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('1990–2004')).toBeInTheDocument()
+    expect(screen.getByText('NFL player stats: 1999–2023.')).toBeInTheDocument()
+  })
+
+  it('gives a career running past the data a plain line, not the callout', async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(TYREEK_HILL_CAREER)
+
+    renderPage('/nfl/players/2052934910')
+
+    expect(
+      await screen.findByText(
+        "Stats through 2023. This season isn't in our books yet.",
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/our books open/)).not.toBeInTheDocument()
+  })
+
+  it('says nothing about cut-offs for a career inside the data', async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(MARVIN_HARRISON_CAREER)
+
+    renderPage('/nfl/players/1')
+
+    await screen.findByRole('heading', { level: 1 })
+    expect(screen.queryByText(/our books/)).not.toBeInTheDocument()
   })
 })

@@ -6,6 +6,7 @@ import type {
   PlayerStatsOut,
 } from '../../lib/api/types'
 import { formatRecord } from '../../lib/formatRecord'
+import { CUT_OFF_GLYPH, cutOffMarkerLabel } from '../../lib/playerCoverage'
 import type { LeaderStatColumn, LeaderStatKey } from '../../lib/playerStats'
 import {
   DASH,
@@ -38,6 +39,25 @@ export interface PlayerLeadersTableProps {
    * (`leaderColumnNoteId`); without a prefix no header is, so no id dangles.
    */
   columnNoteIdPrefix?: string
+}
+
+/**
+ * A small mark after a cut-off career's seasons (#448), titled for the
+ * mouse and named in words for assistive tech: "career began before 1999".
+ */
+function CutOffMarker({ label }: { label: string | null }) {
+  if (label === null) {
+    return null
+  }
+  return (
+    <>
+      {' '}
+      <span className={styles.cutOff} title={label} aria-hidden="true">
+        {CUT_OFF_GLYPH}
+      </span>
+      <span className={styles.srOnly}>, {label}</span>
+    </>
+  )
 }
 
 function SortArrow({ active }: { active: boolean }) {
@@ -330,6 +350,7 @@ export function PlayerLeadersTable({
               </td>
               <td className={styles.numeric}>
                 {formatSeasonSpan(row.first_season, row.last_season)}
+                <CutOffMarker label={cutOffMarkerLabel(row.coverage)} />
               </td>
               <td className={statCellClass(row.games)}>
                 {formatStat(row.games)}

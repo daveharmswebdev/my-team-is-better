@@ -134,6 +134,14 @@
   color: var(--leather);
 }
 
+/* A career that began before the data (issue #448); named in words for assistive tech. */
+.cutOff {
+  font-family: var(--font-body);
+  font-weight: 700;
+  color: var(--leather);
+  cursor: help;
+}
+
 /* Read by assistive tech in place of a visible dash (issue #315). */
 .srOnly {
   position: absolute;

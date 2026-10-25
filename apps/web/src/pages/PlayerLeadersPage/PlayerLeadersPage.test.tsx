@@ -1222,3 +1222,41 @@ describe('PlayerLeadersPage, kicking and punting (issue #315)', () => {
     })
   })
 })
+
+describe('PlayerLeadersPage: the data span (issue #448)', () => {
+  beforeEach(() => {
+    mockedFetchPlayerLeaders.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+  })
+
+  it("says which seasons the board's stats cover, from the API", async () => {
+    mockedFetchPlayerLeaders.mockResolvedValue({
+      ...LEADERS_BY_YARDS,
+      data_first_season: 2002,
+      data_last_season: 2025,
+    })
+
+    renderPage()
+
+    expect(
+      await screen.findByText('NFL player stats: 2002–2025.'),
+    ).toBeInTheDocument()
+  })
+
+  it('says nothing about a span the API has none of', async () => {
+    mockedFetchPlayerLeaders.mockResolvedValue({
+      ...LEADERS_BY_YARDS,
+      data_first_season: null,
+      data_last_season: null,
+    })
+
+    renderPage()
+
+    await screen.findByRole('table')
+    expect(screen.queryByText(/NFL player stats:/)).not.toBeInTheDocument()
+  })
+})

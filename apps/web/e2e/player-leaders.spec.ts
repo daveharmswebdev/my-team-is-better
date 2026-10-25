@@ -61,6 +61,13 @@ test('sorting by passing TDs puts Kurt Warner first and ties Dak Prescott and St
   await expectRow(table, 1, '2', 'Dak Prescott')
   await expectRow(table, 2, '2', 'Steve Beuerlein')
   await expectRow(table, 3, '4', 'Jordan Love')
+  // Warner's (1998) and Beuerlein's careers began before the data: each
+  // row says so; Prescott's (2016) doesn't (#448). The span is the API's.
+  const cutOff = 'career began before 1999'
+  await expect(bodyRow(table, 0)).toContainText(cutOff)
+  await expect(bodyRow(table, 1)).not.toContainText(cutOff)
+  await expect(bodyRow(table, 2)).toContainText(cutOff)
+  await expect(page.getByText('NFL player stats: 1999–2023.')).toBeVisible()
   await expect(
     table.getByRole('columnheader', { name: 'Passing TDs' }),
   ).toHaveAttribute('aria-sort', 'descending')
@@ -592,8 +599,12 @@ test("Kurt Warner's name opens his career: 1999 St. Louis Rams, 4,044 yards, and
   await expect(line).toContainText(
     'Totals undercount 1 game: the source has no stat lines for it.',
   )
+  // His career began in 1998, before the data (#448): the totals are what's
+  // in the books, not a career.
   await expect(
-    regular.getByRole('rowheader', { name: 'Career, 1 season' }),
+    regular.getByRole('rowheader', {
+      name: 'Seasons in our books: 1 of 12 (1999)',
+    }),
   ).toBeVisible()
 
   const playoffs = page.getByRole('table', { name: 'Kurt Warner, playoffs' })

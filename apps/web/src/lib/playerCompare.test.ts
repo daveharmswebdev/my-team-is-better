@@ -647,3 +647,52 @@ describe('comparing like with like (issue #436)', () => {
     ).toBe(false)
   })
 })
+
+describe('comparisonRows with coverage (founder rule, #448)', () => {
+  it('marks no total when either side is cut off, and reads the slice in the seasons row', () => {
+    const { a: faulk, b: farmer } = FAULK_VS_FARMER
+    const rows = comparisonRows(
+      farmer.regular_season,
+      faulk.regular_season,
+      'RB',
+      { a: farmer.coverage, b: faulk.coverage },
+    )
+    expect(rows.every((row) => row.marked === null)).toBe(true)
+    expect(rows[0]).toMatchObject({
+      key: 'seasons',
+      a: '1',
+      b: '1 of 13 (1999)',
+    })
+    // Without coverage the same pair carries marks: the rule removed them.
+    expect(
+      comparisonRows(farmer.regular_season, faulk.regular_season, 'RB').some(
+        (row) => row.marked !== null,
+      ),
+    ).toBe(true)
+  })
+
+  it('marks no playoff total either, and keeps the playoff seasons count plain', () => {
+    const rows = comparisonRows(
+      KURT_WARNER_CAREER.postseason,
+      STEVE_MCNAIR_CAREER.postseason,
+      'QB',
+      { a: KURT_WARNER_CAREER.coverage, b: STEVE_MCNAIR_CAREER.coverage },
+    )
+    expect(rows.every((row) => row.marked === null)).toBe(true)
+    expect(rows[0]).toMatchObject({ a: '1', b: '1' })
+  })
+
+  it('keeps the marks for careers that only run past the data', () => {
+    const { a: hill, b: lamb } = HILL_VS_LAMB
+    const rows = comparisonRows(
+      hill.regular_season,
+      lamb.regular_season,
+      'WR',
+      { a: hill.coverage, b: lamb.coverage },
+    )
+    expect(rows).toEqual(
+      comparisonRows(hill.regular_season, lamb.regular_season, 'WR'),
+    )
+    expect(rows.some((row) => row.marked !== null)).toBe(true)
+  })
+})

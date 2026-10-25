@@ -9,6 +9,7 @@ import type {
   PlayerCareerOut,
   PlayerCareerTotalsOut,
   PlayerComparisonOut,
+  PlayerCoverageOut,
   PlayerHeadToHeadGameOut,
   PlayerPositionGroup,
   PlayerSeasonType,
@@ -16,6 +17,8 @@ import type {
   StarterRecordOut,
 } from './api/types'
 import { formatRecord } from './formatRecord'
+import type { RowKind } from './playerCoverage'
+import { coveredSeasonsText, marksRow } from './playerCoverage'
 import type {
   LeaderColumnExtras,
   StatGroup,
@@ -71,6 +74,11 @@ export interface ComparisonRow extends LeaderColumnExtras {
 interface RowSpec extends LeaderColumnExtras {
   key: string
   label: string
+  /**
+   * Every row the compare table has is a career `total` (#301: no rate
+   * stats), so a cut-off career takes all its marks away (#448).
+   */
+  kind: RowKind
   text: (totals: PlayerCareerTotalsOut) => string
   marked: (a: PlayerCareerTotalsOut, b: PlayerCareerTotalsOut) => Side | null
 }
@@ -78,6 +86,7 @@ interface RowSpec extends LeaderColumnExtras {
 const SEASONS_ROW: RowSpec = {
   key: 'seasons',
   label: 'Seasons',
+  kind: 'total',
   text: (totals) => formatStat(totals.seasons),
   marked: (a, b) => largerSide(a.seasons, b.seasons),
 }
@@ -85,6 +94,7 @@ const SEASONS_ROW: RowSpec = {
 const GAMES_ROW: RowSpec = {
   key: 'games',
   label: 'Games',
+  kind: 'total',
   text: (totals) => formatStat(totals.games),
   marked: (a, b) => largerSide(a.games, b.games),
 }
@@ -92,6 +102,7 @@ const GAMES_ROW: RowSpec = {
 const RECORD_ROW: RowSpec = {
   key: 'record',
   label: 'Starter record',
+  kind: 'total',
   text: ({ record }) => formatRecord(record.wins, record.losses, record.ties),
   marked: (a, b) => largerRecordSide(a.record, b.record),
 }
@@ -115,6 +126,7 @@ function statRow(column: TableStatColumn): RowSpec {
     label: column.label,
     fullLabel: column.fullLabel,
     note: column.note,
+    kind: 'total',
     text: (totals) => statText(totals, column.key),
     marked: (a, b) =>
       largerSide(
@@ -197,14 +209,43 @@ function rowSpecs(
   ]
 }
 
+/** Both players' coverage (#446), which decides the marks (#448). */
+export interface ComparedCoverage {
+  a: PlayerCoverageOut
+  b: PlayerCoverageOut
+}
+
+/**
+ * One side's cell. A cut-off career's regular-season seasons row reads
+ * "6 of 15 (1999–2004)" (#448); its playoff seasons stay a plain count,
+ * since a career's length isn't a count of playoff seasons.
+ */
+function cellText(
+  row: RowSpec,
+  totals: PlayerCareerTotalsOut,
+  coverage: PlayerCoverageOut | undefined,
+): string {
+  if (
+    row.key === SEASONS_ROW.key &&
+    coverage !== undefined &&
+    totals.season_type === 'regular'
+  ) {
+    return coveredSeasonsText(coverage) ?? row.text(totals)
+  }
+  return row.text(totals)
+}
+
 /**
  * Both players' totals of one season type, row by row, with each row's
- * mark. `group` is the position group both share (`comparisonGroup`).
+ * mark. `group` is the position group both share (`comparisonGroup`). With
+ * `coverage`, the founder's rule (#448, `marksRow`): when either career
+ * began before the data, no total is marked.
  */
 export function comparisonRows(
   a: PlayerCareerTotalsOut | null,
   b: PlayerCareerTotalsOut | null,
   group: PlayerPositionGroup | null,
+  coverage?: ComparedCoverage,
 ): ComparisonRow[] {
   const present = [a, b].filter(
     (side): side is PlayerCareerTotalsOut => side !== null,
@@ -214,9 +255,14 @@ export function comparisonRows(
     label: row.label,
     fullLabel: row.fullLabel,
     note: row.note,
-    a: a === null ? null : row.text(a),
-    b: b === null ? null : row.text(b),
-    marked: a === null || b === null ? null : row.marked(a, b),
+    a: a === null ? null : cellText(row, a, coverage?.a),
+    b: b === null ? null : cellText(row, b, coverage?.b),
+    marked:
+      a === null ||
+      b === null ||
+      (coverage !== undefined && !marksRow(row.kind, coverage.a, coverage.b))
+        ? null
+        : row.marked(a, b),
   }))
 }
 

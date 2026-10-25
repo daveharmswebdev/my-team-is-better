@@ -91,6 +91,53 @@ export const Disabled: Story = {
   },
 }
 
+/**
+ * Search rows and the data's span (#448): a career that began before the
+ * data reads its real span and where its stats start; one that runs past
+ * the data, its own.
+ */
+export const CareerSpans: Story = {
+  args: {
+    status: 'done',
+    options: [
+      {
+        player_id: 2249533020,
+        display_name: 'Emmitt Smith',
+        position: 'RB',
+        group: 'RB',
+        first_season: 1999,
+        last_season: 2004,
+        coverage: fixtureCoverage(1990, 2004, 1999, 2004),
+      },
+      {
+        player_id: 2039946310,
+        display_name: 'Robert Farmer',
+        position: 'RB',
+        group: 'RB',
+        first_season: 1999,
+        last_season: 1999,
+        coverage: fixtureCoverage(1999, 1999, 1999, 1999),
+      },
+      {
+        player_id: 2052934910,
+        display_name: 'Tyreek Hill',
+        position: 'WR',
+        group: 'WR',
+        first_season: 2016,
+        last_season: 2023,
+        coverage: fixtureCoverage(2016, 2025, 2016, 2023),
+      },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.type(canvas.getByRole('combobox'), 'e')
+    await expect(
+      canvas.getByRole('option', { name: /Emmitt Smith/ }),
+    ).toHaveTextContent('1990–2004 · stats from 1999')
+  },
+}
+
 /** Two players with one name, told apart by position and seasons. */
 export const SameNames: Story = {
   args: {

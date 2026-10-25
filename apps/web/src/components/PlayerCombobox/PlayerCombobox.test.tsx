@@ -93,7 +93,8 @@ describe('PlayerCombobox (issue #301)', () => {
     await user.type(screen.getByRole('combobox'), 'mc')
 
     expect(optionLabels()).toEqual([
-      'Steve McNair · QB, 1999',
+      // A career that began before the data reads its real span (#448).
+      'Steve McNair · QB, 1995–2007 · stats from 1999',
       'Mike Tomczak · QB, 1999',
       'Cade McNown · QB, 1999',
       'Donovan McNabb · QB, 1999',
@@ -134,6 +135,41 @@ describe('PlayerCombobox (issue #301)', () => {
     expect(optionLabels()).toEqual([
       'Mike Smith · QB, 1999–2004',
       'Mike Smith · position not recorded, 2023',
+    ])
+  })
+
+  it('gives a career cut off by the data its real span and where its stats start (#448)', async () => {
+    const user = userEvent.setup()
+    render(
+      <Harness
+        options={[
+          {
+            player_id: 2249533020,
+            display_name: 'Emmitt Smith',
+            position: 'RB',
+            group: 'RB',
+            first_season: 1999,
+            last_season: 2004,
+            coverage: fixtureCoverage(1990, 2004, 1999, 2004),
+          },
+          {
+            player_id: 2052934910,
+            display_name: 'Tyreek Hill',
+            position: 'WR',
+            group: 'WR',
+            first_season: 2016,
+            last_season: 2023,
+            coverage: fixtureCoverage(2016, 2025, 2016, 2023),
+          },
+        ]}
+      />,
+    )
+
+    await user.type(screen.getByRole('combobox'), 'smith')
+
+    expect(optionLabels()).toEqual([
+      'Emmitt Smith · RB, 1990–2004 · stats from 1999',
+      'Tyreek Hill · WR, 2016–2023',
     ])
   })
 

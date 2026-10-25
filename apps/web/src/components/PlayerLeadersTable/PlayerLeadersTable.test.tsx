@@ -1061,3 +1061,25 @@ describe('PlayerLeadersTable, the defense board (issue #317)', () => {
     },
   )
 })
+
+describe('PlayerLeadersTable and a career cut off by the data (#448)', () => {
+  it('marks a row whose career began before the data, in words for assistive tech', () => {
+    renderTable(LEADERS_BY_TDS)
+
+    const [warner, prescott] = bodyRows() as [HTMLElement, HTMLElement]
+    const seasons = cellUnder(warner, 'Seasons')
+    expect(seasons).toHaveTextContent('1999')
+    expect(seasons).toHaveTextContent(/^1999 ‹, career began before 1999$/)
+    expect(
+      within(seasons).getByTitle('career began before 1999'),
+    ).toHaveAttribute('aria-hidden', 'true')
+    expect(within(prescott).queryByText(/career began before/)).toBeNull()
+  })
+
+  it('leaves a career that only runs past the data unmarked', () => {
+    renderTable(LEADERS_BY_RECEIVING_YARDS)
+
+    expect(screen.getByText('Tyreek Hill')).toBeInTheDocument()
+    expect(screen.queryByText(/career began before/)).toBeNull()
+  })
+})

@@ -1,10 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { within } from 'storybook/test'
+import { expect, within } from 'storybook/test'
 import {
   CAREER_WITH_NULL_STATS,
   DATA_SOURCES,
   KURT_WARNER_CAREER,
+  SMITH_VS_PETERSON,
 } from '../../lib/playerFixtures'
 import { PlayerCareerPage } from './PlayerCareerPage'
 
@@ -74,6 +75,37 @@ export const Loaded: Story = {
     const canvas = within(canvasElement)
     await canvas.findByRole('table', { name: 'Kurt Warner, playoffs' })
     await canvas.findByRole('link', { name: /nflfastR/ })
+  },
+}
+
+/**
+ * Emmitt Smith played 1990 to 2004 and the data opens in 1999 (#448): the
+ * narrator says so above the tables, and the totals read "Seasons in our
+ * books: 6 of 15 (1999–2004)", not a career.
+ */
+export const CareerCutOff: Story = {
+  decorators: [
+    (Story) => {
+      installFetch(() => jsonResponse(200, SMITH_VS_PETERSON.a))
+      return <Story />
+    },
+    atPlayer('2249533020'),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const table = await canvas.findByRole('table', {
+      name: 'Emmitt Smith, regular season',
+    })
+    const callout = canvas.getByText(/^Emmitt Smith played 1990 to 2004\./)
+    await expect(callout).toHaveAttribute('role', 'status')
+    await expect(table).toHaveAccessibleDescription(
+      expect.stringContaining(callout.textContent ?? ''),
+    )
+    await expect(
+      within(table).getByRole('rowheader', {
+        name: 'Seasons in our books: 6 of 15 (1999–2004)',
+      }),
+    ).toBeVisible()
   },
 }
 
