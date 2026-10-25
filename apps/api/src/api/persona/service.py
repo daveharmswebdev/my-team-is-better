@@ -77,6 +77,7 @@ never contested.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Collection, Sequence
 
@@ -102,7 +103,7 @@ from api.persona.fallback import (
     team_case_fallback_text,
 )
 from api.persona.narrate import NarrationResult, narrate, narrate_checked
-from api.persona.qb_claims import QB_GROUNDING_VERSION, check_and_render_qb
+from api.persona.qb_claims import QB_GROUNDING_VERSION, check_and_render_qb, qb_margin_band
 from api.persona.qb_prompt import build_qb_system_prompt, build_qb_user_message
 from api.repositories.teams import TeamRecord
 
@@ -361,8 +362,30 @@ QB_FACT_BLOCK_EXCLUDE: dict[str, IncEx | bool] = {
 
 def qb_fact_block_json(evidence: QbVerdictEvidenceOut) -> str:
     """The FACT BLOCK JSON the QB narrator and the QB claim check see. The
-    one definition, as `team_case_fact_block_json` is for the team verdicts."""
-    return evidence.model_dump_json(exclude=QB_FACT_BLOCK_EXCLUDE)
+    one definition, as `team_case_fact_block_json` is for the team verdicts.
+
+    Beyond the evidence it states each measure's margin band right after its
+    margin (`qb_score.career_band`, `qb_score.peak_band`: close, clear or
+    decisive, null on an exact tie or an inconclusive verdict; #457), so the
+    narrator sees the band the claim check holds its margin words to
+    (`api.persona.qb_claims.qb_margin_band`). The band is the fact block's
+    only: no response carries it."""
+    data = evidence.model_dump(mode="json", exclude=QB_FACT_BLOCK_EXCLUDE)
+    score: dict[str, object] = data["qb_score"]
+    banded: dict[str, object] = {}
+    for key, value in score.items():
+        banded[key] = value
+        if key in ("career_margin", "peak_margin"):
+            measure = key.removesuffix("_margin")
+            winner = getattr(evidence.qb_score, f"{measure}_winner")
+            banded[f"{measure}_band"] = qb_margin_band(
+                measure,
+                winner,
+                getattr(evidence.qb_score.a, measure),
+                getattr(evidence.qb_score.b, measure),
+            )
+    data["qb_score"] = banded
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"))
 
 
 def narrate_qb_comparison(

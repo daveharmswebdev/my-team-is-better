@@ -297,12 +297,24 @@ def test_an_inconclusive_narration_without_a_winner_renders() -> None:
 
 
 def test_the_gates_example_sentence_passes() -> None:
+    # #451's gate example, on a pair whose career margin is close (Manning
+    # 1.43 to McNair 0.60, 0.83): since #457 "by a nose" fits a close margin
+    # only, and Warner's 1.65 over McNair is a clear one.
     rendered = qb_rendered(
+        qb_block(PEYTON_MANNING, STEVE_MCNAIR),
+        "Manning takes the career by a nose, and the books only open in {yr}.",
+        YEAR,
+    )
+    assert rendered == "Manning takes the career by a nose, and the books only open in 1999."
+
+
+def test_the_gates_example_on_a_clear_margin_is_rejected() -> None:
+    errors = qb_rejected(
         _warner_mcnair(),
         "Warner takes the career by a nose, and the books only open in {yr}.",
         YEAR,
     )
-    assert rendered == "Warner takes the career by a nose, and the books only open in 1999."
+    assert_an_error_says(errors, '"by a nose"', "the career margin is 1.65, a clear one")
 
 
 def test_a_full_on_voice_narration_renders() -> None:
