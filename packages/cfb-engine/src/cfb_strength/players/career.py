@@ -15,6 +15,7 @@ from cfb_strength.contracts import (
     StarterRecord,
     UnknownPlayerError,
 )
+from cfb_strength.players._coverage import coverage
 from cfb_strength.players._sql import STAT_COLUMNS, lines_cte, totals_select
 
 _SEASON_TYPE_ORDER = {"regular": 0, "postseason": 1}
@@ -146,4 +147,5 @@ def get_player_career(conn: sqlite3.Connection, *, sport: Sport, player_id: int)
         seasons=seasons,
         regular_season=totals.get("regular"),
         postseason=totals.get("postseason"),
+        coverage=coverage(conn, sport=sport, player_id=player_id),
     )

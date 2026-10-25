@@ -9,7 +9,9 @@ engine modules apps/api is permitted (`cfb_strength.players`, `db`,
   field" means as a value: every dataclass field under its own name, plus
   the derived properties the API publishes (absent from
   `dataclasses.fields`): `StarterRecord.starts`, and since #433 the
-  position `group` of `PlayerCareer` and `PlayerSearchRow` (#428). Comparing
+  position `group` of `PlayerCareer` and `PlayerSearchRow` (#428), and
+  since #446 `PlayerCoverage`'s four derived properties (`career_seasons`,
+  `cut_off_before`, `cut_off_after`, `cut_off`). Comparing
   a response body to it checks names, nesting, order of rows and every
   number at once. `PlayerSearchOut.group`, the request's filter echoed, is
   not the engine's at all; the search tests add it themselves.
@@ -55,6 +57,7 @@ from typing import Any
 
 from cfb_strength.contracts import (
     PlayerCareer,
+    PlayerCoverage,
     PlayerSearchRow,
     PlayerSeasonType,
     PlayerStats,
@@ -221,6 +224,11 @@ def engine_json(value: object) -> Any:
         }
         if isinstance(value, PlayerCareer | PlayerSearchRow):
             fields["group"] = value.group
+        if isinstance(value, PlayerCoverage):
+            fields["career_seasons"] = value.career_seasons
+            fields["cut_off_before"] = value.cut_off_before
+            fields["cut_off_after"] = value.cut_off_after
+            fields["cut_off"] = value.cut_off
         return fields
     if isinstance(value, list):
         return [engine_json(item) for item in value]

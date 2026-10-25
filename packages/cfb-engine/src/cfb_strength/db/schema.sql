@@ -339,6 +339,11 @@ CREATE TABLE IF NOT EXISTS player_season_stats (
     receiving_epa REAL,
     PRIMARY KEY (player_id, season, season_type)
 );
+-- The db's player-stat span per sport (`players._coverage.data_span`, #446):
+-- MIN/MAX(season) for one sport and season type is an index seek, not the
+-- full-table scan every career, leaders and search call would otherwise pay.
+CREATE INDEX IF NOT EXISTS idx_player_season_stats_sport_type_season
+    ON player_season_stats(sport, season_type, season);
 
 -- Reserved for game-winning drives and similar per-game labels. A feat is a
 -- definition applied to a game, not a count, so each row names the definition

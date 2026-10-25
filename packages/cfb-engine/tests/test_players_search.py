@@ -11,6 +11,7 @@ import pytest
 from cfb_strength.contracts import (
     PLAYER_SEARCH_MAX_LIMIT,
     PlayerCareer,
+    PlayerCoverage,
     PlayerPositionGroup,
     PlayerSearchRow,
     position_group,
@@ -132,8 +133,9 @@ _GROUPED = {"QB": "QB", "RB": "RB", "FB": "RB", "WR": "WR", "TE": "TE"}
 def test_position_group_maps_every_measured_label(label: str | None) -> None:
     expected = _GROUPED.get(label) if label is not None else None
     assert position_group(label) == expected
-    assert PlayerSearchRow(1, "X", label, 2000, 2000).group == expected
-    career = PlayerCareer("nfl", 1, "X", label, [], None, None)
+    coverage = PlayerCoverage(None, None, None, None, 2000, 2000, 1)
+    assert PlayerSearchRow(1, "X", label, 2000, 2000, coverage).group == expected
+    career = PlayerCareer("nfl", 1, "X", label, [], None, None, coverage)
     assert career.group == expected
 
 
@@ -322,9 +324,20 @@ def test_a_row_carries_identity_and_the_season_span_across_season_types(db: Play
 
     rows = search_players(conn_of(db), sport="nfl", query="span").rows
 
+    # The players carry no source span; the data span is the db's regular
+    # season rows (2003-2010) and the covered span is each player's own.
     assert rows == [
-        PlayerSearchRow(p, "Span Guy", "QB", 2001, 2005),
-        PlayerSearchRow(other, "Span Other", None, 2010, 2010),
+        PlayerSearchRow(
+            p, "Span Guy", "QB", 2001, 2005, PlayerCoverage(None, None, 2003, 2010, 2001, 2005, 3)
+        ),
+        PlayerSearchRow(
+            other,
+            "Span Other",
+            None,
+            2010,
+            2010,
+            PlayerCoverage(None, None, 2003, 2010, 2010, 2010, 1),
+        ),
     ]
 
 
@@ -352,6 +365,11 @@ _NAME_SCAN = (
     "SELECT id FROM players WHERE sport = 'nfl'"
     " AND lower(display_name) LIKE lower('%needle%') ESCAPE '\\'"
 )
+
+# Every row's `PlayerCoverage` (#446) adds the db's data span, a MIN and a MAX
+# that are each one seek on idx_player_season_stats_sport_type_season, and a
+# coverage lookup keyed by the matching players' ids. Neither is a floor: both
+# are inside the cost below and must not scale with non-matching players.
 
 
 def _steps(conn: sqlite3.Connection, run: Callable[[], object]) -> int:

@@ -51,6 +51,7 @@ MADDOX = 2448560637
 VICK = 2079758716
 WARNER = 2044124519
 SCOTT_MITCHELL = 2330103075
+ADRIAN_PETERSON = 2104182639
 
 
 def _refuse_live_fetch(url: str) -> str:
@@ -827,3 +828,46 @@ def test_a_defense_row_equals_the_career_totals(
         assert (row.stats.def_sacks, row.stats.def_fumbles_forced) == (159.0, 51)
     else:
         assert row.stats.def_interceptions == 9
+
+
+# --- coverage (#446, epic #443) ------------------------------------------------
+
+
+def test_emmitt_smiths_career_is_shown_as_his_last_6_of_15_seasons(
+    conn: sqlite3.Connection,
+) -> None:
+    emmitt = _player_id(conn, "Emmitt Smith")
+    cov = get_player_career(conn, sport="nfl", player_id=emmitt).coverage
+
+    assert (cov.career_first_season, cov.career_last_season) == (1990, 2004)
+    # The committed build's data span, read from the db.
+    assert (cov.data_first_season, cov.data_last_season) == (1999, 2025)
+    assert (cov.covered_first_season, cov.covered_last_season) == (1999, 2004)
+    assert cov.covered_seasons == 6
+    assert cov.career_seasons == 15
+    assert cov.cut_off_before is True
+    assert cov.cut_off is True
+
+    rushing = get_player_leaders(conn, sport="nfl", category="rushing", limit=100)
+    assert (rushing.data_first_season, rushing.data_last_season) == (1999, 2025)
+    (row,) = [r for r in rushing.rows if r.player_id == emmitt]
+    assert row.coverage == cov
+    (hit,) = search_players(conn, sport="nfl", query="emmitt smith").rows
+    assert hit.coverage == cov
+
+
+def test_careers_inside_the_data_are_not_cut_off(conn: sqlite3.Connection) -> None:
+    # Two RBs share the name (the other played 2002-2009); this is the Vikings one.
+    ap = get_player_career(conn, sport="nfl", player_id=ADRIAN_PETERSON)
+    assert ap.position == "RB"
+    assert (ap.coverage.career_first_season, ap.coverage.career_last_season) == (2007, 2021)
+    assert ap.coverage.career_seasons == 15
+    assert ap.coverage.cut_off is False
+
+    brady = get_player_career(conn, sport="nfl", player_id=BRADY).coverage
+    assert (brady.career_first_season, brady.career_last_season) == (2000, 2022)
+    assert brady.cut_off is False
+
+    peyton = get_player_career(conn, sport="nfl", player_id=PEYTON_MANNING).coverage
+    assert peyton.cut_off_before is True
+    assert (peyton.covered_first_season, peyton.covered_last_season) == (1999, 2015)

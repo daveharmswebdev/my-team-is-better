@@ -14,6 +14,7 @@ from cfb_strength.contracts import (
     PlayerSearchRow,
     Sport,
 )
+from cfb_strength.players._coverage import coverages
 from cfb_strength.players._sql import any_category_totals_select, lines_cte
 
 # The same per-(player, season_type) totals a leaderboard ranks, folded to one
@@ -110,6 +111,10 @@ def search_players(
         group_filter, group_params = _group_query(group)
         sql = _SEARCH_SQL_TEMPLATE.format(group_filter=group_filter)
         params.update(group_params)
+    fetched = conn.execute(sql, params).fetchall()
+    # One grouped query for every hit (#446). The row's span is the same
+    # line set, so it equals the coverage's covered span by construction.
+    covered = coverages(conn, sport=sport, player_ids=(r["player_id"] for r in fetched))
     rows = [
         PlayerSearchRow(
             player_id=r["player_id"],
@@ -117,7 +122,8 @@ def search_players(
             position=r["position"],
             first_season=r["first_season"],
             last_season=r["last_season"],
+            coverage=covered[r["player_id"]],
         )
-        for r in conn.execute(sql, params).fetchall()
+        for r in fetched
     ]
     return PlayerSearch(sport=sport, query=stripped, limit=limit, rows=rows)

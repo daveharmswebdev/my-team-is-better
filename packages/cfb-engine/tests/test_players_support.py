@@ -46,11 +46,15 @@ class PlayerDb:
         position: str | None = "QB",
         sport: str | None = None,
         player_id: int | None = None,
+        career: tuple[int | None, int | None] = (None, None),
     ) -> int:
+        """`career` is the source's span (`career_first_season`,
+        `career_last_season`, #444); NULL on both ends unless a test sets it."""
         pid = player_id if player_id is not None else next(self._ids)
         self.conn.execute(
-            "INSERT INTO players (id, sport, display_name, position) VALUES (?, ?, ?, ?)",
-            (pid, sport or self.sport, name, position),
+            "INSERT INTO players (id, sport, display_name, position, "
+            "career_first_season, career_last_season) VALUES (?, ?, ?, ?, ?, ?)",
+            (pid, sport or self.sport, name, position, *career),
         )
         return pid
 
