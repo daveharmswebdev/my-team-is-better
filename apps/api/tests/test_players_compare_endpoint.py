@@ -40,7 +40,16 @@ BRETT_FAVRE = 2003442211
 
 SQLITE_INTEGER_MAX = 2**63 - 1
 
-COMPARISON_KEYS = {"sport", "a", "b", "regular_season_head_to_head", "postseason_head_to_head"}
+# `qb_score` since #451: the engine's QB score for two quarterbacks, pinned
+# field for field in `test_players_qb_score_endpoint.py`.
+COMPARISON_KEYS = {
+    "sport",
+    "a",
+    "b",
+    "regular_season_head_to_head",
+    "postseason_head_to_head",
+    "qb_score",
+}
 HEAD_TO_HEAD_KEYS = {"season_type", "record", "games"}
 GAME_KEYS = {
     "season",
@@ -323,6 +332,10 @@ def test_comparison_is_the_engines_comparison_field_for_field(
         assert set(body[key]) == HEAD_TO_HEAD_KEYS
         for game in body[key]["games"]:
             assert set(game) == GAME_KEYS
+    # Every pair here is two quarterbacks, so `qb_score` is set; its content
+    # is `test_players_qb_score_endpoint.py`'s to pin. The rest is exactly
+    # the engine's comparison.
+    assert body.pop("qb_score") is not None
     with fixture_conn() as conn:
         assert body == engine_json(get_player_comparison(conn, sport="nfl", a=a, b=b))
 

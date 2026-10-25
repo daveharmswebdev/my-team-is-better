@@ -90,6 +90,9 @@ REQUIRED_LOCATIONS: dict[str, tuple[str, ...]] = {
         "GET /api/players/search query parameter 'sport'",
         "#/components/schemas/PlayerComparisonOut/properties/sport",
         "#/components/schemas/PlayerSearchOut/properties/sport",
+        # Issue #451: the QB score on a two-quarterback comparison.
+        "#/components/schemas/PlayerQbScoreComparisonOut/properties/sport",
+        "#/components/schemas/PlayerQbScoreOut/properties/sport",
     ),
     "method": (
         *(f"#/components/schemas/{model}/properties/method" for model in _VERDICT_REQUESTS),
