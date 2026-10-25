@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest'
 import type { PlayerCareerTotalsOut } from '../../lib/api/types'
 import {
   CAREER_WITH_NULL_STATS,
-  HARRISON_VS_JAMES,
+  HILL_VS_LAMB,
   KURT_WARNER_CAREER,
   MARE_VS_GOWIN,
+  SMITH_VS_PETERSON,
   STEVE_MCNAIR_CAREER,
   TJ_WATT_CAREER,
 } from '../../lib/playerFixtures'
@@ -31,6 +32,7 @@ function renderTable(
       a={{ name: 'Kurt Warner', totals: a }}
       b={{ name: 'Steve McNair', totals: b }}
       noTotalsCopy="No regular-season games on record."
+      group="QB"
       {...extra}
     />,
   )
@@ -134,6 +136,7 @@ describe('PlayerComparisonTable (issue #301)', () => {
     const table = renderTable(
       WARNER_REGULAR,
       CAREER_WITH_NULL_STATS.regular_season,
+      { group: null },
     )
 
     const [warner, other] = cellsOf(table, 'Passing TDs')
@@ -156,20 +159,20 @@ describe('PlayerComparisonTable (issue #301)', () => {
   })
 
   /**
-   * Issue #352: the rows are the stat groups either player recorded, so two
-   * receivers, or a kicker and a punter, are compared on their own stats.
+   * Issue #438: the position group both players share decides the rows.
+   * Two backs get rushing then receiving, whatever else they recorded.
    */
-  it('compares a receiver and a back on rushing and receiving, with no passing or record row', () => {
+  it("compares two backs on rushing then receiving, with no passing or record row for Emmitt Smith's one pass", () => {
     const table = renderTable(
-      HARRISON_VS_JAMES.a.regular_season,
-      HARRISON_VS_JAMES.b.regular_season,
+      SMITH_VS_PETERSON.a.regular_season,
+      SMITH_VS_PETERSON.b.regular_season,
+      { group: 'RB' },
     )
 
-    expect(
-      within(table)
-        .getAllByRole('rowheader')
-        .map((header) => header.textContent),
-    ).toEqual([
+    const headers = within(table)
+      .getAllByRole('rowheader')
+      .map((header) => header.textContent)
+    expect(headers).toEqual([
       'Seasons',
       'Games',
       'Carries',
@@ -181,17 +184,54 @@ describe('PlayerComparisonTable (issue #301)', () => {
       'Receiving yards',
       'Receiving TDs',
     ])
-    const [harrison, james] = cellsOf(table, 'Receptions')
-    expect(harrison).toHaveTextContent('115')
-    expect(isMarked(harrison)).toBe(true)
-    expect(james).toHaveTextContent('62')
-    expect(isMarked(james)).toBe(false)
+    for (const gone of [
+      'Starter record',
+      'Completions',
+      'Attempts',
+      'Passing yards',
+      'Passing TDs',
+      'Solo tackles',
+    ]) {
+      expect(
+        within(table).queryByRole('rowheader', { name: gone }),
+      ).not.toBeInTheDocument()
+    }
+    const [smith, peterson] = cellsOf(table, 'Rushing yards')
+    expect(smith).toHaveTextContent('5,789')
+    expect(isMarked(smith)).toBe(false)
+    expect(peterson).toHaveTextContent('14,921')
+    expect(isMarked(peterson)).toBe(true)
   })
 
+  it('compares two receivers on receiving only', () => {
+    const table = renderTable(
+      HILL_VS_LAMB.a.regular_season,
+      HILL_VS_LAMB.b.regular_season,
+      { group: 'WR' },
+    )
+
+    expect(
+      within(table)
+        .getAllByRole('rowheader')
+        .map((header) => header.textContent),
+    ).toEqual([
+      'Seasons',
+      'Games',
+      'Receptions',
+      'Receiving yards',
+      'Receiving TDs',
+    ])
+  })
+
+  /**
+   * Issue #352: with no group the two share (unreachable on the page since
+   * #436), the rows are the stat groups either player recorded.
+   */
   it('compares a kicker and a punter on kicking and punting, a missing longest field goal read as "none"', () => {
     const table = renderTable(
       MARE_VS_GOWIN.a.regular_season,
       MARE_VS_GOWIN.b.regular_season,
+      { group: null },
     )
 
     expect(
@@ -220,10 +260,11 @@ describe('PlayerComparisonTable (issue #301)', () => {
 
   it('describes each defense row a note covers by that note', () => {
     const watt = TJ_WATT_CAREER.regular_season!
-    renderTable(watt, {
-      ...watt,
-      stats: { ...watt.stats, def_sacks: 17.5 },
-    })
+    renderTable(
+      watt,
+      { ...watt, stats: { ...watt.stats, def_sacks: 17.5 } },
+      { group: null },
+    )
 
     expect(
       screen.getByRole('rowheader', { name: 'Sacks' }),

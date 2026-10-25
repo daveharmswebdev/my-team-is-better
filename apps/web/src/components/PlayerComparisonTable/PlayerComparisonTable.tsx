@@ -1,5 +1,8 @@
 import { useId } from 'react'
-import type { PlayerCareerTotalsOut } from '../../lib/api/types'
+import type {
+  PlayerCareerTotalsOut,
+  PlayerPositionGroup,
+} from '../../lib/api/types'
 import type { ComparisonRow } from '../../lib/playerCompare'
 import {
   MARK_GLYPH,
@@ -27,6 +30,11 @@ export interface PlayerComparisonTableProps {
   caption: string
   a: ComparedPlayer
   b: ComparedPlayer
+  /**
+   * The position group both players share (`comparisonGroup`), which
+   * decides the rows (#438); `null` falls back to the stats they recorded.
+   */
+  group: PlayerPositionGroup | null
   /** What a player's column says when they have no totals of this type. */
   noTotalsCopy: string
   /** The id of the note that explains the records. */
@@ -132,20 +140,23 @@ function RowHeader({
  * recorded, unequal numbers is marked, with a glyph and with words a screen
  * reader announces. Nothing is added up, averaged or declared.
  *
- * The rows are the stat groups either player recorded (issue #352), so two
- * receivers are compared on receiving, two kickers on kicking. Defense rows
- * bring the founder's notes (#316) with them, under the table.
+ * The rows come from the position group both players share (issue #438):
+ * two backs are compared on rushing then receiving, two receivers on
+ * receiving, whatever else either recorded. A pair with no shared group
+ * gets the stat groups either player recorded (#352); defense rows bring
+ * the founder's notes (#316) with them, under the table.
  */
 export function PlayerComparisonTable({
   caption,
   a,
   b,
+  group,
   noTotalsCopy,
   describedBy,
 }: PlayerComparisonTableProps) {
   const captionId = useId()
   const noteIdPrefix = useId()
-  const rows = comparisonRows(a.totals, b.totals)
+  const rows = comparisonRows(a.totals, b.totals, group)
   const notes = statColumnNotes(rows)
   return (
     <>

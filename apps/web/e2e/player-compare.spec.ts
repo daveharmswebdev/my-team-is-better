@@ -247,18 +247,17 @@ test('a link to two receivers compares their receiving, with no passing or recor
   await expect(dialog.getByText(/started at quarterback/)).toHaveCount(0)
 })
 
-// Round 3 of #352: each player's columns are decided on his own stats.
-// Since #433 only players of one position group compare, so the rule is
-// shown with two running backs. On the fixture, Robert Farmer (RB, 1999)
-// recorded nothing but solo tackles (8), which is defense for him; Marshall
-// Faulk (RB, 1999) ran for 1,327 yards and made 1 solo tackle, which for him
-// is not defense. Judged together, Faulk's rushing would hide Farmer's
-// tackles-only line; judged one player at a time, Farmer's Solo tackles row
-// still shows.
+// Issue #438 (founder decision): the position group decides the compare
+// rows. Two running backs get rushing then receiving and nothing else. On
+// the fixture, Marshall Faulk (RB, 1999) ran for 1,327 yards, threw one
+// pass and made 1 solo tackle; Robert Farmer (RB, 1999) recorded nothing
+// but solo tackles (8). Under the recorded-stats rule (#352) Faulk's pass
+// brought the passing rows and Farmer's tackles a Solo tackles row; by
+// position, neither shows.
 const FAULK = '2252790861'
 const FARMER = '2039946310'
 
-test("a running back next to a tackles-only running back keeps the tackles-only player's Solo tackles row", async ({
+test('two running backs are compared on rushing then receiving, with no passing, record or tackles row', async ({
   page,
 }) => {
   await page.goto(`/nfl/compare?a=${FAULK}&b=${FARMER}`)
@@ -267,13 +266,33 @@ test("a running back next to a tackles-only running back keeps the tackles-only 
   const regular = dialog.getByRole('table', {
     name: 'Marshall Faulk and Robert Farmer, regular season',
   })
-  const tackles = valueCells(regular, 'Solo tackles')
-  await expect(tackles.nth(0)).toHaveText('1')
-  await expect(tackles.nth(1)).toContainText('8')
-  await expect(tackles.nth(1)).toContainText('(larger number)')
   await expect(valueCells(regular, 'Rushing yards').nth(0)).toContainText(
     '1,327',
   )
+  const rowHeaders = regular.getByRole('rowheader')
+  await expect(rowHeaders).toHaveText([
+    'Seasons',
+    'Games',
+    'Carries',
+    'Rushing yards',
+    'Rushing TDs',
+    'Rushing first downs',
+    'Rushing fumbles lost',
+    'Receptions',
+    'Receiving yards',
+    'Receiving TDs',
+  ])
+  for (const gone of [
+    'Solo tackles',
+    'Passing yards',
+    'Attempts',
+    'Starter record',
+  ]) {
+    await expect(
+      regular.getByRole('rowheader', { name: gone, exact: true }),
+    ).toHaveCount(0)
+  }
+  await expect(dialog.getByText(/^Starter records follow/)).toHaveCount(0)
   // Two backs: no head-to-head section (#436).
   await expect(
     dialog.getByRole('region', { name: 'Head to head' }),
