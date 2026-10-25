@@ -280,6 +280,22 @@ def _migrate_player_stat_columns(conn: sqlite3.Connection) -> list[str]:
     return added
 
 
+def _migrate_player_career_span_columns(conn: sqlite3.Connection) -> list[str]:
+    """Add `players.career_first_season` / `career_last_season` (#444) to a
+    pre-existing db. A no-op on a fresh db, where schema.sql declares them,
+    and idempotent.
+
+    Existing rows stay NULL ("the source hasn't said") until the players are
+    re-ingested; production always builds from an empty db.
+    """
+    added: list[str] = []
+    for column in ("career_first_season", "career_last_season"):
+        if not _has_column(conn, "players", column):
+            conn.execute(f"ALTER TABLE players ADD COLUMN {column} INTEGER")
+            added.append(f"players.{column}")
+    return added
+
+
 # Issue #386: the smallest real CFB season the engine ingests holds 593
 # completed games (2020; a full build from the committed raw cache), and every
 # season of that cache (1998-2025) has 3-10 title games. A hand-built test
@@ -334,6 +350,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         *_migrate_ratings_ties_column(conn),
         *_migrate_elo_ledger_floor_column(conn),
         *_migrate_player_stat_columns(conn),
+        *_migrate_player_career_span_columns(conn),
     ]
     # Whole tables/indexes too, not only ALTER TABLE columns: schema.sql's
     # `CREATE ... IF NOT EXISTS` and the migration's indexes also only add

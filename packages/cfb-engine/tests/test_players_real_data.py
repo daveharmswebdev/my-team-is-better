@@ -91,6 +91,35 @@ def _line(career: PlayerCareer, season: int, season_type: str) -> PlayerSeasonLi
     return line
 
 
+def test_players_carry_the_sources_career_span_past_the_1999_stats_floor(
+    conn: sqlite3.Connection,
+) -> None:
+    # #444: players.csv's rookie_season/last_season, not the stat rows' span.
+    def span(player_id: int) -> tuple[object, object]:
+        row = conn.execute(
+            "SELECT career_first_season, career_last_season FROM players WHERE id = ?",
+            (player_id,),
+        ).fetchone()
+        return row[0], row[1]
+
+    assert span(_player_id(conn, "Emmitt Smith")) == (1990, 2004)
+    assert span(PEYTON_MANNING) == (1998, 2015)
+    assert span(BRADY) == (2000, 2022)
+    stat_first = conn.execute(
+        "SELECT MIN(season) FROM player_season_stats WHERE player_id = ?",
+        (_player_id(conn, "Emmitt Smith"),),
+    ).fetchone()[0]
+    assert stat_first == 1999
+    # The committed players.csv has no blank span cell, so every player found
+    # in it (a pfr id only comes from there) gets a span.
+    unspanned = conn.execute(
+        "SELECT COUNT(*) FROM players p JOIN player_source_ids s "
+        "ON s.player_id = p.id AND s.source = 'pfr' "
+        "WHERE p.sport = 'nfl' AND p.career_first_season IS NULL"
+    ).fetchone()[0]
+    assert unspanned == 0
+
+
 def test_qualifying_populations(conn: sqlite3.Connection) -> None:
     assert get_player_leaders(conn, sport="nfl").total == 819
     assert get_player_leaders(conn, sport="nfl", season_type="postseason").total == 180

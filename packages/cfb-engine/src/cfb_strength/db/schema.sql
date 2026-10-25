@@ -202,7 +202,13 @@ CREATE TABLE IF NOT EXISTS players (
     sport TEXT NOT NULL,
     display_name TEXT NOT NULL,
     position TEXT,
-    birth_date TEXT
+    birth_date TEXT,
+    -- The career span the source's roster file states (#444, epic #443), not
+    -- the span of this db's stat rows: NFL stats start in 1999, so a career
+    -- that began earlier is cut off, and only this tells the two apart.
+    -- NULL when the source doesn't say.
+    career_first_season INTEGER,
+    career_last_season INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS player_source_ids (

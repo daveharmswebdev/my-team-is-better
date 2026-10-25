@@ -511,6 +511,48 @@ def test_players_carry_their_crosswalk_ids(
     assert sources["pfr"] == "WarnKu00"
 
 
+def _span(conn: sqlite3.Connection, name: str) -> tuple[object, object]:
+    row = conn.execute(
+        "SELECT career_first_season, career_last_season FROM players WHERE id = ?",
+        (_player_id(conn, name),),
+    ).fetchone()
+    return row[0], row[1]
+
+
+def test_players_carry_the_sources_career_span(
+    ingested: tuple[sqlite3.Connection, PlayerIngestReport],
+) -> None:
+    # #444: players.csv's own span, not the stat rows' (which start in 1999).
+    conn, _ = ingested
+    assert _span(conn, "Peyton Manning") == (1998, 2015)
+    assert _span(conn, "Kurt Warner") == (1998, 2009)
+    assert _span(conn, "Patrick Mahomes") == (2017, 2026)
+
+
+def test_reingesting_updates_a_changed_career_span(
+    nfl_regression_db: Path, tmp_path: Path, no_network: None
+) -> None:
+    raw = _sample_raw_dir(tmp_path)
+    path = raw / "nfl" / "players.csv"
+    conn = get_conn(nfl_regression_db)
+    try:
+        ingest_players(conn, [2004], raw_dir=raw)
+        assert _span(conn, "Peyton Manning") == (1998, 2015)
+
+        rows = _read_csv(path)
+        manning = next(r for r in rows if r["gsis_id"] == "00-0010346")
+        manning["rookie_season"], manning["last_season"] = "NA", "2016"
+        with path.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+
+        ingest_players(conn, [2004], raw_dir=raw)
+        assert _span(conn, "Peyton Manning") == (None, 2016)
+    finally:
+        conn.close()
+
+
 # --- loud failures ----------------------------------------------------------
 
 

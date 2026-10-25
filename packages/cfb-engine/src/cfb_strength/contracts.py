@@ -364,6 +364,13 @@ class PlayerRow:
     position: str | None
     birth_date: str | None
     sport: Sport
+    # The career span the source's roster file states (#444, epic #443):
+    # nflverse `players.csv`'s `rookie_season` / `last_season`. Not the span
+    # of the stat rows, which start in 1999, so Emmitt Smith is 1990-2004
+    # here while his stat rows cover 1999-2004. None when the source doesn't
+    # say.
+    career_first_season: int | None = None
+    career_last_season: int | None = None
 
     def __post_init__(self) -> None:
         _require_known_sport(self.sport, "PlayerRow")
