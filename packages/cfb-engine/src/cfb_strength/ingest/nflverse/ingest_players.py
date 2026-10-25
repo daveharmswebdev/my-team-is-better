@@ -123,13 +123,21 @@ def _write_season(conn: sqlite3.Connection, year: int, build: SeasonBuild) -> No
 
     conn.executemany(
         """
-        INSERT INTO players (id, sport, display_name, position, birth_date)
-        VALUES (:id, :sport, :display_name, :position, :birth_date)
+        INSERT INTO players (
+            id, sport, display_name, position, birth_date,
+            career_first_season, career_last_season
+        )
+        VALUES (
+            :id, :sport, :display_name, :position, :birth_date,
+            :career_first_season, :career_last_season
+        )
         ON CONFLICT(id) DO UPDATE SET
             sport = excluded.sport,
             display_name = excluded.display_name,
             position = excluded.position,
-            birth_date = excluded.birth_date
+            birth_date = excluded.birth_date,
+            career_first_season = excluded.career_first_season,
+            career_last_season = excluded.career_last_season
         """,
         [
             {
@@ -138,6 +146,8 @@ def _write_season(conn: sqlite3.Connection, year: int, build: SeasonBuild) -> No
                 "display_name": p.display_name,
                 "position": p.position,
                 "birth_date": p.birth_date,
+                "career_first_season": p.career_first_season,
+                "career_last_season": p.career_last_season,
             }
             for p in build.players
         ],

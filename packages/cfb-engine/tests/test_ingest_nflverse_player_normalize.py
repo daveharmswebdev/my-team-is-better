@@ -19,6 +19,10 @@ Fixtures, all real rows cut once from nflverse's files, never synthetic:
   of `stats_player_week_<year>.csv` and `players.csv`. See
   test_ingest_nflverse_players_integration.py's docstring for what each
   season's cut holds; it also checks every row is in the committed cache.
+* `tests/fixtures/raw_nfl_players_unprojected_sample.csv`: three rows of
+  nflverse's raw `players.csv` (every column), cut on 2026-10-25 for #444:
+  Patrick Mahomes, Peyton Manning (rookie_season 1998, before the 1999 stats
+  floor) and Emmitt Smith (1990-2004).
 * Games come from the committed `tests/fixtures/nfl_regression.sqlite3`
   (1999/2004/2013/2022), or for 2001 from the committed `games.csv` cache
   through the existing `normalize_game`.
@@ -57,6 +61,7 @@ from cfb_strength.ingest.nflverse.player_normalize import (
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 UNPROJECTED_SAMPLE = FIXTURES_DIR / "raw_nfl_stats_player_week_unprojected_sample.csv"
+PLAYERS_UNPROJECTED_SAMPLE = FIXTURES_DIR / "raw_nfl_players_unprojected_sample.csv"
 PLAYER_SAMPLE_DIR = FIXTURES_DIR / "raw_nfl_player_sample" / "nfl"
 TEAMS_SAMPLE = FIXTURES_DIR / "raw_nfl_teams_sample.csv"
 
@@ -183,7 +188,97 @@ def test_player_projection_keeps_only_the_documented_columns() -> None:
         "birth_date",
         "pfr_id",
         "espn_id",
+        "rookie_season",
+        "last_season",
     )
+
+
+# --- issue #444: the source's own career span --------------------------------
+
+
+def _roster_row(gsis_id: str) -> dict[str, str]:
+    return next(p for p in _read_csv(PLAYER_SAMPLE_DIR / "players.csv") if p["gsis_id"] == gsis_id)
+
+
+def test_player_projection_keeps_the_career_span_cells() -> None:
+    projected = nflverse_client.project_players(_read_csv(PLAYERS_UNPROJECTED_SAMPLE))
+
+    assert tuple(projected[0]) == nflverse_client.PLAYERS_CACHE_COLUMNS
+    spans = {r["display_name"]: (r["rookie_season"], r["last_season"]) for r in projected}
+    assert spans["Peyton Manning"] == ("1998", "2015")
+    assert spans["Emmitt Smith"] == ("1990", "2004")
+    for dropped in ("years_of_experience", "draft_year", "headshot", "college_name"):
+        assert dropped not in projected[0]
+
+
+def test_client_writes_the_players_projection_with_the_span(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = PLAYERS_UNPROJECTED_SAMPLE.read_text()
+    monkeypatch.setattr(nflverse_client, "_fetch_csv_live", lambda url: text)
+
+    rows, live = nflverse_client.get_players(raw_dir=tmp_path)
+
+    assert live is True
+    assert _read_csv(nflverse_client.players_cache_path(tmp_path)) == rows
+    smith = next(r for r in rows if r["gsis_id"] == "00-0015165")
+    assert (smith["rookie_season"], smith["last_season"]) == ("1990", "2004")
+
+
+def test_client_refuses_a_players_file_missing_the_span_columns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    text = PLAYERS_UNPROJECTED_SAMPLE.read_text().replace("rookie_season", "rookie_year", 1)
+    monkeypatch.setattr(nflverse_client, "_fetch_csv_live", lambda url: text)
+
+    with pytest.raises(nflverse_client.NflverseClientError, match="rookie_season"):
+        nflverse_client.get_players(raw_dir=tmp_path)
+    assert not nflverse_client.players_cache_path(tmp_path).exists()
+
+
+def test_roster_carries_the_sources_career_span_not_the_stat_rows() -> None:
+    # Peyton Manning's stat rows start at the 1999 floor; players.csv says 1998.
+    manning = build_roster([_roster_row("00-0010346")])["00-0010346"]
+
+    assert (manning.career_first_season, manning.career_last_season) == (1998, 2015)
+
+
+@pytest.mark.parametrize("cell", ["", "NA", " "])
+def test_a_blank_or_na_span_cell_is_none(cell: str) -> None:
+    row = {**_roster_row("00-0010346"), "rookie_season": cell, "last_season": cell}
+
+    entry = build_roster([row])["00-0010346"]
+
+    assert (entry.career_first_season, entry.career_last_season) == (None, None)
+
+
+@pytest.mark.parametrize("column", ["rookie_season", "last_season"])
+@pytest.mark.parametrize("cell", ["199O", "1998.5", "unknown"])
+def test_a_non_integer_span_cell_raises_naming_the_player_and_column(
+    column: str, cell: str
+) -> None:
+    row = {**_roster_row("00-0010346"), column: cell}
+
+    with pytest.raises(ValueError, match=rf"{column}.*00-0010346"):
+        build_roster([row])
+
+
+def test_a_player_row_carries_the_roster_span(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    rows = [r for r in _stat_rows(2004) if r["game_id"] == "2004_01_IND_NE"]
+
+    build = build_player_season(
+        2004,
+        rows,
+        _games(nfl_regression_conn, 2004),
+        _franchise(),
+        build_roster(_read_csv(PLAYER_SAMPLE_DIR / "players.csv")),
+    )
+
+    manning_id = mint_surrogate_id("nfl_player", "00-0010346")
+    manning = next(p for p in build.players if p.id == manning_id)
+    assert (manning.career_first_season, manning.career_last_season) == (1998, 2015)
 
 
 def test_stat_fields_are_the_player_stats_contract_in_order() -> None:
@@ -571,6 +666,8 @@ def test_a_player_missing_from_players_csv_is_created_from_the_stat_row(
         None,
         "nfl",
     )
+    # No roster entry, so the source states no span: never the stat rows'.
+    assert (player.career_first_season, player.career_last_season) == (None, None)
     assert [(s.source, s.source_id) for s in build.source_ids if s.player_id == ryan_id] == [
         ("gsis", ryan["player_id"])
     ]

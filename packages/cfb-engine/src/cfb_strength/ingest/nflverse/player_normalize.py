@@ -34,10 +34,14 @@ The rules, in the order a stat line meets them:
    franchise `team_id` equals its own, never by abbreviation equality.
    Anything else unresolvable raises.
 5. Player: the id is `mint_surrogate_id("nfl_player", gsis_id)`. A player in
-   `players.csv` takes its name, position and birth date there, with
-   source ids gsis, pfr and espn (when non-empty). A player missing from it
-   is built from its stat row's name and position (or, for a listed QB with
-   no line, the schedule's QB name) with only a gsis source id, and counted.
+   `players.csv` takes its name, position, birth date and career span there,
+   with source ids gsis, pfr and espn (when non-empty). The career span
+   (#444) is the file's own `rookie_season` / `last_season`, never the span
+   of the stat rows (which start in 1999): a blank or 'NA' cell is None, a
+   non-integer cell raises naming the player and column. A player missing
+   from it is built from its stat row's name and position (or, for a listed
+   QB with no line, the schedule's QB name) with only a gsis source id and
+   no career span, and counted.
    A player is written only if a stored line or starter references them.
 6. Season rows: per (player, season_type), the sum of the game rows --
    except `contracts.PLAYER_STAT_MAX_FIELDS` (`fg_long`, `pt_long`), which
@@ -300,6 +304,23 @@ class RosterEntry:
     birth_date: str | None
     pfr_id: str | None
     espn_id: str | None
+    career_first_season: int | None = None
+    career_last_season: int | None = None
+
+
+def _parse_season_cell(row: Mapping[str, str], name: str) -> int | None:
+    """A `players.csv` season cell (rule 5): blank or 'NA' is None; anything
+    else must be a whole number, or this raises naming the player."""
+    value = row[name].strip()
+    if value in _EMPTY_CELLS:
+        return None
+    try:
+        return int(value)
+    except ValueError as e:
+        raise ValueError(
+            f"players.csv column {name!r} holds {value!r}, not a season "
+            f"(gsis_id={row.get('gsis_id')!r})"
+        ) from e
 
 
 def build_roster(player_rows: Iterable[Mapping[str, str]]) -> dict[str, RosterEntry]:
@@ -317,6 +338,8 @@ def build_roster(player_rows: Iterable[Mapping[str, str]]) -> dict[str, RosterEn
             birth_date=row["birth_date"] or None,
             pfr_id=row["pfr_id"] or None,
             espn_id=row["espn_id"] or None,
+            career_first_season=_parse_season_cell(row, "rookie_season"),
+            career_last_season=_parse_season_cell(row, "last_season"),
         )
     return roster
 
@@ -569,6 +592,10 @@ def build_player_season(
                 position=identity.position,
                 birth_date=identity.birth_date,
                 sport="nfl",
+                career_first_season=(
+                    identity.entry.career_first_season if identity.entry else None
+                ),
+                career_last_season=identity.entry.career_last_season if identity.entry else None,
             )
         )
         source_ids.append(PlayerSourceIdRow(player_id, "gsis", gsis_id))

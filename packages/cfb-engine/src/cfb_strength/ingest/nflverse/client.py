@@ -41,7 +41,9 @@ carry some 150 columns this project doesn't use:
   stats are outside the contract (an assisted tackle, a QB hit) is still
   dropped. EPA cells are cached as nflverse publishes them, up to 18
   decimal places, never rounded.
-* `data/raw/nfl/players.csv` keeps only `PLAYERS_CACHE_COLUMNS`.
+* `data/raw/nfl/players.csv` keeps only `PLAYERS_CACHE_COLUMNS`. Issue #444
+  added `rookie_season` and `last_season` (the career span the source
+  states) and refetched it on 2026-10-25: 24,861 players, 1.52 MB.
 
 The cache is a faithful projection of the source: it holds nflverse's own
 cells, signs included, and the stored sign convention (#298) is applied when
@@ -94,6 +96,10 @@ PLAYERS_CACHE_COLUMNS: tuple[str, ...] = (
     "birth_date",
     "pfr_id",
     "espn_id",
+    # The source's own career span (#444): Emmitt Smith is 1990-2004 here,
+    # while his stat rows start at the 1999 floor.
+    "rookie_season",
+    "last_season",
 )
 
 
