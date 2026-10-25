@@ -94,61 +94,67 @@ const TEST_IDIOMS: [string, string, string][] = [
   ],
 ]
 
-describe('eslint.config.js type-aware and jsx-a11y layers (issue #222)', () => {
-  const eslint = new ESLint({ cwd: WEB_DIR })
+// The first lint starts the TypeScript project service, which took 7 s on a CI
+// runner: past Vitest's 5 s default, so this suite gets its own timeout.
+describe(
+  'eslint.config.js type-aware and jsx-a11y layers (issue #222)',
+  { timeout: 30_000 },
+  () => {
+    const eslint = new ESLint({ cwd: WEB_DIR })
 
-  it.each(FORBIDDEN)(
-    'rejects %s',
-    async (_description, filePath, code, rules) => {
-      const [result] = await eslint.lintText(code, { filePath })
-      const messages = result?.messages ?? []
-      const hits = messages.filter(
-        (message) =>
-          message.severity === 2 && rules.includes(message.ruleId ?? ''),
-      )
-      expect(
-        hits.length,
-        `no error from ${rules.join(' / ')} for:\n${code}\nmessages: ${show(messages)}`,
-      ).toBeGreaterThan(0)
-    },
-  )
+    it.each(FORBIDDEN)(
+      'rejects %s',
+      async (_description, filePath, code, rules) => {
+        const [result] = await eslint.lintText(code, { filePath })
+        const messages = result?.messages ?? []
+        const hits = messages.filter(
+          (message) =>
+            message.severity === 2 && rules.includes(message.ruleId ?? ''),
+        )
+        expect(
+          hits.length,
+          `no error from ${rules.join(' / ')} for:\n${code}\nmessages: ${show(messages)}`,
+        ).toBeGreaterThan(0)
+      },
+    )
 
-  it.each(ORDINARY)(
-    'leaves ordinary code alone: %s',
-    async (_description, filePath, code) => {
-      const [result] = await eslint.lintText(code, { filePath })
-      expect(
-        result?.messages ?? [],
-        `false positive in ${filePath}:\n${code}`,
-      ).toEqual([])
-    },
-  )
+    it.each(ORDINARY)(
+      'leaves ordinary code alone: %s',
+      async (_description, filePath, code) => {
+        const [result] = await eslint.lintText(code, { filePath })
+        expect(
+          result?.messages ?? [],
+          `false positive in ${filePath}:\n${code}`,
+        ).toEqual([])
+      },
+    )
 
-  it.each(TEST_IDIOMS)(
-    'accepts %s in a test file',
-    async (_description, code) => {
-      const [result] = await eslint.lintText(code, {
-        filePath: PROBE_TEST_TSX,
-      })
-      expect(
-        result?.messages ?? [],
-        `false positive in ${PROBE_TEST_TSX}:\n${code}`,
-      ).toEqual([])
-    },
-  )
+    it.each(TEST_IDIOMS)(
+      'accepts %s in a test file',
+      async (_description, code) => {
+        const [result] = await eslint.lintText(code, {
+          filePath: PROBE_TEST_TSX,
+        })
+        expect(
+          result?.messages ?? [],
+          `false positive in ${PROBE_TEST_TSX}:\n${code}`,
+        ).toEqual([])
+      },
+    )
 
-  it.each(TEST_IDIOMS)(
-    'still rejects %s outside test files',
-    async (_description, code, rule) => {
-      const [result] = await eslint.lintText(code, { filePath: PROBE_TS })
-      const messages = result?.messages ?? []
-      const hits = messages.filter(
-        (message) => message.severity === 2 && message.ruleId === rule,
-      )
-      expect(
-        hits.length,
-        `no ${rule} error in ${PROBE_TS} for:\n${code}\nmessages: ${show(messages)}`,
-      ).toBeGreaterThan(0)
-    },
-  )
-})
+    it.each(TEST_IDIOMS)(
+      'still rejects %s outside test files',
+      async (_description, code, rule) => {
+        const [result] = await eslint.lintText(code, { filePath: PROBE_TS })
+        const messages = result?.messages ?? []
+        const hits = messages.filter(
+          (message) => message.severity === 2 && message.ruleId === rule,
+        )
+        expect(
+          hits.length,
+          `no ${rule} error in ${PROBE_TS} for:\n${code}\nmessages: ${show(messages)}`,
+        ).toBeGreaterThan(0)
+      },
+    )
+  },
+)
