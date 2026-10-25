@@ -3,7 +3,11 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { PlayerSearchRowOut } from '../../lib/api/types'
-import { SEARCH_MC, SEARCH_MCNAIR } from '../../lib/playerFixtures'
+import {
+  SEARCH_MC,
+  SEARCH_MCNAIR,
+  fixtureCoverage,
+} from '../../lib/playerFixtures'
 import { PlayerCombobox } from './PlayerCombobox'
 import type { PlayerSearchStatus } from './PlayerCombobox'
 
@@ -110,6 +114,7 @@ describe('PlayerCombobox (issue #301)', () => {
             group: 'QB',
             first_season: 1999,
             last_season: 2004,
+            coverage: fixtureCoverage(1999, 2004, 1999, 2004),
           },
           {
             player_id: 2,
@@ -118,6 +123,7 @@ describe('PlayerCombobox (issue #301)', () => {
             group: null,
             first_season: 2023,
             last_season: 2023,
+            coverage: fixtureCoverage(2023, 2023, 2023, 2023),
           },
         ]}
       />,

@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import { SEARCH_FAILED_COPY } from '../../lib/playerCompare'
-import { SEARCH_MC, SEARCH_MCNAIR } from '../../lib/playerFixtures'
+import {
+  SEARCH_MC,
+  SEARCH_MCNAIR,
+  fixtureCoverage,
+} from '../../lib/playerFixtures'
 import { PlayerCombobox } from './PlayerCombobox'
 import type { PlayerComboboxProps } from './PlayerCombobox'
 
@@ -99,6 +103,7 @@ export const SameNames: Story = {
         group: 'QB',
         first_season: 1999,
         last_season: 2004,
+        coverage: fixtureCoverage(1999, 2004, 1999, 2004),
       },
       {
         player_id: 2,
@@ -107,6 +112,7 @@ export const SameNames: Story = {
         group: null,
         first_season: 2023,
         last_season: 2023,
+        coverage: fixtureCoverage(2023, 2023, 2023, 2023),
       },
     ],
   },

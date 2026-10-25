@@ -30,6 +30,8 @@ import {
   LEADERS_BY_RUSHING_YARDS,
   LEADERS_BY_TDS,
   LEADERS_BY_YARDS,
+  FIXTURE_DATA_FIRST_SEASON,
+  FIXTURE_DATA_LAST_SEASON,
   LEADERS_WITH_NULL_STATS,
   TUA_TAGOVAILOA,
 } from '../../lib/playerFixtures'
@@ -69,7 +71,14 @@ function pageOf(query: PlayerLeadersQuery): PlayerLeadersOut {
       display_name: `Player ${query.offset + index + 1}`,
     }),
   )
-  return { sport: 'nfl', ...query, total: 204, rows }
+  return {
+    sport: 'nfl',
+    ...query,
+    total: 204,
+    data_first_season: FIXTURE_DATA_FIRST_SEASON,
+    data_last_season: FIXTURE_DATA_LAST_SEASON,
+    rows,
+  }
 }
 
 function LocationProbe() {
