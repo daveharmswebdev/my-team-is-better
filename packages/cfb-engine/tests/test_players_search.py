@@ -11,11 +11,13 @@ import pytest
 from cfb_strength.contracts import (
     PLAYER_SEARCH_MAX_LIMIT,
     PlayerCareer,
+    PlayerCoverage,
     PlayerPositionGroup,
     PlayerSearchRow,
     position_group,
 )
 from cfb_strength.players import search_players
+from cfb_strength.players._coverage import data_span
 from tests.test_players_support import STAT_COLUMNS, PlayerDb, conn_of, full_stats
 
 
@@ -132,8 +134,9 @@ _GROUPED = {"QB": "QB", "RB": "RB", "FB": "RB", "WR": "WR", "TE": "TE"}
 def test_position_group_maps_every_measured_label(label: str | None) -> None:
     expected = _GROUPED.get(label) if label is not None else None
     assert position_group(label) == expected
-    assert PlayerSearchRow(1, "X", label, 2000, 2000).group == expected
-    career = PlayerCareer("nfl", 1, "X", label, [], None, None)
+    coverage = PlayerCoverage(None, None, None, None, 2000, 2000, 1)
+    assert PlayerSearchRow(1, "X", label, 2000, 2000, coverage).group == expected
+    career = PlayerCareer("nfl", 1, "X", label, [], None, None, coverage)
     assert career.group == expected
 
 
@@ -322,9 +325,20 @@ def test_a_row_carries_identity_and_the_season_span_across_season_types(db: Play
 
     rows = search_players(conn_of(db), sport="nfl", query="span").rows
 
+    # The players carry no source span; the data span is the db's regular
+    # season rows (2003-2010) and the covered span is each player's own.
     assert rows == [
-        PlayerSearchRow(p, "Span Guy", "QB", 2001, 2005),
-        PlayerSearchRow(other, "Span Other", None, 2010, 2010),
+        PlayerSearchRow(
+            p, "Span Guy", "QB", 2001, 2005, PlayerCoverage(None, None, 2003, 2010, 2001, 2005, 3)
+        ),
+        PlayerSearchRow(
+            other,
+            "Span Other",
+            None,
+            2010,
+            2010,
+            PlayerCoverage(None, None, 2003, 2010, 2010, 2010, 1),
+        ),
     ]
 
 
@@ -353,6 +367,13 @@ _NAME_SCAN = (
     " AND lower(display_name) LIKE lower('%needle%') ESCAPE '\\'"
 )
 
+# The second floor (#446): every row's `PlayerCoverage` carries the db's data
+# span, MIN/MAX regular season over the sport's `player_season_stats`, read
+# once per call. `player_season_stats` has no index on (sport, season_type,
+# season), so that one aggregate reads the whole table too; it is measured by
+# itself and subtracted like the name scan. Everything else must still scale
+# with the players who match.
+
 
 def _steps(conn: sqlite3.Connection, run: Callable[[], object]) -> int:
     """SQLite VM steps (in tens) `run` takes: a deterministic stand-in for
@@ -376,7 +397,8 @@ def _cost_above_name_scan(db: PlayerDb) -> int:
     conn = conn_of(db)
     search = _steps(conn, lambda: search_players(conn, sport="nfl", query="needle"))
     scan = _steps(conn, lambda: conn.execute(_NAME_SCAN).fetchall())
-    return search - scan
+    span = _steps(conn, lambda: data_span(conn, sport="nfl"))
+    return search - scan - span
 
 
 def _db_with_bystanders(path: Path, bystanders: int) -> PlayerDb:

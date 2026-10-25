@@ -19,6 +19,7 @@ from cfb_strength.contracts import (
     Sport,
     StarterRecord,
 )
+from cfb_strength.players._coverage import coverages, data_span
 from cfb_strength.players._sql import STAT_COLUMNS, lines_cte, totals_select
 
 # Fixed SQL only: a sort never reaches SQL as caller text. Each value is an
@@ -167,6 +168,10 @@ def get_player_leaders(
     else:
         total = int(conn.execute(_count_sql(category, resolved), params).fetchone()[0])
 
+    # One grouped query for the page's players, not one per row (#446).
+    span = data_span(conn, sport=sport)
+    covered = coverages(conn, sport=sport, player_ids=(r["player_id"] for r in fetched), span=span)
+    data_first, data_last = span
     rows = [
         PlayerLeaderRow(
             rank=r["rank"],
@@ -178,6 +183,7 @@ def get_player_leaders(
             games=r["games"],
             record=StarterRecord(wins=r["wins"], losses=r["losses"], ties=r["ties"]),
             stats=PlayerStats(**{c: r[c] for c in STAT_COLUMNS}),
+            coverage=covered[r["player_id"]],
         )
         for r in fetched
     ]
@@ -189,5 +195,7 @@ def get_player_leaders(
         limit=limit,
         offset=offset,
         total=total,
+        data_first_season=data_first,
+        data_last_season=data_last,
         rows=rows,
     )
