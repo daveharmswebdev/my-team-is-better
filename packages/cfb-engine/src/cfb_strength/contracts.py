@@ -496,6 +496,9 @@ class PlayerSeasonStatRow:
 #     career). Any QB `game_starters` row counts as a start for a line's
 #     existence and for qualifying; only completed games with both scores
 #     count toward W-L-T. Neither case occurs in 1999-2025 nflverse data.
+#   * Coverage (#446, epic #443): every career, leaders row and search row
+#     carries the player's `PlayerCoverage`, the same value on all three for
+#     one player, so no page can show a cut-off career as the whole one.
 # ---------------------------------------------------------------------------
 
 PlayerLeaderCategory = Literal["passing", "rushing", "receiving", "kicking", "punting", "defense"]
@@ -660,6 +663,68 @@ class StarterRecord:
 
 
 @dataclass(frozen=True)
+class PlayerCoverage:
+    """How much of a player's career this db holds (#446, epic #443).
+
+    The founder's rule: a career that began before the data does is shown as
+    a slice, front and center, never as the whole career. Emmitt Smith played
+    1990-2004; NFL stats start in 1999, so his rows are the last 6 of 15
+    seasons.
+
+    The data span is read from the db itself, not a constant: the min and max
+    regular season in `player_season_stats` for the sport (1999 / 2025 on a
+    full NFL build), so it moves by itself if coverage grows. The derived
+    numbers are properties, so they can't disagree with the spans."""
+
+    # The source's roster span (`players.career_first_season` /
+    # `career_last_season`, #444). None when the source doesn't say.
+    career_first_season: int | None
+    career_last_season: int | None
+    # The db's player-stat span for this sport. None on a db with no
+    # regular-season stat rows.
+    data_first_season: int | None
+    data_last_season: int | None
+    # This player's own lines, either season type: the first and last season
+    # with a season row or a QB start, and how many distinct seasons have
+    # one. None / 0 when there are none.
+    covered_first_season: int | None
+    covered_last_season: int | None
+    covered_seasons: int
+
+    @property
+    def career_seasons(self) -> int | None:
+        """The span's length, last - first + 1: the "15" in "6 of 15". Not
+        nflverse's `years_of_experience`, which disagrees with the span
+        (Adrian Peterson: 2007-2021 is 15, experience 14). None without both
+        ends."""
+        if self.career_first_season is None or self.career_last_season is None:
+            return None
+        return self.career_last_season - self.career_first_season + 1
+
+    @property
+    def cut_off_before(self) -> bool:
+        """The career began before the data does. False when either is
+        unknown: no claim without both numbers."""
+        if self.career_first_season is None or self.data_first_season is None:
+            return False
+        return self.career_first_season < self.data_first_season
+
+    @property
+    def cut_off_after(self) -> bool:
+        """The career runs past the data's last season (an active player the
+        db hasn't caught up with). False when either is unknown."""
+        if self.career_last_season is None or self.data_last_season is None:
+            return False
+        return self.career_last_season > self.data_last_season
+
+    @property
+    def cut_off(self) -> bool:
+        """Either end is cut off: the totals are a slice of the career, so a
+        client marks no "larger number" on them (founder decision, #443)."""
+        return self.cut_off_before or self.cut_off_after
+
+
+@dataclass(frozen=True)
 class PlayerLeaderRow:
     """One qualifying player on a leaderboard for one category and season
     type. Qualifying is per category (`PlayerLeaderCategory`), with no
@@ -683,6 +748,9 @@ class PlayerLeaderRow:
     games: int | None
     record: StarterRecord
     stats: PlayerStats
+    # The whole player's coverage (both season types), the same object a
+    # career page gets, so a cut-off career is marked on the board too (#446).
+    coverage: PlayerCoverage
 
 
 @dataclass(frozen=True)
@@ -698,6 +766,10 @@ class PlayerLeaders:
     # Size of the whole qualifying population, so a client can page. For the
     # `fg_pct` sort, only the kickers who meet the attempts minimum.
     total: int
+    # The db's player-stat span for this sport (`PlayerCoverage`'s data span),
+    # so a board can say "since 1999" even when it has no rows (#446).
+    data_first_season: int | None
+    data_last_season: int | None
     rows: list[PlayerLeaderRow]
 
 
@@ -745,6 +817,7 @@ class PlayerCareer:
     # None when the player has no line of that type.
     regular_season: PlayerCareerTotals | None
     postseason: PlayerCareerTotals | None
+    coverage: PlayerCoverage
 
     @property
     def group(self) -> PlayerPositionGroup | None:
@@ -859,6 +932,10 @@ class PlayerSearchRow:
     # so two players with one name can be told apart.
     first_season: int
     last_season: int
+    # The source's span and the cut-off flags (#446): a search row reads
+    # "1990-2004 (stats from 1999)". `first_season` / `last_season` above
+    # equal `coverage.covered_first_season` / `covered_last_season`.
+    coverage: PlayerCoverage
 
     @property
     def group(self) -> PlayerPositionGroup | None:
