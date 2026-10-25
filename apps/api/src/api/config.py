@@ -150,7 +150,9 @@ PROMPT_VERSION = "persona-v13"
 # change. Independent of `PROMPT_VERSION`: a QB prompt change never busts a
 # team narration, and a team prompt change never busts a QB one.
 # qb-persona-v1: first version.
-QB_PROMPT_VERSION = "qb-persona-v1"
+# qb-persona-v2: rule 3 names career_band/peak_band (photo-finish words on a
+#   close margin only, runaway words on a decisive one) (#457).
+QB_PROMPT_VERSION = "qb-persona-v2"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

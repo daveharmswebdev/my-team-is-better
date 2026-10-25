@@ -43,8 +43,9 @@ In the prose, a name form in another case ("WARNER", "Mcnair"), a close
 misspelling of one ("Warnr"), or a player's other word alone ("Kurt", or
 "Manning" when the two share it) is rejected, and so is the full name of any
 other player in the sport's catalog ("Marshall Faulk", "Marshall Faulk's").
-A word that opens a sentence is never taken for a misspelled name ("Meaning",
-"Warned", "Stove"), and a first name alone that opens one is let through,
+A word that opens any sentence, not just the first (#457), is never taken for
+a misspelled name ("Meaning", "Warned", "Stove"), and a first name alone that
+opens one is let through,
 because it is as often an English word ("Will", for Will Levis); a lowercase
 name is prose; another player's last name alone ("Brady") is not caught.
 Those are accepted gaps.
@@ -53,11 +54,15 @@ A score, record or head-to-head prints its player's name ("McNair 0.60")
 unless the nearest player reference before it in the sentence (a name typed
 in the prose, or a placeholder that refers to a player) is that player
 ("McNair sits at 0.60"), so a figure can't sit beside the wrong player. A
-`career_start`, a count of qualifying seasons or a margin prints no name, so
-it is an error when the last player reference before it is the other player
-(a margin's player is the winner). That reference carries across a sentence
-break ("Warner? His career started in {cs}" can't be McNair's); with none
-before it at all, it passes.
+`career_start` or a count of qualifying seasons prints no name, so it is an
+error when the last player reference before it is the other player. That
+reference carries across a sentence break ("Warner? His career started in
+{cs}" can't be McNair's); with none before it at all, it passes. A margin
+prints no name either, and the player the prose puts ahead by it must be its
+winner: the last player named, unless he trails ("McNair trails by {m}") or
+is the object of a verb ("{wb} beats McNair by {m}"), #457. So "McNair's
+ahead by {m}" and "McNair, by {m}" are rejected. The verdict backstop also
+reads a margin after a win verb as a mention of its measure.
 
 **The verdict goes through claims** (D1 on #451). Every narration holds a
 `year` claim; a conclusive one holds one `winner` both claim or a `winner`
@@ -67,8 +72,21 @@ player reference, then a win verb ("takes", "wins", "edges", "beats", "tops",
 "grabs", "owns", "is ahead", "leads", "has the better"), then "career" or
 "peak" a few words on in the same clause, is rejected when that player isn't
 that measure's winner, and always on an inconclusive block. "Warner takes the
-career by a nose" passes for the winner; "Nobody beats Warner on the career"
-has no subject and passes; a pronoun subject is not caught.
+career" passes for the winner; "Nobody beats Warner on the career" has no
+subject and passes. #457 added the shapes that slipped past it: "McNair is
+the career winner", "The career goes to McNair", "McNair takes it: career
+and peak" (a colon after a bare object carries on to the measures), and
+"McNair? He takes the career" (a lone "he" is the one player the sentence
+before named; after a sentence naming both, it is not caught).
+
+**Margin size** (the coordinator's voice call on #457): any margin is still
+a win, and the words scale with it. Each measure's printed margin falls in a
+band (`MARGIN_BANDS`: close, clear or decisive) that the fact block states
+next to the margin. A runaway phrase ("runs away", "blowout", "in a walk")
+on a measure that isn't decisive, or a photo-finish phrase ("by a nose", "a
+photo finish") on one that isn't close, is rejected, and so is either on a
+dead-level measure. A phrase speaks of the measure named nearest it in its
+clause, else in its sentence, else of both.
 
 **The voice rules a check can see** (the coordinator's voice call on #451):
 there is always a winner, so a hedge that withholds the verdict ("too close
@@ -76,8 +94,12 @@ to call", "toss-up", "basically even", "dead heat", "coin flip", "can't
 separate them", "even steven") is rejected; speculation about the seasons
 the data doesn't hold ("would've flipped", "if we had his rookie year",
 "could swing it", "a different story", "give him those years back") is
-rejected; z-score jargon is rejected; a Roman numeral ("Super Bowl XXXIV")
-is rejected as a number (QB path only, D3). On an inconclusive block a
+rejected, unless a negator heads its clause ("nothing would change that")
+or it is the idiom ("that might change your mind"), and "a different story"
+only as a conditional ("it'd be a different story", "a different story
+if ..."); z-score jargon is rejected; a Roman numeral ("Super Bowl XXXIV")
+is rejected as a number (QB path only, D3), as a whole valid numeral word
+("LIVID" is not one). On an inconclusive block a
 `winner` or `margin` claim is rejected, and so is a score for the side with
 no qualifying season. A starter record used to argue with the score is the
 prompt's job, not a check here.
@@ -115,7 +137,7 @@ from api.persona.claims import (
 # These rules' version in the QB narration cache key
 # (`api.persona.cache.qb_cache_key`): bump it when a change could accept or
 # reject a QB narration differently.
-QB_GROUNDING_VERSION: Final = "qb-claims-v1"
+QB_GROUNDING_VERSION: Final = "qb-claims-v2"
 
 # The verdict alone takes two or three claims (the winners and the year, D1
 # on #451), so the cap leaves room for a few figures on top.
@@ -159,6 +181,13 @@ _CENT: Final = Decimal("0.01")
 # "reference" (a winner) counts as naming its player; "none" changes nothing.
 _Mode = Literal["name", "attributed", "reference", "none"]
 
+
+@dataclass(frozen=True)
+class _ClaimMeasure:
+    kind: str
+    measures: tuple[str, ...]
+
+
 # The hedges that withhold the verdict (voice call on #451: always a winner).
 _HEDGE_RE: Final = re.compile(
     r"\btoo\s+close\s+to\s+call\b|\btoss[\s-]?ups?\b|\bbasically\s+(?:even|tied|a\s+tie)\b"
@@ -171,39 +200,186 @@ _HEDGE_RE: Final = re.compile(
 )
 _HEDGE_ERROR: Final = (
     "there is always a winner on this score unless the FACT BLOCK says inconclusive: any "
-    'margin counts, so say who took it (close is fine: "by a nose", "a photo finish")'
+    'margin counts, so say who took it ("by a nose" and "a photo finish" fit a close margin '
+    "only)"
 )
 # Speculating about the seasons the data doesn't hold (#231: that's arguing
 # with the math).
 _SPECULATION_RE: Final = re.compile(
     r"\bwould(?:'ve|’ve|\s+have)\s+(?:flipped|changed|swung|won|turned|been\s+different)\b"
+    # The listener shape "if you had McNair, you'd be crying" is exempted in
+    # `_speculation_matches` (#457 round 3), not here.
     r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included)\b"
     r"|\bwith\s+(?:those|the\s+missing|his\s+early|his\s+missing)\s+(?:years|seasons)\b"
     # D2 on #451.
+    # "That might change your mind" is about the listener, not the seasons
+    # (#457).
     r"|\b(?:could|might|would)(?:\s+easily)?\s+(?:swing|flip|change)\b"
-    r"|\bdifferent\s+story\b"
+    r"(?!\s+(?:your|his|my|their|our|anybody['’]s|anyone['’]s|somebody['’]s|someone['’]s)"
+    r"\s+minds?\b)"
     r"|\bgive\s+(?:[\w'’]+\s+){1,5}(?:years?|seasons?)\s+back\b",
+    re.IGNORECASE,
+)
+# A would/could/might speculation behind a negator is the math holding, not
+# arguing with it ("nothing would change that", "no amount of whining could
+# change it", #457): it passes when a negator sits within a few words before
+# the modal in the same clause.
+_MODAL_RE: Final = re.compile(r"\b(?:would|could|might)\b", re.IGNORECASE)
+_NEGATOR_RE: Final = re.compile(
+    r"\b(?:nothing|nothin|nobody|no|none|never|not)\b|n['’]t\b", re.IGNORECASE
+)
+_NEGATOR_WORDS: Final = 4
+# "A different story" is speculation only as a conditional (#457): "it'd be
+# a different story", "different story if/with ...", or a conditional cue
+# earlier in its clause ("With his early stuff it's a different story").
+# "McNair's a different story." is just the next topic.
+_DIFFERENT_STORY_RE: Final = re.compile(r"\bdifferent\s+story\b", re.IGNORECASE)
+_STORY_AFTER_RE: Final = re.compile(r"\s+(?:if|with|once|given|had)\b", re.IGNORECASE)
+_STORY_CUE_RE: Final = re.compile(
+    r"\b(?:if|with|give|count|counting|add|had|would|could|might|be)\b|['’]d\b",
     re.IGNORECASE,
 )
 # A Roman numeral ("Super Bowl XXXIV") is a number too, and the QB block holds
 # no Super Bowls (D3 on #451). QB path only: the team path's rules are
-# untouched. Two or more numeral letters, uppercase, as a whole word.
+# untouched. A whole uppercase word of two or more numeral letters that is a
+# valid numeral, never an empty match: "DID", "LIVID" and "LCD" are not
+# numerals (#457). The valid numerals of 400 or more that are everyday
+# abbreviations ("DC", "MD", "CD") are no game number and pass; "XL" is
+# Super Bowl XL and doesn't.
 _ROMAN_RE: Final = re.compile(
-    r"\b(?=[MDCLXVI]{2,}\b)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\b"
+    r"\b(?=[MDCLXVI]{2,}\b)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?!\w)"
 )
+_ROMAN_ABBREVIATIONS: Final = frozenset({"DC", "MD", "CD"})
 _ROMAN_ERROR: Final = (
     "a Roman numeral is a number, and the FACT BLOCK holds no Super Bowls or numbered "
     "games, so leave it out"
 )
 # D1's backstop: a win verb after a player, then a measure (`_verdict_backstop`).
 _WIN_VERB_RE: Final = re.compile(
-    r"\b(?:takes|wins|edges|beats|tops|grabs|owns|is\s+ahead|leads|has\s+the\s+better)\b",
+    r"\b(?:takes|wins|edges|beats|tops|grabs|owns|is\s+ahead|leads|has\s+the\s+better)\b"
+    # "McNair is the career winner", "McNair's the peak king" (#457): the
+    # measure sits inside the verb, so the window starts at the verb.
+    r"|(?:\bis|['’]s)\s+the\s+(?:(?:career|peak)\s+)?(?:winner|leader|champ|champion|king)\b",
     re.IGNORECASE,
 )
 _MEASURE_RE: Final = re.compile(r"\b(?:career|peak)\b", re.IGNORECASE)
 _MEASURE_WINDOW: Final = 6
 _CLAUSE_END_RE: Final = re.compile(r"[,;:—–()]|\s-\s|\b(?:but|while|though|not)\b", re.IGNORECASE)
 _AND_BEFORE_RE: Final = re.compile(r"\b(?:and|while)\s+\Z", re.IGNORECASE)
+# "McNair takes it: career and peak" (#457): after a bare object, a colon or
+# dash introduces the measures instead of ending the clause.
+_OBJECT_COLON_RE: Final = re.compile(
+    r"\s+(?:it|both|them|it\s+all|everything)\s*(?:[:—–]|\s-\s)", re.IGNORECASE
+)
+# "McNair? He takes the career" (#457): a pronoun alone before the verb is
+# the last player named, even in the sentence before.
+_PRONOUN_SUBJECT_RE: Final = re.compile(
+    r"(?:(?:and|but|so|yeah|now|look|sure|oh|well)[,]?\s+)?he", re.IGNORECASE
+)
+# "The career goes to McNair" (#457): a measure handed to a player.
+_GOES_TO_RE: Final = re.compile(
+    r"\b(?P<measure>career|peak)(?:\s+(?:score|crown|title|race|side))?\s+"
+    r"(?:goes|went|belongs|falls|fell)\s+to\b",
+    re.IGNORECASE,
+)
+# Who a margin belongs to (`_margin_holder`, #457 round 2): a trail word
+# between the last name and the margin makes the other player the one ahead;
+# a verb or "over" right before the last name makes it an object.
+_TRAIL_RE: Final = re.compile(
+    r"\b(?:trails?|trailed|trailing|behind|short|lags?|lagged|lagging|loses|lost|down)\b"
+    # The passive (#457 round 3): "McNair gets beat by {m}".
+    r"|\b(?:gets?|got|was|is|been|getting)\s+beat(?:en)?\b",
+    re.IGNORECASE,
+)
+# A trail word right after the margin: "McNair falls {m} short", "finishes
+# {m} behind" (#457 round 3).
+_TRAIL_AFTER_RE: Final = re.compile(r"\s+(?:short|behind|back)\b", re.IGNORECASE)
+_OBJECT_BEFORE_RE: Final = re.compile(
+    r"\b(?:beats|beat|beating|tops|topped|topping|edges|edged|edging|over|past|than"
+    r"|outplays|outplayed|outscores|outscored|outdoes|outdid|leads|led|ahead\s+of"
+    r"|in\s+front\s+of|clears|cleared)\s+\Z",
+    re.IGNORECASE,
+)
+# A coordinated new verb starts its own attribution for margin words (#457
+# round 2): "runs away with the career and takes the peak".
+_COORDINATED_VERB_RE: Final = re.compile(
+    r"\b(?:and|then)\s+(?:then\s+)?(?:he\s+)?"
+    r"(?!(?:his|its|this|thus|as|us|plus|less|yes)\b)"
+    r"(?:[a-z]+(?:s|ed)|took|won|ran|got|had|is|was)\b",
+    re.IGNORECASE,
+)
+# An appositive list of measures after the clause ("runs away with it,
+# career and peak"; "with the career, and the peak too"): the phrase covers
+# every listed measure, as the backstop's colon rule does (#457 round 2).
+_APPOSITIVE_RE: Final = re.compile(
+    r"\s*(?:[,:—–]|\s-\s)\s*(?P<list>(?:(?:and|the|both|too|also|career|peak)\b[\s,]*)+?)"
+    r"(?=[.!?;,]|\s*\Z)",
+    re.IGNORECASE,
+)
+# A negated extreme is no use of it ("no photo finish here", "this was no
+# squeaker", "doesn't run away with it", "forget by a nose"; #457 round 2).
+# The negator must govern the phrase: right before it, with at most an
+# auxiliary, "even" or "a" between (round 3), so "No doubt Manning runs away"
+# is still a runaway.
+_MARGIN_NEGATOR_RE: Final = re.compile(
+    r"(?:\b(?:no|not|never|nobody|forget|nothing\s+like)|n['’]t)\s+"
+    r"(?:(?:even|a|an|is|was|be|been|do|does|did|really|ever|just)\s+){0,2}\Z",
+    re.IGNORECASE,
+)
+# A clause that opens on an imperative conditional ("Give him those years and
+# it's a different story") governs the clause it is coordinated with.
+_IMPERATIVE_CUE_RE: Final = re.compile(
+    r"\s*(?:give|count|add|throw|put|hand|toss|let|credit)\b", re.IGNORECASE
+)
+_AND_RE: Final = re.compile(r"\band\b", re.IGNORECASE)
+# The listener shape of "if you had": "If you had McNair, you'd be crying"
+# (#457 round 3) is about the fan, not the missing seasons.
+_IF_YOU_HAD_RE: Final = re.compile(r"if\s+you\s+had", re.IGNORECASE)
+
+# Margin size (the coordinator's voice call on #457, 2026-10-25): any margin
+# is a win, and the words scale with it. Each measure's margin, as printed
+# (the difference of the two printed scores), falls in a band on fixed
+# thresholds, inclusive on the upper band:
+#   career: close < 1.5 <= clear < 7.5 <= decisive
+#   peak:   close < 0.15 <= clear < 0.75 <= decisive
+# About 0.24 and 1.2 standard deviations of each measure's spread over the
+# 26 notable QBs sampled from production on 2026-10-25 (career pstdev 6.29,
+# peak 0.64: the two differ in scale by about 10x, so one threshold can't
+# serve both). Over those 325 pairs |career margin| p10/p25/p50/p75 =
+# 1.28/3.17/5.89/10.55 and |peak margin| = 0.13/0.31/0.64/1.05.
+MarginBand = Literal["close", "clear", "decisive"]
+MARGIN_BANDS: Final[Mapping[str, tuple[Decimal, Decimal]]] = {
+    "career": (Decimal("1.5"), Decimal("7.5")),
+    "peak": (Decimal("0.15"), Decimal("0.75")),
+}
+# Runaway words fit a decisive margin only, photo-finish words a close one
+# only; a clear margin takes neither.
+_RUNAWAY_RE: Final = re.compile(
+    r"\b(?:runs|ran|running|run)\s+away\b|\brunaway\b|\bblow[\s-]?outs?\b"
+    r"|\b(?:blows|blew|blowing|blow)\s+(?:[\w'’]+\s+)?out\b|\bno\s+contest\b"
+    # The adjective only ("it isn't close", "wasn't even close"), never the
+    # verb with an object ("can't close the gap", "couldn't close it out")
+    # or "close to" (#457 round 2).
+    r"|(?:\bnot|n['’]t)\s+(?:even\s+)?close\b"
+    r"(?!\s+(?:to|the|a|an|it|out|that|this|his|her|their|them|him|ground|in|down|off|any"
+    r"|gaps?|distance|deals?|shop|up)\b)"
+    r"|(?<!victory\s)\blaps\b|\blapped\b|\blapping\b|\blandslide\b|\brout(?:s|ed)?\b"
+    r"|\b(?:buries|buried|burying)\b|\b(?:walks|walked|walking)\s+away\s+with\b"
+    r"|\bin\s+a\s+walk\b|\bby\s+(?:a\s+mile|miles)\b|\bmiles\s+ahead\b|\bcakewalk\b"
+    # The review's probes (#457 round 2).
+    r"|\bgoing\s+away\b|\b(?:cruises|cruised|cruising)\b",
+    re.IGNORECASE,
+)
+_PHOTO_FINISH_RE: Final = re.compile(
+    r"\bphoto[\s-]finish\b|\bby\s+a\s+(?:nose|hair|whisker|eyelash)\b|\brazor[\s-]thin\b"
+    r"|\bcoin[\s-]?flips?\b|\bsqueak(?:s|ed|ing|er)?\b|\bneck\s+and\s+neck\b"
+    r"|\bnip\s+and\s+tuck\b|\bskin\s+of\s+his\s+teeth\b"
+    # "barely" only as a near-miss win ("barely takes the peak"), never
+    # "barely qualified".
+    r"|\bbarely\s+(?:[\w'’]+\s+)?(?:edges?|edged|beats?|takes?|took|wins?|won|tops?|topped"
+    r"|gets?|got|ahead|nips?|nipped|grabs?|grabbed|holds?\s+on|held\s+on|pulls?|pulled)\b",
+    re.IGNORECASE,
+)
 _SPECULATION_ERROR: Final = (
     "never speculate about the missing seasons: the score counts only the seasons in the "
     "books, so say what got counted, never what the missing seasons would do"
@@ -324,7 +500,8 @@ class _QbBlock:
             if winner is not None:
                 ahead = self.players[winner]
                 items.append(
-                    f"{measure}: {ahead.called} ahead by {self.shown_margin(measure, winner)}"
+                    f"{measure}: {ahead.called} ahead by {self.shown_margin(measure, winner)} "
+                    f"({self.band(measure)})"
                 )
         if self.inconclusive is not None:
             names = " and ".join(p.name for p in self.unqualified())
@@ -344,6 +521,46 @@ class _QbBlock:
         low = self.players[_OTHER[winner]].scores[measure]
         assert high is not None and low is not None
         return _decimal_text(_shown(high) - _shown(low))
+
+    def band(self, measure: str) -> MarginBand | None:
+        """The measure's margin band; None on an exact tie or an
+        inconclusive block, which have no margin."""
+        if self.inconclusive is not None:
+            return None
+        a, b = self.players["a"].scores[measure], self.players["b"].scores[measure]
+        return qb_margin_band(measure, self.winners[measure], a, b)
+
+
+def margin_band(measure: str, margin: Decimal) -> MarginBand:
+    """The band of a printed `margin` on `measure` (`MARGIN_BANDS`): a
+    boundary belongs to the upper band."""
+    close_below, decisive_from = MARGIN_BANDS[measure]
+    size = abs(margin)
+    if size < close_below:
+        return "close"
+    return "clear" if size < decisive_from else "decisive"
+
+
+def qb_margin_band(
+    measure: str,
+    winner: str | None,
+    a: Decimal | float | None,
+    b: Decimal | float | None,
+) -> MarginBand | None:
+    """The band of the margin between two scores as the narration prints
+    them (two decimals, half up), so the band always matches the margin on
+    screen. None when the measure has no winner (an exact tie) or either
+    score is missing (inconclusive). The QB fact block
+    (`api.persona.service.qb_fact_block_json`) and the check both use it."""
+    if winner is None or a is None or b is None:
+        return None
+    return margin_band(measure, _shown(_decimal(a)) - _shown(_decimal(b)))
+
+
+def _decimal(value: Decimal | float) -> Decimal:
+    # repr is the shortest round-trip form, the same digits the JSON block
+    # carries and `_parse_block` reads back.
+    return value if isinstance(value, Decimal) else Decimal(repr(value))
 
 
 def qb_tool_schema() -> dict[str, Any]:
@@ -477,6 +694,9 @@ def check_and_render_qb(
     # The resolved claims that carry the verdict: "year", "winner:career",
     # "winner:peak", "winner:both" (D1 on #451: the verdict goes through claims).
     verdict_claims: set[str] = set()
+    # The measures a resolved score, margin or winner placeholder speaks of,
+    # for the margin-size words and the verdict backstop (#457).
+    claim_measures: dict[str, _ClaimMeasure] = {}
     if "claims" not in tool_input:
         errors.append(f'{TOOL_NAME} needs "claims" (a list, which may be empty)')
     elif not isinstance(raw_claims, list):
@@ -522,6 +742,11 @@ def check_and_render_qb(
                 modes[claim_id] = (mode, side)
                 kind = raw["kind"]
                 verdict_claims.add(f"winner:{raw['measure']}" if kind == "winner" else str(kind))
+                if kind in ("score", "margin", "winner"):
+                    measure = cast(str, raw["measure"])
+                    claim_measures[claim_id] = _ClaimMeasure(
+                        kind, MEASURES if measure == "both" else (measure,)
+                    )
         errors.extend(_required_claim_errors(verdict_claims, block))
 
     named_at: set[int] = set()
@@ -539,7 +764,7 @@ def check_and_render_qb(
         if MASK in text:
             errors.append("the text contains a NUL character")
         else:
-            prose_errors, named_at = _check_prose(text, modes, block, player_names)
+            prose_errors, named_at = _check_prose(text, modes, claim_measures, block, player_names)
             errors.extend(prose_errors)
 
     if errors or not isinstance(text, str):
@@ -883,8 +1108,12 @@ def _resolve_margin(
             f"({_score_text(high)}), so there is no margin to state; {ahead.called} is still "
             'ahead, so say he took it without a number ("by a nose")'
         ]
-    # Attributed to the winner (R2, #451): "McNair is ahead by {m}" must not
-    # print Warner's margin beside McNair.
+    # Attributed to the winner (R2, #451): "McNair's ahead by {m}" must not
+    # print Warner's margin beside McNair. #457 exempts a loser who trails or
+    # is the object of the winner's verb (`_margin_beside_loser_is_true`):
+    # "{wb} beats McNair by {m}" and "McNair trails by {m}" are true. The
+    # verdict backstop also reads a margin after a win verb as a mention of
+    # its measure ("McNair is ahead by {m}").
     return (block.shown_margin(measure, winner), "attributed", winner), []
 
 
@@ -896,6 +1125,7 @@ def _resolve_margin(
 def _check_prose(
     text: str,
     modes: Mapping[str, tuple[_Mode, Side | None]],
+    claim_measures: Mapping[str, _ClaimMeasure],
     block: _QbBlock,
     player_names: Collection[str],
 ) -> tuple[list[str], set[int]]:
@@ -907,21 +1137,24 @@ def _check_prose(
     if "{" in masked or "}" in masked:
         errors.append('the text has a "{" or "}" that is not part of a placeholder like {id}')
 
+    breaks = [match.end() for match in SENTENCE_BREAK_RE.finditer(masked)]
     holdings = block.holdings()
     for what, match, rule in typed_number_matches(masked):
         errors.append(f"the prose {what} {quote(match.group(0))}; {rule}. {holdings}")
-    for pattern, message in (
-        (_HEDGE_RE, _HEDGE_ERROR),
-        (_SPECULATION_RE, _SPECULATION_ERROR),
-        (_JARGON_RE, _JARGON_ERROR),
-    ):
-        for match in pattern.finditer(masked):
-            errors.append(f"the prose says {quote(match.group(0))}; {message}")
+    for match in _HEDGE_RE.finditer(masked):
+        errors.append(f"the prose says {quote(match.group(0))}; {_HEDGE_ERROR}")
+    names = [form for player in block.players.values() for form in player.forms]
+    for match in _speculation_matches(masked, breaks, names):
+        errors.append(f"the prose says {quote(match.group(0))}; {_SPECULATION_ERROR}")
+    for match in _JARGON_RE.finditer(masked):
+        errors.append(f"the prose says {quote(match.group(0))}; {_JARGON_ERROR}")
     # A block player's own suffix ("Robert Griffin III") is his name, not a number.
     roman_text = masked
     for player in block.players.values():
         roman_text = roman_text.replace(player.name, MASK * len(player.name))
     for match in _ROMAN_RE.finditer(roman_text):
+        if not match.group(0) or match.group(0) in _ROMAN_ABBREVIATIONS:
+            continue
         errors.append(f"the prose types the Roman numeral {quote(match.group(0))}; {_ROMAN_ERROR}")
 
     third = _third_players(masked, block, player_names)
@@ -933,7 +1166,6 @@ def _check_prose(
     references, name_errors = _name_references(masked, block, [(s, e) for s, e, _ in third])
     errors.extend(name_errors)
 
-    breaks = [match.end() for match in SENTENCE_BREAK_RE.finditer(masked)]
     walk: list[tuple[int, Side | None, str | None]] = sorted(
         [(start, side, None) for start, side in references]
         + [(match.start(), None, match.group(1)) for match in placeholders]
@@ -945,18 +1177,35 @@ def _check_prose(
     # one, so "Warner? His career started in {cs}" can't print McNair's (R3).
     nearest: Side | None = None
     last: Side | None = None
+    # Every player reference so far, as (offset, side), for a margin's
+    # trail/object exemption (#457 round 2).
+    history: list[tuple[int, Side]] = []
     for start, side, claim_id in walk:
         at = bisect.bisect_right(breaks, start)
         if at != sentence:
             sentence, nearest = at, None
         if claim_id is None:
             nearest = last = side
+            if side is not None:
+                history.append((start, side))
             continue
         mode, claim_side = modes.get(claim_id, ("none", None))
         if claim_side is None or mode == "none":
             continue
         if mode == "name" and nearest != claim_side:
             named_at.add(start)
+        is_margin = claim_id in claim_measures and claim_measures[claim_id].kind == "margin"
+        if is_margin:
+            holder = _margin_holder(masked, start, history, breaks)
+            if holder is not None and holder != claim_side:
+                player, other = block.players[claim_side], block.players[holder]
+                errors.append(
+                    f"{{{claim_id}}} is {player.name}'s figure, but the prose puts {other.name} "
+                    f"ahead by it; name {player.called} as the one ahead"
+                )
+            # A margin names nobody: "Warner beats McNair by {m}" leaves
+            # McNair the last player named.
+            continue
         if mode == "attributed" and last is not None and last != claim_side:
             player, other = block.players[claim_side], block.players[last]
             errors.append(
@@ -964,15 +1213,132 @@ def _check_prose(
                 f"is {other.name}; name {player.called} right before it"
             )
         nearest = last = claim_side
+        history.append((start, claim_side))
 
-    errors.extend(_verdict_backstop(masked, walk, modes, breaks, block))
+    errors.extend(_verdict_backstop(masked, walk, modes, claim_measures, breaks, block))
+    errors.extend(_margin_word_errors(masked, placeholders, claim_measures, breaks, block))
     return errors, named_at
+
+
+def _margin_holder(
+    masked: str, start: int, history: Sequence[tuple[int, Side]], breaks: Sequence[int]
+) -> Side | None:
+    """Who the prose says is ahead by the margin at `start` (#457 round 2):
+    the last player named before it, unless he trails ("McNair trails by
+    {m}", "McNair is behind by {m}", "McNair gets beat by {m}", "McNair falls
+    {m} short": the other one is ahead) or is the object of a verb ("{wb}
+    beats McNair by {m}", "Warner over McNair by {m}": the player before him
+    is ahead). A trail word counts only in the margin's own clause (round 3:
+    "McNair went down swinging, but he's ahead by {m}" puts McNair ahead).
+    None when nobody is named."""
+    if not history:
+        return None
+    at, side = history[-1]
+    if _OBJECT_BEFORE_RE.search(masked[max(0, at - 30) : at]):
+        return history[-2][1] if len(history) > 1 else None
+    left, _, _, _ = _clause_bounds(masked, start, start, breaks)
+    end = start
+    while end < len(masked) and masked[end] == MASK:
+        end += 1
+    if _TRAIL_RE.search(masked, max(at, left), start) or _TRAIL_AFTER_RE.match(masked, end):
+        return _OTHER[side]
+    return side
+
+
+def _sentence_bounds(masked: str, start: int, breaks: Sequence[int]) -> tuple[int, int]:
+    sentence = bisect.bisect_right(breaks, start)
+    left = breaks[sentence - 1] if sentence else 0
+    right = breaks[sentence] if sentence < len(breaks) else len(masked)
+    return left, right
+
+
+def _clause_bounds(
+    masked: str, start: int, end: int, breaks: Sequence[int]
+) -> tuple[int, int, int, int]:
+    """The clause around masked[start:end] (cut at `_CLAUSE_END_RE` and the
+    sentence breaks), then its sentence, as (left, right, s_left, s_right)."""
+    s_left, s_right = _sentence_bounds(masked, start, breaks)
+    left = s_left
+    for stop in _CLAUSE_END_RE.finditer(masked, s_left, start):
+        left = max(left, stop.end())
+    after = _CLAUSE_END_RE.search(masked, end, s_right)
+    return left, (after.start() if after else s_right), s_left, s_right
+
+
+def _speculation_matches(
+    masked: str, breaks: Sequence[int], names: Collection[str]
+) -> list[re.Match[str]]:
+    """`_SPECULATION_RE`'s matches, less a would/could/might one behind a
+    negator and the listener shape "if you had McNair, ..." (`names` are the
+    block's name forms), plus a "different story" that is a conditional
+    (#457)."""
+    found: list[re.Match[str]] = []
+    for match in _SPECULATION_RE.finditer(masked):
+        if _IF_YOU_HAD_RE.fullmatch(match.group(0)) and any(
+            re.match(rf"\s+{re.escape(name)}\s*(?:[,;:.!?—–]|\Z)", masked[match.end() :])
+            for name in names
+        ):
+            continue
+        if _MODAL_RE.match(masked, match.start()):
+            left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
+            words = masked[left : match.start()].split()[-_NEGATOR_WORDS:]
+            if any(_NEGATOR_RE.search(word) for word in words):
+                continue
+        found.append(match)
+    for match in _DIFFERENT_STORY_RE.finditer(masked):
+        left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
+        # The cue must govern the phrase (#457 round 2): its own coordinated
+        # clause ("With his early stuff it's a different story", "it'd be a
+        # different story"), or a coordinated clause before it that opens on
+        # an imperative conditional ("Give him those years and it's a
+        # different story"); not an earlier "with" ("Warner takes it with
+        # room to spare and McNair's a different story").
+        ands = list(_AND_RE.finditer(masked, left, match.start()))
+        own = ands[-1].end() if ands else left
+        previous = ands[-2].end() if len(ands) > 1 else left
+        s_left, _ = _sentence_bounds(masked, match.start(), breaks)
+        if ands and len(ands) == 1 and not masked[left : ands[0].start()].strip() and left > s_left:
+            # ", and it's a different story": the coordinated clause before it
+            # is the clause before the comma (#457 round 3).
+            previous, _, _, _ = _clause_bounds(masked, left - 1, left - 1, breaks)
+        conditional = (
+            _STORY_AFTER_RE.match(masked, match.end())
+            or _STORY_CUE_RE.search(masked, own, match.start())
+            or (ands and _IMPERATIVE_CUE_RE.match(masked, previous))
+        )
+        if conditional:
+            found.append(match)
+    return sorted(found, key=lambda match: match.start())
+
+
+def _wrong_winner_error(said: str, subject: _Player, measure: str, block: _QbBlock) -> str | None:
+    if block.inconclusive is not None:
+        return f"the prose says {said}, but {block.verdict_text()}: name no winner"
+    winner = block.winners[measure]
+    if winner == subject.side:
+        return None
+    goes = (
+        f"the {measure} goes to {block.players[winner].called}"
+        if winner is not None
+        else f"the {measure} is dead level"
+    )
+    return (
+        f"the prose says {said}, but {goes}, not {subject.called}; name the winner through a "
+        "winner claim and never type a verdict the block doesn't hold"
+    )
+
+
+def _window_end(masked: str, start: int, end: int) -> int:
+    """Where the first `_MEASURE_WINDOW` words after `start` end, before `end`."""
+    tokens = list(re.finditer(r"\S+", masked[start:end]))[:_MEASURE_WINDOW]
+    return start + tokens[-1].end() if tokens else start
 
 
 def _verdict_backstop(
     masked: str,
     walk: Sequence[tuple[int, Side | None, str | None]],
     modes: Mapping[str, tuple[_Mode, Side | None]],
+    claim_measures: Mapping[str, _ClaimMeasure],
     breaks: Sequence[int],
     block: _QbBlock,
 ) -> list[str]:
@@ -982,23 +1348,46 @@ def _verdict_backstop(
     when that player isn't that measure's winner, and always on an
     inconclusive block. The subject is the last reference before the verb, so
     "McNair beats Warner on the career" is McNair's claim; "Nobody beats
-    Warner on the career" has no subject before its verb and passes."""
+    Warner on the career" has no subject before its verb and passes.
+
+    #457 widened it: a margin placeholder in the window is a mention of its
+    measure ("McNair is ahead by {m}"); "is the career winner" is a win verb;
+    a colon after a bare object carries on to the measures ("McNair takes it:
+    career and peak"); a lone "he" before the verb is the player the sentence
+    before named, when it named only one ("McNair? He takes the career"); and
+    "the career goes to McNair" hands a measure to the player after it."""
     references = [
         (start, side if claim_id is None else modes.get(claim_id, ("none", None))[1])
         for start, side, claim_id in walk
         if claim_id is None or modes.get(claim_id, ("none", None))[0] == "reference"
     ]
+    margins = [
+        (start, claim_measures[claim_id].measures)
+        for start, _, claim_id in walk
+        if claim_id is not None
+        and claim_id in claim_measures
+        and claim_measures[claim_id].kind == "margin"
+    ]
     errors: list[str] = []
     for verb in _WIN_VERB_RE.finditer(masked):
-        sentence = bisect.bisect_right(breaks, verb.start())
-        left = breaks[sentence - 1] if sentence else 0
+        left, _ = _sentence_bounds(masked, verb.start(), breaks)
         before = [
             side for start, side in references if left <= start < verb.start() and side is not None
         ]
-        if not before:
+        if before:
+            subject = block.players[before[-1]]
+        elif _PRONOUN_SUBJECT_RE.fullmatch(masked[left : verb.start()].strip()):
+            previous = _previous_sentence_subject(references, left, breaks)
+            if previous is None:
+                continue
+            subject = block.players[previous]
+        else:
             continue
-        subject = block.players[before[-1]]
-        stop = _CLAUSE_END_RE.search(masked, verb.end())
+        resume = verb.end()
+        colon = _OBJECT_COLON_RE.match(masked, verb.end())
+        if colon:
+            resume = colon.end()
+        stop = _CLAUSE_END_RE.search(masked, resume)
         end = stop.start() if stop else len(masked)
         # "McNair takes the career and Warner the peak": a reference after
         # "and" starts its own (gapped) clause, so the peak isn't McNair's.
@@ -1006,26 +1395,164 @@ def _verdict_backstop(
             if verb.end() <= start < end and _AND_BEFORE_RE.search(masked, verb.end(), start):
                 end = start
                 break
-        window = masked[verb.end() : end]
-        for measure_match in _MEASURE_RE.finditer(" ".join(window.split()[:_MEASURE_WINDOW])):
-            measure = measure_match.group(0).casefold()
-            said = f"{quote(subject.called + ' ' + verb.group(0) + ' ... ' + measure)}"
-            if block.inconclusive is not None:
-                errors.append(f"the prose says {said}, but {block.verdict_text()}: name no winner")
-                continue
-            winner = block.winners[measure]
-            if winner != subject.side:
-                goes = (
-                    f"the {measure} goes to {block.players[winner].called}"
-                    if winner is not None
-                    else f"the {measure} is dead level"
-                )
-                errors.append(
-                    f"the prose says {said}, but {goes}, not {subject.called}; name the "
-                    "winner through a winner claim and never type a verdict the block "
-                    "doesn't hold"
-                )
+        window_end = _window_end(masked, verb.end(), end)
+        found = [
+            match.group(0).casefold()
+            for match in _MEASURE_RE.finditer(masked, verb.start(), window_end)
+        ]
+        found.extend(
+            measure
+            for start, measures in margins
+            if verb.end() <= start < window_end
+            for measure in measures
+        )
+        for measure in dict.fromkeys(found):
+            said = quote(f"{subject.called} {verb.group(0).strip()} ... {measure}")
+            error = _wrong_winner_error(said, subject, measure, block)
+            if error is not None:
+                errors.append(error)
+    for match in _GOES_TO_RE.finditer(masked):
+        stop = _CLAUSE_END_RE.search(masked, match.end())
+        end = stop.start() if stop else len(masked)
+        window_end = _window_end(masked, match.end(), end)
+        after = [
+            side
+            for start, side in references
+            if match.end() <= start < window_end and side is not None
+        ]
+        if not after:
+            continue
+        subject = block.players[after[0]]
+        measure = match.group("measure").casefold()
+        said = quote(f"{' '.join(match.group(0).split())} {subject.called}")
+        error = _wrong_winner_error(said, subject, measure, block)
+        if error is not None:
+            errors.append(error)
     return errors
+
+
+def _previous_sentence_subject(
+    references: Sequence[tuple[int, Side | None]], left: int, breaks: Sequence[int]
+) -> Side | None:
+    """The one player the nearest earlier sentence with a reference names,
+    for a lone "he"; None when it names both (the pronoun is ambiguous)."""
+    earlier = [(start, side) for start, side in references if start < left and side is not None]
+    if not earlier:
+        return None
+    sentence = bisect.bisect_right(breaks, earlier[-1][0])
+    sides = {side for start, side in earlier if bisect.bisect_right(breaks, start) == sentence}
+    return sides.pop() if len(sides) == 1 else None
+
+
+def _margin_word_errors(
+    masked: str,
+    placeholders: Sequence[re.Match[str]],
+    claim_measures: Mapping[str, _ClaimMeasure],
+    breaks: Sequence[int],
+    block: _QbBlock,
+) -> list[str]:
+    """Margin size (#457): a runaway phrase on a measure whose band isn't
+    decisive, or a photo-finish phrase on one that isn't close, is rejected.
+    A phrase speaks of the measure mentioned nearest it in its clause (a
+    "career" or "peak", or a score, margin or winner placeholder of that
+    measure; every mention after it when the nearest is after it), else the
+    nearest before it in its sentence, else the nearest after it, else both
+    measures. A dead-level measure takes neither. An inconclusive block has
+    no margins; its verdict is checked elsewhere."""
+    if block.inconclusive is not None:
+        return []
+    mentions: list[tuple[int, tuple[str, ...]]] = sorted(
+        [(match.start(), (match.group(0).casefold(),)) for match in _MEASURE_RE.finditer(masked)]
+        + [
+            (match.start(), claim_measures[match.group(1)].measures)
+            for match in placeholders
+            if match.group(1) in claim_measures
+        ]
+    )
+    errors: list[str] = []
+    for kind, pattern, fits in (
+        ("runaway", _RUNAWAY_RE, "decisive"),
+        ("photo-finish", _PHOTO_FINISH_RE, "close"),
+    ):
+        for match in pattern.finditer(masked):
+            left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
+            if _MARGIN_NEGATOR_RE.search(masked[left : match.start()]):
+                continue
+            for measure in _phrase_measures(match, mentions, masked, breaks):
+                band = block.band(measure)
+                if band != fits:
+                    errors.append(_margin_word_error(match.group(0), kind, measure, band, block))
+    return errors
+
+
+def _phrase_measures(
+    match: re.Match[str],
+    mentions: Sequence[tuple[int, tuple[str, ...]]],
+    masked: str,
+    breaks: Sequence[int],
+) -> tuple[str, ...]:
+    left, right, s_left, s_right = _clause_bounds(masked, match.start(), match.end(), breaks)
+    # The phrase's own verb phrase (#457 round 2): a coordinated new verb
+    # ("... the career and takes the peak") starts another attribution.
+    for coordinated in _COORDINATED_VERB_RE.finditer(masked, left, match.start()):
+        left = coordinated.start()
+    cut = _COORDINATED_VERB_RE.search(masked, match.end(), right)
+    listed: tuple[str, ...] = ()
+    if cut:
+        right = cut.start()
+    else:
+        apposition = _APPOSITIVE_RE.match(masked, right)
+        if apposition:
+            listed = tuple(
+                found.group(0).casefold() for found in _MEASURE_RE.finditer(apposition["list"])
+            )
+    named = _nearest_measures(match, mentions, left, right, s_left, s_right)
+    return tuple(dict.fromkeys((*(named or ()), *listed))) or MEASURES
+
+
+def _nearest_measures(
+    match: re.Match[str],
+    mentions: Sequence[tuple[int, tuple[str, ...]]],
+    left: int,
+    right: int,
+    s_left: int,
+    s_right: int,
+) -> tuple[str, ...] | None:
+    before = [(match.start() - at, ms) for at, ms in mentions if left <= at < match.start()]
+    after = [(at - match.end(), ms) for at, ms in mentions if match.end() <= at < right]
+    if after and (not before or min(after)[0] < min(before)[0]):
+        return tuple(dict.fromkeys(m for _, ms in after for m in ms))
+    if before:
+        return min(before)[1]
+    # A phrase in a clause of its own is an aside on what came before it
+    # ("{wc} takes the career by {mc}, a photo finish, and ..."), or, opening
+    # the sentence, on what follows ("By a nose, he takes the career").
+    before = [(match.start() - at, ms) for at, ms in mentions if s_left <= at < match.start()]
+    if before:
+        return min(before)[1]
+    after = [(at - match.end(), ms) for at, ms in mentions if match.end() <= at < s_right]
+    return min(after)[1] if after else None
+
+
+def _margin_word_error(
+    phrase: str, kind: str, measure: str, band: MarginBand | None, block: _QbBlock
+) -> str:
+    said = f"the prose says {quote(phrase)}"
+    winner = block.winners[measure]
+    if band is None or winner is None:
+        return (
+            f"{said}, but the {measure} is dead level: no margin words, say plainly that it "
+            "is level"
+        )
+    fits = {
+        "close": 'a close one takes "by a nose" or "a photo finish"',
+        "clear": "a clear one takes neither extreme, just who took it",
+        "decisive": 'a decisive one can "run away with it"',
+    }[band]
+    return (
+        f"{said}, but the {measure} margin is {block.shown_margin(measure, winner)}, a {band} "
+        f"one: no {kind} words; {fits}"
+    )
 
 
 def _third_players(
@@ -1141,10 +1668,13 @@ def _forms_text(player: _Player) -> str:
 
 
 def _opens_sentence(masked: str, start: int, sentence_starts: Collection[int]) -> bool:
+    # A sentence start sits after the break's whitespace (`SENTENCE_BREAK_RE`
+    # ends there), and the walk back stops just after the "." (#457), so any
+    # start between the two counts.
     left = start
     while left > 0 and (masked[left - 1].isspace() or masked[left - 1] in "\"'‘’“”("):
         left -= 1
-    return left in sentence_starts
+    return any(left <= opening <= start for opening in sentence_starts)
 
 
 def _distance(a: str, b: str) -> int:

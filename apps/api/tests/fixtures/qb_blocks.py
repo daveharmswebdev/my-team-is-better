@@ -86,6 +86,45 @@ def split_block() -> str:
 
 
 @cache
+def rescored_evidence(
+    a: int, b: int, *, career: tuple[float, float], peak: tuple[float, float]
+) -> QbVerdictEvidenceOut:
+    """The real block for (a, b) with both players' career and peak scores
+    replaced, and the winners and margins recomputed the engine's way
+    (winner the higher score, margin a minus b, an exact tie no winner).
+    For the margin bands (#457): no fixture pair has a decisive career, a
+    split, or a live pair's exact figures (Brady vs P. Manning)."""
+    evidence = qb_evidence(a, b)
+    score = evidence.qb_score
+
+    def winner(pair: tuple[float, float]) -> str | None:
+        if pair[0] == pair[1]:
+            return None
+        return "a" if pair[0] > pair[1] else "b"
+
+    return evidence.model_copy(
+        update={
+            "qb_score": score.model_copy(
+                update={
+                    "a": score.a.model_copy(update={"career": career[0], "peak": peak[0]}),
+                    "b": score.b.model_copy(update={"career": career[1], "peak": peak[1]}),
+                    "career_winner": winner(career),
+                    "peak_winner": winner(peak),
+                    "career_margin": career[0] - career[1],
+                    "peak_margin": peak[0] - peak[1],
+                }
+            )
+        }
+    )
+
+
+def rescored_block(
+    a: int, b: int, *, career: tuple[float, float], peak: tuple[float, float]
+) -> str:
+    return qb_fact_block_json(rescored_evidence(a, b, career=career, peak=peak))
+
+
+@cache
 def nfl_player_names() -> frozenset[str]:
     with fixture_conn() as conn:
         return list_player_names(conn, "nfl")
