@@ -3,11 +3,13 @@ import {
   CAREER_WITH_NULL_STATS,
   EDGERRIN_JAMES,
   FAULK_VS_FARMER,
+  FRANK_WYCHECK_CAREER,
   FRED_MCCRARY_CAREER,
   HILL_VS_LAMB,
   HARRISON_VS_JAMES,
   KURT_WARNER_CAREER,
   MARE_VS_GOWIN,
+  SMITH_VS_PETERSON,
   STEVE_MCNAIR_CAREER,
   WARNER_VS_MCNAIR,
   ZAYNE_ANDERSON_CAREER,
@@ -16,7 +18,9 @@ import {
   MEASURED_POSITION_LABELS,
   POSITION_NOUNS,
   compareUndercountNote,
+  comparisonGroup,
   comparisonRows,
+  comparisonShowsRecord,
   formatGameDate,
   groupSingular,
   headToHeadStatLine,
@@ -29,6 +33,7 @@ import {
   showsHeadToHead,
   uncomparableCopy,
 } from './playerCompare'
+import type { PlayerCareerOut, PlayerCareerTotalsOut } from './api/types'
 import { DASH } from './playerStats'
 
 const record = (wins: number, losses: number, ties = 0) => ({
@@ -79,6 +84,7 @@ describe('comparisonRows (issue #301)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.regular_season,
       STEVE_MCNAIR_CAREER.regular_season,
+      'QB',
     )
     expect(rows.map((row) => row.label)).toEqual([
       'Seasons',
@@ -101,6 +107,7 @@ describe('comparisonRows (issue #301)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.regular_season,
       STEVE_MCNAIR_CAREER.regular_season,
+      'QB',
     )
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Passing yards']).toMatchObject({
@@ -126,6 +133,7 @@ describe('comparisonRows (issue #301)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.postseason,
       STEVE_MCNAIR_CAREER.postseason,
+      'QB',
     )
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Games']).toMatchObject({ a: '3', b: '4', marked: 'b' })
@@ -140,6 +148,7 @@ describe('comparisonRows (issue #301)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.regular_season,
       CAREER_WITH_NULL_STATS.regular_season,
+      comparisonGroup(KURT_WARNER_CAREER, CAREER_WITH_NULL_STATS),
     )
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Games']).toMatchObject({
@@ -163,6 +172,7 @@ describe('comparisonRows (issue #301)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.postseason,
       CAREER_WITH_NULL_STATS.postseason,
+      comparisonGroup(KURT_WARNER_CAREER, CAREER_WITH_NULL_STATS),
     )
     expect(rows.every((row) => row.b === null)).toBe(true)
     expect(rows.every((row) => row.a !== null)).toBe(true)
@@ -171,15 +181,18 @@ describe('comparisonRows (issue #301)', () => {
 })
 
 /**
- * Issue #352: the rows are the stat groups either player recorded, by the
- * career table's rule, and the starter record shows only when one of them
- * passed or started.
+ * Issue #352: with no position group the two players share, the rows are
+ * the stat groups either player recorded, by the career table's rule, and
+ * the starter record shows only when one of them passed or started. Since
+ * #436 the page never shows such a pair; the rule keeps `comparisonRows`
+ * total.
  */
-describe('comparisonRows for non-quarterbacks (issue #352)', () => {
+describe('comparisonRows with no shared group (issue #352)', () => {
   it('gives a receiver and a back the rushing and receiving rows, and no passing or record row', () => {
     const rows = comparisonRows(
       HARRISON_VS_JAMES.a.regular_season,
       HARRISON_VS_JAMES.b.regular_season,
+      comparisonGroup(HARRISON_VS_JAMES.a, HARRISON_VS_JAMES.b),
     )
     expect(rows.map((row) => row.label)).toEqual([
       'Seasons',
@@ -210,6 +223,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
     const rows = comparisonRows(
       MARE_VS_GOWIN.a.regular_season,
       MARE_VS_GOWIN.b.regular_season,
+      comparisonGroup(MARE_VS_GOWIN.a, MARE_VS_GOWIN.b),
     )
     expect(rows.map((row) => row.label)).toEqual([
       'Seasons',
@@ -232,6 +246,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.regular_season,
       ZAYNE_ANDERSON_CAREER.regular_season,
+      comparisonGroup(KURT_WARNER_CAREER, ZAYNE_ANDERSON_CAREER),
     )
     const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
     expect(byLabel['Solo tackles']).toMatchObject({
@@ -246,6 +261,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.regular_season,
       FRED_MCCRARY_CAREER.regular_season,
+      comparisonGroup(KURT_WARNER_CAREER, FRED_MCCRARY_CAREER),
     )
     const labels = rows.map((row) => row.label)
     expect(labels).toContain('Receptions')
@@ -256,6 +272,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
     const rows = comparisonRows(
       KURT_WARNER_CAREER.regular_season,
       STEVE_MCNAIR_CAREER.regular_season,
+      'QB',
     )
     expect(KURT_WARNER_CAREER.regular_season!.stats.def_tackles_solo).toBe(1)
     expect(STEVE_MCNAIR_CAREER.regular_season!.stats.def_tackles_solo).toBe(1)
@@ -263,7 +280,7 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
   })
 
   it('keeps the rows of the player who has totals when the other has none', () => {
-    const rows = comparisonRows(MARE_VS_GOWIN.a.postseason, null)
+    const rows = comparisonRows(MARE_VS_GOWIN.a.postseason, null, null)
     expect(rows.map((row) => row.label)).toEqual([
       'Seasons',
       'Games',
@@ -272,6 +289,184 @@ describe('comparisonRows for non-quarterbacks (issue #352)', () => {
       'FG long',
       'XP made',
     ])
+  })
+})
+
+/**
+ * Issue #438 (founder decision, 2026-10-25): the position group both
+ * players share decides the rows, not whichever stats either recorded.
+ * Stats outside the group are hidden.
+ */
+describe('comparisonRows by position group (issue #438)', () => {
+  const RUSHING_ROWS = [
+    'Carries',
+    'Rushing yards',
+    'Rushing TDs',
+    'Rushing first downs',
+    'Rushing fumbles lost',
+  ]
+  const RECEIVING_ROWS = ['Receptions', 'Receiving yards', 'Receiving TDs']
+
+  it("gives two backs rushing then receiving, and none of Emmitt Smith's one pass or a record row", () => {
+    const { a: smith, b: peterson } = SMITH_VS_PETERSON
+    expect(smith.regular_season!.stats.completions).toBe(1)
+    const rows = comparisonRows(
+      smith.regular_season,
+      peterson.regular_season,
+      comparisonGroup(smith, peterson),
+    )
+    expect(rows.map((row) => row.label)).toEqual([
+      'Seasons',
+      'Games',
+      ...RUSHING_ROWS,
+      ...RECEIVING_ROWS,
+    ])
+    const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
+    expect(byLabel['Rushing yards']).toMatchObject({
+      a: '5,789',
+      b: '14,921',
+      marked: 'b',
+    })
+  })
+
+  it('gives two backs the same rows in the playoffs', () => {
+    const { a: smith, b: peterson } = SMITH_VS_PETERSON
+    const rows = comparisonRows(smith.postseason, peterson.postseason, 'RB')
+    expect(rows.map((row) => row.label)).toEqual([
+      'Seasons',
+      'Games',
+      ...RUSHING_ROWS,
+      ...RECEIVING_ROWS,
+    ])
+  })
+
+  it("hides a back's solo tackles too", () => {
+    const { a: faulk, b: farmer } = FAULK_VS_FARMER
+    const labels = comparisonRows(
+      faulk.regular_season,
+      farmer.regular_season,
+      comparisonGroup(faulk, farmer),
+    ).map((row) => row.label)
+    expect(labels).not.toContain('Solo tackles')
+    expect(labels).not.toContain('Attempts')
+    expect(labels).not.toContain('Starter record')
+  })
+
+  it('gives two quarterbacks the record, passing and rushing rows even when neither ran', () => {
+    const noRushing = (
+      totals: PlayerCareerTotalsOut,
+    ): PlayerCareerTotalsOut => ({
+      ...totals,
+      stats: {
+        ...totals.stats,
+        carries: 0,
+        rushing_yards: 0,
+        rushing_tds: 0,
+        rushing_first_downs: 0,
+        rushing_fumbles_lost: 0,
+      },
+    })
+    const rows = comparisonRows(
+      noRushing(KURT_WARNER_CAREER.regular_season!),
+      noRushing(STEVE_MCNAIR_CAREER.regular_season!),
+      comparisonGroup(KURT_WARNER_CAREER, STEVE_MCNAIR_CAREER),
+    )
+    expect(rows.map((row) => row.label)).toEqual([
+      'Seasons',
+      'Games',
+      'Starter record',
+      'Completions',
+      'Attempts',
+      'Passing yards',
+      'Passing TDs',
+      'Interceptions',
+      ...RUSHING_ROWS,
+    ])
+    const byLabel = Object.fromEntries(rows.map((row) => [row.label, row]))
+    expect(byLabel['Carries']).toMatchObject({ a: '0', b: '0', marked: null })
+  })
+
+  it('gives two receivers receiving only, not their carries', () => {
+    const { a: hill, b: lamb } = HILL_VS_LAMB
+    expect(lamb.regular_season!.stats.carries).toBeGreaterThan(0)
+    const rows = comparisonRows(
+      hill.regular_season,
+      lamb.regular_season,
+      comparisonGroup(hill, lamb),
+    )
+    expect(rows.map((row) => row.label)).toEqual([
+      'Seasons',
+      'Games',
+      ...RECEIVING_ROWS,
+    ])
+  })
+
+  it("gives two tight ends receiving only, not Frank Wycheck's touchdown pass", () => {
+    const other: PlayerCareerOut = {
+      ...FRANK_WYCHECK_CAREER,
+      player_id: 1,
+      display_name: 'Another tight end',
+    }
+    expect(FRANK_WYCHECK_CAREER.regular_season!.stats.passing_tds).toBe(1)
+    const rows = comparisonRows(
+      FRANK_WYCHECK_CAREER.regular_season,
+      other.regular_season,
+      comparisonGroup(FRANK_WYCHECK_CAREER, other),
+    )
+    expect(rows.map((row) => row.label)).toEqual([
+      'Seasons',
+      'Games',
+      ...RECEIVING_ROWS,
+    ])
+  })
+
+  it("keeps a group's rows for the one player with totals when the other has none", () => {
+    const rows = comparisonRows(SMITH_VS_PETERSON.a.postseason, null, 'RB')
+    expect(rows.map((row) => row.label)).toEqual([
+      'Seasons',
+      'Games',
+      ...RUSHING_ROWS,
+      ...RECEIVING_ROWS,
+    ])
+    expect(rows.every((row) => row.b === null)).toBe(true)
+  })
+})
+
+describe('comparisonGroup (issue #438)', () => {
+  it('is the group both players share', () => {
+    expect(comparisonGroup(SMITH_VS_PETERSON.a, SMITH_VS_PETERSON.b)).toBe('RB')
+    expect(comparisonGroup(KURT_WARNER_CAREER, STEVE_MCNAIR_CAREER)).toBe('QB')
+  })
+
+  it('is null for two groups, or a player with none', () => {
+    expect(comparisonGroup(HARRISON_VS_JAMES.a, HARRISON_VS_JAMES.b)).toBeNull()
+    expect(
+      comparisonGroup(KURT_WARNER_CAREER, ZAYNE_ANDERSON_CAREER),
+    ).toBeNull()
+    expect(comparisonGroup(MARE_VS_GOWIN.a, MARE_VS_GOWIN.b)).toBeNull()
+  })
+})
+
+describe('comparisonShowsRecord (issue #438)', () => {
+  it('is true for two quarterbacks only, among grouped pairs', () => {
+    expect(comparisonShowsRecord(KURT_WARNER_CAREER, STEVE_MCNAIR_CAREER)).toBe(
+      true,
+    )
+    expect(
+      comparisonShowsRecord(SMITH_VS_PETERSON.a, SMITH_VS_PETERSON.b),
+    ).toBe(false)
+    expect(
+      comparisonShowsRecord(FRANK_WYCHECK_CAREER, FRANK_WYCHECK_CAREER),
+    ).toBe(false)
+  })
+
+  it('keeps the recorded-stats rule (#352) for a pair with no shared group', () => {
+    expect(
+      comparisonShowsRecord(KURT_WARNER_CAREER, ZAYNE_ANDERSON_CAREER),
+    ).toBe(true)
+    expect(
+      comparisonShowsRecord(HARRISON_VS_JAMES.a, HARRISON_VS_JAMES.b),
+    ).toBe(false)
   })
 })
 

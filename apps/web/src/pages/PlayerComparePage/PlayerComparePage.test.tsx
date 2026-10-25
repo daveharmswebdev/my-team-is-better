@@ -39,6 +39,7 @@ import {
   SEARCH_MANNING,
   SEARCH_MCNAIR,
   SEARCH_WILKINS,
+  SMITH_VS_PETERSON,
   TYREEK_HILL_CAREER,
   WARNER_VS_MCNAIR,
   ZAYNE_ANDERSON_CAREER,
@@ -278,6 +279,24 @@ describe('PlayerComparePage (issue #301)', () => {
     expect(
       within(regular).queryByRole('rowheader', { name: 'Passing yards' }),
     ).not.toBeInTheDocument()
+    expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
+    expect(regular).not.toHaveAccessibleDescription()
+  })
+
+  it("compares two backs on their position's rows: no passing rows and no starter-record note for Emmitt Smith's one pass (#438)", async () => {
+    mockedCompare.mockResolvedValue(SMITH_VS_PETERSON)
+
+    renderPage('?a=2249533020&b=2104182639')
+
+    const regular = await screen.findByRole('table', {
+      name: 'Emmitt Smith and Adrian Peterson, regular season',
+    })
+    for (const gone of ['Starter record', 'Completions', 'Passing yards']) {
+      expect(
+        within(regular).queryByRole('rowheader', { name: gone }),
+      ).not.toBeInTheDocument()
+    }
+    expect(cellsOf(regular, 'Rushing yards')[1]).toHaveTextContent('14,921')
     expect(screen.queryByText(STARTER_RECORD_NOTE)).not.toBeInTheDocument()
     expect(regular).not.toHaveAccessibleDescription()
   })

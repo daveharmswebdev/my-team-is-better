@@ -24,6 +24,7 @@ import type {
 import {
   DASH,
   NOT_RECORDED,
+  STAT_GROUP_COLUMNS,
   formatStat,
   leaderStatCell,
   recordedStatGroups,
@@ -124,30 +125,91 @@ function statRow(column: TableStatColumn): RowSpec {
 }
 
 /**
- * The comparison's rows, in order (issue #352): seasons, games, the starter
- * record when either player passed or started, then the stat groups either
- * player recorded, each judged on his own totals (`statColumnsForPlayers`).
- * No sack rows: like the boards, the comparison doesn't show sacks suffered
- * or sack yards lost, a display choice (#298).
+ * The stat groups each position group is compared on, in order (founder
+ * decision on #438): the position decides the rows, and stats outside it
+ * are hidden. A quarterback keeps his rushing even when he never ran.
  */
-function rowSpecs(totals: readonly PlayerCareerTotalsOut[]): RowSpec[] {
+const POSITION_STAT_GROUPS: Record<PlayerPositionGroup, readonly StatGroup[]> =
+  {
+    QB: ['passing', 'rushing'],
+    RB: ['rushing', 'receiving'],
+    WR: ['receiving'],
+    TE: ['receiving'],
+  }
+
+/**
+ * The position group both players share, which decides the compare rows
+ * (#438), or `null` when their groups differ or either has none. Since #436
+ * the page shows only a shared-group pair.
+ */
+export function comparisonGroup(
+  a: PlayerCareerOut,
+  b: PlayerCareerOut,
+): PlayerPositionGroup | null {
+  return a.group !== null && a.group === b.group ? a.group : null
+}
+
+/**
+ * Whether a compare table shows the starter record: for two quarterbacks
+ * only (#438). A pair with no shared group keeps the recorded-stats rule
+ * (#352, `showsStarterRecord`).
+ */
+function showsRecordRow(
+  group: PlayerPositionGroup | null,
+  lines: readonly { stats: PlayerStatsOut; record: StarterRecordOut }[],
+): boolean {
+  return group === null ? showsStarterRecord(lines) : group === 'QB'
+}
+
+/** Whether the compare page's tables show a starter record, so need its note. */
+export function comparisonShowsRecord(
+  a: PlayerCareerOut,
+  b: PlayerCareerOut,
+): boolean {
+  return showsRecordRow(comparisonGroup(a, b), [...a.seasons, ...b.seasons])
+}
+
+/**
+ * The comparison's rows, in order: seasons, games, then by the position
+ * group both players share (#438) -- for a quarterback the starter record,
+ * passing and rushing; for a back rushing then receiving; for a receiver
+ * or tight end receiving. With no shared group (unreachable on the page
+ * since #436), the #352 rule: the starter record when either player passed
+ * or started, then the stat groups either player recorded, each judged on
+ * his own totals (`statColumnsForPlayers`). No sack rows: like the boards,
+ * the comparison doesn't show sacks suffered or sack yards lost (#298).
+ */
+function rowSpecs(
+  totals: readonly PlayerCareerTotalsOut[],
+  group: PlayerPositionGroup | null,
+): RowSpec[] {
+  const columns =
+    group === null
+      ? statColumnsForPlayers(totals.map((side) => [side.stats]))
+      : POSITION_STAT_GROUPS[group].flatMap(
+          (statGroup) => STAT_GROUP_COLUMNS[statGroup],
+        )
   return [
     SEASONS_ROW,
     GAMES_ROW,
-    ...(showsStarterRecord(totals) ? [RECORD_ROW] : []),
-    ...statColumnsForPlayers(totals.map((side) => [side.stats])).map(statRow),
+    ...(showsRecordRow(group, totals) ? [RECORD_ROW] : []),
+    ...columns.map(statRow),
   ]
 }
 
-/** Both players' totals of one season type, row by row, with each row's mark. */
+/**
+ * Both players' totals of one season type, row by row, with each row's
+ * mark. `group` is the position group both share (`comparisonGroup`).
+ */
 export function comparisonRows(
   a: PlayerCareerTotalsOut | null,
   b: PlayerCareerTotalsOut | null,
+  group: PlayerPositionGroup | null,
 ): ComparisonRow[] {
   const present = [a, b].filter(
     (side): side is PlayerCareerTotalsOut => side !== null,
   )
-  return rowSpecs(present).map((row) => ({
+  return rowSpecs(present, group).map((row) => ({
     key: row.key,
     label: row.label,
     fullLabel: row.fullLabel,

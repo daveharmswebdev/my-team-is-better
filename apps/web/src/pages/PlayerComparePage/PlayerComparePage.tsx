@@ -35,6 +35,8 @@ import {
   SAME_PLAYER_COPY,
   SEARCH_FAILED_COPY,
   compareUndercountNote,
+  comparisonGroup,
+  comparisonShowsRecord,
   groupSingular,
   notComparableCopy,
   pickOneMoreCopy,
@@ -47,7 +49,6 @@ import {
   PLAYER_NOT_FOUND_COPY,
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
-  showsStarterRecord,
 } from '../../lib/playerStats'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
 import { usePlayerSearch } from './usePlayerSearch'
@@ -996,7 +997,8 @@ function Comparison({
   const headToHeadId = `${noteId}-head-to-head`
   // The note explains the starter record, so it shows only when a table can
   // show one: two receivers have no record row for it to describe (#352).
-  const showsRecordNote = showsStarterRecord([...a.seasons, ...b.seasons])
+  const showsRecordNote = comparisonShowsRecord(a, b)
+  const group = comparisonGroup(a, b)
 
   return (
     <>
@@ -1048,6 +1050,7 @@ function Comparison({
                 caption={`${a.display_name} and ${b.display_name}, ${label.toLowerCase()}`}
                 a={{ name: a.display_name, totals: aTotals }}
                 b={{ name: b.display_name, totals: bTotals }}
+                group={group}
                 noTotalsCopy={NO_TOTALS_COPY[seasonType]}
                 describedBy={showsRecordNote ? noteId : undefined}
               />

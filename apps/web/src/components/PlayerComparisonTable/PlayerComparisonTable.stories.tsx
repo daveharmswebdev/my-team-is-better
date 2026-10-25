@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import {
   CAREER_WITH_NULL_STATS,
-  HARRISON_VS_JAMES,
+  HILL_VS_LAMB,
   KURT_WARNER_CAREER,
-  MARE_VS_GOWIN,
+  SMITH_VS_PETERSON,
   STEVE_MCNAIR_CAREER,
   TJ_WATT_CAREER,
 } from '../../lib/playerFixtures'
@@ -18,6 +18,7 @@ const meta = {
     a: { name: 'Kurt Warner', totals: KURT_WARNER_CAREER.regular_season },
     b: { name: 'Steve McNair', totals: STEVE_MCNAIR_CAREER.regular_season },
     noTotalsCopy: 'No regular-season games on record.',
+    group: 'QB',
   },
 } satisfies Meta<typeof PlayerComparisonTable>
 
@@ -38,9 +39,14 @@ export const Playoffs: Story = {
   },
 }
 
-/** Stats one side didn't record read "not recorded", and their rows stay unmarked. */
+/**
+ * Stats one side didn't record read "not recorded", and their rows stay
+ * unmarked. The other player has no group, so the rows are the stats either
+ * recorded (#352).
+ */
 export const NullStats: Story = {
   args: {
+    group: null,
     caption: 'Kurt Warner and Unrecorded Player, regular season',
     b: {
       name: 'Unrecorded Player',
@@ -59,34 +65,41 @@ export const NoTotalsForOne: Story = {
   },
 }
 
-/** A receiver and a back (#352): rushing and receiving rows, no passing or record row. */
-export const ReceiverAndBack: Story = {
+/**
+ * Two backs (#438): rushing then receiving. Emmitt Smith's one touchdown
+ * pass brings no passing rows and no starter record.
+ */
+export const TwoBacks: Story = {
   args: {
-    caption: 'Marvin Harrison and Edgerrin James, regular season',
-    a: {
-      name: 'Marvin Harrison',
-      totals: HARRISON_VS_JAMES.a.regular_season,
-    },
+    caption: 'Emmitt Smith and Adrian Peterson, regular season',
+    a: { name: 'Emmitt Smith', totals: SMITH_VS_PETERSON.a.regular_season },
     b: {
-      name: 'Edgerrin James',
-      totals: HARRISON_VS_JAMES.b.regular_season,
+      name: 'Adrian Peterson',
+      totals: SMITH_VS_PETERSON.b.regular_season,
     },
+    group: 'RB',
   },
 }
 
-/** A kicker and a punter (#352): the punter's missing longest field goal is a dash, unmarked. */
-export const KickerAndPunter: Story = {
+/** Two receivers (#438): receiving only, not their handful of carries. */
+export const TwoReceivers: Story = {
   args: {
-    caption: 'Olindo Mare and Toby Gowin, regular season',
-    a: { name: 'Olindo Mare', totals: MARE_VS_GOWIN.a.regular_season },
-    b: { name: 'Toby Gowin', totals: MARE_VS_GOWIN.b.regular_season },
+    caption: 'Tyreek Hill and CeeDee Lamb, regular season',
+    a: { name: 'Tyreek Hill', totals: HILL_VS_LAMB.a.regular_season },
+    b: { name: 'CeeDee Lamb', totals: HILL_VS_LAMB.b.regular_season },
+    group: 'WR',
   },
 }
 
-/** Two pass rushers (#352): the defense rows, with the founder's notes (#316) under the table. */
+/**
+ * Two pass rushers, who have no position group yet: the rows are the stats
+ * they recorded (#352), with the founder's defense notes (#316) under the
+ * table. The page doesn't compare them yet (#436); the table still can.
+ */
 export const Defenders: Story = {
   args: {
     caption: 'T.J. Watt and a 17.5-sack season, regular season',
+    group: null,
     a: { name: 'T.J. Watt', totals: TJ_WATT_CAREER.regular_season },
     b: {
       name: 'Another pass rusher',
