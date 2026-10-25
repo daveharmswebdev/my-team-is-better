@@ -189,10 +189,8 @@ describe('ShareButton (issue #184)', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(2))
     expect(screen.getByRole('status')).toBeEmptyDOMElement()
 
-    // Returning a promise keeps this an async act, which flushes the updates.
-    await act(() => {
+    await act(async () => {
       releaseSecondCopy()
-      return Promise.resolve()
     })
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent('Link copied'),

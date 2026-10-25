@@ -213,7 +213,10 @@ describe('formatRating', () => {
   it('has a display rule for every method in METHODS', () => {
     expect(METHODS.length).toBeGreaterThan(0)
     for (const method of METHODS) {
-      expect(formatRating(0.5, method), method).toMatch(/\S/)
+      expect({ method, formatted: formatRating(0.5, method) }).toEqual({
+        method,
+        formatted: expect.stringMatching(/\S/),
+      })
     }
   })
 })

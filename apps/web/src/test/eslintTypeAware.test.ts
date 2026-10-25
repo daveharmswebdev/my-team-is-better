@@ -21,6 +21,7 @@ import { describe, expect, it } from 'vitest'
 const WEB_DIR = process.cwd()
 const PROBE_TS = 'src/lib/formatRating.ts'
 const PROBE_TSX = 'src/components/ShareButton/ShareButton.tsx'
+const PROBE_TEST_TSX = 'src/components/ShareButton/ShareButton.test.tsx'
 
 const show = (value: unknown) => JSON.stringify(value, null, 2)
 
@@ -63,6 +64,36 @@ const ORDINARY: [string, string, string][] = [
   ],
 ]
 
+/**
+ * Canonical React Testing Library / Vitest idioms the type-aware rules reject
+ * (issue #222 round 2). The test-file override turns exactly these rules off,
+ * so each probe must lint clean under a test path and still error under a
+ * source path: the override can't silently widen to shipped code.
+ * [description, code, rule it trips outside test files]
+ */
+const TEST_IDIOMS: [string, string, string][] = [
+  [
+    '`await act(async () => { sync() })`',
+    "import { act } from '@testing-library/react'\nimport { it } from 'vitest'\n\nconst sync = (): void => undefined\n\nit('acts', async () => {\n  await act(async () => {\n    sync()\n  })\n})\n",
+    '@typescript-eslint/require-await',
+  ],
+  [
+    'an `async it()` with no await',
+    "import { expect, it } from 'vitest'\n\nit('checks', async () => {\n  expect(1).toBe(1)\n})\n",
+    '@typescript-eslint/require-await',
+  ],
+  [
+    '`toEqual({ a: expect.any(String) })`',
+    "import { expect, it } from 'vitest'\n\nit('matches', () => {\n  expect({ a: 'b' }).toEqual({ a: expect.any(String) })\n})\n",
+    '@typescript-eslint/no-unsafe-assignment',
+  ],
+  [
+    '`expect(obj.m).toHaveBeenCalled()`',
+    "import { expect, it, vi } from 'vitest'\n\ninterface Thing {\n  m(): void\n}\n\nit('spies', () => {\n  const obj: Thing = { m: vi.fn() }\n  obj.m()\n  expect(obj.m).toHaveBeenCalled()\n})\n",
+    '@typescript-eslint/unbound-method',
+  ],
+]
+
 describe('eslint.config.js type-aware and jsx-a11y layers (issue #222)', () => {
   const eslint = new ESLint({ cwd: WEB_DIR })
 
@@ -90,6 +121,34 @@ describe('eslint.config.js type-aware and jsx-a11y layers (issue #222)', () => {
         result?.messages ?? [],
         `false positive in ${filePath}:\n${code}`,
       ).toEqual([])
+    },
+  )
+
+  it.each(TEST_IDIOMS)(
+    'accepts %s in a test file',
+    async (_description, code) => {
+      const [result] = await eslint.lintText(code, {
+        filePath: PROBE_TEST_TSX,
+      })
+      expect(
+        result?.messages ?? [],
+        `false positive in ${PROBE_TEST_TSX}:\n${code}`,
+      ).toEqual([])
+    },
+  )
+
+  it.each(TEST_IDIOMS)(
+    'still rejects %s outside test files',
+    async (_description, code, rule) => {
+      const [result] = await eslint.lintText(code, { filePath: PROBE_TS })
+      const messages = result?.messages ?? []
+      const hits = messages.filter(
+        (message) => message.severity === 2 && message.ruleId === rule,
+      )
+      expect(
+        hits.length,
+        `no ${rule} error in ${PROBE_TS} for:\n${code}\nmessages: ${show(messages)}`,
+      ).toBeGreaterThan(0)
     },
   )
 })

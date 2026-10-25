@@ -2610,10 +2610,8 @@ describe('QuestionForm', () => {
       ).not.toBeInTheDocument()
       expect(submitButton()).not.toBeDisabled()
 
-      // Returning a promise keeps this an async act, which flushes the updates.
-      await act(() => {
+      await act(async () => {
         releaseElo([2005, 2006, 2007])
-        return Promise.resolve()
       })
 
       expect(

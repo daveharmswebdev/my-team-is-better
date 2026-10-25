@@ -136,6 +136,26 @@ export default tseslint.config(
     },
   },
   {
+    // Issue #222: three type-aware rules that reject canonical React Testing
+    // Library / Vitest idioms, off in test files only (story and source files
+    // keep the full set; src/test/eslintTypeAware.test.ts checks both sides).
+    name: 'type-aware/test-files',
+    files: ['**/*.test.{ts,tsx}', 'src/test/setup.ts'],
+    rules: {
+      // `await act(async () => { sync() })` is RTL's documented way to flush
+      // the updates a resolved promise schedules, and `async it()` with no
+      // await is ordinary test style.
+      '@typescript-eslint/require-await': 'off',
+      // Asymmetric matchers (`expect.any`, `expect.stringMatching`, ...) are
+      // typed `any` by Vitest, so every `toEqual({ a: expect.any(String) })`
+      // would be flagged.
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      // `expect(obj.method).toHaveBeenCalled()` passes a method without
+      // calling it; Vitest's own guidance is to turn this rule off in tests.
+      '@typescript-eslint/unbound-method': 'off',
+    },
+  },
+  {
     // Issue #222: static accessibility checks on JSX (a click handler on a
     // <div> with no key handler or role, a missing alt, ...). The storybook
     // a11y addon checks rendered stories at run time; this catches the same
