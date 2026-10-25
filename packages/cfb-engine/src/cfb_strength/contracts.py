@@ -869,6 +869,179 @@ class PlayerSearch:
 
 
 # ---------------------------------------------------------------------------
+# QB score (issue #440, epic #439 step 1): an era-adjusted efficiency score
+# that settles "who was the better QB?" on a QB compare. The math decides;
+# the narrator (a later step) only reads the verdict out. Same module
+# (`cfb_strength.players`) and the same data rules as the read layer above.
+#
+# Coordinator-assigned signatures, implemented by players-agent and exported
+# from `cfb_strength.players`:
+#
+#   def get_qb_score(conn: sqlite3.Connection, *, sport: Sport,
+#                    player_id: int) -> QbScore: ...
+#       Raises UnknownPlayerError when no `players` row has that id and sport,
+#       and NotAQuarterbackError when the player's group isn't "QB".
+#
+#   def get_qb_score_comparison(conn: sqlite3.Connection, *, sport: Sport,
+#                               a: int, b: int) -> QbScoreComparison: ...
+#       Raises ValueError when a == b, then UnknownPlayerError and
+#       NotAQuarterbackError for the first of `a`, `b` (checked in that order,
+#       one player at a time: `a` is fully checked before `b`).
+#
+#   def fit_qb_score_weights(conn: sqlite3.Connection, *,
+#                            sport: Sport) -> QbScoreWeightFit: ...
+#       The reproducible refit behind QB_SCORE_WEIGHTS. Never called per
+#       request: a refit that moves the weights is a deliberate
+#       QB_SCORE_VERSION bump.
+#
+# Definition (founder decisions, epic #439; don't re-decide):
+#   * Population: players whose `position_group(position)` is "QB", in
+#     `sport`, `season_type = 'regular'` only (postseason is context).
+#   * A season is one `player_season_stats` row: its primary key is
+#     (player_id, season, season_type), so a QB traded mid-season already has
+#     one whole-season row (team_id NULL), never two halves.
+#   * dropbacks = attempts + sacks_suffered. A season qualifies at
+#     dropbacks >= QB_SCORE_MIN_DROPBACKS.
+#   * epa_per_dropback = passing_epa / dropbacks.
+#     rush_epa_per_play = rushing_epa / (dropbacks + carries).
+#     any_a = (passing_yards + 20*passing_tds - 45*passing_interceptions
+#              - sack_yards_lost) / dropbacks: computed and shown, NOT scored.
+#     any_a is None when any of its four inputs is NULL (never coalesced),
+#     and that season is left out of the ANY/A baseline.
+#     NULL attempts/sacks_suffered/carries count as 0 for dropbacks; a NULL
+#     passing_epa or rushing_epa in a qualifying season raises ValueError (a
+#     data bug: EPA coverage is complete from 1999 on, #354).
+#   * Era z-score: per season, (value - mean) / population sd over that
+#     season's qualifying QBs. 1999-2025 has 31-39 per season. When the sd
+#     is 0 (one QB, or all equal), z is 0.0: everyone is league average.
+#   * composite = Σ QB_SCORE_WEIGHTS[m] * z[m].
+#   * career = Σ composite over qualifying seasons (above-average years add,
+#     below-average subtract). peak = mean of the best QB_SCORE_PEAK_SEASONS
+#     composites, filled with 0.0 (league average) up to that many.
+#   * Verdict per measure: the higher score wins; any margin counts, there is
+#     no tie band. An exact tie is None. A QB with no qualifying season has no
+#     score, and then both measures have no winner (`inconclusive`).
+#   * The 1999 floor: `first_season` / `first_scored_season` let the narrator
+#     say "since 1999", louder when a career began before EPA exists.
+# ---------------------------------------------------------------------------
+
+QB_SCORE_VERSION = "1"
+"""Bump whenever the weights, the qualifying line or the definition changes:
+it keys every cached verdict built on the score."""
+
+QB_SCORE_MIN_DROPBACKS = 224
+QB_SCORE_PEAK_SEASONS = 5
+
+QbScoreMetric = Literal["epa_per_dropback", "rush_epa_per_play"]
+
+QB_SCORE_WEIGHTS: Mapping[QbScoreMetric, float] = MappingProxyType(
+    {"epa_per_dropback": 0.826, "rush_epa_per_play": 0.174}
+)
+"""Frozen. Fitted (epic #439 spike, 2026-10-25) by OLS, no intercept, of next
+season's total EPA per play z-score on this season's (z_epa_per_dropback,
+z_rush_epa_per_play), over n = 629 consecutive qualifying QB-season pairs,
+1999-2025; coefficients 0.4318 and 0.0913, normalised to sum to 1. ANY/A was
+dropped: it correlates 0.87 with EPA per dropback and its coefficient goes
+negative in a three-metric fit. `fit_qb_score_weights` reproduces the fit."""
+
+QbScoreSide = Literal["a", "b"]
+QbScoreInconclusiveReason = Literal[
+    "a_no_qualifying_season", "b_no_qualifying_season", "neither_has_qualifying_season"
+]
+
+
+@dataclass(frozen=True)
+class QbMetricValue:
+    """One metric in one season, with the baseline it was judged against."""
+
+    value: float
+    # Over that season's qualifying QBs; None when this season doesn't
+    # qualify (it isn't judged).
+    season_mean: float | None
+    season_sd: float | None
+    z: float | None
+
+
+@dataclass(frozen=True)
+class QbScoreSeason:
+    """One regular season of one QB: every season with a row, qualifying or
+    not, so the panel can show why a year didn't count. Rates are None when
+    their denominator is 0."""
+
+    season: int
+    dropbacks: int
+    qualifies: bool
+    epa_per_dropback: QbMetricValue | None
+    rush_epa_per_play: QbMetricValue | None
+    # Shown, not scored: never in `composite`.
+    any_a: QbMetricValue | None
+    # Σ QB_SCORE_WEIGHTS[m] * z[m]; None when the season doesn't qualify.
+    composite: float | None
+    # True for the seasons whose composites make up `QbScore.peak`.
+    in_peak: bool
+
+
+@dataclass(frozen=True)
+class QbScore:
+    sport: Sport
+    player_id: int
+    display_name: str
+    version: str
+    # Chronological.
+    seasons: list[QbScoreSeason]
+    qualifying_seasons: int
+    # None when there is no qualifying season.
+    career: float | None
+    peak: float | None
+    # How many of the QB_SCORE_PEAK_SEASONS peak slots were filled with 0.0.
+    peak_filled_with_average: int
+    # First regular season with a season row or a QB start, any year (for the
+    # "since 1999" line); None when there is none. `first_scored_season` is
+    # the first season with EPA data that qualifies.
+    first_season: int | None
+    first_scored_season: int | None
+
+
+@dataclass(frozen=True)
+class QbScoreComparison:
+    sport: Sport
+    version: str
+    a: QbScore
+    b: QbScore
+    # None when inconclusive or exactly tied.
+    career_winner: QbScoreSide | None
+    peak_winner: QbScoreSide | None
+    # `a.career - b.career` / `a.peak - b.peak`; None when inconclusive.
+    career_margin: float | None
+    peak_margin: float | None
+    # Set exactly when either QB has no qualifying season.
+    inconclusive: QbScoreInconclusiveReason | None
+    weights: Mapping[QbScoreMetric, float]
+
+
+@dataclass(frozen=True)
+class QbScoreWeightFit:
+    """`fit_qb_score_weights`' result: the raw OLS coefficients, the
+    normalised weights, and the sample they came from. `first_season` is the
+    earliest y and `last_season` the latest y + 1 over the (y, y + 1) pairs."""
+
+    n_pairs: int
+    first_season: int
+    last_season: int
+    coefficients: Mapping[QbScoreMetric, float]
+    weights: Mapping[QbScoreMetric, float]
+
+
+class NotAQuarterbackError(ValueError):
+    """Raised by the QB score when a player's position group isn't "QB"."""
+
+    def __init__(self, player_id: int, position: str | None):
+        super().__init__(f"player {player_id} is not a quarterback (position {position!r})")
+        self.player_id = player_id
+        self.position = position
+
+
+# ---------------------------------------------------------------------------
 # ratings input/output (ratings-agent implements RatingMethod; the CLI reads
 # `games` from the db, the compute-and-store step writes to `ratings`)
 # ---------------------------------------------------------------------------
