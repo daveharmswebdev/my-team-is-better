@@ -885,7 +885,8 @@ class PlayerSearch:
 #   def get_qb_score_comparison(conn: sqlite3.Connection, *, sport: Sport,
 #                               a: int, b: int) -> QbScoreComparison: ...
 #       Raises ValueError when a == b, then UnknownPlayerError and
-#       NotAQuarterbackError for the first of `a`, `b` (checked in that order).
+#       NotAQuarterbackError for the first of `a`, `b` (checked in that order,
+#       one player at a time: `a` is fully checked before `b`).
 #
 #   def fit_qb_score_weights(conn: sqlite3.Connection, *,
 #                            sport: Sport) -> QbScoreWeightFit: ...
@@ -905,11 +906,14 @@ class PlayerSearch:
 #     rush_epa_per_play = rushing_epa / (dropbacks + carries).
 #     any_a = (passing_yards + 20*passing_tds - 45*passing_interceptions
 #              - sack_yards_lost) / dropbacks: computed and shown, NOT scored.
+#     any_a is None when any of its four inputs is NULL (never coalesced),
+#     and that season is left out of the ANY/A baseline.
 #     NULL attempts/sacks_suffered/carries count as 0 for dropbacks; a NULL
 #     passing_epa or rushing_epa in a qualifying season raises ValueError (a
 #     data bug: EPA coverage is complete from 1999 on, #354).
 #   * Era z-score: per season, (value - mean) / population sd over that
-#     season's qualifying QBs. 1999-2025 has 31-39 per season.
+#     season's qualifying QBs. 1999-2025 has 31-39 per season. When the sd
+#     is 0 (one QB, or all equal), z is 0.0: everyone is league average.
 #   * composite = Σ QB_SCORE_WEIGHTS[m] * z[m].
 #   * career = Σ composite over qualifying seasons (above-average years add,
 #     below-average subtract). peak = mean of the best QB_SCORE_PEAK_SEASONS
@@ -1018,7 +1022,8 @@ class QbScoreComparison:
 @dataclass(frozen=True)
 class QbScoreWeightFit:
     """`fit_qb_score_weights`' result: the raw OLS coefficients, the
-    normalised weights, and the sample they came from."""
+    normalised weights, and the sample they came from. `first_season` is the
+    earliest y and `last_season` the latest y + 1 over the (y, y + 1) pairs."""
 
     n_pairs: int
     first_season: int
