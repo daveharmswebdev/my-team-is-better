@@ -29,7 +29,7 @@ apps/web/e2e assert that exact text.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import anthropic
 from anthropic.types import (
@@ -114,11 +114,29 @@ class ClaudeNarrator:
     it; omitting it is the documented default of no thinking).
     """
 
-    def __init__(self, client: anthropic.Anthropic | None = None) -> None:
+    def __init__(
+        self,
+        client: anthropic.Anthropic | None = None,
+        *,
+        tool: dict[str, Any] | None = None,
+    ) -> None:
         # No explicit key -- resolves ANTHROPIC_API_KEY from the real
         # environment the normal way (issue #4's brief: never read the raw
         # value out of `.env` and pass it around by hand).
         self._client = client or anthropic.Anthropic()
+        # The `submit_narration` definition sent with every call: the team
+        # verdicts' (`api.persona.claims.tool_schema`) unless one is given.
+        # The QB verdict's (issue #451) has the same name and input shape but
+        # its own claim kinds; `with_tool` builds that narrator.
+        self._tool: dict[str, Any] = tool if tool is not None else tool_schema()
+
+    def with_tool(self, tool: dict[str, Any]) -> ClaudeNarrator:
+        """A narrator on the same client that sends `tool` instead. `tool`
+        must be named `TOOL_NAME`: the call forces it and the reply reads it
+        back by that name."""
+        if tool.get("name") != TOOL_NAME:
+            raise ValueError(f"a narrator's tool must be named {TOOL_NAME!r}")
+        return ClaudeNarrator(self._client, tool=tool)
 
     def submit(self, *, system: str, messages: list[MessageParam]) -> NarratorReply:
         response = self._client.messages.create(
@@ -126,9 +144,9 @@ class ClaudeNarrator:
             max_tokens=MAX_TOKENS,
             system=system,
             messages=messages,
-            # `tool_schema()` is the Messages API tool shape, typed loosely in
+            # The tool schema is the Messages API tool shape, typed loosely in
             # `api.persona.claims`; `ToolParam` is the SDK's name for it.
-            tools=[cast(ToolParam, tool_schema())],
+            tools=[cast(ToolParam, self._tool)],
             tool_choice={"type": "tool", "name": TOOL_NAME},
         )
         tool_call: ToolCall | None = None

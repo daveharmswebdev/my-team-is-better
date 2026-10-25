@@ -37,7 +37,9 @@ at error level, since it is the operator's problem, not the user's.
 decision, epic #372) is a gate `api.players.compare` puts in front of it.
 400, like `same_team_comparison`: the request names a pair that cannot be
 compared. Either player with no group (a kicker, a linebacker) is refused
-too, even two of the same label.
+too, even two of the same label. The QB verdict (`POST
+/api/players/compare/verdict`, #451) raises it for any pair that isn't two
+quarterbacks, so there two RBs are refused too, echoing "RB" twice.
 
 `StaleDatabaseError` (issue #280) is the engine's, from
 `cfb_strength.evidence.proof`: `_elo_ledger` raises it when the db predates
@@ -383,6 +385,13 @@ PLAYER_CAREER_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError)
 PLAYER_COMPARISON_ERROR_RESPONSES = openapi_error_responses(
     UnknownPlayerError, PlayersNotComparableError
 )
+
+# `POST /api/players/compare/verdict` (issue #451): the QB verdict runs
+# compare's gates first, so it reaches `UnknownPlayerError` the same ways,
+# and `PlayersNotComparableError` for any pair that isn't two quarterbacks
+# (two RBs included). `a == b` and a league without player stats are
+# request-validation 422s at the body, so they keep FastAPI's default.
+QB_VERDICT_ERROR_RESPONSES = openapi_error_responses(UnknownPlayerError, PlayersNotComparableError)
 
 # `GET /api/years` and `GET /api/teams` (issue #423): both read the ratings
 # and teams tables, so each checks the schema first (`list_available_years`

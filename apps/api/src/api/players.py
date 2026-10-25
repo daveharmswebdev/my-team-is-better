@@ -53,13 +53,14 @@ boundary:
 from __future__ import annotations
 
 import sqlite3
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from cfb_strength.contracts import (
     PLAYER_LEADER_SORTS_BY_CATEGORY,
     PLAYER_LEADERS_MAX_LIMIT,
     PLAYER_SEARCH_MAX_LIMIT,
     PLAYER_SEARCH_MIN_QUERY_LENGTH,
+    PlayerComparison,
     PlayerLeaderCategory,
     PlayerLeaderSort,
     PlayerPositionGroup,
@@ -76,10 +77,11 @@ from cfb_strength.players import (
 from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
 
-from api.deps import get_db_conn
+from api.deps import get_call_budget, get_db_conn, get_narration_cache, get_qb_narrator
 from api.errors import (
     PLAYER_CAREER_ERROR_RESPONSES,
     PLAYER_COMPARISON_ERROR_RESPONSES,
+    QB_VERDICT_ERROR_RESPONSES,
     PlayersNotComparableError,
 )
 from api.models import (
@@ -87,8 +89,16 @@ from api.models import (
     PlayerComparisonOut,
     PlayerLeadersOut,
     PlayerSearchOut,
+    QbVerdictEnvelope,
+    QbVerdictEvidenceOut,
+    QbVerdictRequest,
     Sport,
 )
+from api.persona.budget import CallBudget
+from api.persona.cache import NarrationCacheStore
+from api.persona.claude_client import Narrator
+from api.persona.service import narrate_qb_comparison
+from api.repositories.players import list_player_names
 
 router = APIRouter(prefix="/api", tags=["players"])
 
@@ -222,12 +232,30 @@ def compare(
     `a == b` is a 422 at `b`. Two players not of one position group
     (different groups, or either with none) are a 400
     `players_not_comparable` echoing both groups (#433)."""
+    comparison = _comparable_pair(conn, sport=sport, a=a, b=b, source="query")
+    # Two quarterbacks also get the engine's era-adjusted QB score (#451).
+    # The gate above already proved both groups equal, so one check covers
+    # both players, and the engine's `NotAQuarterbackError` cannot fire.
+    qb_score = (
+        get_qb_score_comparison(conn, sport=sport, a=a, b=b) if comparison.a.group == "QB" else None
+    )
+    return PlayerComparisonOut.from_dataclass(comparison, qb_score=qb_score)
+
+
+def _comparable_pair(
+    conn: sqlite3.Connection, *, sport: Sport, a: int, b: int, source: Literal["query", "body"]
+) -> PlayerComparison:
+    """Compare's gates, in their order, then the engine's comparison: `a ==
+    b` is a 422 at `b` (in the query or the body, per `source`), an id no
+    SQLite INTEGER can hold is `unknown_player`, the engine raises
+    `unknown_player` for the first unknown id, and two players outside one
+    position group are `players_not_comparable` (#433)."""
     if a == b:
         raise RequestValidationError(
             [
                 {
                     "type": "value_error",
-                    "loc": ("query", "b"),
+                    "loc": (source, "b"),
                     "msg": "Value error, b must be a different player from a",
                     "input": b,
                 }
@@ -242,11 +270,55 @@ def compare(
     a_group, b_group = comparison.a.group, comparison.b.group
     if a_group is None or b_group is None or a_group != b_group:
         raise PlayersNotComparableError(a_group, b_group)
-    # Two quarterbacks also get the engine's era-adjusted QB score (#451).
-    # The gate above already proved both groups equal, so one check covers
-    # both players, and the engine's `NotAQuarterbackError` cannot fire.
-    qb_score = get_qb_score_comparison(conn, sport=sport, a=a, b=b) if a_group == "QB" else None
-    return PlayerComparisonOut.from_dataclass(comparison, qb_score=qb_score)
+    return comparison
+
+
+@router.post(
+    "/players/compare/verdict",
+    response_model=QbVerdictEnvelope,
+    responses=QB_VERDICT_ERROR_RESPONSES,
+)
+def qb_verdict(
+    payload: QbVerdictRequest,
+    conn: sqlite3.Connection = Depends(get_db_conn),
+    cache: NarrationCacheStore = Depends(get_narration_cache),
+    narrator: Narrator = Depends(get_qb_narrator),
+    budget: CallBudget = Depends(get_call_budget),
+) -> QbVerdictEnvelope:
+    """'Who's the better quarterback?' -- the QB score's verdict on `a` vs
+    `b`, narrated (#451). `evidence.qb_score` is exactly compare's
+    `qb_score` for the pair; the rest of `evidence` is the context the
+    narrator may cite. Compare's gates apply, at the body: `a == b` is a 422
+    at `b`, a league without player stats a 422 at `sport`, an unknown player
+    the typed 404. Any pair that isn't two quarterbacks is a 400
+    `players_not_comparable` echoing both groups, two RBs included."""
+    sport = payload.sport
+    if sport not in PLAYER_SPORTS:
+        expected = " or ".join(repr(s) for s in sorted(PLAYER_SPORTS))
+        raise RequestValidationError(
+            [
+                {
+                    "type": "literal_error",
+                    "loc": ("body", "sport"),
+                    "msg": f"Input should be {expected}",
+                    "input": sport,
+                    "ctx": {"expected": expected},
+                }
+            ]
+        )
+    comparison = _comparable_pair(conn, sport=sport, a=payload.a, b=payload.b, source="body")
+    if comparison.a.group != "QB":
+        raise PlayersNotComparableError(comparison.a.group, comparison.b.group)
+    qb_score = get_qb_score_comparison(conn, sport=sport, a=payload.a, b=payload.b)
+    evidence = QbVerdictEvidenceOut.from_dataclasses(comparison, qb_score)
+    narration = narrate_qb_comparison(
+        evidence,
+        player_names=list_player_names(conn, sport),
+        cache=cache,
+        narrator=narrator,
+        budget=budget,
+    )
+    return QbVerdictEnvelope(evidence=evidence, narration=narration)
 
 
 @router.get("/players/search", response_model=PlayerSearchOut)

@@ -75,6 +75,7 @@ from collections.abc import Iterator
 
 from cfb_strength.config import DB_PATH
 from cfb_strength.db.connection import get_conn
+from fastapi import Depends
 
 from api.config import APP_TEST_MODE, CLAUDE_CALLS_PER_MINUTE, DATABASE_URL, PROMPT_VERSION
 from api.persona.budget import CallBudget, RollingWindowCallBudget, UnlimitedCallBudget
@@ -85,6 +86,7 @@ from api.persona.cache import (
     PostgresNarrationCache,
 )
 from api.persona.claude_client import ClaudeNarrator, Narrator, StubNarrator
+from api.persona.qb_claims import qb_tool_schema
 
 logger = logging.getLogger(__name__)
 
@@ -133,3 +135,17 @@ def get_narrator() -> Narrator:
     if APP_TEST_MODE:
         return StubNarrator()
     return ClaudeNarrator()
+
+
+def get_qb_narrator(narrator: Narrator = Depends(get_narrator)) -> Narrator:
+    """The QB verdict's narrator (issue #451): the app's narrator, sent with
+    the QB tool (`api.persona.qb_claims.qb_tool_schema`) instead of the team
+    one. A real `ClaudeNarrator` is rebuilt on the same client with that tool;
+    any other narrator (`StubNarrator` under `APP_TEST_MODE`, a test's fake)
+    is passed through as it is. Built on `get_narrator` rather than beside it
+    on purpose: every override of `get_narrator` (the pytest suite overrides
+    it for every client) covers the QB route too, so no test can reach a real
+    Claude call through a dependency nobody overrode."""
+    if isinstance(narrator, ClaudeNarrator):
+        return narrator.with_tool(qb_tool_schema())
+    return narrator
