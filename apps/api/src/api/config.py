@@ -177,6 +177,15 @@ CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
 
 APP_TEST_MODE: bool = os.environ.get("APP_TEST_MODE") == "1"
 
+# Issue #185: the web origin a share page (`api.share`) redirects a human to,
+# with the shared question. Production's web service by default; a local dev
+# setup points it at the Vite server. A trailing slash is dropped so the
+# routes can append "/?..." and "/nfl/compare" without doubling it. The
+# preview image stays on production's web domain either way.
+PUBLIC_WEB_URL: str = os.environ.get(
+    "PUBLIC_WEB_URL", "https://my-team-is-better-web.onrender.com"
+).rstrip("/")
+
 # Issue #236. One narration call is about 5-6k input tokens (system prompt,
 # tool schema and fact block: 17-19k characters on the 2005 fixture) and
 # ~360 output tokens, roughly $0.008 on claude-haiku-4-5 ($1/M in, $5/M out);

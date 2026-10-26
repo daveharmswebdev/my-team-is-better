@@ -488,11 +488,24 @@ browser URL is always the current question's link.
 - **Never writes the recipient's storage.** On a team-case or compare link,
   `for` seeds the "Your team" field without touching `localStorage`, until
   the visitor edits it.
+- **Per-link previews come from the API (#185).** Link scrapers don't run
+  JS, and the web is a static site, so `GET /api/share?<same query>` and
+  `GET /api/share/nfl/compare?a=&b=` (`apps/api/src/api/share.py`) return a
+  small HTML page carrying per-link `og:`/`twitter:` title and description.
+  The text is built from the query plus catalog and player-name lookups and
+  never calls the narrator, because scrapers hit it. The image stays the
+  site-wide `og-image.png`. The page redirects the human to the SPA's own
+  `/?…` (or `/nfl/compare?…`) with the same validated params. Validation
+  mirrors `fromShareSearch` / `parsePick` server side, and any malformed or
+  unknown link gets a 200 with the generic tags plus a redirect, never an
+  error. `render.yaml` proxies the web's `/s` and `/s/nfl/compare` to those
+  routes, so the minted links stay on the web domain. `/s…` is an
+  append-only addition to this contract: `/?q=…` links keep working with
+  the generic preview.
 - **Re-asks, so the text can change.** The narration cache usually returns
   the same text (the key includes the resolved, canonical `user_team`). A
   `PROMPT_VERSION` bump or an uncached fallback (#187) gives a fresh
-  generation. Stored copies (#186) and per-verdict Open Graph previews (#185)
-  are deferred.
+  generation. Stored copies (#186) are deferred.
 
 ## 6. The engine: the second method seam, now used
 

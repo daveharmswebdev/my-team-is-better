@@ -129,6 +129,18 @@ services:
       - key: VITE_API_BASE_URL
         sync: false
     routes:
+      # Share-link previews (#185): link scrapers don't run JS, so a shared
+      # link's per-link Open Graph text comes from the API. Render proxies a
+      # static-site rewrite to a full URL (the browser's URL doesn't change),
+      # so share links stay on this domain. The API page redirects humans to
+      # the SPA's own `/?...` or `/nfl/compare?...`. These must sit above the
+      # SPA fallback.
+      - type: rewrite
+        source: /s
+        destination: https://my-team-is-better-api.onrender.com/api/share
+      - type: rewrite
+        source: /s/nfl/compare
+        destination: https://my-team-is-better-api.onrender.com/api/share/nfl/compare
       # SPA fallback: client-side routing owns everything under /.
       - type: rewrite
         source: /*
