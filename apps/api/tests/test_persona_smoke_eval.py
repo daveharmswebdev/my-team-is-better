@@ -89,12 +89,12 @@ from fixtures.persona_eval import (
     summarize,
 )
 
-from api.config import ANTHROPIC_API_KEY, PROMPT_VERSION
+from api.config import ANTHROPIC_API_KEY, PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_narrator
 from api.main import app
 from api.models import TeamCaseOut
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import MODEL, ClaudeNarrator
+from api.persona.claude_client import ClaudeNarrator
 from api.persona.fallback import team_case_fallback_text
 from api.persona.prompt import build_user_message
 from api.persona.service import team_case_fact_block_json
@@ -129,7 +129,7 @@ _NO_KEY = pytest.mark.skipif(
     not ANTHROPIC_API_KEY,
     reason=(
         "persona smoke eval requires ANTHROPIC_API_KEY (it makes real "
-        f"{MODEL} calls); unset, so skipped"
+        f"{TEAM_NARRATOR_MODEL} calls); unset, so skipped"
     ),
 )
 

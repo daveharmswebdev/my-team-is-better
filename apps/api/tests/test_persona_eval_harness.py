@@ -106,11 +106,11 @@ from persona_eval_harness.variants import (
     parse_variants,
 )
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_narrator
 from api.main import app
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import MODEL, NarratorReply, tool_reply
+from api.persona.claude_client import NarratorReply, tool_reply
 from api.persona.prompt import build_system_prompt, build_user_message
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -733,7 +733,7 @@ def test_report_json_is_keyed_by_versions_models_and_n() -> None:
     report = _report_json(records, ["baseline"], samples=1)
     assert report["prompt_version"] == PROMPT_VERSION
     assert report["grounding_version"] == GROUNDING_VERSION
-    assert report["narrator_model"] == MODEL
+    assert report["narrator_model"] == TEAM_NARRATOR_MODEL
     assert report["grader_model"] == GRADER_MODEL
     assert report["grader_prompt_version"] == "grader-v2"
     assert report["errors"] == {"narrator": 0, "grader": 0}
@@ -1311,7 +1311,7 @@ def test_a_run_inside_the_budget_writes_the_three_files(tmp_path: Path) -> None:
     assert first["case"] == TEXAS_CHAMPION
     assert first["prompt_version"] == PROMPT_VERSION
     assert first["grounding_version"] == GROUNDING_VERSION
-    assert first["narrator_model"] == MODEL
+    assert first["narrator_model"] == TEAM_NARRATOR_MODEL
     assert first["grader_model"] == GRADER_MODEL
     assert first["attempts"][0]["tool_input"] == {"text": "Solid case, no notes.", "claims": []}
     assert first["attempts"][0]["errors"] == []

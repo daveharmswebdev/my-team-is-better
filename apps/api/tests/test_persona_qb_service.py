@@ -26,7 +26,7 @@ from fixtures.qb_blocks import (
     qb_evidence,
 )
 
-from api.config import PROMPT_VERSION, QB_PROMPT_VERSION
+from api.config import PROMPT_VERSION, QB_NARRATOR_MODEL, QB_PROMPT_VERSION
 from api.models import NarrationOut, QbVerdictEvidenceOut
 from api.persona import service
 from api.persona.budget import RollingWindowCallBudget, UnlimitedCallBudget
@@ -78,6 +78,7 @@ def _key(**overrides: object) -> str:
         "prompt_version": QB_PROMPT_VERSION,
         "fact_block_json": qb_fact_block_json(evidence),
         "grounding_version": QB_GROUNDING_VERSION,
+        "model": QB_NARRATOR_MODEL,
     }
     arguments.update(overrides)
     return qb_cache_key(**arguments)  # type: ignore[arg-type]  # test-built kwargs
@@ -96,8 +97,16 @@ def _key(**overrides: object) -> str:
         {"grounding_version": QB_GROUNDING_VERSION + "-tightened"},
         {"fact_block_json": qb_block(KURT_WARNER, PEYTON_MANNING)},
         {"a": STEVE_MCNAIR, "b": KURT_WARNER},
+        {"model": "claude-sonnet-5-5"},
     ],
-    ids=["qb-score-version", "qb-prompt-version", "qb-grounding-version", "block", "order"],
+    ids=[
+        "qb-score-version",
+        "qb-prompt-version",
+        "qb-grounding-version",
+        "block",
+        "order",
+        "model",
+    ],
 )
 def test_the_key_changes_with_each_input(override: dict[str, object]) -> None:
     assert _key(**override) != _key()
@@ -133,6 +142,17 @@ def test_a_qb_prompt_version_bump_misses(monkeypatch: pytest.MonkeyPatch) -> Non
     assert len(narrator.calls) == 1
 
 
+def test_a_qb_narrator_model_change_misses(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #463: a narration written by another model is its own cache entry.
+    cache = InMemoryNarrationCache()
+    _ask(cache, FakeNarrator([ACCEPTED]))
+    monkeypatch.setattr(service, "QB_NARRATOR_MODEL", "claude-sonnet-5-5")
+    narrator = FakeNarrator([ACCEPTED])
+    assert _ask(cache, narrator).cached is False
+    assert len(narrator.calls) == 1
+    assert cache.get(_key(model="claude-sonnet-5-5")) is not None
+
+
 def test_the_grounding_version_is_bumped_for_the_margin_bands() -> None:
     # #457: the bands and the matcher fixes accept and reject differently.
     assert QB_GROUNDING_VERSION == "qb-claims-v2"
@@ -153,6 +173,7 @@ def test_a_narration_cached_before_the_margin_bands_is_not_served() -> None:
         prompt_version=QB_PROMPT_VERSION,
         fact_block_json=old_block,
         grounding_version="qb-claims-v1",
+        model=QB_NARRATOR_MODEL,
     )
     assert old_key != _key()
     cache = InMemoryNarrationCache()

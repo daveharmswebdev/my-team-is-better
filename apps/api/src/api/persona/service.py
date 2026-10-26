@@ -73,6 +73,11 @@ own key (`api.persona.cache.qb_cache_key`, under `QB_SCORE_VERSION`,
 check. The cache rules both share live in `_serve_cached`; the team entry
 points still reach `narrate` by name, exactly as before. A QB narration is
 never contested.
+
+**The narrator model is in the key (issue #463).** Each key passes its
+narrator's model (`api.config.TEAM_NARRATOR_MODEL` / `QB_NARRATOR_MODEL`),
+which `api.persona.cache` hashes in only when it is not claude-haiku-4-5,
+so every key written before #463 is still the key read today.
 """
 
 from __future__ import annotations
@@ -85,7 +90,13 @@ import psycopg
 from cfb_strength.contracts import QB_SCORE_VERSION
 from pydantic.main import IncEx
 
-from api.config import CONTESTED_YEARS, PROMPT_VERSION, QB_PROMPT_VERSION
+from api.config import (
+    CONTESTED_YEARS,
+    PROMPT_VERSION,
+    QB_NARRATOR_MODEL,
+    QB_PROMPT_VERSION,
+    TEAM_NARRATOR_MODEL,
+)
 from api.models import (
     ComparisonResultOut,
     NarrationOut,
@@ -206,6 +217,7 @@ def narrate_team_case(
         prompt_version=PROMPT_VERSION,
         fact_block_json=fact_block_json,
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
     return _cached_narration(
         year=case.year,
@@ -244,6 +256,7 @@ def narrate_comparison(
         prompt_version=PROMPT_VERSION,
         fact_block_json=fact_block_json,
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
     return _cached_narration(
         year=comparison.year,
@@ -411,6 +424,7 @@ def narrate_qb_comparison(
         prompt_version=QB_PROMPT_VERSION,
         fact_block_json=fact_block_json,
         grounding_version=QB_GROUNDING_VERSION,
+        model=QB_NARRATOR_MODEL,
     )
     return _serve_cached(
         key=key,

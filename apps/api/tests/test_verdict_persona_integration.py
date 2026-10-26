@@ -23,7 +23,7 @@ from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_team_case
 from fastapi.testclient import TestClient
 
-from api.config import ANTHROPIC_API_KEY, DATABASE_URL, PROMPT_VERSION
+from api.config import ANTHROPIC_API_KEY, DATABASE_URL, PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import TeamCaseOut
@@ -76,6 +76,7 @@ def test_repeated_champion_request_is_a_cache_hit_on_the_second_call(
             prompt_version=PROMPT_VERSION,
             fact_block_json=team_case_fact_block_json(case),
             grounding_version=GROUNDING_VERSION,
+            model=TEAM_NARRATOR_MODEL,
         )
         conn.execute("DELETE FROM persona_cache WHERE cache_key = %s", (key,))
         conn.commit()

@@ -24,6 +24,18 @@ returns, the swallowed error makes the narration the `error` outcome
 (`HarnessRecord.served_by`): no grader call, no grade, and `report.py`
 leaves it out of every rate and mean and counts it instead.
 
+**The QB narrator** (issue #463) runs the same way through production's QB
+entry point, `api.persona.service.narrate_qb_comparison` (which runs
+`narrate_checked` with the QB prompt and `check_and_render_qb`), with the
+cache disabled so every narration calls the narrator. `judge_qb_narration`
+re-checks the recorded calls with `check_and_render_qb` to say which one was
+served (first, retry, fallback or untraceable), and the QB code graders
+(`qb_graders.py`) score the served narration.
+
+**Usage.** Every record keeps each narrator call's token usage (and the
+grade keeps the grader's), so the report and records.jsonl can price a
+narration (`cost.py`).
+
 The loops go sample, then variant, then case, so a run stopped at the
 `--max-calls` cap has covered the variants evenly.
 """
@@ -38,8 +50,10 @@ from typing import Literal, TextIO
 
 from anthropic.types import MessageParam
 from fixtures.persona_eval import (
+    JudgedCall,
     Judgement,
     NarrationRecord,
+    RecordedCall,
     RecordingNarrator,
     ServedBy,
     banned_hits,
@@ -50,13 +64,20 @@ from fixtures.persona_eval import (
 )
 
 from api.persona.budget import UnlimitedCallBudget
-from api.persona.claude_client import Narrator, NarratorReply
+from api.persona.cache import DisabledNarrationCache
+from api.persona.claims import TOOL_NAME
+from api.persona.claude_client import Narrator, NarratorReply, TokenUsage
 from api.persona.narrate import narrate
+from api.persona.qb_claims import check_and_render_qb
+from api.persona.service import narrate_qb_comparison
 from persona_eval_harness.budget import BudgetedNarrator, BudgetExhausted, CallBudget
 from persona_eval_harness.dataset import EvalCase
 from persona_eval_harness.grader import Grade, Grader
+from persona_eval_harness.qb_dataset import QbEvalCase
+from persona_eval_harness.qb_graders import QbGrades, grade_qb
 from persona_eval_harness.report import (
     Report,
+    RunContext,
     build_report,
     record_to_json,
     render_markdown,
@@ -100,7 +121,10 @@ class HarnessRecord:
     raised a transport error; such a narration is `served_by == "error"` and
     `grade` is None, because it was never graded. Otherwise `grade` is set,
     and may itself be an ungraded result, a grader transport error included
-    (`grader_error`)."""
+    (`grader_error`).
+
+    `narrator_usage` is each returned narrator call's usage, in order (`None`
+    for a fake's reply); `qb_grades` is set on a QB narration only."""
 
     variant: str
     case_id: str
@@ -111,6 +135,8 @@ class HarnessRecord:
     banned: tuple[str, ...]
     grade: Grade | None
     narrator_error: str | None = None
+    narrator_usage: tuple[TokenUsage | None, ...] = ()
+    qb_grades: QbGrades | None = None
 
     @property
     def errored(self) -> bool:
@@ -147,7 +173,7 @@ def served_claims(judgement: Judgement) -> int | None:
     return len(claims) if isinstance(claims, list) else 0
 
 
-def property_violations(case: EvalCase, judgement: Judgement) -> tuple[str, ...]:
+def property_violations(case: EvalCase | QbEvalCase, judgement: Judgement) -> tuple[str, ...]:
     """§8 properties 1, 3 and 4 where they apply. Properties 2 and 5 are the
     judgement's `served_by`. Only a narrator-served text is checked: the
     fallback is a template."""
@@ -155,8 +181,9 @@ def property_violations(case: EvalCase, judgement: Judgement) -> tuple[str, ...]
         return ()
     text = judgement.served_text
     violations: list[str] = []
-    expected_team = case.spec.expected_team
-    if expected_team is not None:
+    # Property 1 (the expected team is named) is a team verdict's only.
+    expected_team = case.spec.expected_team if isinstance(case, EvalCase) else None
+    if isinstance(case, EvalCase) and expected_team is not None:
         violations += named_team_violations(
             text, expected_team, [record.name for record in case.catalog]
         )
@@ -219,12 +246,111 @@ def narrate_case(
         banned=tuple(banned_hits(result.text)),
         grade=grade,
         narrator_error=narrator_error,
+        narrator_usage=tuple(reply.usage for reply in recorder.replies),
+    )
+
+
+def judge_qb_narration(
+    *,
+    served_text: str,
+    replies: Sequence[NarratorReply],
+    case: QbEvalCase,
+) -> Judgement:
+    """Which recorded QB call production served, re-checked with
+    `check_and_render_qb` exactly as `narrate_checked` checks it: the first
+    valid call whose rendering is the served text is first or retry, the
+    fallback text is the fallback, anything else is untraceable. Violations
+    are left empty: the QB graders are the QB code checks."""
+    attempts: list[JudgedCall] = []
+    for reply in replies:
+        call = RecordedCall(
+            tool_input=None if reply.tool_call is None else reply.tool_call.input,
+            fact_block_json=case.fact_block_json,
+            stop_reason=reply.stop_reason,
+        )
+        if call.tool_input is None:
+            error = f"no {TOOL_NAME} call came back (stop reason: {call.stop_reason})"
+            attempts.append(JudgedCall(call=call, errors=(error,), text=None))
+            continue
+        outcome = check_and_render_qb(call.tool_input, case.fact_block_json, case.player_names)
+        attempts.append(JudgedCall(call=call, errors=outcome.errors, text=outcome.text))
+    served_index = next(
+        (i for i, attempt in enumerate(attempts) if attempt.valid and attempt.text == served_text),
+        None,
+    )
+    served_by: ServedBy
+    if served_text == case.fallback_text:
+        served_by = "fallback"
+    elif served_index is None:
+        served_by = "untraceable"
+    else:
+        served_by = "first" if served_index == 0 else "retry"
+    return Judgement(
+        served_text=served_text,
+        attempts=tuple(attempts),
+        served_by=served_by,
+        served_attempt=None if served_index is None else attempts[served_index],
+        violations=(),
+    )
+
+
+def narrate_qb_case(
+    *,
+    case: QbEvalCase,
+    variant: Variant,
+    sample: int,
+    narrator: Narrator,
+    grader: Grader,
+    budget: CallBudget,
+) -> HarnessRecord:
+    """`narrate_case` for a QB case, through production's
+    `narrate_qb_comparison` with the cache disabled."""
+    errors = ErrorRecordingNarrator(narrator)
+    recorder = RecordingNarrator(BudgetedNarrator(errors, budget))
+    swapped = SystemSwappingNarrator(recorder, system=variant.build_system_prompt(case.user_team))
+    served = narrate_qb_comparison(
+        case.evidence,
+        player_names=case.player_names,
+        cache=DisabledNarrationCache(),
+        narrator=swapped,
+        # The harness caps its own calls (`--max-calls`, BudgetedNarrator).
+        budget=UnlimitedCallBudget(),
+    )
+    judgement = judge_qb_narration(served_text=served.text, replies=recorder.replies, case=case)
+    narrator_error = (
+        "; ".join(f"{type(exc).__name__}: {exc}" for exc in errors.errors)
+        if errors.errors
+        else None
+    )
+    grade: Grade | None = None
+    if narrator_error is None:
+        budget.spend("grader")
+        grade = grader.grade(
+            fact_block_json=case.fact_block_json, contested=False, narration=served.text
+        )
+    served_attempt = judgement.served_attempt
+    return HarnessRecord(
+        variant=variant.name,
+        case_id=case.id,
+        sample=sample,
+        narration=build_record(f"{variant.name} {case.id} sample {sample + 1}", judgement),
+        claims=served_claims(judgement),
+        property_violations=property_violations(case, judgement),
+        banned=tuple(banned_hits(served.text)),
+        grade=grade,
+        narrator_error=narrator_error,
+        narrator_usage=tuple(reply.usage for reply in recorder.replies),
+        qb_grades=grade_qb(
+            served_text=served.text,
+            served_input=None if served_attempt is None else served_attempt.call.tool_input,
+            fact_block_json=case.fact_block_json,
+        ),
     )
 
 
 def run_eval(
     *,
-    cases: Sequence[EvalCase],
+    cases: Sequence[EvalCase | QbEvalCase],
     variants: Sequence[Variant],
     samples: int,
     narrator: Narrator,
@@ -237,14 +363,24 @@ def run_eval(
         for variant in variants:
             for case in cases:
                 try:
-                    record = narrate_case(
-                        case=case,
-                        variant=variant,
-                        sample=sample,
-                        narrator=narrator,
-                        grader=grader,
-                        budget=budget,
-                    )
+                    if isinstance(case, QbEvalCase):
+                        record = narrate_qb_case(
+                            case=case,
+                            variant=variant,
+                            sample=sample,
+                            narrator=narrator,
+                            grader=grader,
+                            budget=budget,
+                        )
+                    else:
+                        record = narrate_case(
+                            case=case,
+                            variant=variant,
+                            sample=sample,
+                            narrator=narrator,
+                            grader=grader,
+                            budget=budget,
+                        )
                 except BudgetExhausted as exc:
                     note = (
                         f"Stopped mid-run: {exc}. The narration in progress ({variant.name}, "
@@ -284,7 +420,7 @@ def _progress_line(record: HarnessRecord) -> str:
 
 def run_to_directory(
     *,
-    cases: Sequence[EvalCase],
+    cases: Sequence[EvalCase | QbEvalCase],
     variants: Sequence[Variant],
     samples: int,
     narrator: Narrator,
@@ -293,16 +429,20 @@ def run_to_directory(
     worst_case_estimate: int,
     out_dir: Path,
     progress: TextIO | None = None,
+    context: RunContext | None = None,
 ) -> Report:
     """Run under a `max_calls` budget, appending each record to
     `records.jsonl` as it finishes, then write `report.json` and `report.md`
     (marked partial when the cap stopped the run)."""
+    context = context or RunContext()
     out_dir.mkdir(parents=True, exist_ok=True)
     budget = CallBudget(max_calls)
     with (out_dir / "records.jsonl").open("w", encoding="utf-8") as records_file:
 
         def on_record(record: HarnessRecord) -> None:
-            line = json.dumps(record_to_json(record, samples=samples), default=repr)
+            line = json.dumps(
+                record_to_json(record, samples=samples, context=context), default=repr
+            )
             records_file.write(line + "\n")
             records_file.flush()
             if progress is not None:
@@ -328,6 +468,7 @@ def run_to_directory(
         grader_calls=result.grader_calls,
         max_calls=max_calls,
         worst_case_estimate=worst_case_estimate,
+        context=context,
     )
     (out_dir / "report.json").write_text(
         json.dumps(report_to_json(report), indent=2, ensure_ascii=False) + "\n", encoding="utf-8"

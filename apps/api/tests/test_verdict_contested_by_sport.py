@@ -38,7 +38,7 @@ from fastapi.testclient import TestClient
 from fixtures.narrator_fake import FakeNarrator
 from fixtures.sport_fixture import make_sport_fixture_db
 
-from api.config import CONTESTED_YEARS, PROMPT_VERSION
+from api.config import CONTESTED_YEARS, PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.models import ComparisonResultOut, Sport, TeamCaseOut
@@ -155,6 +155,7 @@ def _key(db: Path, route: str, sport: Sport, year: int) -> str:
         prompt_version=PROMPT_VERSION,
         fact_block_json=_fact_block_json(db, route, sport, year),
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
 
 

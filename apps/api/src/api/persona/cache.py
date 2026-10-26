@@ -49,6 +49,16 @@ class CachedNarration:
     contested: bool
 
 
+# The model every key before issue #463 was written under. A key for it leaves
+# the model out of the payload, so those keys stay byte-for-byte what they
+# were; any other model is hashed in (`cache_key`, `qb_cache_key`).
+UNKEYED_MODEL = "claude-haiku-4-5"
+
+
+def _with_model(payload: dict[str, object], model: str) -> dict[str, object]:
+    return payload if model == UNKEYED_MODEL else {**payload, "model": model}
+
+
 class NarrationCacheStore(Protocol):
     def get(self, key: str) -> CachedNarration | None: ...
 
@@ -66,6 +76,7 @@ def cache_key(
     prompt_version: str,
     fact_block_json: str,
     grounding_version: str,
+    model: str,
 ) -> str:
     """issue #4's cache key: `hash(question_type, year, team(s), user_team,
     method, sport, PROMPT_VERSION, sha256(fact block), GROUNDING_VERSION)`.
@@ -99,6 +110,13 @@ def cache_key(
     changed every key, which invalidated all older entries on purpose (the
     same deliberate bust #84 did): they cannot say which block they were
     written from.
+
+    `model` (issue #463) is the narrator model that writes the narration
+    (`api.config.TEAM_NARRATOR_MODEL`). It is hashed in only when it is not
+    `claude-haiku-4-5` (`UNKEYED_MODEL`), the model every earlier key was
+    written under: the team keys stay byte-for-byte what they were, and a
+    narration from another model never answers for, or is answered by, a
+    haiku-4-5 one.
     """
     payload = {
         "question_type": question_type,
@@ -111,7 +129,7 @@ def cache_key(
         "fact_block_sha256": hashlib.sha256(fact_block_json.encode("utf-8")).hexdigest(),
         "grounding_version": grounding_version,
     }
-    canonical = json.dumps(payload, sort_keys=True)
+    canonical = json.dumps(_with_model(payload, model), sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -124,6 +142,7 @@ def qb_cache_key(
     prompt_version: str,
     fact_block_json: str,
     grounding_version: str,
+    model: str,
 ) -> str:
     """The QB verdict's cache key (issue #451): one per ordered pair of
     player ids in `sport`, under `contracts.QB_SCORE_VERSION`,
@@ -133,7 +152,11 @@ def qb_cache_key(
     own. Its own function rather than `cache_key` with a QB `question_type`,
     so the team keys stay byte-for-byte what they were; the `question_type`
     in the payload keeps the two key spaces apart anyway. (a, b) and (b, a)
-    are two keys: their blocks, and so their narrations, differ."""
+    are two keys: their blocks, and so their narrations, differ.
+
+    `model` (issue #463) is `api.config.QB_NARRATOR_MODEL`, hashed in only
+    when it is not `claude-haiku-4-5`, exactly as in `cache_key`, so the QB
+    keys stay byte-for-byte too."""
     payload = {
         "question_type": "qb_compare",
         "sport": sport,
@@ -144,7 +167,7 @@ def qb_cache_key(
         "fact_block_sha256": hashlib.sha256(fact_block_json.encode("utf-8")).hexdigest(),
         "grounding_version": grounding_version,
     }
-    canonical = json.dumps(payload, sort_keys=True)
+    canonical = json.dumps(_with_model(payload, model), sort_keys=True)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

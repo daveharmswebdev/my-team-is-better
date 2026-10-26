@@ -26,7 +26,7 @@ from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fixtures.narrator_fake import FakeNarrator
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona.budget import UnlimitedCallBudget
 from api.persona.cache import CachedNarration, InMemoryNarrationCache, cache_key
@@ -117,6 +117,7 @@ def _key(route: str, conn: sqlite3.Connection) -> str:
             prompt_version=PROMPT_VERSION,
             fact_block_json=team_case_fact_block_json(_case(conn)),
             grounding_version=GROUNDING_VERSION,
+            model=TEAM_NARRATOR_MODEL,
         )
     return cache_key(
         question_type="compare",
@@ -128,6 +129,7 @@ def _key(route: str, conn: sqlite3.Connection) -> str:
         prompt_version=PROMPT_VERSION,
         fact_block_json=comparison_fact_block_json(_comparison(conn)),
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
 
 

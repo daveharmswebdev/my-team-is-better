@@ -19,6 +19,13 @@ A Claude transport/API error on either call skips straight to the fallback
 rather than raising, so a Claude outage degrades the narration, not the whole
 verdict request.
 
+**A refusal is not retried** (issue #463). The 5.x models can decline a
+request with HTTP 200 and `stop_reason` "refusal" (with a
+`stop_details.category` such as "cyber" or "general_harms"). Feedback can't
+fix a policy decline, so a refused first call serves the fallback at once,
+without a second call, and logs one warning naming the category when there
+is one. A refusal on the retry serves the fallback too, logged the same way.
+
 **The per-minute call budget** (issue #236). Each of the two calls first takes
 one unit from the caller's `CallBudget` (`api.persona.budget`). A refused unit
 means that call is never made and the fallback is served, logged once: before
@@ -172,6 +179,10 @@ def narrate_checked(
         logger.warning("Claude API call failed, serving fallback narration: %s", exc)
         return fallback
 
+    if first.stop_reason == "refusal":
+        _log_refusal(first, "serving fallback narration without a retry")
+        return fallback
+
     first_outcome = _check(first, check)
     if first_outcome.text is not None:
         return NarrationResult(text=first_outcome.text, is_fallback=False)
@@ -187,6 +198,10 @@ def narrate_checked(
         second = narrator.submit(system=system_prompt, messages=list(messages))
     except _TRANSPORT_ERRORS as exc:
         logger.warning("Claude API call failed on the claim retry, serving fallback: %s", exc)
+        return fallback
+
+    if second.stop_reason == "refusal":
+        _log_refusal(second, "on the claim retry, serving fallback narration")
         return fallback
 
     second_outcome = _check(second, check)
@@ -205,6 +220,11 @@ def narrate_checked(
         ),
     )
     return fallback
+
+
+def _log_refusal(reply: NarratorReply, what_next: str) -> None:
+    category = f" (category {reply.refusal_category})" if reply.refusal_category is not None else ""
+    logger.warning("Claude refused the narration%s; %s", category, what_next)
 
 
 def _check(reply: NarratorReply, check: ClaimCheck) -> ClaimOutcome:

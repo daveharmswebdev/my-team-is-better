@@ -35,6 +35,24 @@ Error counts are not metrics, so the spread check never reads a variant as
 "separated" on errors alone.
 
 A metric with an empty denominator is `None` (`n/a`), never 0.
+
+**The run's context** (issue #463): which narrator (team or qb), on which
+model and at which effort, and so which prompt and grounding versions the
+numbers belong to. `RunContext` carries it into the report header, the
+report.json keys and every records.jsonl line.
+
+**Per narrator.** The team metrics are the list above. The QB narrator drops
+the three team-only measurements (timing/venue wording, ambiguous when,
+lowercase block-team rejections) and adds its four code graders
+(`qb_graders.py`), each a pass rate over the narrations it applies to: no
+hedge over all narrations, the other three over narrator-served ones (a
+fallback is N/A on them).
+
+**Dollars** (both narrators): the mean cost of a narration, narrator calls
+only and narrator plus grader, priced by `cost.py` from each call's
+recorded usage on the run's narrator model and the grader's model. A
+narration with a call that carried no usage is left out of the mean rather
+than counted as free.
 """
 
 from __future__ import annotations
@@ -45,17 +63,64 @@ from typing import TYPE_CHECKING, Literal
 
 from fixtures.persona_eval import PROMPT_MAX_SENTENCES, rate, summarize
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, QB_PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.persona.claims import GROUNDING_VERSION
-from api.persona.claude_client import MODEL
+from api.persona.claude_client import Effort, request_profile
+from api.persona.qb_claims import QB_GROUNDING_VERSION
+from persona_eval_harness.cost import call_cost_usd, calls_cost_usd
 from persona_eval_harness.grader import GRADER_MODEL, GRADER_PROMPT_VERSION
+from persona_eval_harness.variants import NarratorKind
 
 if TYPE_CHECKING:
+    from api.persona.claude_client import TokenUsage
     from persona_eval_harness.runner import HarnessRecord
     from persona_eval_harness.variants import Variant
 
 Number = float | int
-MetricKind = Literal["rate", "mean", "score", "count"]
+MetricKind = Literal["rate", "mean", "score", "count", "usd"]
+
+
+@dataclass(frozen=True)
+class RunContext:
+    """Which narrator a run scored, on which model, and the effort override
+    (`None`: the model's profile default)."""
+
+    narrator: NarratorKind = "team"
+    model: str = TEAM_NARRATOR_MODEL
+    effort_override: Effort | None = None
+
+    @property
+    def effort(self) -> str | None:
+        """The effort the narrator ran at; `None` on a model that takes none."""
+        return self.effort_override or request_profile(self.model).effort
+
+    @property
+    def effort_label(self) -> str:
+        return self.effort or "n/a"
+
+    @property
+    def prompt_version(self) -> str:
+        return QB_PROMPT_VERSION if self.narrator == "qb" else PROMPT_VERSION
+
+    @property
+    def grounding_version(self) -> str:
+        return QB_GROUNDING_VERSION if self.narrator == "qb" else GROUNDING_VERSION
+
+
+def narrator_cost(record: HarnessRecord, model: str) -> float | None:
+    """The narration's narrator calls in dollars, or None without usage."""
+    if not record.narrator_usage:
+        return None
+    return calls_cost_usd(model, record.narrator_usage)
+
+
+def total_cost(record: HarnessRecord, model: str) -> float | None:
+    """Narrator plus grader dollars, or None when either lacks usage."""
+    narrator = narrator_cost(record, model)
+    usage = None if record.grade is None else record.grade.usage
+    if narrator is None or usage is None:
+        return None
+    return narrator + call_cost_usd(GRADER_MODEL, usage)
 
 
 def _mean(values: Sequence[Number]) -> float | None:
@@ -206,6 +271,77 @@ METRICS: tuple[MetricDef, ...] = (
 )
 
 
+TEAM_ONLY_METRICS = ("timing_venue_rate", "ambiguous_when_rate", "lowercase_rejection_rate")
+
+
+def _qb_pass_rate(
+    records: Sequence[HarnessRecord], field: str, *, served_only: bool
+) -> float | None:
+    pool = _narrator_served(records) if served_only else _without_errors(records)
+    verdicts = [getattr(record.qb_grades, field) for record in pool if record.qb_grades is not None]
+    applicable = [verdict for verdict in verdicts if verdict is not None]
+    return rate(sum(1 for verdict in applicable if verdict), len(applicable))
+
+
+QB_METRICS: tuple[MetricDef, ...] = (
+    MetricDef(
+        "qb_no_hedge_rate",
+        "QB: no-hedge pass rate",
+        "rate",
+        lambda rs: _qb_pass_rate(rs, "no_hedge", served_only=False),
+    ),
+    MetricDef(
+        "qb_year_present_rate",
+        "QB: year-claim pass rate (served)",
+        "rate",
+        lambda rs: _qb_pass_rate(rs, "year_present", served_only=True),
+    ),
+    MetricDef(
+        "qb_winners_named_rate",
+        "QB: winners-named pass rate (served)",
+        "rate",
+        lambda rs: _qb_pass_rate(rs, "winners_named", served_only=True),
+    ),
+    MetricDef(
+        "qb_margin_wording_rate",
+        "QB: margin-wording-fits-band pass rate (served)",
+        "rate",
+        lambda rs: _qb_pass_rate(rs, "margin_wording", served_only=True),
+    ),
+)
+
+
+def _mean_cost(
+    records: Sequence[HarnessRecord], cost: Callable[[HarnessRecord], float | None]
+) -> float | None:
+    return _mean([value for record in records if (value := cost(record)) is not None])
+
+
+def cost_metrics(model: str) -> tuple[MetricDef, ...]:
+    return (
+        MetricDef(
+            "usd_per_narration_narrator",
+            f"$ per narration, narrator ({model})",
+            "usd",
+            lambda rs: _mean_cost(rs, lambda r: narrator_cost(r, model)),
+        ),
+        MetricDef(
+            "usd_per_narration_total",
+            f"$ per narration, narrator + grader ({GRADER_MODEL})",
+            "usd",
+            lambda rs: _mean_cost(rs, lambda r: total_cost(r, model)),
+        ),
+    )
+
+
+def metrics_for(context: RunContext) -> tuple[MetricDef, ...]:
+    """The metric list a run reports (module docstring)."""
+    if context.narrator == "qb":
+        shared = tuple(metric for metric in METRICS if metric.key not in TEAM_ONLY_METRICS)
+        return (*shared, *QB_METRICS, *cost_metrics(context.model))
+    return (*METRICS, *cost_metrics(context.model))
+
+
 @dataclass(frozen=True)
 class MetricValue:
     value: Number | None
@@ -268,6 +404,11 @@ class Report:
     max_calls: int
     worst_case_estimate: int
     variants: tuple[VariantReport, ...]
+    context: RunContext = RunContext()
+
+    @property
+    def metrics(self) -> tuple[MetricDef, ...]:
+        return metrics_for(self.context)
 
     @property
     def narrator_errors(self) -> int:
@@ -326,7 +467,10 @@ def _case_breakdown(case_id: str, records: Sequence[HarnessRecord]) -> CaseBreak
 
 
 def variant_report(
-    variant: Variant, records: Sequence[HarnessRecord], case_ids: Sequence[str]
+    variant: Variant,
+    records: Sequence[HarnessRecord],
+    case_ids: Sequence[str],
+    metrics: Sequence[MetricDef] = METRICS,
 ) -> VariantReport:
     mine = [record for record in records if record.variant == variant.name]
     return VariantReport(
@@ -339,7 +483,7 @@ def variant_report(
         narrator_errors=_narrator_error_count(mine),
         grader_errors=_grader_error_count(mine),
         sample_rounds=len({record.sample for record in _without_errors(mine)}),
-        metrics={metric.key: metric_value(metric, mine) for metric in METRICS},
+        metrics={metric.key: metric_value(metric, mine) for metric in metrics},
         per_case=tuple(
             _case_breakdown(case_id, [r for r in mine if r.case_id == case_id])
             for case_id in case_ids
@@ -359,11 +503,14 @@ def build_report(
     grader_calls: int,
     max_calls: int,
     worst_case_estimate: int,
+    context: RunContext | None = None,
 ) -> Report:
+    context = context or RunContext()
+    metrics = metrics_for(context)
     return Report(
-        prompt_version=PROMPT_VERSION,
-        grounding_version=GROUNDING_VERSION,
-        narrator_model=MODEL,
+        prompt_version=context.prompt_version,
+        grounding_version=context.grounding_version,
+        narrator_model=context.model,
         grader_model=GRADER_MODEL,
         grader_prompt_version=GRADER_PROMPT_VERSION,
         samples=samples,
@@ -374,15 +521,18 @@ def build_report(
         grader_calls=grader_calls,
         max_calls=max_calls,
         worst_case_estimate=worst_case_estimate,
-        variants=tuple(variant_report(variant, records, case_ids) for variant in variants),
+        variants=tuple(variant_report(variant, records, case_ids, metrics) for variant in variants),
+        context=context,
     )
 
 
 def report_to_json(report: Report) -> dict[str, object]:
     return {
+        "narrator": report.context.narrator,
         "prompt_version": report.prompt_version,
         "grounding_version": report.grounding_version,
         "narrator_model": report.narrator_model,
+        "effort": report.context.effort,
         "grader_model": report.grader_model,
         "grader_prompt_version": report.grader_prompt_version,
         "samples": report.samples,
@@ -416,17 +566,28 @@ def report_to_json(report: Report) -> dict[str, object]:
     }
 
 
-def record_to_json(record: HarnessRecord, *, samples: int) -> dict[str, object]:
+def _usage_json(usage: TokenUsage | None) -> dict[str, int] | None:
+    return None if usage is None else asdict(usage)
+
+
+def record_to_json(
+    record: HarnessRecord, *, samples: int, context: RunContext | None = None
+) -> dict[str, object]:
     """One `records.jsonl` line: the run's keys, every attempt's raw tool
-    input and validator errors, the served text, the measurements and the
-    grader's whole output. An `error` narration has its `narrator_error` and
-    `grade: null`; its `claude_calls` counts only the calls that returned."""
+    input and validator errors, the served text, the measurements, the
+    grader's whole output, each call's usage and the narration's dollars
+    (#463), and on a QB narration its code grades. An `error` narration has
+    its `narrator_error` and `grade: null`; its `claude_calls` and usage
+    count only the calls that returned."""
+    context = context or RunContext()
     judgement = record.narration.judgement
     grade = record.grade
     return {
-        "prompt_version": PROMPT_VERSION,
-        "grounding_version": GROUNDING_VERSION,
-        "narrator_model": MODEL,
+        "narrator": context.narrator,
+        "prompt_version": context.prompt_version,
+        "grounding_version": context.grounding_version,
+        "narrator_model": context.model,
+        "effort": context.effort,
         "grader_model": GRADER_MODEL,
         "grader_prompt_version": GRADER_PROMPT_VERSION,
         "samples": samples,
@@ -454,6 +615,15 @@ def record_to_json(record: HarnessRecord, *, samples: int) -> dict[str, object]:
         "lowercase_rejections": record.narration.lowercase_rejections,
         "property_violations": list(record.property_violations),
         "banned": list(record.banned),
+        "qb_grades": None if record.qb_grades is None else asdict(record.qb_grades),
+        "usage": {
+            "narrator": [_usage_json(usage) for usage in record.narrator_usage],
+            "grader": None if grade is None else _usage_json(grade.usage),
+        },
+        "cost_usd": {
+            "narrator": narrator_cost(record, context.model),
+            "total": total_cost(record, context.model),
+        },
         "grade": None
         if grade is None
         else {
@@ -507,6 +677,8 @@ def _format(value: Number | None, kind: MetricKind) -> str:
         return f"{value:.0%}"
     if kind == "count":
         return str(int(value))
+    if kind == "usd":
+        return f"${value:.4f}"
     return f"{value:.2f}"
 
 
@@ -556,9 +728,10 @@ def render_markdown(report: Report) -> str:
     lines = [
         "# Persona eval report",
         "",
+        f"- narrator: {report.context.narrator} · model: {report.narrator_model} · "
+        f"effort: {report.context.effort_label}",
         f"- prompt: {report.prompt_version} · grounding: {report.grounding_version}",
-        f"- narrator: {report.narrator_model} · grader: {report.grader_model} "
-        f"({report.grader_prompt_version})",
+        f"- grader: {report.grader_model} ({report.grader_prompt_version})",
         f"- samples per case: {report.samples} · cases: {len(report.cases)} · "
         f"variants: {', '.join(names)}",
         f"- calls: narrator {report.narrator_calls} + grader {report.grader_calls} = "
@@ -595,7 +768,7 @@ def render_markdown(report: Report) -> str:
     ]
     rows += [
         [metric.label, *(_cell(v.metrics[metric.key], metric.kind) for v in variants)]
-        for metric in METRICS
+        for metric in report.metrics
     ]
     lines += _table(["metric", *names], rows)
 
@@ -612,7 +785,7 @@ def render_markdown(report: Report) -> str:
             [f"metric vs {reference.name}", *names[1:]],
             [
                 [metric.label, *(spread_check(reference, other, metric) for other in variants[1:])]
-                for metric in METRICS
+                for metric in report.metrics
             ],
         )
 
