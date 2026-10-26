@@ -206,6 +206,21 @@ class PostgresNarrationCache:
         self._dsn = dsn
         self._prompt_version = prompt_version
 
+    @property
+    def prompt_version(self) -> str:
+        """The label every row this store writes carries (`persona_cache.
+        prompt_version`). Not part of any cache key: it is what
+        `python -m api.admin purge-narrations --prompt-version` selects on
+        (issue #447)."""
+        return self._prompt_version
+
+    def with_prompt_version(self, prompt_version: str) -> PostgresNarrationCache:
+        """The same database under another label: the QB route's store is
+        the app's store relabelled `QB_PROMPT_VERSION` (issue #447,
+        `api.deps.get_qb_narration_cache`), so QB rows say which prompt wrote
+        them instead of claiming the team prompt's."""
+        return PostgresNarrationCache(self._dsn, prompt_version=prompt_version)
+
     def get(self, key: str) -> CachedNarration | None:
         try:
             with psycopg.connect(self._dsn, connect_timeout=CONNECT_TIMEOUT_SECONDS) as conn:

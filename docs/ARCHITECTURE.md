@@ -645,6 +645,21 @@ Environment variables:
 - `MY_TEAM_IS_BETTER_API_ENV_FILE`: an alternate `.env` path for local API dev.
 - An auth provider secret, once accounts are built (#201).
 
+### 7.1 Caches, and how to clear each (#447)
+
+These are the caches that can stand between a merged change and what the site shows.
+A PR that adds a cache adds its row here.
+
+| Layer | What it holds | Lifetime | How to clear it |
+|---|---|---|---|
+| Postgres `persona_cache` (`apps/api/src/api/persona/schema.sql`) | Team-verdict and QB-verdict narrations. Keys are sha256 digests over the prompt, grounding and score versions, the fact block and the model (§4.3), so a change to any of them misses on its own | Until purged | `uv run python -m api.admin purge-narrations` (`--prompt-version V`, `--older-than DAYS`, `--all`; `--dry-run` first). Usage: `apps/api/README.md`. Rows record the prompt version that wrote them: team rows `PROMPT_VERSION`, QB rows `QB_PROMPT_VERSION`. QB rows written before #447 deployed say `persona-v13`, so reach them with `--older-than` or by purging `persona-v13` |
+| Cloudflare edge, web HTML and `public/` files (`index.html`, `og-image.png`) | The SPA shell and static assets | `cache-control: public, max-age=0, s-maxage=300`: 5 minutes at the edge | Wait, or hard-refresh to revalidate |
+| Web JS/CSS bundles | Hashed filenames | Per deploy | Nothing to clear |
+| `/api/*` responses | Not cached (`cf-cache-status: DYNAMIC`, no cache header) | — | — |
+| `functools.lru_cache` in `apps/api/src/api/persona/claims.py` | In-process lookups | Per process | A redeploy or restart |
+| Engine SQLite (`data/cfb.sqlite3`) | Ratings, games, player stats, built at deploy (§3.1) | Per deploy | A redeploy rebuilds it |
+| Link-preview scrapers (iMessage, Slack, Facebook) | Their own copy of a shared link's title and `og:image` | Their policy, not ours | Each platform's own debugger or re-scrape tool |
+
 ## 8. CI (`.github/workflows/ci.yml`)
 
 Extends the engine's existing checks rather than replacing them:

@@ -69,3 +69,23 @@ uv run ruff check .
 uv run ruff format --check .
 uv run lint-imports
 ```
+
+## Clearing cached narrations
+
+`persona_cache` keys are sha256 digests, so narrations are cleared by the
+prompt that wrote them or by age (issue #447). Team narrations are stored
+under `api.config.PROMPT_VERSION`, QB ones under `QB_PROMPT_VERSION`. The
+command runs against whatever `DATABASE_URL` it is given (from `apps/api/.env`
+locally, or a Render shell). Dry-run first:
+
+```bash
+cd apps/api
+uv run python -m api.admin purge-narrations --prompt-version qb-persona-v3 --dry-run
+uv run python -m api.admin purge-narrations --prompt-version qb-persona-v3
+uv run python -m api.admin purge-narrations --older-than 30 --prompt-version persona-v13
+uv run python -m api.admin purge-narrations --all          # asks you to type "purge"
+uv run python -m api.admin purge-narrations --all --yes    # doesn't ask
+```
+
+With no selector it refuses. It prints the count per prompt version. There is
+deliberately no HTTP endpoint for this.
