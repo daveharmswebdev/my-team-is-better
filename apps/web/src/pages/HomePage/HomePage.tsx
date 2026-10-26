@@ -22,6 +22,7 @@ import type {
   VerdictCardState,
   VerdictErrorState,
 } from '../../lib/api/types'
+import { verdictShareUrl } from '../../lib/sharePaths'
 import styles from './HomePage.module.css'
 import { fromShareSearch, toShareSearch } from './shareLink'
 
@@ -351,7 +352,10 @@ export function HomePage() {
             headingLevel={2}
             shareUrl={
               state.status === 'success' && submission !== null
-                ? `${window.location.origin}/?${toShareSearch(submission)}`
+                ? verdictShareUrl(
+                    window.location.origin,
+                    toShareSearch(submission),
+                  )
                 : undefined
             }
           />

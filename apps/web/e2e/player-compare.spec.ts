@@ -571,9 +571,29 @@ test('the Share button copies the link the comparison was opened with', async ({
 
   await expect(dialog.getByText('Link copied')).toBeVisible()
   const origin = new URL(page.url()).origin
+  // Issue #185: the copied link is the minted /s one, whose proxied preview
+  // page unfurls with this pair's names; the query is unchanged.
   expect(await page.evaluate(readClipboard)).toBe(
-    `${origin}/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`,
+    `${origin}/s/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`,
   )
+})
+
+// Issue #185: no proxy runs in the e2e server, so the SPA lands a minted link
+// itself, replacing /s/nfl/compare with the old link's address.
+test('a minted /s link, opened with no proxy, lands on the comparison at the old address', async ({
+  page,
+}) => {
+  await page.goto(`/s/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  await expect(
+    dialog.getByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    }),
+  ).toBeVisible()
+  const url = new URL(page.url())
+  expect(url.pathname).toBe('/nfl/compare')
+  expect(url.search).toBe(`?${WARNER_VS_MCNAIR_SEARCH}`)
 })
 
 test('closing the comparison returns to the filled-in form, drops the query, and a reload stays closed', async ({

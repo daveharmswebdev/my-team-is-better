@@ -394,7 +394,7 @@ describe('HomePage', () => {
 
       await waitFor(() =>
         expect(writeText).toHaveBeenCalledWith(
-          `${window.location.origin}/?q=team_case&sport=cfb&year=2005&engine=keener&team=Texas&for=Texas+A%26M`,
+          `${window.location.origin}/s?q=team_case&sport=cfb&year=2005&engine=keener&team=Texas&for=Texas+A%26M`,
         ),
       )
       expect(await screen.findByText('Link copied')).toBeInTheDocument()

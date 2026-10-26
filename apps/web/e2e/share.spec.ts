@@ -92,7 +92,25 @@ test('the Share button copies the link the verdict was opened with', async ({
 
   await expect(verdict.getByText('Link copied')).toBeVisible()
   const origin = new URL(page.url()).origin
-  expect(await page.evaluate(readClipboard)).toBe(`${origin}/?${SHARE_SEARCH}`)
+  // Issue #185: the copied link is the minted /s one, whose proxied preview
+  // page unfurls with this question's own text; the query is unchanged.
+  expect(await page.evaluate(readClipboard)).toBe(`${origin}/s?${SHARE_SEARCH}`)
+})
+
+// Issue #185: no proxy runs in the e2e server, so the SPA lands a minted link
+// itself, replacing /s with the old link's address.
+test('a minted /s link, opened with no proxy, lands on the verdict at the old address', async ({
+  page,
+}) => {
+  await page.goto(`/s?${SHARE_SEARCH}`)
+
+  const verdict = page
+    .getByRole('dialog', { name: 'The verdict' })
+    .getByRole('article')
+  await expect(verdict.getByText('Solid case, no notes.')).toBeVisible()
+  const url = new URL(page.url())
+  expect(url.pathname).toBe('/')
+  expect(url.search).toBe(`?${SHARE_SEARCH}`)
 })
 
 test('closing the verdict returns to the filled-in form, drops the share query, and a reload stays closed', async ({

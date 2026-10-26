@@ -21,6 +21,7 @@ import { QbScorePanel } from '../../components/QbScorePanel/QbScorePanel'
 import type { QbNarrationState } from '../../components/QbScorePanel/QbScorePanel'
 import { qbNarrationErrorCopy } from '../../lib/qbScore'
 import { isPlayerPositionGroup } from '../../lib/api/types'
+import { compareShareUrl } from '../../lib/sharePaths'
 import type {
   PlayerCareerTotalsOut,
   PlayerComparisonOut,
@@ -838,7 +839,7 @@ export function PlayerComparePage() {
     comparison !== null &&
     typeof pickA === 'number' &&
     typeof pickB === 'number'
-      ? `${window.location.origin}/nfl/compare?a=${pickA}&b=${pickB}`
+      ? compareShareUrl(window.location.origin, pickA, pickB)
       : undefined
   const nameA = typeof pickA === 'number' ? names[pickA] : undefined
   const nameB = typeof pickB === 'number' ? names[pickB] : undefined
