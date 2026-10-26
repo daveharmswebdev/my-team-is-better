@@ -335,10 +335,11 @@ _APPOSITIVE_RE: Final = re.compile(
 # squeaker", "doesn't run away with it", "forget by a nose"; #457 round 2).
 # The negator must govern the phrase: right before it, with at most an
 # auxiliary, "even" or "a" between (round 3), so "No doubt Manning runs away"
-# is still a runaway.
+# is still a runaway. Never "just": "It's not just a blowout" asserts a
+# blowout (#463 round 3).
 _MARGIN_NEGATOR_RE: Final = re.compile(
     r"(?:\b(?:no|not|never|nobody|forget|nothing\s+like)|n['’]t)\s+"
-    r"(?:(?:even|a|an|is|was|be|been|do|does|did|really|ever|just)\s+){0,2}\Z",
+    r"(?:(?:even|a|an|is|was|be|been|do|does|did|really|ever)\s+){0,2}\Z",
     re.IGNORECASE,
 )
 # A clause that opens on an imperative conditional ("Give him those years and
@@ -352,6 +353,15 @@ _AND_RE: Final = re.compile(r"\band\b", re.IGNORECASE)
 # his Houston years in, it's a different story".
 _OPENING_CUE_RE: Final = re.compile(
     r"[\s\"'‘’“”(]*(?:if|with|give|count|counting|add)\b", re.IGNORECASE
+)
+# That opening clause governs only when it is about the missing seasons (#463
+# round 3): it names seasons or years ("his Houston years", "his rookie
+# year"), an early or earlier career, a team stint, or the time before the
+# data. "If you look at the peak, it's a different story" and "With that
+# said, McNair's a different story" are true split narrations.
+_MISSING_SEASONS_RE: Final = re.compile(
+    r"\b(?:seasons?|years?|rookie|early|earlier|days|stint|tenure|before|pre)\b",
+    re.IGNORECASE,
 )
 # The listener shape of "if you had": "If you had McNair, you'd be crying"
 # (#457 round 3) is about the fan, not the missing seasons.
@@ -1374,7 +1384,11 @@ def _speculation_matches(
             # to spare, Warner takes both, and McNair's a different story"
             # the "with" is Warner's win.
             opening, _, _, _ = _clause_bounds(masked, left - 1, left - 1, breaks)
-            conditional = opening == s_left and bool(_OPENING_CUE_RE.match(masked, s_left))
+            conditional = (
+                opening == s_left
+                and bool(_OPENING_CUE_RE.match(masked, s_left))
+                and bool(_MISSING_SEASONS_RE.search(masked, s_left, left))
+            )
         if conditional:
             found.append(match)
     return sorted(found, key=lambda match: match.start())
