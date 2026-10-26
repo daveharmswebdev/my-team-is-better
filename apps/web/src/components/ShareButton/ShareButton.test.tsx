@@ -247,6 +247,36 @@ describe('ShareButton, floating (issue #474)', () => {
     )
   })
 
+  it('reserves room for its overlay as well as the button, measured as it changes', async () => {
+    // jsdom lays nothing out: a ResizeObserver stub reports the stack's height.
+    let report: () => void = () => {}
+    class FakeResizeObserver {
+      constructor(callback: () => void) {
+        report = callback
+      }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    const height = vi
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockReturnValue(200)
+    try {
+      const { container } = render(
+        <ShareButton url={URL_TO_SHARE} layout="floating" />,
+      )
+      act(() => report())
+      const slot = container.firstElementChild as HTMLElement
+      // The stack's 200px, plus the gap below it and a little air.
+      expect(slot.style.height).toBe(
+        'calc(200px + var(--fab-gap) + var(--sp-2))',
+      )
+    } finally {
+      height.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('is inline by default, its text the full label', () => {
     const { container } = render(<ShareButton url={URL_TO_SHARE} />)
     expect(container.firstElementChild).toHaveAttribute('data-layout', 'inline')
@@ -255,3 +285,85 @@ describe('ShareButton, floating (issue #474)', () => {
     ).toHaveTextContent('Share this verdict')
   })
 })
+
+/**
+ * Issue #474, round 2: on a phone the toast and the manual-copy box float
+ * over the content, so neither may stay there forever.
+ */
+describe.each(['inline', 'floating'] as const)(
+  'ShareButton, transient messages (%s)',
+  (layout) => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('has its status live region in the accessibility tree before any click', () => {
+      render(<ShareButton url={URL_TO_SHARE} layout={layout} />)
+      const status = screen.getByRole('status')
+      expect(status).toBeEmptyDOMElement()
+      expect(status).toBeVisible()
+    })
+
+    it('clears "Link copied" after about four seconds', async () => {
+      vi.useFakeTimers()
+      stubNavigator('clipboard', {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      })
+      render(<ShareButton url={URL_TO_SHARE} layout={layout} />)
+
+      clickShare()
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied')
+
+      act(() => {
+        vi.advanceTimersByTime(3500)
+      })
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied')
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    })
+
+    it('drops its pending clear on unmount', async () => {
+      vi.useFakeTimers()
+      stubNavigator('clipboard', {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      })
+      const { unmount } = render(
+        <ShareButton url={URL_TO_SHARE} layout={layout} />,
+      )
+      clickShare()
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(vi.getTimerCount()).toBe(1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('lets the manual-copy box be dismissed, and puts focus back on Share', async () => {
+      stubNavigator('clipboard', {
+        writeText: () => Promise.reject(new Error('Clipboard blocked')),
+      })
+      render(<ShareButton url={URL_TO_SHARE} layout={layout} />)
+      clickShare()
+      const field = await screen.findByRole('textbox', {
+        name: 'Copy this link',
+      })
+      expect(field).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss the link' }))
+
+      expect(
+        screen.queryByRole('textbox', { name: 'Copy this link' }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      expect(
+        screen.getByRole('button', { name: 'Share this verdict' }),
+      ).toHaveFocus()
+    })
+  },
+)

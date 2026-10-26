@@ -31,6 +31,52 @@ const readLastLineAndShare = () => {
   }
 }
 
+// The whole floating stack -- button, toast, manual-copy box -- against the
+// content's last line, at the bottom of the scroll.
+const readLastLineAndOverlay = () => {
+  const modal = document.querySelector('dialog[open]')
+  if (modal === null) throw new Error('no open dialog')
+  modal.scrollTop = modal.scrollHeight
+  const slot = modal.querySelector('[data-layout="floating"]')
+  const stack = slot?.firstElementChild
+  const last = slot?.previousElementSibling
+  if (!stack || !last) throw new Error('no floating share slot')
+  return {
+    lastLineBottom: last.getBoundingClientRect().bottom,
+    overlayTop: stack.getBoundingClientRect().top,
+  }
+}
+
+/** Makes the clipboard refuse, so ShareButton falls back to the manual-copy box. */
+export const refuseClipboard = () => {
+  Object.defineProperty(Navigator.prototype, 'share', {
+    value: undefined,
+    configurable: true,
+  })
+  Object.defineProperty(Navigator.prototype, 'clipboard', {
+    value: {
+      writeText: () => Promise.reject(new Error('Clipboard blocked')),
+    },
+    configurable: true,
+  })
+}
+
+/**
+ * Issue #474, round 2: whatever the floating stack shows -- the toast or the
+ * manual-copy box -- scrolled to the bottom, the content's last line ends
+ * above it rather than under it.
+ */
+export async function expectOverlayClearOfLastLine(page: Page) {
+  await expect
+    .poll(async () => {
+      const { lastLineBottom, overlayTop } = await page.evaluate(
+        readLastLineAndOverlay,
+      )
+      return lastLineBottom <= overlayTop
+    })
+    .toBe(true)
+}
+
 /** Whether `first` comes before `second` in document (reading) order. */
 export async function precedes(first: Locator, second: Locator) {
   const handle = await second.elementHandle()

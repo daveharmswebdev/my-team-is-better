@@ -46,7 +46,16 @@ export default meta
 
 type Story = StoryObj<typeof meta>
 
-export const Default: Story = {}
+/**
+ * The status live region is in the accessibility tree from the first
+ * render, empty, so the first "Link copied" is announced (issue #474).
+ */
+export const Default: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toBeEmptyDOMElement()
+  },
+}
 
 /**
  * A caller's own wording (issue #310): the NFL player comparison shares a

@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
 import { TEXAS_ELO, USC_ELO } from '../EvidenceReceipts/eloLedgerFixture'
@@ -278,6 +278,91 @@ export const ComparisonOnPhone: Story = {
     })
     await expect(precedes(teams, receipts)).toBe(true)
     await expect(precedes(receipts, share)).toBe(true)
+  },
+}
+
+/**
+ * A `beforeEach` that takes away the share sheet and gives the clipboard
+ * `writeText` -- own properties on `navigator`, removed again after.
+ */
+function withClipboard(writeText: (text: string) => Promise<void>) {
+  return () => {
+    Object.defineProperty(navigator, 'share', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    })
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    })
+    return () => {
+      Reflect.deleteProperty(navigator, 'share')
+      Reflect.deleteProperty(navigator, 'clipboard')
+    }
+  }
+}
+
+/**
+ * Scrolled to the bottom of the page (a standalone card scrolls the
+ * document), the receipts end above the floating stack -- button plus
+ * whatever it shows -- not under it.
+ */
+async function expectReceiptsClearOfOverlay(canvasElement: HTMLElement) {
+  const slot = canvasElement.querySelector('[data-layout="floating"]')
+  const stack = slot?.firstElementChild
+  const last = slot?.previousElementSibling
+  await expect(stack).toBeTruthy()
+  await expect(last).toBeTruthy()
+  await waitFor(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight)
+    return expect(last?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      stack?.getBoundingClientRect().top ?? 0,
+    )
+  })
+}
+
+/** Issue #474, round 2: the "Link copied" toast never sits over the receipts. */
+export const ComparisonOnPhoneLinkCopied: Story = {
+  ...ComparisonSuccess,
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  beforeEach: withClipboard(() => Promise.resolve()),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Share this verdict' }),
+    )
+    await expect(await canvas.findByText('Link copied')).toBeVisible()
+    await expectReceiptsClearOfOverlay(canvasElement)
+  },
+}
+
+/**
+ * Issue #474, round 2: the manual-copy box makes room for itself, and has a
+ * dismiss button that puts focus back on Share.
+ */
+export const ComparisonOnPhoneManualCopy: Story = {
+  ...ComparisonSuccess,
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  beforeEach: withClipboard(() =>
+    Promise.reject(new Error('Clipboard blocked')),
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const share = canvas.getByRole('button', { name: 'Share this verdict' })
+    await userEvent.click(share)
+    await expect(
+      await canvas.findByRole('textbox', { name: 'Copy this link' }),
+    ).toBeVisible()
+    await expectReceiptsClearOfOverlay(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Dismiss the link' }),
+    )
+    await expect(
+      canvas.queryByRole('textbox', { name: 'Copy this link' }),
+    ).toBeNull()
+    await expect(share).toHaveFocus()
   },
 }
 

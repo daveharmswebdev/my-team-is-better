@@ -120,8 +120,46 @@
   color: var(--hunter);
 }
 
-.status:empty {
-  display: none;
+/* Closes the manual-copy box (#474): a quiet outlined button under the
+   field, at least the 44px touch-target height. */
+.dismiss {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--navy);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  border-color: var(--navy);
+}
+
+.dismiss:focus-visible {
+  outline: 3px solid var(--navy);
+  outline-offset: 2px;
+}
+
+/* Empty, the live region takes no room but stays in the accessibility tree
+   (never display: none), so the first message inserted is announced. */
+.status:empty,
+.floating .status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* The manual-copy fallback is guidance, not a success -- so not green. */

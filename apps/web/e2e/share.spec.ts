@@ -3,7 +3,9 @@ import {
   PHONE,
   expectFloatingShare,
   expectInlineShare,
+  expectOverlayClearOfLastLine,
   precedes,
+  refuseClipboard,
 } from './shareLayout.ts'
 
 // Share-by-link smoke spec (issue #184). A share link holds the *question*;
@@ -219,8 +221,34 @@ for (const [kind, search] of [
     const share = verdict.getByRole('button', { name: 'Share this verdict' })
     await expectFloatingShare(page, share)
 
+    // Round 2: the toast has room of its own and goes after a few seconds.
     await share.click()
     await expect(verdict.getByText('Link copied')).toBeInViewport()
+    await expectOverlayClearOfLastLine(page)
+    await expect(verdict.getByText('Link copied')).toHaveCount(0, {
+      timeout: 8000,
+    })
+  })
+
+  test(`on a phone, a ${kind} verdict's manual-copy fallback makes room for itself and can be dismissed`, async ({
+    page,
+  }) => {
+    await page.addInitScript(refuseClipboard)
+    await page.setViewportSize(PHONE)
+    await page.goto(`/?${search}`)
+
+    const verdict = page
+      .getByRole('dialog', { name: 'The verdict' })
+      .getByRole('article')
+    const share = verdict.getByRole('button', { name: 'Share this verdict' })
+    await share.click()
+    const field = verdict.getByRole('textbox', { name: 'Copy this link' })
+    await expect(field).toBeInViewport()
+    await expectOverlayClearOfLastLine(page)
+
+    await verdict.getByRole('button', { name: 'Dismiss the link' }).click()
+    await expect(field).toHaveCount(0)
+    await expect(share).toBeFocused()
   })
 
   test(`on a desktop, a ${kind} verdict opens with one Share button, before the teams and the verdict`, async ({

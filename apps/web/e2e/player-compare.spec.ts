@@ -4,7 +4,9 @@ import {
   PHONE,
   expectFloatingShare,
   expectInlineShare,
+  expectOverlayClearOfLastLine,
   precedes,
+  refuseClipboard,
 } from './shareLayout.ts'
 
 // Issue #301: the NFL player comparison, end to end against the real API on
@@ -907,9 +909,33 @@ test('on a phone, the comparison floats one Share button that stays on screen an
   // The comparison is far taller than a phone, so the bottom is a real scroll.
   await expectFloatingShare(page, share)
 
-  // It still shares, and says so on screen.
+  // It still shares, and says so on screen -- in room of its own, never
+  // over the last line, and only for a few seconds (round 2).
   await share.click()
   await expect(dialog.getByText('Link copied')).toBeInViewport()
+  await expectOverlayClearOfLastLine(page)
+  await expect(dialog.getByText('Link copied')).toHaveCount(0, {
+    timeout: 8000,
+  })
+})
+
+test('on a phone, the manual-copy fallback makes room for itself and can be dismissed', async ({
+  page,
+}) => {
+  await page.addInitScript(refuseClipboard)
+  await page.setViewportSize(PHONE)
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  const share = dialog.getByRole('button', { name: 'Share this comparison' })
+  await share.click()
+  const field = dialog.getByRole('textbox', { name: 'Copy this link' })
+  await expect(field).toBeInViewport()
+  await expectOverlayClearOfLastLine(page)
+
+  await dialog.getByRole('button', { name: 'Dismiss the link' }).click()
+  await expect(field).toHaveCount(0)
+  await expect(share).toBeFocused()
 })
 
 test('on a desktop, the comparison opens with one Share button, before the players', async ({
