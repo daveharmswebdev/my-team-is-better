@@ -35,11 +35,11 @@ QUALIFYING: Mapping[PlayerLeaderCategory, str] = MappingProxyType(
         # the rule: a player thrown to who caught nothing belongs on the
         # board with 0 receptions rather than missing from it.
         #
-        # The OR is there for one upstream gap, tracked as #345. nflverse
-        # publishes `targets` as a literal 0 for 2003-2008 -- 3,528 to 3,647
-        # players a year caught a pass with targets 0 -- and there is no
-        # blank cell anywhere in 1999-2025 to tell "not tracked" from "never
-        # thrown to", so the NULL-not-zero rule cannot save it.
+        # The OR is there for one upstream gap (#345). nflverse publishes
+        # `targets` as a literal 0 for 2003-2008 -- 3,528 to 3,647 players a
+        # year caught a pass with targets 0. The ingest now stores those
+        # seasons' targets as NULL, so `targets > 0` is NULL there and the
+        # reception is what qualifies the row.
         #
         # Outside those six seasons the two halves are all but the same
         # test: over the full raw cache, 1999-2001 and 2009-2025 have no

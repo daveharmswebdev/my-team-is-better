@@ -432,9 +432,9 @@ export interface StarterRecordOut {
  *
  * The receiving stats (issue #314) are mirrored in full, but only
  * `receptions`, `receiving_yards` and `receiving_tds` are shown, and only on
- * the receiving board. `targets` is never shown: the source publishes it as
- * a literal 0 for every 2003-2008 season (#345), so a career total spanning
- * those years would be a false undercount. First downs and fumbles lost are
+ * the receiving board. `targets` is never shown: the source did not track it
+ * for 2003-2008, which the db stores as null (#345), so a career total
+ * spanning those years is null. First downs and fumbles lost are
  * not shown in v1 either.
  *
  * The kicking and punting stats (issue #315) are shown only on their own
