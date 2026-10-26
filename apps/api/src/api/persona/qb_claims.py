@@ -82,11 +82,15 @@ before named; after a sentence naming both, it is not caught).
 **Margin size** (the coordinator's voice call on #457): any margin is still
 a win, and the words scale with it. Each measure's printed margin falls in a
 band (`MARGIN_BANDS`: close, clear or decisive) that the fact block states
-next to the margin. A runaway phrase ("runs away", "blowout", "in a walk")
-on a measure that isn't decisive, or a photo-finish phrase ("by a nose", "a
-photo finish") on one that isn't close, is rejected, and so is either on a
-dead-level measure. A phrase speaks of the measure named nearest it in its
-clause, else in its sentence, else of both.
+next to the margin. Runaway words come in two tiers (the founder's call
+on #463): a mild one ("not close", "pulls away", "comfortably", "with room
+to spare") fits a clear or a decisive margin, a hard one ("runs away",
+"blowout", "in a walk") a decisive one only. A runaway phrase on a band its
+tier doesn't fit, or a photo-finish phrase ("by a nose", "a photo finish")
+on one that isn't close, is rejected, and so is any of them on a dead-level
+measure. A negated phrase is no use of it ("It's not a blowout", "did not
+run away with the peak", #462). A phrase speaks of the measure named
+nearest it in its clause, else in its sentence, else of both.
 
 **The voice rules a check can see** (the coordinator's voice call on #451):
 there is always a winner, so a hedge that withholds the verdict ("too close
@@ -97,9 +101,10 @@ the data doesn't hold ("would've flipped", "if we had his rookie year",
 rejected, unless a negator heads its clause ("nothing would change that")
 or it is the idiom ("that might change your mind"), and "a different story"
 only as a conditional ("it'd be a different story", "a different story
-if ..."); z-score jargon is rejected; a Roman numeral ("Super Bowl XXXIV")
-is rejected as a number (QB path only, D3), as a whole valid numeral word
-("LIVID" is not one). On an inconclusive block a
+if ...", or after an opening conditional clause: "If you count his Houston
+years, it's a different story", #462); z-score jargon is rejected; a
+Roman numeral ("Super Bowl XXXIV") is rejected as a number (QB path only,
+D3), as a whole valid numeral word ("LIVID" is not one). On an inconclusive block a
 `winner` or `margin` claim is rejected, and so is a score for the side with
 no qualifying season. A starter record used to argue with the score is the
 prompt's job, not a check here.
@@ -137,7 +142,9 @@ from api.persona.claims import (
 # These rules' version in the QB narration cache key
 # (`api.persona.cache.qb_cache_key`): bump it when a change could accept or
 # reject a QB narration differently.
-QB_GROUNDING_VERSION: Final = "qb-claims-v2"
+# qb-claims-v3: two runaway tiers, honoured "not" negations, a comma-clause
+# conditional before "a different story" (#463 round B, #462).
+QB_GROUNDING_VERSION: Final = "qb-claims-v3"
 
 # The verdict alone takes two or three claims (the winners and the year, D1
 # on #451), so the cap leaves room for a few figures on top.
@@ -210,6 +217,8 @@ _SPECULATION_RE: Final = re.compile(
     # The listener shape "if you had McNair, you'd be crying" is exempted in
     # `_speculation_matches` (#457 round 3), not here.
     r"|\bif\s+(?:we|they|you|the\s+books?)\s+(?:had|counted|included)\b"
+    # #462: "If you count his Houston years, ..."
+    r"|\bif\s+you\s+count\b"
     r"|\bwith\s+(?:those|the\s+missing|his\s+early|his\s+missing)\s+(?:years|seasons)\b"
     # D2 on #451.
     # "That might change your mind" is about the listener, not the seasons
@@ -265,6 +274,12 @@ _WIN_VERB_RE: Final = re.compile(
 _MEASURE_RE: Final = re.compile(r"\b(?:career|peak)\b", re.IGNORECASE)
 _MEASURE_WINDOW: Final = 6
 _CLAUSE_END_RE: Final = re.compile(r"[,;:—–()]|\s-\s|\b(?:but|while|though|not)\b", re.IGNORECASE)
+# The margin-word negator reads back to this bound, which is the clause bound
+# less "not" (#462): "It's not a photo finish" and "Manning did not run away
+# with the peak" are negated, true sentences.
+_MARGIN_NEGATOR_BOUND_RE: Final = re.compile(
+    r"[,;:—–()]|\s-\s|\b(?:but|while|though)\b", re.IGNORECASE
+)
 _AND_BEFORE_RE: Final = re.compile(r"\b(?:and|while)\s+\Z", re.IGNORECASE)
 # "McNair takes it: career and peak" (#457): after a bare object, a colon or
 # dash introduces the measures instead of ending the clause.
@@ -332,6 +347,12 @@ _IMPERATIVE_CUE_RE: Final = re.compile(
     r"\s*(?:give|count|add|throw|put|hand|toss|let|credit)\b", re.IGNORECASE
 )
 _AND_RE: Final = re.compile(r"\band\b", re.IGNORECASE)
+# A sentence that opens on a conditional clause governs the clause right after
+# it (#462): "If you count his Houston years, it's a different story", "With
+# his Houston years in, it's a different story".
+_OPENING_CUE_RE: Final = re.compile(
+    r"[\s\"'‘’“”(]*(?:if|with|give|count|counting|add)\b", re.IGNORECASE
+)
 # The listener shape of "if you had": "If you had McNair, you'd be crying"
 # (#457 round 3) is about the fan, not the missing seasons.
 _IF_YOU_HAD_RE: Final = re.compile(r"if\s+you\s+had", re.IGNORECASE)
@@ -352,17 +373,22 @@ MARGIN_BANDS: Final[Mapping[str, tuple[Decimal, Decimal]]] = {
     "career": (Decimal("1.5"), Decimal("7.5")),
     "peak": (Decimal("0.15"), Decimal("0.75")),
 }
-# Runaway words fit a decisive margin only, photo-finish words a close one
-# only; a clear margin takes neither.
-_RUNAWAY_RE: Final = re.compile(
-    r"\b(?:runs|ran|running|run)\s+away\b|\brunaway\b|\bblow[\s-]?outs?\b"
-    r"|\b(?:blows|blew|blowing|blow)\s+(?:[\w'’]+\s+)?out\b|\bno\s+contest\b"
+# Two runaway tiers (the founder's call on #463, 2026-10-26): mild runaway
+# words fit a clear or a decisive margin, hard runaway words a decisive one
+# only. Photo-finish words fit a close one only.
+_MILD_RUNAWAY_RE: Final = re.compile(
     # The adjective only ("it isn't close", "wasn't even close"), never the
     # verb with an object ("can't close the gap", "couldn't close it out")
     # or "close to" (#457 round 2).
-    r"|(?:\bnot|n['’]t)\s+(?:even\s+)?close\b"
+    r"(?:\bnot|n['’]t)\s+(?:even\s+)?close\b"
     r"(?!\s+(?:to|the|a|an|it|out|that|this|his|her|their|them|him|ground|in|down|off|any"
     r"|gaps?|distance|deals?|shop|up)\b)"
+    r"|\b(?:pulls|pulled|pulling|pull)\s+away\b|\bcomfortably\b|\bwith\s+room\s+to\s+spare\b",
+    re.IGNORECASE,
+)
+_HARD_RUNAWAY_RE: Final = re.compile(
+    r"\b(?:runs|ran|running|run)\s+away\b|\brunaway\b|\bblow[\s-]?outs?\b"
+    r"|\b(?:blows|blew|blowing|blow)\s+(?:[\w'’]+\s+)?out\b|\bno\s+contest\b"
     r"|(?<!victory\s)\blaps\b|\blapped\b|\blapping\b|\blandslide\b|\brout(?:s|ed)?\b"
     r"|\b(?:buries|buried|burying)\b|\b(?:walks|walked|walking)\s+away\s+with\b"
     r"|\bin\s+a\s+walk\b|\bby\s+(?:a\s+mile|miles)\b|\bmiles\s+ahead\b|\bcakewalk\b"
@@ -379,6 +405,41 @@ _PHOTO_FINISH_RE: Final = re.compile(
     r"|\bbarely\s+(?:[\w'’]+\s+)?(?:edges?|edged|beats?|takes?|took|wins?|won|tops?|topped"
     r"|gets?|got|ahead|nips?|nipped|grabs?|grabbed|holds?\s+on|held\s+on|pulls?|pulled)\b",
     re.IGNORECASE,
+)
+
+
+@dataclass(frozen=True)
+class _MarginTier:
+    """One tier of margin words: the bands it fits, and how its feedback
+    says so (the error names the tier and its bands, #463)."""
+
+    pattern: re.Pattern[str]
+    fits: frozenset[MarginBand]
+    refusal: str
+    rule: str
+
+
+_MARGIN_TIERS: Final[tuple[_MarginTier, ...]] = (
+    _MarginTier(
+        _HARD_RUNAWAY_RE,
+        frozenset({"decisive"}),
+        "no runaway words that hard",
+        'hard runaway words ("runs away with it", "a blowout", "laps him") fit a decisive '
+        "margin only",
+    ),
+    _MarginTier(
+        _MILD_RUNAWAY_RE,
+        frozenset({"clear", "decisive"}),
+        "no runaway words",
+        'mild runaway words ("not close", "pulls away", "comfortably", "with room to spare") '
+        "fit a clear or a decisive margin",
+    ),
+    _MarginTier(
+        _PHOTO_FINISH_RE,
+        frozenset({"close"}),
+        "no photo-finish words",
+        'photo-finish words ("by a nose", "a photo finish") fit a close margin only',
+    ),
 )
 _SPECULATION_ERROR: Final = (
     "never speculate about the missing seasons: the score counts only the seasons in the "
@@ -1301,11 +1362,19 @@ def _speculation_matches(
             # ", and it's a different story": the coordinated clause before it
             # is the clause before the comma (#457 round 3).
             previous, _, _, _ = _clause_bounds(masked, left - 1, left - 1, breaks)
-        conditional = (
+        conditional = bool(
             _STORY_AFTER_RE.match(masked, match.end())
             or _STORY_CUE_RE.search(masked, own, match.start())
             or (ands and _IMPERATIVE_CUE_RE.match(masked, previous))
         )
+        if not conditional and left > s_left:
+            # #462: the sentence's opening clause, right before this one,
+            # opens on a conditional ("If you count his Houston years, it's a
+            # different story"). Only the clause right before: in "With room
+            # to spare, Warner takes both, and McNair's a different story"
+            # the "with" is Warner's win.
+            opening, _, _, _ = _clause_bounds(masked, left - 1, left - 1, breaks)
+            conditional = opening == s_left and bool(_OPENING_CUE_RE.match(masked, s_left))
         if conditional:
             found.append(match)
     return sorted(found, key=lambda match: match.start())
@@ -1451,13 +1520,16 @@ def _margin_word_errors(
     breaks: Sequence[int],
     block: _QbBlock,
 ) -> list[str]:
-    """Margin size (#457): a runaway phrase on a measure whose band isn't
-    decisive, or a photo-finish phrase on one that isn't close, is rejected.
-    A phrase speaks of the measure mentioned nearest it in its clause (a
-    "career" or "peak", or a score, margin or winner placeholder of that
-    measure; every mention after it when the nearest is after it), else the
-    nearest before it in its sentence, else the nearest after it, else both
-    measures. A dead-level measure takes neither. An inconclusive block has
+    """Margin size (#457, two runaway tiers since #463): a hard runaway
+    phrase on a measure whose band isn't decisive, a mild runaway phrase on
+    a close one, or a photo-finish phrase on one that isn't close, is
+    rejected, unless a negator governs it (`_MARGIN_NEGATOR_RE`, read back to
+    `_MARGIN_NEGATOR_BOUND_RE`, so "not" counts, #462). A phrase speaks of
+    the measure mentioned nearest it in its clause (a "career" or "peak", or
+    a score, margin or winner placeholder of that measure; every mention
+    after it when the nearest is after it), else the nearest before it in
+    its sentence, else the nearest after it, else both measures. A
+    dead-level measure takes no margin words. An inconclusive block has
     no margins; its verdict is checked elsewhere."""
     if block.inconclusive is not None:
         return []
@@ -1470,19 +1542,25 @@ def _margin_word_errors(
         ]
     )
     errors: list[str] = []
-    for kind, pattern, fits in (
-        ("runaway", _RUNAWAY_RE, "decisive"),
-        ("photo-finish", _PHOTO_FINISH_RE, "close"),
-    ):
-        for match in pattern.finditer(masked):
-            left, _, _, _ = _clause_bounds(masked, match.start(), match.end(), breaks)
-            if _MARGIN_NEGATOR_RE.search(masked[left : match.start()]):
+    for tier in _MARGIN_TIERS:
+        for match in tier.pattern.finditer(masked):
+            if _margin_word_negated(masked, match.start(), breaks):
                 continue
             for measure in _phrase_measures(match, mentions, masked, breaks):
                 band = block.band(measure)
-                if band != fits:
-                    errors.append(_margin_word_error(match.group(0), kind, measure, band, block))
+                if band not in tier.fits:
+                    errors.append(_margin_word_error(match.group(0), tier, measure, band, block))
     return errors
+
+
+def _margin_word_negated(masked: str, start: int, breaks: Sequence[int]) -> bool:
+    """A negator governs the margin phrase at `start` ("no photo finish",
+    "doesn't run away", "It's not a blowout"): the window reads back to the
+    comma or clause bound, never stopping at "not" (#462)."""
+    left, _ = _sentence_bounds(masked, start, breaks)
+    for stop in _MARGIN_NEGATOR_BOUND_RE.finditer(masked, left, start):
+        left = max(left, stop.end())
+    return bool(_MARGIN_NEGATOR_RE.search(masked[left:start]))
 
 
 def _phrase_measures(
@@ -1535,7 +1613,7 @@ def _nearest_measures(
 
 
 def _margin_word_error(
-    phrase: str, kind: str, measure: str, band: MarginBand | None, block: _QbBlock
+    phrase: str, tier: _MarginTier, measure: str, band: MarginBand | None, block: _QbBlock
 ) -> str:
     said = f"the prose says {quote(phrase)}"
     winner = block.winners[measure]
@@ -1544,14 +1622,14 @@ def _margin_word_error(
             f"{said}, but the {measure} is dead level: no margin words, say plainly that it "
             "is level"
         )
-    fits = {
+    takes = {
         "close": 'a close one takes "by a nose" or "a photo finish"',
-        "clear": "a clear one takes neither extreme, just who took it",
+        "clear": 'a clear one takes the mild ones, "not close" or "pulls away"',
         "decisive": 'a decisive one can "run away with it"',
     }[band]
     return (
         f"{said}, but the {measure} margin is {block.shown_margin(measure, winner)}, a {band} "
-        f"one: no {kind} words; {fits}"
+        f"one: {tier.refusal}; {tier.rule}, and {takes}"
     )
 
 

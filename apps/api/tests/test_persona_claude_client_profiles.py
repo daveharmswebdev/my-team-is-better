@@ -8,9 +8,10 @@ Three narrator models are supported, each with its own request shape:
   `tests/test_persona_claude_client.py` pins.
 - `claude-haiku-5-5` and `claude-sonnet-5-5`: forced `tool_choice` is a 400
   on Sonnet 5.5 and skips thinking on Haiku 5.5, so both send
-  `tool_choice: auto` with the tool marked `strict: true`, leave thinking at
-  its adaptive default, send `output_config.effort` (medium unless
-  overridden) and allow `max_tokens` 8000, since thinking counts toward it.
+  `tool_choice: auto` with the tool exactly as haiku-4-5 sends it (no
+  `strict` key since round B of #463), leave thinking at its adaptive
+  default, send `output_config.effort` (medium unless overridden) and
+  allow `max_tokens` 8000, since thinking counts toward it.
 
 No profile ever sends `temperature`, `top_p`, `top_k` or `fallbacks`. A fake
 `anthropic` client captures the request kwargs and hands back hand-built
@@ -129,31 +130,33 @@ def test_haiku_4_5_sends_exactly_todays_request() -> None:
 
 
 @pytest.mark.parametrize("model", FIVE_X)
-def test_a_5x_model_steers_with_auto_and_a_strict_tool(model: str) -> None:
+def test_a_5x_model_steers_with_auto_and_the_plain_tool(model: str) -> None:
     assert _kwargs_for(model) == {
         "model": model,
         "max_tokens": 8000,
         "system": "SYSTEM",
         "messages": [{"role": "user", "content": "FACTS"}],
-        "tools": [{**tool_schema(), "strict": True}],
+        "tools": [tool_schema()],
         "tool_choice": {"type": "auto"},
         "output_config": {"effort": "medium"},
     }
 
 
 @pytest.mark.parametrize("model", SUPPORTED_MODELS)
+@pytest.mark.parametrize("tool", [None, qb_tool_schema()], ids=["team", "qb"])
+def test_no_profile_sends_a_strict_tool(model: str, tool: dict[str, Any] | None) -> None:
+    """Strict tool use malformed the 5.x models' margin claims (#463, measured
+    live 2026-10-26), so no profile marks the tool strict, and the tool sent
+    is the shared schema unchanged."""
+    (sent,) = _kwargs_for(model, tool=tool)["tools"]
+    assert "strict" not in sent
+    assert sent == (tool_schema() if tool is None else qb_tool_schema())
+
+
+@pytest.mark.parametrize("model", SUPPORTED_MODELS)
 def test_no_profile_sends_thinking_sampling_or_fallbacks(model: str) -> None:
     kwargs = _kwargs_for(model)
     assert [key for key in FORBIDDEN_KEYS if key in kwargs] == []
-
-
-@pytest.mark.parametrize("model", FIVE_X)
-def test_the_qb_tool_is_sent_strict_too_and_the_team_schema_is_never_mutated(model: str) -> None:
-    kwargs = _kwargs_for(model, tool=qb_tool_schema())
-    assert kwargs["tools"] == [{**qb_tool_schema(), "strict": True}]
-    assert "strict" not in qb_tool_schema()
-    assert "strict" not in tool_schema()
-    assert "strict" not in _kwargs_for(HAIKU_4_5, tool=qb_tool_schema())["tools"][0]
 
 
 @pytest.mark.parametrize("model", FIVE_X)
@@ -180,61 +183,6 @@ def test_with_tool_keeps_the_model_or_takes_one() -> None:
     assert team.with_tool(qb_tool_schema()).effort == "high"
     assert team.with_tool(qb_tool_schema(), model=HAIKU_5_5).model == HAIKU_5_5
     assert ClaudeNarrator(fake, model=HAIKU_4_5).with_tool(qb_tool_schema()).model == HAIKU_4_5
-
-
-def _walk_objects(node: object) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-    if isinstance(node, dict):
-        if node.get("type") == "object":
-            found.append(node)
-        for value in node.values():
-            found += _walk_objects(value)
-    elif isinstance(node, list):
-        for value in node:
-            found += _walk_objects(value)
-    return found
-
-
-_UNSUPPORTED_STRICT_KEYWORDS = (
-    "minimum",
-    "maximum",
-    "exclusiveMinimum",
-    "exclusiveMaximum",
-    "multipleOf",
-    "minLength",
-    "maxLength",
-    "minItems",
-    "maxItems",
-    "uniqueItems",
-)
-
-
-def _keywords(node: object) -> set[str]:
-    keys: set[str] = set()
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if key != "properties":
-                keys.add(key)
-            keys |= _keywords(value)
-    elif isinstance(node, list):
-        for value in node:
-            keys |= _keywords(value)
-    return keys
-
-
-@pytest.mark.parametrize("schema", [tool_schema, qb_tool_schema], ids=["team", "qb"])
-def test_both_tool_schemas_meet_the_strict_rules_as_they_are(schema: Any) -> None:
-    """Strict tool use needs `additionalProperties: false` and `required` on
-    every object, and no numeric, string-length or array-size constraints.
-    Both schemas already comply, so the 5.x profiles send them unchanged
-    except for `strict: true` (whether the API accepts them is a live check)."""
-    input_schema = schema()["input_schema"]
-    objects = _walk_objects(input_schema)
-    assert len(objects) == 2
-    for obj in objects:
-        assert obj.get("additionalProperties") is False, obj
-        assert isinstance(obj.get("required"), list) and obj["required"], obj
-    assert _keywords(input_schema) & set(_UNSUPPORTED_STRICT_KEYWORDS) == set()
 
 
 # ---------------------------------------------------------------------------

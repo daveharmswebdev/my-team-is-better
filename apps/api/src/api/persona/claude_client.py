@@ -33,17 +33,19 @@ exist so the eval harness can compare them by number before a switch.
 - `claude-haiku-5-5` and `claude-sonnet-5-5`: forced `tool_choice`
   (`tool` or `any`) is a 400 on Sonnet 5.5, and on Haiku 5.5 it is accepted
   but the model then skips thinking. So both send `tool_choice: auto` with
-  the tool marked `strict: true` (schema-valid arguments, the guarantee the
-  forced call gave), and a reply with no `submit_narration` call is a
-  rejected attempt that `narrate` retries with feedback, which it already
-  was. Thinking is left at its adaptive default (no `thinking` field),
-  `output_config.effort` is sent explicitly (`medium` unless the harness
-  overrides it), and `max_tokens` is 8000 because thinking counts toward it.
-  Both tool schemas (`api.persona.claims.tool_schema`,
-  `api.persona.qb_claims.qb_tool_schema`) already meet the strict rules
-  (`additionalProperties: false` and `required` on every object, no numeric
-  or length constraints), so they are sent as they are plus `strict: true`,
-  on a copy: haiku-4-5 never sees the flag.
+  the tool exactly as haiku-4-5 sends it, and a reply with no
+  `submit_narration` call is a rejected attempt that `narrate` retries with
+  feedback, which it already was. Thinking is left at its adaptive default
+  (no `thinking` field), `output_config.effort` is sent explicitly
+  (`medium` unless the harness overrides it), and `max_tokens` is 8000
+  because thinking counts toward it.
+
+  No profile marks the tool `strict` (round B of #463). Measured live on
+  2026-10-26 on the QB prompt (auto, effort medium): with `strict: true`
+  every margin claim the 5.x models made came back malformed (6 of 6 on
+  Sonnet 5.5, 4 of 4 on Haiku 5.5: `of` and/or `season_type` set and no
+  `player`), and without it none did (0 of 9). Every auto call still made
+  the `submit_narration` call.
 
 No profile sends `temperature`, `top_p`, `top_k` (a 400 on the 5.x models)
 or `fallbacks` (Haiku 5.5 has no server-side fallback, and a different
@@ -99,7 +101,7 @@ EFFORTS: Final[tuple[Effort, ...]] = ("low", "medium", "high")
 class RequestProfile:
     """How one model is asked for a narration (module docstring).
     `forced_tool` sends `tool_choice: {type: tool}`; otherwise the call is
-    `tool_choice: auto` with a `strict` tool. `effort` is the
+    `tool_choice: auto`. Either way the tool is sent unchanged. `effort` is the
     `output_config.effort` sent by default, `None` for a model that takes no
     effort at all."""
 
@@ -270,12 +272,10 @@ class ClaudeNarrator:
             "system": system,
             "messages": messages,
         }
+        kwargs["tools"] = [self._tool]
         if profile.forced_tool:
-            kwargs["tools"] = [self._tool]
             kwargs["tool_choice"] = {"type": "tool", "name": TOOL_NAME}
         else:
-            # A copy: the shared schema dicts never carry the flag.
-            kwargs["tools"] = [{**self._tool, "strict": True}]
             kwargs["tool_choice"] = {"type": "auto"}
         effort = self._effort or profile.effort
         if effort is not None:

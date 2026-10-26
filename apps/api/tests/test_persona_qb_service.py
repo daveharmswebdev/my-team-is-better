@@ -153,9 +153,13 @@ def test_a_qb_narrator_model_change_misses(monkeypatch: pytest.MonkeyPatch) -> N
     assert cache.get(_key(model="claude-sonnet-5-5")) is not None
 
 
-def test_the_grounding_version_is_bumped_for_the_margin_bands() -> None:
-    # #457: the bands and the matcher fixes accept and reject differently.
-    assert QB_GROUNDING_VERSION == "qb-claims-v2"
+def test_the_versions_are_bumped_for_the_two_margin_tiers() -> None:
+    # #457 (v2): the bands and the matcher fixes accept and reject
+    # differently. #463 round B (v3): the two runaway tiers, honoured "not"
+    # negations and the comma-clause conditional (#462) do too, and the
+    # prompt's rule 3 and examples changed.
+    assert QB_GROUNDING_VERSION == "qb-claims-v3"
+    assert QB_PROMPT_VERSION == "qb-persona-v3"
 
 
 def test_a_narration_cached_before_the_margin_bands_is_not_served() -> None:

@@ -157,7 +157,9 @@ PROMPT_VERSION = "persona-v13"
 # qb-persona-v1: first version.
 # qb-persona-v2: rule 3 names career_band/peak_band (photo-finish words on a
 #   close margin only, runaway words on a decisive one) (#457).
-QB_PROMPT_VERSION = "qb-persona-v2"
+# qb-persona-v3: two runaway tiers in rule 3, and a clear and a decisive
+#   sweep example (#463 round B).
+QB_PROMPT_VERSION = "qb-persona-v3"
 
 # Issue #463: each narrator's model. Both stay on claude-haiku-4-5, whose
 # request is byte-for-byte the one sent since #291 and whose cache keys are

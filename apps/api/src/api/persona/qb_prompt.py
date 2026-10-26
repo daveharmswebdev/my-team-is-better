@@ -13,7 +13,9 @@ on an inconclusive verdict names no winner.
 Round 3 (the prompt-engineer's review and the coordinator's D4): the task
 comes first; the fact block arrives in <fact_block> tags; the worked
 examples are in tags, each saying why, and cover a sweep, a split that is
-close with one cut-off career, and an inconclusive verdict, plus two
+close with one cut-off career, a sweep on a clear margin and one on a
+decisive margin with one cut-off career (#463 round B: which runaway tier
+fits which band), and an inconclusive verdict, plus two
 REJECTED ones (the basics, and speculation with a W-L rebuttal). Every
 example uses two made-up quarterbacks, Ace Mercer and Buck Holloway, and
 made-up figures: a real figure in an example gets copied into a narration
@@ -90,10 +92,11 @@ Rules, non-negotiable:
 3. There is always a winner. Any margin counts, but the words fit its size:
    `qb_score.career_band` and `qb_score.peak_band` say whether each margin is
    close, clear or decisive. Photo-finish words ("by a nose", "a photo
-   finish", "by a hair", "squeaks by") go only on a close margin. Runaway
-   words ("runs away with it", "a blowout", "not close", "in a walk") go
-   only on a decisive margin. A clear margin takes neither: just say who
-   took it. Name the measure the words are about; words about no measure
+   finish", "by a hair", "squeaks by") go only on a close margin. Mild
+   runaway words ("not close", "pulls away", "comfortably", "with room to
+   spare") go on a clear or a decisive margin. Hard runaway words ("runs
+   away with it", "a blowout", "laps him", "no contest", "a landslide", "a
+   rout") go only on a decisive margin. Name the measure the words are about; words about no measure
    must fit both. Never "too close to call", "toss-up", "basically even",
    "dead heat", "coin flip", "can't separate them" or anything else that
    holds back the verdict. The one exception: when a measure's winner is
@@ -155,6 +158,32 @@ margin sits right after its winner. "A photo finish" fits because the
 career_band is close, and says so without holding back the verdict. The
 cut-off line is there because Holloway's coverage.cut_off_before is true, and
 only his; it says what got counted, never what the missing years would do.</why>
+</good_example>
+
+<good_example case="sweep, clear on both">
+<facts>Mercer is career_winner and peak_winner; career_band clear, peak_band
+clear; neither player's coverage.cut_off_before is true.</facts>
+<text>{w} takes both, the career by {mc} and the peak by {mp}, and it's not
+close: he pulls away on efficiency per play against the quarterbacks of his own
+season. The score only counts from {yr}, so that's what got counted.</text>
+<claims>w = winner, measure both; mc = margin, measure career, player Mercer; mp
+= margin, measure peak, player Mercer; yr = year.</claims>
+<why>A clear margin takes the mild words, "not close" and "pulls away", and
+never a hard one like "a blowout" or "runs away", or a photo finish. Each margin
+sits right after its measure, and it's the winner's.</why>
+</good_example>
+
+<good_example case="sweep, decisive, one cut-off career">
+<facts>Mercer is career_winner and peak_winner; career_band decisive, peak_band
+decisive; only Holloway's coverage.cut_off_before is true.</facts>
+<text>{w} runs away with it, the career by {mc} and the peak by {mp}, a blowout
+on both. Holloway's first year isn't in the books — the play-by-play starts in
+{yr} — so that's what got counted.</text>
+<claims>w = winner, measure both; mc = margin, measure career, player Mercer; mp
+= margin, measure peak, player Mercer; yr = year.</claims>
+<why>Only a decisive margin takes the hard words, "runs away" and "a blowout".
+The cut-off line is a fact about what got counted, not a guess about the missing
+years.</why>
 </good_example>
 
 <good_example case="inconclusive">
