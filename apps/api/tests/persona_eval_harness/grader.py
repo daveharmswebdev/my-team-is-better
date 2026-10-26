@@ -27,16 +27,29 @@ and the command exits 4 (`cli.py`).
 Bump `GRADER_PROMPT_VERSION` whenever the rubric, the instructions or the
 schema change: reports with different grader versions don't compare.
 `grader-v2` added §4's contested-year bullet to the rubric.
+
+**The QB narrator (issue #463) is graded on the same rubric**, with the QB
+fact block and `contested` false. Nothing in it is team-only in a way that
+misgrades a QB narration: the persona, the may-not bullet and the founder's
+rule ("who the fact block ... rates higher") read the same on a QB score,
+and the QB prompt asks for the same two or three sentences. So scores stay
+comparable across narrators and models, and there is no QB rubric version.
+
+**Usage** (#463): a `Grade` carries the grader call's token usage, so the
+report can cost a narration narrator and grader together.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from dataclasses import dataclass
 from typing import Protocol
 
 import anthropic
 from anthropic.types import Message, TextBlock
+
+from api.persona.claude_client import TokenUsage
 
 GRADER_MODEL = "claude-opus-5"
 GRADER_MAX_TOKENS = 16000
@@ -203,6 +216,7 @@ class Grade:
     stop_reason: str | None
     raw_text: str
     transport_error: str | None = None
+    usage: TokenUsage | None = None
 
     @property
     def graded(self) -> bool:
@@ -322,4 +336,4 @@ class ModelGrader:
         except (anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
             error = f"{type(exc).__name__}: {exc}"
             return ungraded(f"grader call failed: {error}", transport_error=error)
-        return parse_grade(message)
+        return dataclasses.replace(parse_grade(message), usage=TokenUsage.from_sdk(message.usage))

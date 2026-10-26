@@ -5,7 +5,8 @@ its size.
 Each measure's margin falls in a band, on fixed per-measure thresholds
 (career: close < 1.5 <= clear < 7.5 <= decisive; peak: close < 0.15 <=
 clear < 0.75 <= decisive). The fact block states the band next to the
-margin; runaway words are rejected on a measure that isn't decisive and
+margin; hard runaway words are rejected on a measure that isn't decisive,
+mild ones ("not close", "pulls away", #463) on a close one, and
 photo-finish words on one that isn't close. Blocks are real fixture blocks
 (`tests/fixtures/qb_blocks.py`), some rescored to a live pair's figures:
 
@@ -195,7 +196,6 @@ RUNAWAY = [
     "It's a blowout on the peak.",
     "Warner blows him out on the peak.",
     "No contest on the peak.",
-    "The peak is not close.",
     "Warner laps him on the peak.",
     "The peak is a landslide.",
     "The peak is a rout.",
@@ -203,6 +203,13 @@ RUNAWAY = [
     "Warner walks away with the peak.",
     "Warner takes the peak in a walk.",
     "Warner takes the peak by a mile.",
+]
+# #463 round B: the mild tier fits a clear or a decisive margin.
+MILD_RUNAWAY = [
+    "The peak is not close.",
+    "Warner pulls away on the peak.",
+    "Warner takes the peak comfortably.",
+    "Warner takes the peak with room to spare.",
 ]
 PHOTO_FINISH = [
     "Warner takes the peak in a photo finish.",
@@ -231,6 +238,20 @@ def test_runaway_words_are_rejected_on_a_close_or_clear_margin(
 @pytest.mark.parametrize("text", RUNAWAY)
 def test_runaway_words_pass_on_a_decisive_margin(text: str) -> None:
     assert qb_rendered_verdict(_decisive_peak(), text) == text
+
+
+@pytest.mark.parametrize("text", MILD_RUNAWAY)
+def test_mild_runaway_words_are_rejected_on_a_close_margin(text: str) -> None:
+    errors = qb_rejected(_close(), text.replace("Warner", "Lawrence"))
+    assert_an_error_says(errors, "the peak margin is", "no runaway words", "mild runaway")
+
+
+@pytest.mark.parametrize("text", MILD_RUNAWAY)
+@pytest.mark.parametrize("block", [_clear, _decisive_peak], ids=["clear", "decisive"])
+def test_mild_runaway_words_pass_on_a_clear_or_decisive_margin(
+    text: str, block: Callable[[], str]
+) -> None:
+    assert qb_rendered_verdict(block(), text) == text
 
 
 @pytest.mark.parametrize("text", PHOTO_FINISH)

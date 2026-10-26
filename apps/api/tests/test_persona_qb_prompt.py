@@ -239,3 +239,100 @@ def test_the_verdict_tail_helper_renders_on_every_case() -> None:
         qb_fact_block_json(split_evidence()),
     ):
         assert qb_rendered_verdict(block, "Here goes.") == "Here goes."
+
+
+# ---------------------------------------------------------------------------
+# #463 round B: a clear and a decisive margin example, on the bands they claim
+# ---------------------------------------------------------------------------
+
+_SWEEP_MARGIN_CLAIMS: tuple[dict[str, object], ...] = (
+    {"id": "w", "kind": "winner", "measure": "both"},
+    {"id": "mc", "kind": "margin", "measure": "career", "player": "Mercer"},
+    {"id": "mp", "kind": "margin", "measure": "peak", "player": "Mercer"},
+    YEAR,
+)
+_CLEAR_CASE = "sweep, clear on both"
+_DECISIVE_CASE = "sweep, decisive, one cut-off career"
+
+
+def _clear_sweep(cut_off: tuple[bool, bool] = (False, False)) -> str:
+    # The harness's herbert-mayfield-clear figures: career +2.91, peak +0.18.
+    evidence = rescored_evidence(
+        KURT_WARNER, STEVE_MCNAIR, career=(2.1171, -0.7880), peak=(0.4393, 0.2644)
+    )
+    return _fictional(evidence, cut_off=cut_off)
+
+
+def _decisive_sweep(cut_off: tuple[bool, bool] = (False, True)) -> str:
+    # The harness's brady-flacco-decisive figures: career +22.61, peak +1.60.
+    evidence = rescored_evidence(
+        KURT_WARNER, STEVE_MCNAIR, career=(18.1914, -4.4199), peak=(1.7261, 0.1280)
+    )
+    return _fictional(evidence, cut_off=cut_off)
+
+
+def _bands(block: str) -> tuple[object, object]:
+    score = json.loads(block)["qb_score"]
+    return score["career_band"], score["peak_band"]
+
+
+def test_the_prompt_holds_every_example_in_order() -> None:
+    cases = re.findall(r'<(good|rejected)_example case="([^"]+)">', build_qb_system_prompt())
+    assert cases == [
+        ("good", "sweep"),
+        ("good", "split, close, one cut-off career"),
+        ("good", _CLEAR_CASE),
+        ("good", _DECISIVE_CASE),
+        ("good", "inconclusive"),
+        ("rejected", "basics"),
+        ("rejected", "speculation and a W-L rebuttal"),
+    ]
+
+
+def test_the_clear_sweep_example_renders_on_a_clear_block() -> None:
+    block = _clear_sweep()
+    assert _bands(block) == ("clear", "clear")
+    text, errors = _check(block, _text("good_example", _CLEAR_CASE), *_SWEEP_MARGIN_CLAIMS)
+    assert errors == ()
+    assert text is not None
+    assert text.startswith("Mercer takes both, the career by 2.91 and the peak by 0.18, and it")
+    assert "not close" in text and "pulls away" in text and "from 1999" in text
+
+
+def test_the_decisive_sweep_example_renders_on_a_decisive_block() -> None:
+    block = _decisive_sweep()
+    assert _bands(block) == ("decisive", "decisive")
+    text, errors = _check(block, _text("good_example", _DECISIVE_CASE), *_SWEEP_MARGIN_CLAIMS)
+    assert errors == ()
+    assert text is not None
+    assert text.startswith("Mercer runs away with it, the career by 22.61 and the peak by 1.60")
+    assert "Holloway's first year isn't in the books" in text and "starts in 1999" in text
+
+
+def test_the_decisive_examples_hard_words_are_rejected_on_a_clear_block() -> None:
+    _, errors = _check(
+        _clear_sweep((False, True)), _text("good_example", _DECISIVE_CASE), *_SWEEP_MARGIN_CLAIMS
+    )
+    assert_an_error_says(errors, '"runs away"', "a clear one")
+    assert_an_error_says(errors, '"blowout"', "a clear one")
+
+
+def test_the_clear_examples_mild_words_are_rejected_on_a_close_block() -> None:
+    evidence = rescored_evidence(KURT_WARNER, STEVE_MCNAIR, career=(1.0, 0.6), peak=(0.45, 0.4))
+    block = _fictional(evidence, cut_off=(False, False))
+    assert _bands(block) == ("close", "close")
+    _, errors = _check(block, _text("good_example", _CLEAR_CASE), *_SWEEP_MARGIN_CLAIMS)
+    assert_an_error_says(errors, '"not close"', "a close one")
+    assert_an_error_says(errors, '"pulls away"', "a close one")
+
+
+def test_the_prompt_states_the_two_runaway_tiers() -> None:
+    prompt = " ".join(build_qb_system_prompt().split())
+    assert (
+        'Mild runaway words ("not close", "pulls away", "comfortably", "with room to spare") '
+        "go on a clear or a decisive margin."
+    ) in prompt
+    assert (
+        'Hard runaway words ("runs away with it", "a blowout", "laps him", "no contest", '
+        '"a landslide", "a rout") go only on a decisive margin.'
+    ) in prompt

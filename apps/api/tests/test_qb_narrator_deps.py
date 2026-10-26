@@ -17,7 +17,7 @@ from fixtures.narrator_fake import FakeNarrator
 
 from api.deps import get_qb_narrator
 from api.persona.claims import TOOL_NAME, tool_schema
-from api.persona.claude_client import MODEL, ClaudeNarrator, StubNarrator
+from api.persona.claude_client import HAIKU_4_5, ClaudeNarrator, StubNarrator
 from api.persona.qb_claims import qb_tool_schema
 
 
@@ -35,7 +35,7 @@ class _FakeMessages:
                 "id": "msg_test",
                 "type": "message",
                 "role": "assistant",
-                "model": MODEL,
+                "model": HAIKU_4_5,
                 "content": [block.model_dump()],
                 "stop_reason": "tool_use",
                 "stop_sequence": None,
@@ -51,15 +51,18 @@ class _FakeAnthropic:
 
 def test_a_claude_narrator_is_sent_with_the_qb_tool() -> None:
     fake = _FakeAnthropic()
-    team = ClaudeNarrator(cast(anthropic.Anthropic, fake))
+    team = ClaudeNarrator(cast(anthropic.Anthropic, fake), model=HAIKU_4_5)
     qb = get_qb_narrator(team)
 
     reply = qb.submit(system="S", messages=[{"role": "user", "content": "F"}])
     team.submit(system="S", messages=[{"role": "user", "content": "F"}])
 
     qb_kwargs, team_kwargs = fake.messages.kwargs
+    # The QB narrator runs on claude-sonnet-5-5 (#463), which rejects forced
+    # tool use: it steers with tool_choice auto.
+    assert qb_kwargs["model"] == "claude-sonnet-5-5"
     assert qb_kwargs["tools"] == [qb_tool_schema()]
-    assert qb_kwargs["tool_choice"] == {"type": "tool", "name": TOOL_NAME}
+    assert qb_kwargs["tool_choice"] == {"type": "auto"}
     assert reply.tool_call is not None
     # The team narrator it was built from is untouched.
     assert team_kwargs["tools"] == [tool_schema()]

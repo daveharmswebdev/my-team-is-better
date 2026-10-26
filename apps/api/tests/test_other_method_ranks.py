@@ -34,7 +34,7 @@ from cfb_strength.db.connection import get_conn
 from fastapi.testclient import TestClient
 from fixtures.narrator_fake import FakeNarrator
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_db_conn, get_narration_cache, get_narrator
 from api.main import app
 from api.models import TeamCaseOut
@@ -325,5 +325,6 @@ def test_narrator_input_and_cache_key_do_not_carry_other_method_ranks(client: Te
         prompt_version=PROMPT_VERSION,
         fact_block_json=fact_block,
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
     assert cache.get(key) is not None

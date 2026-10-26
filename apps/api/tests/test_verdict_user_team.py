@@ -45,7 +45,7 @@ from fastapi.testclient import TestClient
 from fixtures.fact_blocks import envelope_fact_block
 from fixtures.narrator_fake import FakeNarrator
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import USER_TEAM_MAX_LENGTH
@@ -109,6 +109,7 @@ class Route:
             prompt_version=PROMPT_VERSION,
             fact_block_json=envelope_fact_block(self.question_type, body),
             grounding_version=GROUNDING_VERSION,
+            model=TEAM_NARRATOR_MODEL,
         )
 
 
@@ -319,6 +320,7 @@ def test_the_same_team_is_kept_on_its_own_sports_request(sport_client: TestClien
         prompt_version=PROMPT_VERSION,
         fact_block_json=envelope_fact_block("team_case", response.json()),
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
     assert cache.get(key) is not None
 

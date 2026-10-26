@@ -23,11 +23,12 @@ from fixtures.claim_blocks import cfb_catalog, cfb_comparison_block, cfb_team_ca
 from api.persona.budget import UnlimitedCallBudget
 from api.persona.claims import TOOL_NAME, check_and_render, tool_schema
 from api.persona.claude_client import (
-    MAX_TOKENS,
-    MODEL,
+    HAIKU_4_5,
+    PROFILES,
     ClaudeNarrator,
     NarratorReply,
     StubNarrator,
+    TokenUsage,
     ToolCall,
 )
 from api.persona.narrate import NarrationResult, narrate
@@ -57,7 +58,7 @@ def _message(content: list[ContentBlock], stop_reason: str = "tool_use") -> Mess
             "id": "msg_test",
             "type": "message",
             "role": "assistant",
-            "model": MODEL,
+            "model": HAIKU_4_5,
             "content": [block.model_dump() for block in content],
             "stop_reason": stop_reason,
             "stop_sequence": None,
@@ -78,15 +79,17 @@ def _submit(
     content: list[ContentBlock], stop_reason: str = "tool_use"
 ) -> tuple[NarratorReply, dict[str, Any]]:
     fake = _FakeAnthropic(_message(content, stop_reason))
-    narrator = ClaudeNarrator(cast(anthropic.Anthropic, fake))
+    narrator = ClaudeNarrator(cast(anthropic.Anthropic, fake), model=HAIKU_4_5)
     reply = narrator.submit(system="SYSTEM", messages=[{"role": "user", "content": "FACTS"}])
     (kwargs,) = fake.messages.kwargs
     return reply, kwargs
 
 
-def test_the_model_and_token_budget() -> None:
-    assert MODEL == "claude-haiku-4-5"
-    assert MAX_TOKENS == 1200
+def test_the_haiku_4_5_profile_keeps_todays_model_and_token_budget() -> None:
+    # #463: the profile production runs on (api.config's narrator models).
+    profile = PROFILES[HAIKU_4_5]
+    assert profile.model == "claude-haiku-4-5"
+    assert profile.max_tokens == 1200
 
 
 def test_claude_narrator_forces_one_submit_narration_call_with_no_thinking() -> None:
@@ -112,6 +115,12 @@ def test_the_reply_carries_the_tool_call_the_replay_content_and_the_stop_reason(
             {"type": "tool_use", "id": "toolu_abc", "name": TOOL_NAME, "input": INPUT},
         ),
         stop_reason="tool_use",
+        usage=TokenUsage(
+            input_tokens=10,
+            output_tokens=20,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
+        ),
     )
 
 

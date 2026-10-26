@@ -36,7 +36,7 @@ from cfb_strength.db.connection import get_conn
 from cfb_strength.evidence.proof import build_comparison, build_team_case
 from fixtures.narrator_fake import FakeNarrator
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.models import ComparisonResultOut, NarrationOut, TeamCaseOut
 from api.persona import claims, service
 from api.persona.budget import UnlimitedCallBudget
@@ -220,6 +220,7 @@ def test_service_writes_under_the_key_built_from_the_production_fact_block(
         prompt_version=PROMPT_VERSION,
         fact_block_json=team_case_fact_block_json(case),
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
     comparison_key = cache_key(
         question_type="compare",
@@ -231,6 +232,7 @@ def test_service_writes_under_the_key_built_from_the_production_fact_block(
         prompt_version=PROMPT_VERSION,
         fact_block_json=comparison_fact_block_json(comparison),
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
     assert cache.get(case_key) is not None
     assert cache.get(comparison_key) is not None

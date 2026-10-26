@@ -54,6 +54,7 @@ def _key(fact_block_json: str, **overrides: object) -> str:
         "prompt_version": "persona-v1",
         "fact_block_json": fact_block_json,
         "grounding_version": "grounding-v1",
+        "model": "claude-haiku-4-5",
     }
     base.update(overrides)
     return cache_key(**base)  # type: ignore[arg-type]

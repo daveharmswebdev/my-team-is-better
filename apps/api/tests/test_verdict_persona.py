@@ -24,7 +24,7 @@ from cfb_strength.evidence.proof import build_team_case
 from fastapi.testclient import TestClient
 from fixtures.narrator_fake import FakeNarrator
 
-from api.config import PROMPT_VERSION
+from api.config import PROMPT_VERSION, TEAM_NARRATOR_MODEL
 from api.deps import get_narration_cache, get_narrator
 from api.main import app
 from api.models import TeamCaseOut
@@ -70,6 +70,7 @@ def _usc_2005_team_case_key() -> str:
         prompt_version=PROMPT_VERSION,
         fact_block_json=team_case_fact_block_json(case),
         grounding_version=GROUNDING_VERSION,
+        model=TEAM_NARRATOR_MODEL,
     )
 
 

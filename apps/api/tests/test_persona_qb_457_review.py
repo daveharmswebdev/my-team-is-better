@@ -128,8 +128,12 @@ def test_b3_the_verb_close_is_no_runaway_word(text: str, block: Callable[[], str
 
 
 @pytest.mark.parametrize("text", ["It isn't close.", "It wasn't even close.", "Not close."])
-def test_b3_the_adjective_close_is_still_runaway_on_a_clear_margin(text: str) -> None:
-    assert_an_error_says(qb_rejected(_wm(), text), "no runaway words")
+def test_b3_the_adjective_close_is_still_runaway_on_a_close_margin(text: str) -> None:
+    # #463 round B: "not close" is a mild runaway word, so it fits a clear
+    # margin now, and is still rejected on a close one (Manning/McNair's
+    # career is close).
+    assert_an_error_says(qb_rejected(_mm(), text), "no runaway words", "mild runaway")
+    assert qb_rendered_verdict(_wm(), text) == text
 
 
 # ---------------------------------------------------------------------------
@@ -169,18 +173,37 @@ def test_b4_an_unnegated_runaway_on_a_close_or_clear_margin_is_still_rejected(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("block", [_wm, _mm, _decisive], ids=["clear", "close", "decisive"])
 @pytest.mark.parametrize(
-    "text",
+    "block,text",
     [
-        "Warner takes it with room to spare and McNair's a different story.",
-        "Warner takes both with something left over, and McNair's a different story.",
+        (block, text)
+        for text, blocks in (
+            # #463 round B: "with room to spare" is a mild runaway word, so
+            # it no longer fits the close block (the margin, not the story).
+            (
+                "Warner takes it with room to spare and McNair's a different story.",
+                ((_wm, "clear"), (_decisive, "decisive")),
+            ),
+            (
+                "Warner takes both with something left over, and McNair's a different story.",
+                ((_wm, "clear"), (_mm, "close"), (_decisive, "decisive")),
+            ),
+        )
+        for block, _ in blocks
     ],
 )
 def test_b5_an_earlier_with_does_not_make_a_different_story_conditional(
     text: str, block: Callable[[], str]
 ) -> None:
     assert qb_rendered_verdict(block(), text) == text
+
+
+def test_b5_room_to_spare_on_a_close_margin_is_a_margin_error_not_a_story_one() -> None:
+    errors = qb_rejected(
+        _mm(), "Warner takes it with room to spare and McNair's a different story."
+    )
+    assert_an_error_says(errors, '"with room to spare"', "mild runaway")
+    assert not any("missing seasons" in error for error in errors)
 
 
 @pytest.mark.parametrize(

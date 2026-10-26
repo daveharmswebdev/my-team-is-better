@@ -45,6 +45,11 @@ this app is scoped to. This module loads `apps/api/.env` (via
   `get_narrator`, which branch on this flag). Distinct from `DATABASE_URL`
   being merely unset: this is an explicit "run in test mode" signal, not an
   absence of config.
+- `TEAM_NARRATOR_MODEL` / `QB_NARRATOR_MODEL`: the model each narrator runs
+  on (issue #463), one of `api.persona.claude_client.SUPPORTED_MODELS`, whose
+  request profiles say what each model is sent. Plain constants with no env
+  override: a model switch is a reviewed change, and it moves the cache key
+  (`api.persona.cache`), so a new model's narrations never mix with the old.
 - `CLAUDE_CALLS_PER_MINUTE`: the per-process cap on Claude calls in any
   rolling 60 seconds (issue #236; `api.persona.budget`). Every call counts,
   the grounding retry included; past the cap a cache-missing verdict is
@@ -152,7 +157,18 @@ PROMPT_VERSION = "persona-v13"
 # qb-persona-v1: first version.
 # qb-persona-v2: rule 3 names career_band/peak_band (photo-finish words on a
 #   close margin only, runaway words on a decisive one) (#457).
-QB_PROMPT_VERSION = "qb-persona-v2"
+# qb-persona-v3: two runaway tiers in rule 3, and a clear and a decisive
+#   sweep example (#463 round B).
+QB_PROMPT_VERSION = "qb-persona-v3"
+
+# Issue #463: each narrator's model. The team narrator stays on
+# claude-haiku-4-5, whose request is byte-for-byte the one sent since #291 and
+# whose cache keys are unchanged. The QB narrator moved to claude-sonnet-5-5,
+# the founder's pick from #463's eval (persona_eval_harness --narrator qb, on
+# qb-persona-v3: 88% accepted first try and no fallback, against 38% and 4%
+# on claude-haiku-4-5).
+TEAM_NARRATOR_MODEL = "claude-haiku-4-5"
+QB_NARRATOR_MODEL = "claude-sonnet-5-5"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),
