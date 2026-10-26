@@ -73,6 +73,38 @@ export const CustomLabel: Story = {
   },
 }
 
+/**
+ * Issue #474: a phone's floating Share button -- fixed bottom-right, at
+ * least 56px, "Share" on screen with the full label as its name. A copy
+ * shows "Link copied" as a toast above it.
+ */
+export const Floating: Story = {
+  args: { label: 'Share this comparison', layout: 'floating' },
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  beforeEach: withNavigator({
+    share: undefined,
+    clipboard: { writeText: copyToClipboard },
+  }),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const button = canvas.getByRole('button', {
+      name: 'Share this comparison',
+    })
+    await expect(button).toHaveTextContent(/^Share$/)
+    const box = button.getBoundingClientRect()
+    await expect(box.width).toBeGreaterThanOrEqual(56)
+    await expect(box.height).toBeGreaterThanOrEqual(56)
+    await expect(window.innerWidth - box.right).toBeLessThanOrEqual(32)
+    await expect(window.innerHeight - box.bottom).toBeLessThanOrEqual(48)
+    await userEvent.click(button)
+    const status = await canvas.findByRole('status')
+    await expect(status).toHaveTextContent('Link copied')
+    await expect(status.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      button.getBoundingClientRect().top,
+    )
+  },
+}
+
 /** Where the browser has a share sheet, the link goes to it, and nothing else shows. */
 export const NativeShareSheet: Story = {
   beforeEach: withNavigator({

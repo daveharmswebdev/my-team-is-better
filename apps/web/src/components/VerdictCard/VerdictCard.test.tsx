@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { composeStories } from '@storybook/react-vite'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import type { ComparisonEnvelope, TeamCaseEnvelope } from '../../lib/api/types'
+import { expectReadingOrder, matchMediaFor } from '../../test/viewport'
 import * as stories from './VerdictCard.stories'
 import { VerdictCard } from './VerdictCard'
 
@@ -87,7 +88,11 @@ describe('VerdictCard', () => {
     expect(
       screen.getByText('Texas was the best team in 2005, full stop.'),
     ).toBeInTheDocument()
-    expect(screen.getByText(/13-0/)).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: 'Texas evidence' })).getByText(
+        /13-0/,
+      ),
+    ).toBeInTheDocument()
   })
 
   it('renders the narration and comparison receipts on success', () => {
@@ -108,17 +113,93 @@ describe('VerdictCard', () => {
     expect(screen.queryByText(/Texas was better\./)).not.toBeInTheDocument()
   })
 
-  /** Issue #184: a verdict can be shared by link, from the foot of the card. */
+  /**
+   * Issue #474: the card opens on who's compared -- name, rank and record --
+   * then the verdict, then the other engines' ranks, then the receipts.
+   */
+  describe('the teams header', () => {
+    it('names both teams of a comparison with rank and record, before the verdict', () => {
+      render(
+        <VerdictCard
+          state={{
+            status: 'success',
+            envelope: {
+              ...comparisonEnvelope,
+              team_a_other_method_ranks: [{ method: 'elo', rank: 1 }],
+            },
+          }}
+        />,
+      )
+
+      const header = screen.getByRole('list', { name: 'Teams compared' })
+      const items = within(header).getAllByRole('listitem')
+      expect(items.map((item) => item.textContent)).toEqual([
+        'Texas Rank #1 · 13-0',
+        'USC Rank #2 · 12-1',
+      ])
+      expectReadingOrder(
+        header,
+        screen.getByText('Texas edges USC.'),
+        screen.getByText(/^Engine: /),
+        screen.getByText('Texas · Elo (second opinion): #1'),
+        screen.getByRole('region', { name: 'comparison evidence' }),
+      )
+    })
+
+    it('names the one team of a team case with rank and record, before the verdict', () => {
+      render(
+        <VerdictCard
+          state={{
+            status: 'success',
+            envelope: {
+              ...teamCaseEnvelope,
+              evidence: { ...teamCaseEnvelope.evidence, ties: 1 },
+              other_method_ranks: [{ method: 'elo', rank: 2 }],
+            },
+          }}
+        />,
+      )
+
+      const header = screen.getByTestId('verdict-teams')
+      expect(header).toHaveTextContent('Texas Rank #1 · 13-0-1')
+      expect(
+        screen.queryByRole('list', { name: 'Teams compared' }),
+      ).not.toBeInTheDocument()
+      expectReadingOrder(
+        header,
+        screen.getByText('Texas was the best team in 2005, full stop.'),
+        screen.getByText(/^Engine: /),
+        screen.getByText('Elo (second opinion): #2'),
+        screen.getByRole('region', { name: 'Texas evidence' }),
+      )
+    })
+
+    it('has no header outside a verdict', () => {
+      render(<VerdictCard state={{ status: 'loading' }} />)
+      expect(screen.queryByTestId('verdict-teams')).not.toBeInTheDocument()
+    })
+  })
+
+  /** Issue #184: a verdict can be shared by link (#474: placed by viewport). */
   describe('the share button', () => {
     const SHARE_URL =
       'https://my-team-is-better.lol/?q=champion&sport=cfb&year=2005&engine=keener'
 
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    /**
+     * Issue #474: on a desktop, Share is the card's first control -- before
+     * the teams and the verdict -- and there is no floating one.
+     */
     it.each([
       ['team-case', teamCaseEnvelope],
       ['compare', comparisonEnvelope],
     ] as const)(
-      'renders "Share this verdict" at the foot of a %s success card when shareUrl is set',
+      'renders one "Share this verdict" button at the top of a %s card on a desktop',
       (_kind, envelope) => {
+        vi.stubGlobal('matchMedia', matchMediaFor('desktop'))
         render(
           <VerdictCard
             state={{ status: 'success', envelope }}
@@ -126,12 +207,55 @@ describe('VerdictCard', () => {
           />,
         )
 
-        const button = screen.getByRole('button', {
-          name: 'Share this verdict',
-        })
+        const buttons = screen.getAllByRole('button', { name: /^Share/ })
+        expect(buttons).toHaveLength(1)
+        const [button] = buttons
         const article = screen.getByRole('article')
-        expect(article).toContainElement(button)
-        expect(article.lastElementChild).toContainElement(button)
+        expect(article.firstElementChild).toContainElement(button ?? null)
+        expect(
+          article.querySelector('[data-layout="inline"]'),
+        ).toContainElement(button ?? null)
+        expectReadingOrder(
+          button as Element,
+          screen.getByTestId('verdict-teams'),
+          screen.getByText(envelope.narration.text),
+        )
+      },
+    )
+
+    /**
+     * Issue #474: on a phone, Share floats bottom-right (a FAB), so it leaves
+     * the content flow: last in reading order, after the receipts, and the
+     * only Share button on the card.
+     */
+    it.each([
+      ['team-case', teamCaseEnvelope],
+      ['compare', comparisonEnvelope],
+    ] as const)(
+      'renders one floating "Share this verdict" button after the receipts of a %s card on a phone',
+      (_kind, envelope) => {
+        vi.stubGlobal('matchMedia', matchMediaFor('phone'))
+        render(
+          <VerdictCard
+            state={{ status: 'success', envelope }}
+            shareUrl={SHARE_URL}
+          />,
+        )
+
+        const buttons = screen.getAllByRole('button', { name: /^Share/ })
+        expect(buttons).toHaveLength(1)
+        const [button] = buttons
+        const article = screen.getByRole('article')
+        expect(article.lastElementChild).toContainElement(button ?? null)
+        expect(
+          article.querySelector('[data-layout="floating"]'),
+        ).toContainElement(button ?? null)
+        expectReadingOrder(
+          screen.getByTestId('verdict-teams'),
+          screen.getByText(envelope.narration.text),
+          screen.getByRole('region', { name: /evidence/ }),
+          button as Element,
+        )
       },
     )
 

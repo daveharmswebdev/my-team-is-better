@@ -33,6 +33,16 @@ export default defineConfig({
     // or not checked by the a11y guard below.
     storyRunGuard(),
   ],
+  resolve: {
+    alias: {
+      // Issue #474: @storybook/addon-vitest sizes the page for a story's
+      // `viewport` global by importing `@vitest/browser/context`, which
+      // Vitest 5 no longer intercepts (the virtual module is now
+      // `vitest/browser`), so the import threw, the addon swallowed it, and
+      // every story ran at Vitest's default 414x896 whatever its viewport.
+      '@vitest/browser/context': 'vitest/browser',
+    },
+  },
   test: {
     name: 'storybook',
     setupFiles: ['./.storybook/a11y-guard.setup.ts'],

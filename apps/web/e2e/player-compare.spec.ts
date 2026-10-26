@@ -1,5 +1,11 @@
 import { test, expect } from './fixtures.ts'
 import type { Locator, Page } from '@playwright/test'
+import {
+  PHONE,
+  expectFloatingShare,
+  expectInlineShare,
+  precedes,
+} from './shareLayout.ts'
 
 // Issue #301: the NFL player comparison, end to end against the real API on
 // the committed fixture db (NFL 1999 + 2023). Every number here was measured
@@ -875,4 +881,56 @@ test('two running backs get no QB score panel and no verdict request', async ({
   // Give a stray request the time a real one takes to leave.
   await page.waitForLoadState('networkidle')
   expect(verdictPosts).toEqual([])
+})
+
+// Issue #474: sharing is promoted. A phone gets a floating Share button that
+// stays on screen the whole way down the comparison; a desktop gets one
+// inline button, first in the panel. Either way, exactly one.
+test('on a phone, the comparison floats one Share button that stays on screen and never covers the last line', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await page.addInitScript(removeNativeShare)
+  await page.setViewportSize(PHONE)
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  await expect(
+    dialog.getByRole('table', {
+      name: 'Kurt Warner and Steve McNair, regular season',
+    }),
+  ).toBeVisible()
+  const shares = dialog.getByRole('button', { name: /^Share/ })
+  await expect(shares).toHaveCount(1)
+  const share = dialog.getByRole('button', { name: 'Share this comparison' })
+  // The comparison is far taller than a phone, so the bottom is a real scroll.
+  await expectFloatingShare(page, share)
+
+  // It still shares, and says so on screen.
+  await share.click()
+  await expect(dialog.getByText('Link copied')).toBeInViewport()
+})
+
+test('on a desktop, the comparison opens with one Share button, before the players', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto(`/nfl/compare?${WARNER_VS_MCNAIR_SEARCH}`)
+
+  const dialog = comparisonModal(page, 'Kurt Warner and Steve McNair')
+  const players = dialog.getByRole('list', { name: 'Players compared' })
+  await expect(players).toBeVisible()
+  await expect(dialog.getByRole('button', { name: /^Share/ })).toHaveCount(1)
+  const share = dialog.getByRole('button', { name: 'Share this comparison' })
+  await expectInlineShare(page, share)
+  expect(await precedes(share, players)).toBe(true)
+  // The verdict comes right after the players, before the totals.
+  const take = dialog.getByRole('region', { name: 'The take' })
+  const totals = dialog.getByRole('table', {
+    name: 'Kurt Warner and Steve McNair, regular season',
+  })
+  expect(await precedes(players, take)).toBe(true)
+  expect(await precedes(take, totals)).toBe(true)
+  await expect(share).toBeInViewport({ ratio: 1 })
 })

@@ -61,6 +61,7 @@ import {
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
 } from '../../lib/playerStats'
+import { useIsWideViewport } from '../../lib/useMediaQuery'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
 import { usePlayerSearch } from './usePlayerSearch'
 import styles from './PlayerComparePage.module.css'
@@ -291,6 +292,7 @@ const COMPARISON_TITLE = 'The comparison'
 export function PlayerComparePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
+  const isWide = useIsWideViewport()
   const pickA = parsePick(searchParams.get('a'))
   const pickB = parsePick(searchParams.get('b'))
 
@@ -894,6 +896,15 @@ export function PlayerComparePage() {
     } else if (currentComparison.status === 'success') {
       answer = (
         <div className={styles.answer}>
+          {/* Issue #474: one Share button, chosen by the viewport -- first
+              on a desktop, floating bottom-right on a phone. */}
+          {shareUrl !== undefined && isWide && (
+            <ShareButton
+              url={shareUrl}
+              label="Share this comparison"
+              layout="inline"
+            />
+          )}
           <Comparison
             comparison={currentComparison.comparison}
             noteId={noteId}
@@ -905,8 +916,12 @@ export function PlayerComparePage() {
             credit={credit}
             epModel={currentComparison.comparison.qb_score !== null}
           />
-          {shareUrl !== undefined && (
-            <ShareButton url={shareUrl} label="Share this comparison" />
+          {shareUrl !== undefined && !isWide && (
+            <ShareButton
+              url={shareUrl}
+              label="Share this comparison"
+              layout="floating"
+            />
           )}
         </div>
       )
@@ -1122,15 +1137,10 @@ function Comparison({
         ))}
       </ul>
 
-      {/* Above the numbers, not a footnote (#448): the tables are described by it. */}
-      {callout !== null && (
-        <p id={calloutId} role="status" className={styles.callout}>
-          {callout}
-        </p>
-      )}
-
       {/* Two quarterbacks (#459): the engine's era-adjusted score, before
-          the counting totals. Every other pair has no qb_score. */}
+          the counting totals. Every other pair has no qb_score. It opens on
+          the verdict, so the verdict comes right after the players (#474);
+          the panel states its own 1999 floor. */}
       {comparison.qb_score !== null && (
         <QbScorePanel
           qbScore={comparison.qb_score}
@@ -1138,6 +1148,14 @@ function Comparison({
           cutOff={{ a: a.coverage.cut_off, b: b.coverage.cut_off }}
           narration={narration}
         />
+      )}
+
+      {/* Above the numbers, not a footnote (#448): the totals tables are
+          described by it. */}
+      {callout !== null && (
+        <p id={calloutId} role="status" className={styles.callout}>
+          {callout}
+        </p>
       )}
 
       <div className={styles.notes}>

@@ -8,6 +8,7 @@ import {
   QB_SCORE_TIE,
   WARNER_VS_MCNAIR_QB_SCORE,
 } from '../../lib/qbScoreFixtures'
+import { expectReadingOrder } from '../../test/viewport'
 import { QbScorePanel } from './QbScorePanel'
 import type { QbNarrationState } from './QbScorePanel'
 
@@ -155,6 +156,48 @@ describe('QbScorePanel (issue #459)', () => {
       expect(screen.getByRole('region', { name: 'The take' })).toHaveAttribute(
         'aria-live',
         'polite',
+      )
+    })
+  })
+
+  /**
+   * Issue #474: the verdict leads the panel -- the winning line (the API's
+   * winner per measure, as the table's Edge column says it) and the take --
+   * and the working follows: lede, floor, table, explanation.
+   */
+  describe('the verdict first (issue #474)', () => {
+    it('reads the winning line, then the take, then the numbers', () => {
+      renderPanel()
+      const panel = screen.getByRole('region', { name: 'QB score' })
+      const winningLine = within(panel).getByText(
+        'Career: Tom Brady by 0.10 · Peak: Peyton Manning by 0.04',
+      )
+      expectReadingOrder(
+        within(panel).getByRole('heading', { name: 'QB score' }),
+        winningLine,
+        within(panel).getByRole('region', { name: 'The take' }),
+        within(panel).getByText(/^Era-adjusted efficiency/),
+        within(panel).getByText(/^Peyton Manning's career started before 1999/),
+        within(panel).getByRole('table', { name: /QB score/ }),
+        within(panel).getByRole('button', { name: 'How the QB score works' }),
+      )
+    })
+
+    it('a tie reads "Dead even" in the winning line', () => {
+      renderPanel(QB_SCORE_TIE)
+      expect(
+        screen.getByText('Career: Dead even · Peak: Dead even'),
+      ).toBeInTheDocument()
+    })
+
+    it('inconclusive: the inconclusive line is the verdict, before the take', () => {
+      renderPanel(BRADY_VS_BARKLEY_QB_SCORE, SUCCESS, { a: false, b: false })
+      const panel = screen.getByRole('region', { name: 'QB score' })
+      expect(within(panel).queryByText(/^Career: /)).toBeNull()
+      expectReadingOrder(
+        within(panel).getByText(/^Matt Barkley has no season in our books/),
+        within(panel).getByRole('region', { name: 'The take' }),
+        within(panel).getByText(/^Era-adjusted efficiency/),
       )
     })
   })

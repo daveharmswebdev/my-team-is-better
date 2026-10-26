@@ -1,4 +1,10 @@
 import { test, expect } from './fixtures.ts'
+import {
+  PHONE,
+  expectFloatingShare,
+  expectInlineShare,
+  precedes,
+} from './shareLayout.ts'
 
 // Share-by-link smoke spec (issue #184). A share link holds the *question*;
 // opening one fills in the form and re-asks the API with no click. Year 2005,
@@ -182,3 +188,60 @@ test('on a phone, a share link opens its verdict full screen with the first line
   await expect(page.getByLabel('Team A', { exact: true })).toBeInViewport()
   await expect.poll(() => new URL(page.url()).search).toBe('')
 })
+
+// Issue #474: sharing is promoted. The best-team question, whose verdict
+// (Texas 2005 with its whole schedule) is taller than a phone.
+const CHAMPION_SEARCH = new URLSearchParams({
+  q: 'champion',
+  sport: 'cfb',
+  year: '2005',
+  engine: 'keener',
+}).toString()
+
+for (const [kind, search] of [
+  ['matchup', SHARE_SEARCH],
+  ['best-team', CHAMPION_SEARCH],
+] as const) {
+  test(`on a phone, a ${kind} verdict floats one Share button that stays on screen and never covers the last line`, async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+    await page.addInitScript(removeNativeShare)
+    await page.setViewportSize(PHONE)
+    await page.goto(`/?${search}`)
+
+    const verdict = page
+      .getByRole('dialog', { name: 'The verdict' })
+      .getByRole('article')
+    await expect(verdict.getByText('Solid case, no notes.')).toBeVisible()
+    await expect(verdict.getByRole('button', { name: /^Share/ })).toHaveCount(1)
+    const share = verdict.getByRole('button', { name: 'Share this verdict' })
+    await expectFloatingShare(page, share)
+
+    await share.click()
+    await expect(verdict.getByText('Link copied')).toBeInViewport()
+  })
+
+  test(`on a desktop, a ${kind} verdict opens with one Share button, before the teams and the verdict`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto(`/?${search}`)
+
+    const verdict = page
+      .getByRole('dialog', { name: 'The verdict' })
+      .getByRole('article')
+    const narration = verdict.getByText('Solid case, no notes.')
+    await expect(narration).toBeVisible()
+    await expect(verdict.getByRole('button', { name: /^Share/ })).toHaveCount(1)
+    const share = verdict.getByRole('button', { name: 'Share this verdict' })
+    await expectInlineShare(page, share)
+    const teams = verdict.getByTestId('verdict-teams')
+    await expect(teams).toContainText('Texas')
+    await expect(teams).toContainText('Rank #1')
+    expect(await precedes(share, teams)).toBe(true)
+    expect(await precedes(teams, narration)).toBe(true)
+    await expect(share).toBeInViewport({ ratio: 1 })
+  })
+}

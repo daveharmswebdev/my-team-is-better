@@ -197,3 +197,61 @@ describe('ShareButton (issue #184)', () => {
     )
   })
 })
+
+/**
+ * Issue #474: on a phone, the button floats bottom-right over the scrolling
+ * view (a FAB), labelled "Share" on screen but keeping the full accessible
+ * name, so screen readers and the e2e selectors read it the same.
+ */
+describe('ShareButton, floating (issue #474)', () => {
+  it('shows "Share" and keeps the full label as its accessible name', () => {
+    render(
+      <ShareButton
+        url={URL_TO_SHARE}
+        label="Share this comparison"
+        layout="floating"
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'Share this comparison' })
+    expect(button).toHaveTextContent(/^Share$/)
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+  })
+
+  it('confirms a copy and falls back to a manual-copy field, like the inline button', async () => {
+    const writeText = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Clipboard blocked'))
+    stubNavigator('clipboard', { writeText })
+    render(<ShareButton url={URL_TO_SHARE} layout="floating" />)
+
+    clickShare()
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied'),
+    )
+    clickShare()
+    expect(
+      await screen.findByRole('textbox', { name: 'Copy this link' }),
+    ).toHaveValue(URL_TO_SHARE)
+  })
+
+  it('sits in an in-flow slot that reserves its space at the end of the content', () => {
+    const { container } = render(
+      <ShareButton url={URL_TO_SHARE} layout="floating" />,
+    )
+    const slot = container.firstElementChild
+    expect(slot).toHaveAttribute('data-layout', 'floating')
+    expect(slot).toContainElement(
+      screen.getByRole('button', { name: 'Share this verdict' }),
+    )
+  })
+
+  it('is inline by default, its text the full label', () => {
+    const { container } = render(<ShareButton url={URL_TO_SHARE} />)
+    expect(container.firstElementChild).toHaveAttribute('data-layout', 'inline')
+    expect(
+      screen.getByRole('button', { name: 'Share this verdict' }),
+    ).toHaveTextContent('Share this verdict')
+  })
+})

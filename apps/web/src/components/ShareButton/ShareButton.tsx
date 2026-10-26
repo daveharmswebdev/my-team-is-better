@@ -10,7 +10,17 @@ export interface ShareButtonProps {
    * comparison passes its own (issue #310).
    */
   label?: string
+  /**
+   * Where the button sits (issue #474). `inline` (the default) is a primary
+   * button in the content's flow, which a desktop view puts at the top of
+   * its panel. `floating` is a phone's floating action button, fixed
+   * bottom-right over the scrolling view and always on screen; render it
+   * last in the content, where its in-flow slot keeps the last line clear.
+   */
+  layout?: ShareButtonLayout
 }
+
+export type ShareButtonLayout = 'inline' | 'floating'
 
 const SHARE_TITLE = 'My Team Is Better'
 
@@ -36,7 +46,11 @@ const MANUAL_COPY_STATUS =
  * the start of every attempt, so a repeat of the same message is a change a
  * screen reader announces again.
  */
-export function ShareButton({ url, label = DEFAULT_LABEL }: ShareButtonProps) {
+export function ShareButton({
+  url,
+  label = DEFAULT_LABEL,
+  layout = 'inline',
+}: ShareButtonProps) {
   const fieldId = useId()
   const [status, setStatus] = useState('')
   const [showManualCopy, setShowManualCopy] = useState(false)
@@ -65,14 +79,25 @@ export function ShareButton({ url, label = DEFAULT_LABEL }: ShareButtonProps) {
     }
   }
 
-  return (
-    <div className={styles.share}>
+  const floating = layout === 'floating'
+  const controls = (
+    <>
       <button
         type="button"
-        className={styles.shareButton}
+        className={floating ? styles.fab : styles.shareButton}
+        // The FAB's visible text is just "Share"; the full label stays its
+        // accessible name, which starts with that word (WCAG 2.5.3).
+        aria-label={floating ? label : undefined}
         onClick={() => void handleClick()}
       >
-        {label}
+        {floating ? (
+          <>
+            <ShareIcon />
+            Share
+          </>
+        ) : (
+          label
+        )}
       </button>
       <p
         role="status"
@@ -99,7 +124,42 @@ export function ShareButton({ url, label = DEFAULT_LABEL }: ShareButtonProps) {
           />
         </div>
       )}
+    </>
+  )
+
+  if (!floating) {
+    return (
+      <div className={styles.share} data-layout="inline">
+        {controls}
+      </div>
+    )
+  }
+  // The slot stays in the content's flow, as tall as the button and its
+  // margins, so at the bottom of the scroll the last line sits above the
+  // button instead of under it. The button itself is fixed to the viewport.
+  return (
+    <div className={styles.slot} data-layout="floating">
+      <div className={styles.floating}>{controls}</div>
     </div>
+  )
+}
+
+/** The three-node "share" glyph; decorative, the button's name says it. */
+function ShareIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      className={styles.icon}
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+    >
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" />
+    </svg>
   )
 }
 

@@ -187,8 +187,9 @@ export const Loading: Story = {
 }
 
 /**
- * A success card ends with "Share this verdict" (issue #184) whenever the
- * page hands it a share link, as `HomePage` does for every verdict.
+ * A success card offers "Share this verdict" (issue #184) whenever the page
+ * hands it a share link, as `HomePage` does for every verdict. Since #474 it
+ * is first in the card on a desktop and floats bottom-right on a phone.
  */
 export const TeamCaseSuccess: Story = {
   args: {
@@ -215,6 +216,100 @@ export const ComparisonSuccess: Story = {
     await expect(
       canvas.getByRole('button', { name: 'Share this verdict' }),
     ).toBeVisible()
+  },
+}
+
+/** Whether `first` comes before `second` in reading (document) order. */
+function precedes(first: Element, second: Element): boolean {
+  return (
+    (first.compareDocumentPosition(second) &
+      Node.DOCUMENT_POSITION_FOLLOWING) !==
+    0
+  )
+}
+
+/**
+ * Issue #474 on a desktop: one inline Share button, the primary action,
+ * first in the card; then the two teams with rank and record; then the
+ * verdict.
+ */
+export const ComparisonOnDesktop: Story = {
+  ...ComparisonSuccess,
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getAllByRole('button', { name: /^Share/ }),
+    ).toHaveLength(1)
+    const share = canvas.getByRole('button', { name: 'Share this verdict' })
+    const teams = canvas.getByRole('list', { name: 'Teams compared' })
+    await expect(teams).toHaveTextContent('Texas Rank #1 · 13-0')
+    await expect(teams).toHaveTextContent('USC Rank #2 · 12-1')
+    const narration = canvas.getByText(/Texas edges USC/)
+    await expect(precedes(share, teams)).toBe(true)
+    await expect(precedes(teams, narration)).toBe(true)
+    await expect(
+      canvasElement.querySelector('[data-layout="floating"]'),
+    ).toBeNull()
+  },
+}
+
+/**
+ * Issue #474 on a phone: the teams, the verdict, the receipts -- and one
+ * Share button floating bottom-right, at least 56px, out of the flow.
+ */
+export const ComparisonOnPhone: Story = {
+  ...ComparisonSuccess,
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getAllByRole('button', { name: /^Share/ }),
+    ).toHaveLength(1)
+    const share = canvas.getByRole('button', { name: 'Share this verdict' })
+    await expect(share).toHaveTextContent(/^Share$/)
+    const box = share.getBoundingClientRect()
+    await expect(box.width).toBeGreaterThanOrEqual(56)
+    await expect(box.height).toBeGreaterThanOrEqual(56)
+    await expect(box.bottom).toBeLessThanOrEqual(window.innerHeight)
+    const teams = canvas.getByRole('list', { name: 'Teams compared' })
+    const receipts = canvas.getByRole('region', {
+      name: 'comparison evidence',
+    })
+    await expect(precedes(teams, receipts)).toBe(true)
+    await expect(precedes(receipts, share)).toBe(true)
+  },
+}
+
+/** Issue #474: a team case's header is its one team, with rank and record. */
+export const TeamCaseOnDesktop: Story = {
+  ...TeamCaseSuccess,
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const share = canvas.getByRole('button', { name: 'Share this verdict' })
+    const teams = canvas.getByTestId('verdict-teams')
+    await expect(teams).toHaveTextContent('Texas Rank #1 · 13-0')
+    await expect(precedes(share, teams)).toBe(true)
+  },
+}
+
+/** Issue #474: the same team case on a phone, its Share button floating. */
+export const TeamCaseOnPhone: Story = {
+  ...TeamCaseSuccess,
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getAllByRole('button', { name: /^Share/ }),
+    ).toHaveLength(1)
+    const share = canvas.getByRole('button', { name: 'Share this verdict' })
+    await expect(
+      canvasElement.querySelector('[data-layout="floating"]'),
+    ).toContainElement(share)
+    await expect(canvas.getByTestId('verdict-teams')).toHaveTextContent(
+      'Texas Rank #1 · 13-0',
+    )
   },
 }
 

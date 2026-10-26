@@ -44,7 +44,11 @@ const MEASURES: readonly [QbMeasure, string][] = [
  * The era-adjusted QB score for two quarterbacks (issue #459, epic #439):
  * career and peak, each with the winner and margin the API names -- never a
  * winner worked out here -- the floor the score counts from, how it was got
- * (`QbScoreExplanation`), and the bar-stool narration under it.
+ * (`QbScoreExplanation`), and the bar-stool narration.
+ *
+ * The verdict leads (issue #474): the winning line (each measure's edge,
+ * as the table's Edge column states it) or the inconclusive line, then the
+ * take; the lede, the floor, the table and the explanation follow.
  *
  * The score renders from the comparison's `qb_score` without waiting for the
  * narration, which arrives after in a polite live region, and a narration
@@ -71,6 +75,41 @@ export function QbScorePanel({
       <h2 id={headingId} className={styles.heading}>
         QB score
       </h2>
+
+      {/* The verdict first (#474): the API's winner on each measure -- the
+          same words as the table's Edge column -- or why there is none. */}
+      {inconclusive !== null ? (
+        <p className={styles.inconclusive}>{inconclusive}</p>
+      ) : (
+        <p className={styles.winningLine}>
+          {MEASURES.map(
+            ([measure, label]) =>
+              `${label}: ${qbMeasureEdge(qbScore, measure)}`,
+          ).join(' · ')}
+        </p>
+      )}
+
+      {/* The narrator explains right under the winner; the working after. */}
+      <section
+        className={styles.take}
+        aria-labelledby={takeId}
+        aria-live="polite"
+        aria-busy={narration.status === 'loading'}
+      >
+        <h3 id={takeId} className={styles.takeHeading}>
+          The take
+        </h3>
+        {narration.status === 'loading' && (
+          <p className={styles.loading}>{QB_NARRATION_LOADING_COPY}</p>
+        )}
+        {narration.status === 'success' && (
+          <p className={styles.narration}>{narration.text}</p>
+        )}
+        {narration.status === 'error' && (
+          <p className={styles.narrationError}>{narration.message}</p>
+        )}
+      </section>
+
       <p className={styles.lede}>
         Era-adjusted efficiency: every season rated per play against the
         quarterbacks of that same season.
@@ -85,9 +124,7 @@ export function QbScorePanel({
         </p>
       )}
 
-      {inconclusive !== null ? (
-        <p className={styles.inconclusive}>{inconclusive}</p>
-      ) : (
+      {inconclusive === null && (
         <table className={styles.table}>
           <caption className={styles.caption}>
             QB score, {a.display_name} and {b.display_name}
@@ -124,27 +161,6 @@ export function QbScorePanel({
           </tbody>
         </table>
       )}
-
-      {/* The narrator explains right under the numbers; the working after. */}
-      <section
-        className={styles.take}
-        aria-labelledby={takeId}
-        aria-live="polite"
-        aria-busy={narration.status === 'loading'}
-      >
-        <h3 id={takeId} className={styles.takeHeading}>
-          The take
-        </h3>
-        {narration.status === 'loading' && (
-          <p className={styles.loading}>{QB_NARRATION_LOADING_COPY}</p>
-        )}
-        {narration.status === 'success' && (
-          <p className={styles.narration}>{narration.text}</p>
-        )}
-        {narration.status === 'error' && (
-          <p className={styles.narrationError}>{narration.message}</p>
-        )}
-      </section>
 
       <QbScoreExplanation qbScore={qbScore} dataFirstSeason={dataFirstSeason} />
     </section>
