@@ -334,3 +334,123 @@ def test_a_narration_cached_under_qb_claims_v3_is_not_served() -> None:
     assert result.cached is False
     assert result.text == "Warner takes both, the career by 1.65, counting since 1999."
     assert len(narrator.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Round 2 of #464: the review's four blocking findings and its nit
+# ---------------------------------------------------------------------------
+
+R_MCNAIR: dict[str, object] = {
+    "id": "r",
+    "kind": "record",
+    "player": "McNair",
+    "season_type": "regular",
+}
+
+
+# B1: "took"/"won" are win verbs only with a measure as their object.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "McNair won more games over his career, but the score doesn't count wins.",
+        "McNair won plenty of games in his career, and the score didn't count a single one.",
+        "McNair took a beating on the career.",
+        "McNair took plenty of hits over his career, and he still trails.",
+        "McNair took the long road through his career, and it shows.",
+    ],
+)
+def test_took_and_won_as_colour_pass(text: str) -> None:
+    assert qb_rendered_verdict(_wm(), text) == text
+
+
+def test_a_starter_record_won_over_his_career_passes() -> None:
+    text = "McNair won {r} over his career as a starter, color the score never counted."
+    rendered = qb_rendered_verdict(_wm(), text, R_MCNAIR)
+    assert rendered == text.replace("{r}", "9-2")
+
+
+@pytest.mark.parametrize(
+    ("text", "said"),
+    [
+        ("McNair took both the career and the peak.", "McNair took ... career"),
+        ("McNair won it: career and peak.", "McNair won ... peak"),
+    ],
+)
+def test_took_and_won_with_a_measure_object_are_rejected(text: str, said: str) -> None:
+    assert_an_error_says(qb_rejected(_wm(), text), said)
+
+
+# B2: a lone score after "<player> to <player>".
+@pytest.mark.parametrize(
+    "text",
+    [
+        # The #464 production string on the Brady/Flacco-shaped block.
+        "{w} takes both, Warner to McNair {sc} over the whole body of work, counting since {yr}.",
+        "{w} takes both, and it's {wc} to McNair {sc} on the career, counting since {yr}.",
+    ],
+)
+def test_a_lone_score_after_player_to_player_is_rejected(text: str) -> None:
+    for block in _blocks():
+        errors = qb_rejected(block, text, *_used(text, W_BOTH, W_CAREER, S_MCNAIR, YEAR))
+        assert_an_error_says(errors, "is one player's score", "scoreline")
+
+
+# B3: margin-as-score with ordinary punctuation.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{w} takes both, Warner, at {mc}, over the whole body of work, counting since {yr}.",
+        "{w} takes both. {wc}: {mc} over the whole body of work, counting since {yr}.",
+        "{w} takes both. {wc} — {mc} over the whole body of work, counting since {yr}.",
+        "{w} takes both. {wc}—{mc} over the whole body of work, counting since {yr}.",
+        "{w} takes both. {wc} – {mc} over the whole body of work, counting since {yr}.",
+        "{w} takes both. {wc} - {mc} over the whole body of work, counting since {yr}.",
+    ],
+)
+def test_a_margin_after_a_player_and_punctuation_is_rejected(text: str) -> None:
+    for block in _blocks():
+        errors = qb_rejected(block, text, *_used(text, W_BOTH, W_CAREER, M_CAREER, YEAR))
+        assert_an_error_says(errors, "{mc} is a margin", "as if it were his score")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{w} takes both, and {wc} takes the career, by {mc}, counting since {yr}.",
+        # N1: the margin's own words after the loser's name.
+        "{w} takes both, and {wc} takes the career over McNair, {mc} clear, counting since {yr}.",
+    ],
+)
+def test_a_margin_in_its_own_words_after_punctuation_passes(text: str) -> None:
+    for block in _blocks():
+        assert qb_rendered(block, text, *_used(text, W_BOTH, W_CAREER, M_CAREER, YEAR))
+
+
+# B4: an opener about the seasons the data lacks is still speculation.
+@pytest.mark.parametrize(
+    "opener",
+    [
+        "With the years he lost",
+        "If you add the years the books don't have",
+        "With the seasons we can't see",
+        "If you look at the seasons we don't have",
+        "If you factor in the years the play-by-play missed",
+        "Add the seasons the books don't have",
+        "Add his other years",
+        "Add in his years in Houston",
+    ],
+)
+def test_an_opener_on_the_seasons_the_data_lacks_is_speculation(opener: str) -> None:
+    errors = qb_rejected(_wm(), f"{opener}, it's a different story.")
+    assert_an_error_says(errors, "different story", "missing seasons")
+
+
+@pytest.mark.parametrize(
+    "seasons", ["his MVP seasons", "his prime years", "his peak seasons", "his best years"]
+)
+def test_an_opener_on_his_qualified_best_seasons_passes(seasons: str) -> None:
+    text = (
+        f"{{c}} takes the career by a nose. If you look at {seasons}, it's a different "
+        "story: {p} squeaks by. Counting since {yr}."
+    )
+    assert qb_rendered(_brady_manning(), text, C_CAREER, P_PEAK, YEAR)

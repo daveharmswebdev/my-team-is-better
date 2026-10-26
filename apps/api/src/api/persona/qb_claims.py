@@ -64,9 +64,11 @@ is the object of a verb ("{wb} beats McNair by {m}"), #457. So "McNair's
 ahead by {m}" and "McNair, by {m}" are rejected. The verdict backstop also
 reads a margin after a win verb as a mention of its measure. A figure can't
 pose as a player's score (#464): a margin right after a player reference
-joined by "at", "with", a bare comma or a space ("{wc} at {mc}" prints
-"Warner at 22.61") is rejected, and so is a lone score after "<player> to"
-("{wc} to {sc}" prints "Warner to McNair 0.60"); "{wc} by {mc}" passes.
+joined by a space, comma, colon or dash, with or without "at" / "with"
+("{wc} at {mc}" prints "Warner at 22.61"), is rejected unless the margin's
+own words follow it ("over McNair, {mc} clear"), and so is a lone score
+after "<player> to" or "<player> to <player>" ("{wc} to {sc}" prints
+"Warner to McNair 0.60"); "{wc} by {mc}" passes.
 
 **The verdict goes through claims** (D1 on #451). Every narration holds a
 `year` claim; a conclusive one holds one `winner` both claim or a `winner`
@@ -74,7 +76,7 @@ career plus a `winner` peak claim (a measure that is exactly level has none
 to claim). The backstop on a verdict typed in prose: within one sentence, a
 player reference, then a win verb ("takes", "wins", "edges", "beats", "tops",
 "grabs", "owns", "is ahead", "leads", "has the better", and since #462
-"took" and "won"), then "career" or "peak" a few words on in the same
+"took" and "won" with a measure as their object), then "career" or "peak" a few words on in the same
 clause, never past the sentence break (#462), is rejected when that player
 isn't that measure's winner, and always on an inconclusive block. "Warner takes the
 career" passes for the winner; "Nobody beats Warner on the career" has no
@@ -277,9 +279,12 @@ _ROMAN_ERROR: Final = (
 # D1's backstop: a win verb after a player, then a measure (`_verdict_backstop`).
 _WIN_VERB_RE: Final = re.compile(
     r"\b(?:takes|wins|edges|beats|tops|grabs|owns|is\s+ahead|leads|has\s+the\s+better)\b"
-    # The past tense (#462 comment from #456): "McNair took the career". Never
-    # "won-loss", which is a record, not a verdict.
-    r"|\btook\b|\bwon\b(?![-‐‑])"
+    # The past tense (#462 comment from #456), only with a measure as its
+    # object: "McNair took the career", "won both the career and the peak",
+    # "won it: career and peak". "McNair won more games over his career" and
+    # "took a beating on the career" are starter-record colour (#464 round 2).
+    r"|\b(?:took|won)\b(?=\s+(?:(?:the|both)\s+){0,2}(?:career|peak)\b"
+    r"|\s+(?:it|both|them|it\s+all|everything)\s*(?:[:—–]|\s-\s))"
     # "McNair is the career winner", "McNair's the peak king" (#457): the
     # measure sits inside the verb, so the window starts at the verb.
     r"|(?:\bis|['’]s)\s+the\s+(?:(?:career|peak)\s+)?(?:winner|leader|champ|champion|king)\b",
@@ -372,28 +377,58 @@ _OPENING_CUE_RE: Final = re.compile(
     r"[\s\"'‘’“”(]*(?:if|with|give|count|counting|add)\b", re.IGNORECASE
 )
 # That opening clause governs only when it is about the missing seasons (#463
-# round 3): a team stint ("his Houston years", "his stint", "his tenure"),
-# a rookie year, an early or earlier career, his first or missing seasons,
-# or the time before the data. "If you look at the peak, it's a different
+# round 3): it names seasons or years ("his Houston years", "the seasons we
+# can't see"), a rookie year, an early or earlier career, a team stint, or
+# the time before the data. "If you look at the peak, it's a different
 # story" and "With that said, McNair's a different story" are true split
-# narrations, and so is any opener on his best, peak or top seasons (#462:
-# "If you look at his best seasons", "his early peak").
+# narrations, and so is an opener on his best, peak, top, prime or MVP
+# seasons (#462: "If you look at his best seasons", "his early peak"): the
+# qualifier right before the seasons, or right after "early", picks out
+# seasons the score holds (#464 round 2).
+_SEASON_QUALIFIERS: Final[tuple[str, ...]] = (
+    "best",
+    "peak",
+    "top",
+    "prime",
+    "mvp",
+    "glory",
+    "great",
+    "greatest",
+    "finest",
+    "good",
+    "big",
+    "biggest",
+    "strongest",
+    "healthy",
+    "elite",
+    "bowl",
+)
 _MISSING_SEASONS_RE: Final = re.compile(
     r"\b(?:rookie|stint|tenure|before|pre)\b"
     r"|\b(?:early|earlier)\b(?!\s+(?:peak|prime|best|top)\b)"
-    r"|\b(?:first|missing|lost|uncounted)\s+(?:(?:few|couple|of)\s+){0,2}"
-    r"(?:seasons?|years?|days)\b"
-    # A team's name before them: "his Houston years", "his Tennessee days".
-    r"|(?-i:\b[A-Z][\w'’]*)\s+(?:seasons?|years?|days)\b",
+    r"|"
+    + "".join(rf"(?<!\b{word}\s)" for word in _SEASON_QUALIFIERS)
+    # Python's lookbehind is fixed-width: one per qualifier.
+    + r"\b(?:seasons?|years?|days)\b",
     re.IGNORECASE,
 )
 # A figure presented as a player's score (#464): a margin right after a
-# player reference, joined by "at", "with", a bare comma or a space ("Warner
-# at 22.61" prints the margin as Warner's score), and a lone score after
-# "<player> to" ("Warner to McNair 0.60" reads as a one-number scoreline).
-# "{wc} by {mc}" and "wins it by {mc}" are the margin's own words and pass.
-_MARGIN_AS_SCORE_GAP_RE: Final = re.compile(r"(?:\s+(?:at|with)\s+|\s*,\s*|\s+)\Z", re.IGNORECASE)
-_SCORELINE_GAP_RE: Final = re.compile(r"\s+to\s+\Z", re.IGNORECASE)
+# player reference, joined by a space, a comma, a colon or a dash, with or
+# without "at" / "with" ("Warner at 22.61", "Warner, at 22.61,", "Warner:
+# 22.61" print the margin as Warner's score), and a lone score after
+# "<player> to" or "<player> to <player>" ("Warner to McNair 0.60" reads as
+# a one-number scoreline). Each gap is matched whole from the end of the
+# reference. "{wc} by {mc}" and "wins it by {mc}" are the margin's own words
+# and pass, and so does a bare joiner when the margin's own words follow it
+# ("over McNair, {mc} clear", #464 round 2).
+_MARGIN_JOIN_RE: Final = re.compile(
+    r"(?:\s*(?:[,:—–]|\s-\s)\s*|\s+)(?P<word>(?:at|with)\s+)?", re.IGNORECASE
+)
+_MARGIN_OWN_WORDS_RE: Final = re.compile(
+    r"\s+(?:clear|ahead|better|up|in\s+front|to\s+the\s+good)\b", re.IGNORECASE
+)
+_TO_JOIN_RE: Final = re.compile(r"\s+to\s+", re.IGNORECASE)
+_SPACE_RE: Final = re.compile(r"\s+")
 _GAP_WINDOW: Final = 12
 # The listener shape of "if you had": "If you had McNair, you'd be crying"
 # (#457 round 3) is about the fan, not the missing seasons.
@@ -1335,30 +1370,43 @@ def _figure_as_score_errors(
     block: _QbBlock,
 ) -> list[str]:
     """#464: a margin placeholder right after a player reference (a typed
-    name or a winner placeholder) joined by "at", "with", a bare comma or a
-    space, and a score placeholder right after "<player reference> to"."""
-    ends: dict[int, Side] = {}
+    name or a winner placeholder) joined by `_MARGIN_JOIN_RE`, and a score
+    placeholder right after "<player reference> to", with or without a
+    second reference before the score ("Warner to McNair {sc}")."""
+    spans: dict[int, tuple[int, Side]] = {}
     for start, side in references:
         for form in sorted(block.players[side].forms, key=len, reverse=True):
             if masked.startswith(form, start):
-                ends[start + len(form)] = side
+                spans[start + len(form)] = (start, side)
                 break
     for match in placeholders:
         mode, referred = modes.get(match.group(1), ("none", None))
         if mode == "reference" and referred is not None:
-            ends[match.end()] = referred
+            spans[match.end()] = (match.start(), referred)
+
+    def joined_by(pattern: re.Pattern[str], at: int) -> tuple[int, re.Match[str]] | None:
+        """The nearest reference end that `pattern` joins, whole, to `at`."""
+        for end in sorted(spans, reverse=True):
+            if end <= at and at - end <= _GAP_WINDOW:
+                gap = pattern.fullmatch(masked, end, at)
+                if gap is not None:
+                    return end, gap
+        return None
+
     errors: list[str] = []
     for match in placeholders:
         claim_id = match.group(1)
         claim = claim_measures.get(claim_id)
         if claim is None or claim.kind not in ("margin", "score"):
             continue
-        gap_re = _MARGIN_AS_SCORE_GAP_RE if claim.kind == "margin" else _SCORELINE_GAP_RE
-        gap = gap_re.search(masked, max(0, match.start() - _GAP_WINDOW), match.start())
-        if gap is None or gap.start() not in ends:
-            continue
-        name = block.players[ends[gap.start()]].called
         if claim.kind == "margin":
+            found = joined_by(_MARGIN_JOIN_RE, match.start())
+            if found is None:
+                continue
+            end, gap = found
+            if gap["word"] is None and _MARGIN_OWN_WORDS_RE.match(masked, match.end()):
+                continue
+            name = block.players[spans[end][1]].called
             joined = " ".join(gap.group(0).split()) or "a space"
             errors.append(
                 f"{{{claim_id}}} is a margin, but the prose puts it right after {name} "
@@ -1366,12 +1414,21 @@ def _figure_as_score_errors(
                 f'ahead the winner is, so write it with "by" ("{name} takes the '
                 f'{claim.measures[0]} by {{{claim_id}}}")'
             )
-        else:
-            errors.append(
-                f"{{{claim_id}}} is one player's score, but the prose puts it after "
-                f'"{name} to", which reads as a scoreline with one number; give both scores '
-                f'("{{a}} to {{b}}") or the margin with "by"'
-            )
+            continue
+        found = joined_by(_TO_JOIN_RE, match.start())
+        if found is None:
+            # "Warner to McNair {sc}": a second reference between "to" and it.
+            second = joined_by(_SPACE_RE, match.start())
+            if second is not None:
+                found = joined_by(_TO_JOIN_RE, spans[second[0]][0])
+        if found is None:
+            continue
+        name = block.players[spans[found[0]][1]].called
+        errors.append(
+            f"{{{claim_id}}} is one player's score, but the prose puts it after "
+            f'"{name} to", which reads as a scoreline with one number; give both scores '
+            f'("{{a}} to {{b}}") or the margin with "by"'
+        )
     return errors
 
 
