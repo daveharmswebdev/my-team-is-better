@@ -77,7 +77,7 @@ from cfb_strength.players import (
 from fastapi import APIRouter, Depends, Query
 from fastapi.exceptions import RequestValidationError
 
-from api.deps import get_call_budget, get_db_conn, get_narration_cache, get_qb_narrator
+from api.deps import get_call_budget, get_db_conn, get_qb_narration_cache, get_qb_narrator
 from api.errors import (
     PLAYER_CAREER_ERROR_RESPONSES,
     PLAYER_COMPARISON_ERROR_RESPONSES,
@@ -281,7 +281,7 @@ def _comparable_pair(
 def qb_verdict(
     payload: QbVerdictRequest,
     conn: sqlite3.Connection = Depends(get_db_conn),
-    cache: NarrationCacheStore = Depends(get_narration_cache),
+    cache: NarrationCacheStore = Depends(get_qb_narration_cache),
     narrator: Narrator = Depends(get_qb_narrator),
     budget: CallBudget = Depends(get_call_budget),
 ) -> QbVerdictEnvelope:

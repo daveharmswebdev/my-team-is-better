@@ -83,6 +83,7 @@ from api.config import (
     DATABASE_URL,
     PROMPT_VERSION,
     QB_NARRATOR_MODEL,
+    QB_PROMPT_VERSION,
     TEAM_NARRATOR_MODEL,
 )
 from api.persona.budget import CallBudget, RollingWindowCallBudget, UnlimitedCallBudget
@@ -125,6 +126,26 @@ def get_narration_cache() -> NarrationCacheStore:
         logger.warning("DATABASE_URL is not configured -- persona narration cache disabled")
         return DisabledNarrationCache()
     return PostgresNarrationCache(DATABASE_URL, prompt_version=PROMPT_VERSION)
+
+
+def get_qb_narration_cache(
+    cache: NarrationCacheStore = Depends(get_narration_cache),
+) -> NarrationCacheStore:
+    """The QB verdict's cache (issue #447): the app's store, writing its rows
+    under `QB_PROMPT_VERSION` instead of `PROMPT_VERSION`, so every
+    `persona_cache` row names the prompt that wrote it and
+    `python -m api.admin purge-narrations --prompt-version qb-persona-v3`
+    clears exactly the QB voice. Only the row's label changes; the QB cache
+    key (`api.persona.cache.qb_cache_key`) already carried `QB_PROMPT_VERSION`
+    and is untouched, so no existing row misses. Any store other than
+    `PostgresNarrationCache` (the in-memory one under `APP_TEST_MODE`, the
+    disabled one, a test's fake) records no label and is passed through.
+    Built on `get_narration_cache` rather than beside it, like
+    `get_qb_narrator`, so every override of `get_narration_cache` covers the
+    QB route too."""
+    if isinstance(cache, PostgresNarrationCache):
+        return cache.with_prompt_version(QB_PROMPT_VERSION)
+    return cache
 
 
 _CALL_BUDGET: CallBudget = (
