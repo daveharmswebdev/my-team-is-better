@@ -438,6 +438,13 @@ def test_a_margin_in_its_own_words_after_punctuation_passes(text: str) -> None:
         "Add the seasons the books don't have",
         "Add his other years",
         "Add in his years in Houston",
+        # #464 round 2's review: only best/peak/top/prime/MVP pick out
+        # seasons the score holds; "good" or "glory" years can be the
+        # missing ones.
+        "With his good years in Houston",
+        "If you add his big years in Houston",
+        "With his healthy years",
+        "If you add his glory years",
     ],
 )
 def test_an_opener_on_the_seasons_the_data_lacks_is_speculation(opener: str) -> None:

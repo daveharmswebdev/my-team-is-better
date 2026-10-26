@@ -391,17 +391,6 @@ _SEASON_QUALIFIERS: Final[tuple[str, ...]] = (
     "top",
     "prime",
     "mvp",
-    "glory",
-    "great",
-    "greatest",
-    "finest",
-    "good",
-    "big",
-    "biggest",
-    "strongest",
-    "healthy",
-    "elite",
-    "bowl",
 )
 _MISSING_SEASONS_RE: Final = re.compile(
     r"\b(?:rookie|stint|tenure|before|pre)\b"
