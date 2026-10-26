@@ -338,3 +338,15 @@ def test_redirect_uses_public_web_url(client: TestClient, monkeypatch: pytest.Mo
         description=CFB_2005_CHAMPION,
         target=f"http://localhost:5173/?{urlencode(params)}",
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/share?q=champion&sport=nfl&year=2025&engine=keener", "/api/share/nfl/compare?a=1&b=2"],
+)
+def test_head_is_answered_like_get(client: TestClient, path: str) -> None:
+    # Some link unfurlers probe with HEAD before they GET; a 405 there can
+    # make them give up on the preview (#185, seen on the live proxy).
+    response = client.head(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
