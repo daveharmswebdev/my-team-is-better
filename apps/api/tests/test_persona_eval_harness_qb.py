@@ -509,6 +509,8 @@ def test_a_qb_run_narrates_through_production_and_records_grades_and_cost(
         [
             "--narrator",
             "qb",
+            "--model",
+            "claude-haiku-4-5",
             "--case",
             SWEEP,
             "--case",

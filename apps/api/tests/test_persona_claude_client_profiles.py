@@ -111,11 +111,11 @@ def _kwargs_for(model: str, *, tool: dict[str, Any] | None = None, **extra: Any)
 # ---------------------------------------------------------------------------
 
 
-def test_exactly_three_models_are_supported_and_production_is_on_haiku_4_5() -> None:
+def test_exactly_three_models_are_supported_and_production_is_on_its_picks() -> None:
     assert SUPPORTED_MODELS == ("claude-haiku-4-5", "claude-haiku-5-5", "claude-sonnet-5-5")
     assert set(PROFILES) == set(SUPPORTED_MODELS)
     assert TEAM_NARRATOR_MODEL == "claude-haiku-4-5"
-    assert QB_NARRATOR_MODEL == "claude-haiku-4-5"
+    assert QB_NARRATOR_MODEL == "claude-sonnet-5-5"
 
 
 def test_haiku_4_5_sends_exactly_todays_request() -> None:

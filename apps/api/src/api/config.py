@@ -161,12 +161,14 @@ PROMPT_VERSION = "persona-v13"
 #   sweep example (#463 round B).
 QB_PROMPT_VERSION = "qb-persona-v3"
 
-# Issue #463: each narrator's model. Both stay on claude-haiku-4-5, whose
-# request is byte-for-byte the one sent since #291 and whose cache keys are
-# unchanged; the eval harness compares claude-haiku-5-5 and claude-sonnet-5-5
-# before either moves.
+# Issue #463: each narrator's model. The team narrator stays on
+# claude-haiku-4-5, whose request is byte-for-byte the one sent since #291 and
+# whose cache keys are unchanged. The QB narrator moved to claude-sonnet-5-5,
+# the founder's pick from #463's eval (persona_eval_harness --narrator qb, on
+# qb-persona-v3: 88% accepted first try and no fallback, against 38% and 4%
+# on claude-haiku-4-5).
 TEAM_NARRATOR_MODEL = "claude-haiku-4-5"
-QB_NARRATOR_MODEL = "claude-haiku-4-5"
+QB_NARRATOR_MODEL = "claude-sonnet-5-5"
 
 CONTESTED_YEARS: dict[Sport, frozenset[int]] = {
     "cfb": frozenset({2003, 2017}),

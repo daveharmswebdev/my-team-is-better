@@ -97,7 +97,7 @@ def _key(**overrides: object) -> str:
         {"grounding_version": QB_GROUNDING_VERSION + "-tightened"},
         {"fact_block_json": qb_block(KURT_WARNER, PEYTON_MANNING)},
         {"a": STEVE_MCNAIR, "b": KURT_WARNER},
-        {"model": "claude-sonnet-5-5"},
+        {"model": "claude-haiku-5-5"},
     ],
     ids=[
         "qb-score-version",
@@ -146,11 +146,11 @@ def test_a_qb_narrator_model_change_misses(monkeypatch: pytest.MonkeyPatch) -> N
     # #463: a narration written by another model is its own cache entry.
     cache = InMemoryNarrationCache()
     _ask(cache, FakeNarrator([ACCEPTED]))
-    monkeypatch.setattr(service, "QB_NARRATOR_MODEL", "claude-sonnet-5-5")
+    monkeypatch.setattr(service, "QB_NARRATOR_MODEL", "claude-haiku-5-5")
     narrator = FakeNarrator([ACCEPTED])
     assert _ask(cache, narrator).cached is False
     assert len(narrator.calls) == 1
-    assert cache.get(_key(model="claude-sonnet-5-5")) is not None
+    assert cache.get(_key(model="claude-haiku-5-5")) is not None
 
 
 def test_the_versions_are_bumped_for_the_two_margin_tiers() -> None:

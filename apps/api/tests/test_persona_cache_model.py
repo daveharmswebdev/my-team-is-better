@@ -91,9 +91,11 @@ def test_get_qb_narrator_builds_the_qb_narrator_on_qb_narrator_model(
     assert team.model == HAIKU_4_5
 
 
-def test_production_builds_both_narrators_on_haiku_4_5(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_production_builds_team_on_haiku_4_5_and_qb_on_sonnet_5_5(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(deps, "APP_TEST_MODE", False)
     team = deps.get_narrator()
     qb = deps.get_qb_narrator(team)
     assert isinstance(team, ClaudeNarrator) and isinstance(qb, ClaudeNarrator)
-    assert (team.model, qb.model) == (HAIKU_4_5, HAIKU_4_5)
+    assert (team.model, qb.model) == (HAIKU_4_5, "claude-sonnet-5-5")

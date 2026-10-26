@@ -58,8 +58,11 @@ def test_a_claude_narrator_is_sent_with_the_qb_tool() -> None:
     team.submit(system="S", messages=[{"role": "user", "content": "F"}])
 
     qb_kwargs, team_kwargs = fake.messages.kwargs
+    # The QB narrator runs on claude-sonnet-5-5 (#463), which rejects forced
+    # tool use: it steers with tool_choice auto.
+    assert qb_kwargs["model"] == "claude-sonnet-5-5"
     assert qb_kwargs["tools"] == [qb_tool_schema()]
-    assert qb_kwargs["tool_choice"] == {"type": "tool", "name": TOOL_NAME}
+    assert qb_kwargs["tool_choice"] == {"type": "auto"}
     assert reply.tool_call is not None
     # The team narrator it was built from is untouched.
     assert team_kwargs["tools"] == [tool_schema()]
