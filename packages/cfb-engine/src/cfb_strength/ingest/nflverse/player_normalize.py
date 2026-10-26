@@ -69,6 +69,13 @@ The rules, in the order a stat line meets them:
    other column with `int()`, so a fraction in a count column raises,
    naming the column, instead of being truncated. An empty cell is None,
    never 0.
+10. Untracked columns (#345): a column the source did not track in a
+   season is None on every line of that season, so every game and season
+   row stores NULL, never the source's 0 (the #313 rule: a stat an era
+   did not track is NULL). Which columns are untracked is measured on the
+   season's own stat rows by `untracked_stat_columns`, never a year list:
+   see `UNTRACKED_COMPANIONS` for the test and its measurement. The
+   season report names the columns it nulled.
 """
 
 from __future__ import annotations
@@ -110,6 +117,30 @@ changed convention, and that should fail loudly downstream rather than be
 silently absorbed. Every other column (including net yardage like
 `rushing_yards`, genuinely negative on 4,603 rows) keeps the source's
 sign."""
+
+UNTRACKED_COMPANIONS: Mapping[str, str] = {"targets": "receptions"}
+"""Rule 10: column -> the companion column whose activity shows whether the
+column was tracked. A reception implies a target, so a season with plenty
+of catches and (almost) no targets is a season nflverse did not track
+targets in. Measured on the committed cache (issue #345), per season, the
+share of rows with receptions > 0 whose targets are nonzero: 100% in
+1999-2001 and 2009-2025, 3,613 of 3,614 in 2002, and at most 0.44% in
+2003-2008 (2008: 16 of 3,630; 2005: 0 of 3,528). Every other contract
+column was measured too and shows no such season, so only targets has a
+companion here."""
+
+UNTRACKED_MIN_COMPANION_ROWS = 100
+"""Rule 10's evidence floor: a season with fewer companion-active rows is
+too thin to judge, so its column is kept as published. A full season has
+3,349-4,138 rows with a catch (1999-2025); one week about 200-280. So
+the floor sits below one week, and a sample cut or a single game (the
+fixtures' 2001 cut has 13) is never judged."""
+
+UNTRACKED_MAX_NONZERO_SHARE = 0.05
+"""Rule 10's threshold: a column is untracked when it is nonzero on fewer
+than this share of the companion-active rows. Measured (issue #345):
+tracked seasons sit at 99.97% or more, untracked ones at 0.44% or less,
+so 5% is far from both."""
 
 SEASON_ROW_SOURCE = "nflverse"
 STARTER_FROM_SCHEDULE = "nflverse_schedule"
@@ -186,6 +217,30 @@ def parse_stats(row: Mapping[str, str]) -> PlayerStats:
     # `**` dict can't express per key; `_parse_stat` is what keeps them apart.
     cells: dict[str, Any] = {name: _parse_stat(row, name) for name in STAT_FIELDS}
     return PlayerStats(**cells)
+
+
+def untracked_stat_columns(stat_rows: Iterable[Mapping[str, str]]) -> tuple[str, ...]:
+    """Rule 10: the `UNTRACKED_COMPANIONS` columns the source did not track
+    in the season these rows make up, in contract order. A column is
+    untracked when its companion is nonzero on at least
+    `UNTRACKED_MIN_COMPANION_ROWS` rows and the column itself is nonzero on
+    fewer than `UNTRACKED_MAX_NONZERO_SHARE` of them. An empty cell counts
+    as zero here; below the evidence floor nothing is untracked."""
+    active = dict.fromkeys(UNTRACKED_COMPANIONS, 0)
+    nonzero = dict.fromkeys(UNTRACKED_COMPANIONS, 0)
+    for row in stat_rows:
+        for column, companion in UNTRACKED_COMPANIONS.items():
+            if _is_nonzero(row[companion]):
+                active[column] += 1
+                if _is_nonzero(row[column]):
+                    nonzero[column] += 1
+    return tuple(
+        name
+        for name in STAT_FIELDS
+        if name in UNTRACKED_COMPANIONS
+        and active[name] >= UNTRACKED_MIN_COMPANION_ROWS
+        and nonzero[name] < UNTRACKED_MAX_NONZERO_SHARE * active[name]
+    )
 
 
 def player_season_type(value: str) -> PlayerSeasonType:
@@ -380,6 +435,8 @@ class PlayerSeasonReport:
     games_without_stat_lines: tuple[str, ...]
     sides_without_starter: tuple[tuple[str, Side], ...]
     derived_starters: tuple[DerivedStarter, ...]
+    untracked_stats: tuple[str, ...] = ()
+    """Rule 10: the columns stored NULL on every row this season."""
 
 
 @dataclass(frozen=True)
@@ -484,6 +541,8 @@ def build_player_season(
     games = sorted(games, key=lambda g: g.source_id)
     games_by_source = {g.source_id: g for g in games}
     identities = _Identities(roster, rows, games)
+    untracked = untracked_stat_columns(rows)
+    blank_untracked: dict[str, None] = dict.fromkeys(untracked)
 
     skipped: list[SkippedStatRow] = []
     lines: list[_Line] = []
@@ -523,7 +582,10 @@ def build_player_season(
         if (gsis_id, game.id) in seen:
             raise ValueError(f"{_where(row)} appears more than once")
         seen.add((gsis_id, game.id))
-        lines.append(_Line(gsis_id, game, side, season_type, parse_stats(row)))
+        # Rule 10: untracked columns are None on every line, so the season
+        # aggregate (None only if None on every line) is NULL too.
+        stats = dataclasses.replace(parse_stats(row), **blank_untracked)
+        lines.append(_Line(gsis_id, game, side, season_type, stats))
 
     lines.sort(key=lambda line: (line.game.source_id, line.gsis_id))
 
@@ -665,6 +727,7 @@ def build_player_season(
         games_without_stat_lines=tuple(g.source_id for g in games if g.id not in games_with_lines),
         sides_without_starter=tuple(sides_without_starter),
         derived_starters=tuple(derived),
+        untracked_stats=untracked,
     )
     return SeasonBuild(
         players=tuple(players),

@@ -49,6 +49,7 @@ from cfb_strength.ingest.nflverse import client as nflverse_client
 from cfb_strength.ingest.nflverse import player_normalize
 from cfb_strength.ingest.nflverse.ingest_players import (
     PlayerIngestReport,
+    format_season_report,
     ingest_players,
     main,
 )
@@ -309,11 +310,48 @@ def test_a_season_row_is_null_only_where_the_source_leaves_the_cell_empty(
         for column in STAT_FIELDS
     }
 
-    assert {column for column, count in nulls.items() if count} == set(PLAYER_STAT_MAX_FIELDS) | epa
+    # The one exception is a column the source didn't track that season
+    # (#345): targets in 2004, NULL on every row there and nowhere else.
+    assert {column for column, count in nulls.items() if count} == (
+        set(PLAYER_STAT_MAX_FIELDS) | epa | {"targets"}
+    )
     assert nulls["fg_long"] > 0 and nulls["pt_long"] > 0
     assert all(nulls[column] > 0 for column in epa)
     # A season with any EPA cell is never NULL: Warner's 1999 passing EPA.
     assert _season_row(conn, "Kurt Warner", 1999, "regular")["passing_epa"] is not None
+
+
+def test_targets_are_null_in_the_untracked_2004_season_at_both_grains_and_only_there(
+    ingested: tuple[sqlite3.Connection, PlayerIngestReport],
+) -> None:
+    # nflverse publishes targets as 0 for 2003-2008 (#345). The 2004 cut has
+    # 249 catches and one nonzero target, so the season is untracked and
+    # every row's targets is NULL; the other three seasons keep every value.
+    conn, report = ingested
+    counts = {
+        (table, season): conn.execute(
+            f"SELECT COUNT(*) FILTER (WHERE s.targets IS NULL), COUNT(*) FROM {table} s "
+            + (
+                "JOIN games g ON g.id = s.game_id WHERE g.season = ?"
+                if table == "player_game_stats"
+                else "WHERE s.season = ?"
+            ),
+            (season,),
+        ).fetchone()
+        for table in ("player_game_stats", "player_season_stats")
+        for season in FIXTURE_SEASONS
+    }
+
+    for (table, season), (nulls, total) in counts.items():
+        assert total > 0, (table, season)
+        assert nulls == (total if season == 2004 else 0), (table, season)
+    assert {s.season: s.untracked_stats for s in report.seasons} == {
+        1999: (),
+        2004: ("targets",),
+        2013: (),
+        2022: (),
+    }
+    assert _season_row(conn, "Peyton Manning", 2004, "regular")["receptions"] is not None
 
 
 def test_a_stat_missing_on_every_game_row_stays_null_while_an_all_zero_stat_stays_zero(
@@ -721,6 +759,25 @@ def test_the_committed_cache_reproduces_the_contracts_season_counts(
         assert s.starters_by_source == starters, season
         assert s.games_without_stat_lines == no_lines, season
         assert s.sides_without_starter == (), season
+        assert s.untracked_stats == (("targets",) if season == 2004 else ()), season
+
+
+def test_the_report_names_an_untracked_column() -> None:
+    report = PlayerSeasonReport(
+        season=2004,
+        stat_lines=0,
+        season_rows=0,
+        players_written=0,
+        players_without_roster_entry=(),
+        starters_by_source={},
+        skipped=(),
+        games_without_stat_lines=(),
+        sides_without_starter=(),
+        derived_starters=(),
+        untracked_stats=("targets",),
+    )
+
+    assert "  untracked by the source, stored NULL: targets" in (format_season_report(report))
 
 
 def test_main_ingests_from_the_committed_cache_and_prints_the_report(

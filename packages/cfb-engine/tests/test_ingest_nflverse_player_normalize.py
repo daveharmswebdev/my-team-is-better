@@ -1004,3 +1004,170 @@ def test_every_def_cell_is_filled_and_only_def_sacks_is_ever_fractional() -> Non
             "def_pass_defended",
         ):
             assert all(isinstance(getattr(s, column), int) for s in stats), (year, column)
+
+
+# --- issue #345: a column the source did not track that season is NULL ------
+#
+# nflverse publishes `targets` as an affirmative 0 for 2003-2008, seasons it
+# did not track them, while 3,500+ rows a season carry a reception (a catch
+# implies a target). Measured on the committed cache, per season, rows with
+# receptions > 0 whose targets are 0: none in 1999-2001 and 2009-2025, one in
+# 2002, and 3,528-3,647 in 2003-2008 (99.5% or more of that season's catches).
+
+
+def _with_targets(rows: list[dict[str, str]], value: str) -> list[dict[str, str]]:
+    return [{**r, "targets": value} for r in rows]
+
+
+def _receiving_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [r for r in rows if int(r["receptions"]) > 0]
+
+
+def _build(
+    conn: sqlite3.Connection, season: int, rows: list[dict[str, str]]
+) -> player_normalize.SeasonBuild:
+    return build_player_season(
+        season,
+        rows,
+        _games(conn, season),
+        _franchise(),
+        build_roster(_read_csv(PLAYER_SAMPLE_DIR / "players.csv")),
+    )
+
+
+def _targets(build: player_normalize.SeasonBuild) -> tuple[set[int | None], set[int | None]]:
+    """The distinct targets values written at the game and the season grain."""
+    return (
+        {r.stats.targets for r in build.game_stats},
+        {r.stats.targets for r in build.season_stats},
+    )
+
+
+def test_targets_has_receptions_as_its_tracking_companion() -> None:
+    assert player_normalize.UNTRACKED_COMPANIONS == {"targets": "receptions"}
+
+
+def test_a_season_of_catches_with_all_zero_targets_stores_targets_null_everywhere(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # The 1999 cut (IND and St. Louis, a tracked season) with every targets
+    # cell rewritten to the 0 nflverse publishes for 2003-2008.
+    rows = _with_targets(_stat_rows(1999), "0")
+    assert len(_receiving_rows(rows)) >= player_normalize.UNTRACKED_MIN_COMPANION_ROWS
+
+    build = _build(nfl_regression_conn, 1999, rows)
+
+    assert _targets(build) == ({None}, {None})
+    assert build.report.untracked_stats == ("targets",)
+    # Only targets: the receptions in the same rows keep their values.
+    assert None not in {r.stats.receptions for r in build.game_stats}
+    assert sum(r.stats.receptions or 0 for r in build.season_stats) > 0
+
+
+def test_a_tracked_season_keeps_its_targets(nfl_regression_conn: sqlite3.Connection) -> None:
+    build = _build(nfl_regression_conn, 1999, _stat_rows(1999))
+
+    games, seasons = _targets(build)
+    assert None not in games | seasons
+    assert build.report.untracked_stats == ()
+    # Marvin Harrison, 1999 Indianapolis: his season targets are his cells.
+    harrison = mint_surrogate_id("nfl_player", "00-0007024")
+    season = next(
+        r for r in build.season_stats if r.player_id == harrison and r.season_type == "regular"
+    )
+    cells = [int(v) for v in _game_values(1999, "00-0007024", "targets")]
+    assert season.stats.targets == sum(cells) and sum(cells) > 0
+
+
+def test_one_stray_zero_target_catch_leaves_the_season_tracked(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # 2002 has exactly one row with a reception and 0 targets: a source slip
+    # in a tracked season, not an untracked season. That row keeps its
+    # published 0 and every other row its count.
+    rows = _stat_rows(1999)
+    stray = _receiving_rows(rows)[0]
+    assert stray["targets"] != "0"
+    rows = [{**r, "targets": "0"} if r is stray else r for r in rows]
+
+    build = _build(nfl_regression_conn, 1999, rows)
+
+    assert build.report.untracked_stats == ()
+    stray_player = mint_surrogate_id("nfl_player", stray["player_id"])
+    zero_target_catches = [
+        r for r in build.game_stats if (r.stats.receptions or 0) > 0 and r.stats.targets == 0
+    ]
+    assert [r.player_id for r in zero_target_catches] == [stray_player]
+    assert None not in _targets(build)[0]
+
+
+def test_the_real_2004_cut_stores_targets_null_including_its_stray_nonzero_row(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # The 2004 cut (IND and NE): 249 rows with a catch, 248 of them with
+    # targets 0, and one row with a nonzero target -- untrustworthy in a
+    # season the source didn't track, so NULL like the rest.
+    rows = _stat_rows(2004)
+    receiving = _receiving_rows(rows)
+    assert len(receiving) == 249
+    assert sum(1 for r in receiving if r["targets"] == "0") == 248
+    assert sum(1 for r in rows if r["targets"] not in ("", "0")) == 1
+
+    build = _build(nfl_regression_conn, 2004, rows)
+
+    assert _targets(build) == ({None}, {None})
+    assert build.report.untracked_stats == ("targets",)
+
+
+def test_a_thin_file_keeps_its_targets_as_published(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # Too few catches to judge (a sample, one game): the rule doesn't guess,
+    # so an all-zero targets column stays the published 0. 1999_15_NO_BAL
+    # has 16 rows with a catch.
+    rows = _with_targets([r for r in _stat_rows(1999) if r["game_id"] == "1999_15_NO_BAL"], "0")
+    assert len(_receiving_rows(rows)) == 16
+
+    build = _build(nfl_regression_conn, 1999, rows)
+
+    assert build.report.untracked_stats == ()
+    assert _targets(build)[0] == {0}
+
+
+@pytest.mark.parametrize(
+    ("catches", "nonzero_targets", "untracked"),
+    [
+        (100, 0, True),  # exactly the minimum evidence, no targets: untracked
+        (99, 0, False),  # one catch short of the minimum: thin, kept as published
+        (200, 9, True),  # 4.5% of catches carry a target: still untracked
+        (200, 10, False),  # 5%: tracked
+    ],
+)
+def test_the_rule_thresholds(catches: int, nonzero_targets: int, untracked: bool) -> None:
+    assert player_normalize.UNTRACKED_MIN_COMPANION_ROWS == 100
+    assert player_normalize.UNTRACKED_MAX_NONZERO_SHARE == 0.05
+    rows = [
+        {"receptions": "1", "targets": "1" if i < nonzero_targets else "0"} for i in range(catches)
+    ] + [{"receptions": "0", "targets": "0"}] * 500
+
+    result = player_normalize.untracked_stat_columns(rows)
+
+    assert result == (("targets",) if untracked else ())
+
+
+def test_an_empty_targets_cell_on_a_catch_counts_as_no_target() -> None:
+    rows = [{"receptions": "2", "targets": ""}] * 150
+    assert player_normalize.untracked_stat_columns(rows) == ("targets",)
+
+
+def test_the_committed_cache_marks_exactly_2003_to_2008_untracked_for_targets() -> None:
+    # The rule is measured, not a year list: run it on every cached season.
+    marked = {
+        year: player_normalize.untracked_stat_columns(
+            _read_csv(RAW_DIR / "nfl" / f"stats_player_week_{year}.csv")
+        )
+        for year in range(1999, 2026)
+    }
+
+    assert {y for y, cols in marked.items() if cols} == set(range(2003, 2009))
+    assert all(cols == ("targets",) for cols in marked.values() if cols)
