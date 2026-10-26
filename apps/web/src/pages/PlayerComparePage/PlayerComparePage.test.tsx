@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   NETWORK_ERROR_COPY,
   PlayerApiError,
@@ -64,6 +64,7 @@ import {
   PLAYER_NOT_FOUND_COPY,
   STARTER_RECORD_NOTE,
 } from '../../lib/playerStats'
+import { expectReadingOrder, matchMediaFor } from '../../test/viewport'
 import { PlayerComparePage } from './PlayerComparePage'
 
 vi.mock('../../lib/api/client', async () => {
@@ -1948,5 +1949,103 @@ describe('PlayerComparePage: the QB score (issue #459)', () => {
     )
 
     expect(options?.signal?.aborted).toBe(true)
+  })
+})
+
+/**
+ * Issue #474: sharing is promoted, and the verdict moves up. Both layouts
+ * read who's compared, then the verdict (the QB score's winning line and the
+ * take), then the numbers. A desktop puts Share first; a phone floats it
+ * bottom-right, so in reading order it comes last. Either way there is
+ * exactly one Share button.
+ */
+describe('PlayerComparePage: the comparison layout (issue #474)', () => {
+  beforeEach(() => {
+    mockedCompare.mockReset()
+    mockedCareer.mockReset()
+    mockedSearch.mockReset()
+    mockedVerdict.mockReset()
+    mockedCredits.mockReset()
+    mockedCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
+    mockedVerdict.mockResolvedValue(WARNER_VS_MCNAIR_VERDICT)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** The comparison's landmarks, in the order the founder set (#474). */
+  async function comparisonParts() {
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Kurt Warner and Steve McNair',
+    })
+    const panel = within(dialog).getByRole('region', { name: 'QB score' })
+    const take = within(panel).getByRole('region', { name: 'The take' })
+    await waitFor(() => {
+      expect(take).toHaveTextContent(WARNER_VS_MCNAIR_VERDICT.narration.text)
+    })
+    return {
+      dialog,
+      players: within(dialog).getByRole('list', { name: 'Players compared' }),
+      winningLine: within(panel).getByText(/^Career: Kurt Warner by 1\.65/),
+      take,
+      scoreTable: within(panel).getByRole('table', { name: /QB score/ }),
+      regularSeason: within(dialog).getByRole('table', {
+        name: 'Kurt Warner and Steve McNair, regular season',
+      }),
+      headToHead: within(dialog).getByRole('region', { name: 'Head to head' }),
+      credit: await within(dialog).findByText(/nflfastR's EP model/),
+      shares: within(dialog).getAllByRole('button', { name: /^Share/ }),
+    }
+  }
+
+  it('on a desktop: Share first, then the players, the verdict, and the numbers', async () => {
+    vi.stubGlobal('matchMedia', matchMediaFor('desktop'))
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    const parts = await comparisonParts()
+    expect(parts.shares).toHaveLength(1)
+    const [share] = parts.shares
+    expect(share).toHaveAccessibleName('Share this comparison')
+    expectReadingOrder(
+      share as Element,
+      parts.players,
+      parts.winningLine,
+      parts.take,
+      parts.scoreTable,
+      parts.regularSeason,
+      parts.headToHead,
+      parts.credit,
+    )
+    expect(
+      parts.dialog.querySelector('[data-layout="floating"]'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('on a phone: the players, the verdict, the numbers, then the floating Share', async () => {
+    vi.stubGlobal('matchMedia', matchMediaFor('phone'))
+    renderPage(`?a=${WARNER}&b=${MCNAIR}`)
+
+    const parts = await comparisonParts()
+    expect(parts.shares).toHaveLength(1)
+    const [share] = parts.shares
+    expect(share).toHaveAccessibleName('Share this comparison')
+    expect(
+      parts.dialog.querySelector('[data-layout="floating"]'),
+    ).toContainElement(share ?? null)
+    expectReadingOrder(
+      parts.players,
+      parts.winningLine,
+      parts.take,
+      parts.scoreTable,
+      parts.regularSeason,
+      parts.headToHead,
+      parts.credit,
+      share as Element,
+    )
   })
 })

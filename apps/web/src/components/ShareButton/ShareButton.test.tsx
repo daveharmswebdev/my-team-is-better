@@ -197,3 +197,173 @@ describe('ShareButton (issue #184)', () => {
     )
   })
 })
+
+/**
+ * Issue #474: on a phone, the button floats bottom-right over the scrolling
+ * view (a FAB), labelled "Share" on screen but keeping the full accessible
+ * name, so screen readers and the e2e selectors read it the same.
+ */
+describe('ShareButton, floating (issue #474)', () => {
+  it('shows "Share" and keeps the full label as its accessible name', () => {
+    render(
+      <ShareButton
+        url={URL_TO_SHARE}
+        label="Share this comparison"
+        layout="floating"
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'Share this comparison' })
+    expect(button).toHaveTextContent(/^Share$/)
+    expect(screen.getAllByRole('button')).toHaveLength(1)
+  })
+
+  it('confirms a copy and falls back to a manual-copy field, like the inline button', async () => {
+    const writeText = vi
+      .fn<(text: string) => Promise<void>>()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Clipboard blocked'))
+    stubNavigator('clipboard', { writeText })
+    render(<ShareButton url={URL_TO_SHARE} layout="floating" />)
+
+    clickShare()
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied'),
+    )
+    clickShare()
+    expect(
+      await screen.findByRole('textbox', { name: 'Copy this link' }),
+    ).toHaveValue(URL_TO_SHARE)
+  })
+
+  it('sits in an in-flow slot that reserves its space at the end of the content', () => {
+    const { container } = render(
+      <ShareButton url={URL_TO_SHARE} layout="floating" />,
+    )
+    const slot = container.firstElementChild
+    expect(slot).toHaveAttribute('data-layout', 'floating')
+    expect(slot).toContainElement(
+      screen.getByRole('button', { name: 'Share this verdict' }),
+    )
+  })
+
+  it('reserves room for its overlay as well as the button, measured as it changes', async () => {
+    // jsdom lays nothing out: a ResizeObserver stub reports the stack's height.
+    let report: () => void = () => {}
+    class FakeResizeObserver {
+      constructor(callback: () => void) {
+        report = callback
+      }
+      observe() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver)
+    const height = vi
+      .spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockReturnValue(200)
+    try {
+      const { container } = render(
+        <ShareButton url={URL_TO_SHARE} layout="floating" />,
+      )
+      act(() => report())
+      const slot = container.firstElementChild as HTMLElement
+      // The stack's 200px, plus the gap below it and a little air.
+      expect(slot.style.height).toBe(
+        'calc(200px + var(--fab-gap) + var(--sp-2))',
+      )
+    } finally {
+      height.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('is inline by default, its text the full label', () => {
+    const { container } = render(<ShareButton url={URL_TO_SHARE} />)
+    expect(container.firstElementChild).toHaveAttribute('data-layout', 'inline')
+    expect(
+      screen.getByRole('button', { name: 'Share this verdict' }),
+    ).toHaveTextContent('Share this verdict')
+  })
+})
+
+/**
+ * Issue #474, round 2: on a phone the toast and the manual-copy box float
+ * over the content, so neither may stay there forever.
+ */
+describe.each(['inline', 'floating'] as const)(
+  'ShareButton, transient messages (%s)',
+  (layout) => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('has its status live region in the accessibility tree before any click', () => {
+      render(<ShareButton url={URL_TO_SHARE} layout={layout} />)
+      const status = screen.getByRole('status')
+      expect(status).toBeEmptyDOMElement()
+      expect(status).toBeVisible()
+    })
+
+    it('clears "Link copied" after about four seconds', async () => {
+      vi.useFakeTimers()
+      stubNavigator('clipboard', {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      })
+      render(<ShareButton url={URL_TO_SHARE} layout={layout} />)
+
+      clickShare()
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied')
+
+      act(() => {
+        vi.advanceTimersByTime(3500)
+      })
+      expect(screen.getByRole('status')).toHaveTextContent('Link copied')
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+    })
+
+    it('drops its pending clear on unmount', async () => {
+      vi.useFakeTimers()
+      stubNavigator('clipboard', {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      })
+      const { unmount } = render(
+        <ShareButton url={URL_TO_SHARE} layout={layout} />,
+      )
+      clickShare()
+      await act(async () => {
+        await Promise.resolve()
+      })
+      expect(vi.getTimerCount()).toBe(1)
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+    })
+
+    it('lets the manual-copy box be dismissed, and puts focus back on Share', async () => {
+      stubNavigator('clipboard', {
+        writeText: () => Promise.reject(new Error('Clipboard blocked')),
+      })
+      render(<ShareButton url={URL_TO_SHARE} layout={layout} />)
+      clickShare()
+      const field = await screen.findByRole('textbox', {
+        name: 'Copy this link',
+      })
+      expect(field).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss the link' }))
+
+      expect(
+        screen.queryByRole('textbox', { name: 'Copy this link' }),
+      ).not.toBeInTheDocument()
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      expect(
+        screen.getByRole('button', { name: 'Share this verdict' }),
+      ).toHaveFocus()
+    })
+  },
+)

@@ -7,6 +7,49 @@
   padding: var(--sp-6) var(--sp-4) var(--sp-4);
 }
 
+/* Issue #474: who's compared, above the verdict -- a ticket stub over the
+   tear. The right padding keeps the names clear of the stamp, which sits on
+   the tear and reaches up into this row. */
+.teams {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0 6rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--sp-6);
+  row-gap: var(--sp-2);
+}
+
+.team {
+  display: block;
+}
+
+/* One team (best-team, case-for-a-team): a single line, not a row of items. */
+.oneTeam {
+  display: block;
+}
+
+.teamName {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+
+.teamMeta {
+  font-family: var(--font-label);
+  font-size: 0.95rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+/* The verdict block: stamp, tear, narration, contested tag, engine. */
+.verdict {
+  position: relative;
+}
+
 .stamp {
   position: absolute;
   top: -16px;

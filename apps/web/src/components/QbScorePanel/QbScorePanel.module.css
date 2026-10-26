@@ -33,6 +33,17 @@
   font-weight: 700;
 }
 
+/* Issue #474: the verdict line, under the heading -- said plainly and
+   loud, the way the table's Edge column says it. */
+.winningLine {
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
 .inconclusive {
   max-width: 72ch;
   font-weight: 600;

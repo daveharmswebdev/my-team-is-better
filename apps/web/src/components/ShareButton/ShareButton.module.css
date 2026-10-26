@@ -1,33 +1,114 @@
-/* Issue #184: sits at the foot of the verdict card, under the receipts --
-   a quiet secondary action, never competing with "Get the verdict". */
+/* Issue #474: sharing is promoted. Inline (a desktop), the button opens the
+   panel, above who's compared, styled as the primary action -- the leather
+   fill "Get the verdict" uses. */
 .share {
-  margin-top: var(--sp-6);
-  padding-top: var(--sp-4);
-  border-top: 1px solid var(--rule);
+  margin-bottom: var(--sp-4);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-3);
 }
 
-/* The outlined chip look `VerdictError`'s pills use, in navy. */
-.shareButton {
+.shareButton,
+.fab {
   font-family: var(--font-label);
   font-weight: 700;
-  font-size: 0.9rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  border-radius: var(--radius);
-  padding: 0.55rem 1rem;
   cursor: pointer;
-  background: transparent;
-  border: 1.5px solid var(--navy);
-  color: var(--navy);
+  border: none;
+  background: var(--leather);
+  color: var(--on-leather);
 }
 
-.shareButton:hover {
-  background: var(--navy);
-  color: var(--on-leather);
+.shareButton {
+  font-size: 1rem;
+  border-radius: var(--radius);
+  padding: 0.75rem 1.4rem;
+  min-height: 44px;
+}
+
+.shareButton:hover,
+.fab:hover {
+  background: var(--leather-strong);
+}
+
+.shareButton:focus-visible,
+.fab:focus-visible {
+  outline: 3px solid var(--navy);
+  outline-offset: 2px;
+}
+
+/* Floating (a phone). The slot is the content's bottom padding: the FAB's
+   height, its gap above the screen's edge, and a little air, so at the
+   bottom of the scroll the last line sits clear above the button. */
+.slot {
+  --fab-size: 3.5rem; /* 56px, the floor (#474) */
+  --fab-gap: var(--sp-4);
+
+  height: calc(var(--fab-size) + var(--fab-gap) + var(--sp-2));
+}
+
+/* Fixed to the viewport -- inside the verdict modal too, which is fixed
+   itself and transforms nothing -- bottom-right, above the iOS home
+   indicator (the safe-area insets). Column-reverse keeps the DOM order
+   (button, status, manual field) while the toast and the field stack above
+   the button. Below a rating popover (z-index 20), above the modal's sticky
+   header (10). */
+.floating {
+  position: fixed;
+  right: max(var(--fab-gap), env(safe-area-inset-right));
+  bottom: calc(var(--fab-gap) + env(safe-area-inset-bottom));
+  z-index: 15;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  max-width: calc(100vw - 2 * var(--fab-gap));
+  pointer-events: none;
+}
+
+.floating > * {
+  pointer-events: auto;
+}
+
+.fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-width: var(--fab-size);
+  min-height: var(--fab-size);
+  padding: 0 1.25rem;
+  font-size: 1.05rem;
+  border-radius: calc(var(--fab-size) / 2);
+  box-shadow: var(--shadow);
+}
+
+.icon {
+  flex: none;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+/* The toast: the same status line, on a chip of its own over the content. */
+.floating .status {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow);
+}
+
+.floating .manual {
+  flex-basis: auto;
+  width: min(22rem, calc(100vw - 2 * var(--fab-gap)));
+  padding: var(--sp-3);
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow);
 }
 
 .status {
@@ -39,8 +120,46 @@
   color: var(--hunter);
 }
 
-.status:empty {
-  display: none;
+/* Closes the manual-copy box (#474): a quiet outlined button under the
+   field, at least the 44px touch-target height. */
+.dismiss {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 0 var(--sp-3);
+  font-family: var(--font-label);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--navy);
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  border-color: var(--navy);
+}
+
+.dismiss:focus-visible {
+  outline: 3px solid var(--navy);
+  outline-offset: 2px;
+}
+
+/* Empty, the live region takes no room but stays in the accessibility tree
+   (never display: none), so the first message inserted is announced. */
+.status:empty,
+.floating .status:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* The manual-copy fallback is guidance, not a success -- so not green. */

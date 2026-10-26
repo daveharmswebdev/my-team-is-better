@@ -649,6 +649,76 @@ export const QuarterbacksScored: Story = {
   },
 }
 
+/**
+ * Issue #474 on a phone: who's compared, then the verdict (the winning line
+ * and the take), then the numbers -- and one Share button, floating
+ * bottom-right over the scrolling comparison, never over its last line.
+ */
+export const ShareOnPhone: Story = {
+  globals: { viewport: { value: 'mobile2', isRotated: false } },
+  decorators: QuarterbacksScored.decorators,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const modal = within(dialog)
+    await modal.findByRole('region', { name: 'QB score' })
+    const shares = modal.getAllByRole('button', { name: /^Share/ })
+    await expect(shares).toHaveLength(1)
+    const share = modal.getByRole('button', { name: 'Share this comparison' })
+    await expect(share).toHaveTextContent(/^Share$/)
+
+    const box = share.getBoundingClientRect()
+    await expect(box.width).toBeGreaterThanOrEqual(56)
+    await expect(box.height).toBeGreaterThanOrEqual(56)
+    await expect(box.bottom).toBeLessThanOrEqual(window.innerHeight)
+
+    // Scrolled to the bottom, it is still on screen, below the last line.
+    dialog.scrollTop = dialog.scrollHeight
+    const slot = dialog.querySelector('[data-layout="floating"]')
+    const lastLine = slot?.previousElementSibling
+    await expect(lastLine).toBeTruthy()
+    await waitFor(() =>
+      expect(lastLine?.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        share.getBoundingClientRect().top,
+      ),
+    )
+    await expect(share.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      window.innerHeight,
+    )
+  },
+}
+
+/**
+ * Issue #474 on a desktop: one inline Share button, the primary action,
+ * first in the panel -- before the players and the verdict.
+ */
+export const ShareOnDesktop: Story = {
+  globals: { viewport: { value: 'desktop', isRotated: false } },
+  decorators: QuarterbacksScored.decorators,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: WARNER_AND_MCNAIR,
+    })
+    const modal = within(dialog)
+    const panel = await modal.findByRole('region', { name: 'QB score' })
+    const shares = modal.getAllByRole('button', { name: /^Share/ })
+    await expect(shares).toHaveLength(1)
+    const share = modal.getByRole('button', { name: 'Share this comparison' })
+    await expect(share).toHaveTextContent('Share this comparison')
+    const players = modal.getByRole('list', { name: 'Players compared' })
+    await expect(
+      share.compareDocumentPosition(players) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    await expect(
+      players.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    await expect(dialog.querySelector('[data-layout="floating"]')).toBeNull()
+  },
+}
+
 /** The narration can't be had (#459): the narrator says so, and the score stays. */
 export const QuarterbackNarrationFailed: Story = {
   decorators: [

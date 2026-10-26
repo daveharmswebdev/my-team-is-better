@@ -1,6 +1,13 @@
-import type { Method, VerdictCardState } from '../../lib/api/types'
+import type {
+  ComparisonTeamSummaryOut,
+  Method,
+  VerdictCardState,
+  VerdictEnvelope,
+} from '../../lib/api/types'
 import { isTeamCaseEnvelope } from '../../lib/api/types'
+import { formatRecord } from '../../lib/formatRecord'
 import { METHOD_RADIO_LABEL } from '../../lib/methods'
+import { useIsWideViewport } from '../../lib/useMediaQuery'
 import type { HeadingLevel } from '../Heading/headingLevel'
 import { OtherEngineRanks } from '../OtherEngineRanks/OtherEngineRanks'
 import { ComparisonReceipts } from '../EvidenceReceipts/ComparisonReceipts'
@@ -22,8 +29,9 @@ export interface VerdictCardProps {
   onSelectMethod?: (method: Method) => void
   /**
    * The absolute share link for the verdict on screen (issue #184). When set,
-   * a success card ends with a "Share this verdict" button; loading and error
-   * states never offer one, since there is no verdict to share.
+   * a success card offers one "Share this verdict" button (#474): first in
+   * the card on a desktop, floating bottom-right on a phone. Loading and
+   * error states never offer one, since there is no verdict to share.
    */
   shareUrl?: string
   /**
@@ -41,6 +49,12 @@ export interface VerdictCardProps {
  * A verdict names the engine that answered it (issue #154), read off the
  * response envelope's echoed `method` -- never off the form, whose Engine
  * toggle may already be set for the next question.
+ *
+ * The order (issue #474): Share (desktop) -> who's compared -> the verdict
+ * (stamp, narration, contested, engine) -> the other engines' ranks -> the
+ * receipts -> Share (phone, floating). Exactly one Share button renders,
+ * chosen by the viewport, so neither layout leaves a hidden twin in the
+ * accessibility tree.
  */
 export function VerdictCard({
   state,
@@ -50,6 +64,8 @@ export function VerdictCard({
   shareUrl,
   headingLevel = 2,
 }: VerdictCardProps) {
+  const isWide = useIsWideViewport()
+
   if (state.status === 'loading') {
     return (
       <p role="status" className={styles.loading}>
@@ -71,23 +87,31 @@ export function VerdictCard({
   const { envelope } = state
   return (
     <article className={styles.vcard}>
-      <span aria-hidden="true" className={styles.stamp}>
-        <span>Certified</span>
-        <span>Verdict</span>
-      </span>
-      <div className={styles.tear} />
-      <blockquote className={styles.narration}>
-        {envelope.narration.text}
-      </blockquote>
-      {envelope.narration.contested && (
-        <p className={styles.contested}>
-          <span className={styles.tagContested}>Contested</span>
-          This one's contested -- reasonable people disagree.
-        </p>
+      {shareUrl !== undefined && isWide && (
+        <ShareButton url={shareUrl} layout="inline" />
       )}
-      <p className={styles.engine}>
-        {`Engine: ${METHOD_RADIO_LABEL[envelope.evidence.method]}`}
-      </p>
+      <VerdictTeams envelope={envelope} />
+      {/* The verdict itself, its own positioned block so the stamp sits on
+          the tear between it and the teams. */}
+      <div className={styles.verdict}>
+        <span aria-hidden="true" className={styles.stamp}>
+          <span>Certified</span>
+          <span>Verdict</span>
+        </span>
+        <div className={styles.tear} />
+        <blockquote className={styles.narration}>
+          {envelope.narration.text}
+        </blockquote>
+        {envelope.narration.contested && (
+          <p className={styles.contested}>
+            <span className={styles.tagContested}>Contested</span>
+            This one's contested -- reasonable people disagree.
+          </p>
+        )}
+        <p className={styles.engine}>
+          {`Engine: ${METHOD_RADIO_LABEL[envelope.evidence.method]}`}
+        </p>
+      </div>
       {/* Issue #155: right under the answering engine's name, and so just
           above its rank in the receipts. */}
       <OtherEngineRanks
@@ -118,7 +142,58 @@ export function VerdictCard({
           headingLevel={headingLevel}
         />
       )}
-      {shareUrl !== undefined && <ShareButton url={shareUrl} />}
+      {shareUrl !== undefined && !isWide && (
+        <ShareButton url={shareUrl} layout="floating" />
+      )}
     </article>
+  )
+}
+
+/** The fields a team's header line reads: on both `TeamCaseOut` and a comparison side. */
+type TeamLineFields = Pick<
+  ComparisonTeamSummaryOut,
+  'team_name' | 'rank' | 'wins' | 'losses' | 'ties'
+>
+
+/**
+ * Who the verdict is about (issue #474): each team's name, then its rank
+ * under the answering engine and its record -- both teams of a matchup, the
+ * one team of a best-team or case-for-a-team question.
+ */
+function VerdictTeams({ envelope }: { envelope: VerdictEnvelope }) {
+  if (isTeamCaseEnvelope(envelope)) {
+    return (
+      <p
+        className={`${styles.teams} ${styles.oneTeam}`}
+        data-testid="verdict-teams"
+      >
+        <TeamLine team={envelope.evidence} />
+      </p>
+    )
+  }
+  const { team_a, team_b } = envelope.evidence
+  return (
+    <ul
+      className={styles.teams}
+      aria-label="Teams compared"
+      data-testid="verdict-teams"
+    >
+      {[team_a, team_b].map((team) => (
+        <li key={team.team_id} className={styles.team}>
+          <TeamLine team={team} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function TeamLine({ team }: { team: TeamLineFields }) {
+  return (
+    <>
+      <span className={styles.teamName}>{team.team_name}</span>{' '}
+      <span className={styles.teamMeta}>
+        {`Rank #${team.rank} · ${formatRecord(team.wins, team.losses, team.ties)}`}
+      </span>
+    </>
   )
 }
