@@ -321,7 +321,7 @@ def _page(title: str, description: str, target: str) -> HTMLResponse:
     )
 
 
-@router.get("", response_class=HTMLResponse)
+@router.api_route("", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def share_verdict(
     request: Request, conn: sqlite3.Connection = Depends(get_db_conn)
 ) -> HTMLResponse:
@@ -333,7 +333,7 @@ def share_verdict(
     return _page(title, description, f"{PUBLIC_WEB_URL}/?{question.query()}")
 
 
-@router.get("/nfl/compare", response_class=HTMLResponse)
+@router.api_route("/nfl/compare", methods=["GET", "HEAD"], response_class=HTMLResponse)
 def share_player_compare(
     request: Request, conn: sqlite3.Connection = Depends(get_db_conn)
 ) -> HTMLResponse:
