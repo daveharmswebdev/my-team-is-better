@@ -157,8 +157,10 @@ def test_the_versions_are_bumped_for_the_two_margin_tiers() -> None:
     # #457 (v2): the bands and the matcher fixes accept and reject
     # differently. #463 round B (v3): the two runaway tiers, honoured "not"
     # negations and the comma-clause conditional (#462) do too, and the
-    # prompt's rule 3 and examples changed.
-    assert QB_GROUNDING_VERSION == "qb-claims-v3"
+    # prompt's rule 3 and examples changed. #464 (v4): a margin or a lone
+    # score presented as a player's score, and #462's narrow fixes; the
+    # prompt didn't change.
+    assert QB_GROUNDING_VERSION == "qb-claims-v4"
     assert QB_PROMPT_VERSION == "qb-persona-v3"
 
 

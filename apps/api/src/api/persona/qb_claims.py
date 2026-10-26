@@ -62,16 +62,21 @@ prints no name either, and the player the prose puts ahead by it must be its
 winner: the last player named, unless he trails ("McNair trails by {m}") or
 is the object of a verb ("{wb} beats McNair by {m}"), #457. So "McNair's
 ahead by {m}" and "McNair, by {m}" are rejected. The verdict backstop also
-reads a margin after a win verb as a mention of its measure.
+reads a margin after a win verb as a mention of its measure. A figure can't
+pose as a player's score (#464): a margin right after a player reference
+joined by "at", "with", a bare comma or a space ("{wc} at {mc}" prints
+"Warner at 22.61") is rejected, and so is a lone score after "<player> to"
+("{wc} to {sc}" prints "Warner to McNair 0.60"); "{wc} by {mc}" passes.
 
 **The verdict goes through claims** (D1 on #451). Every narration holds a
 `year` claim; a conclusive one holds one `winner` both claim or a `winner`
 career plus a `winner` peak claim (a measure that is exactly level has none
 to claim). The backstop on a verdict typed in prose: within one sentence, a
 player reference, then a win verb ("takes", "wins", "edges", "beats", "tops",
-"grabs", "owns", "is ahead", "leads", "has the better"), then "career" or
-"peak" a few words on in the same clause, is rejected when that player isn't
-that measure's winner, and always on an inconclusive block. "Warner takes the
+"grabs", "owns", "is ahead", "leads", "has the better", and since #462
+"took" and "won"), then "career" or "peak" a few words on in the same
+clause, never past the sentence break (#462), is rejected when that player
+isn't that measure's winner, and always on an inconclusive block. "Warner takes the
 career" passes for the winner; "Nobody beats Warner on the career" has no
 subject and passes. #457 added the shapes that slipped past it: "McNair is
 the career winner", "The career goes to McNair", "McNair takes it: career
@@ -89,8 +94,9 @@ to spare") fits a clear or a decisive margin, a hard one ("runs away",
 tier doesn't fit, or a photo-finish phrase ("by a nose", "a photo finish")
 on one that isn't close, is rejected, and so is any of them on a dead-level
 measure. A negated phrase is no use of it ("It's not a blowout", "did not
-run away with the peak", #462). A phrase speaks of the measure named
-nearest it in its clause, else in its sentence, else of both.
+run away with the peak", "Neither man runs away with it", #462). A phrase
+speaks of the measure named nearest it in its clause, else in its sentence,
+else of both.
 
 **The voice rules a check can see** (the coordinator's voice call on #451):
 there is always a winner, so a hedge that withholds the verdict ("too close
@@ -102,7 +108,9 @@ rejected, unless a negator heads its clause ("nothing would change that")
 or it is the idiom ("that might change your mind"), and "a different story"
 only as a conditional ("it'd be a different story", "a different story
 if ...", or after an opening conditional clause: "If you count his Houston
-years, it's a different story", #462); z-score jargon is rejected; a
+years, it's a different story", #462, but never one on his best, peak or
+top seasons: "If you look at his best seasons, ..."); z-score jargon is
+rejected; a
 Roman numeral ("Super Bowl XXXIV") is rejected as a number (QB path only,
 D3), as a whole valid numeral word ("LIVID" is not one). On an inconclusive block a
 `winner` or `margin` claim is rejected, and so is a score for the side with
@@ -144,7 +152,10 @@ from api.persona.claims import (
 # reject a QB narration differently.
 # qb-claims-v3: two runaway tiers, honoured "not" negations, a comma-clause
 # conditional before "a different story" (#463 round B, #462).
-QB_GROUNDING_VERSION: Final = "qb-claims-v3"
+# qb-claims-v4: a margin or a lone score presented as a player's score (#464);
+# best/peak/top seasons are no missing seasons, "neither" negates, the
+# backstop stops at the sentence break and reads "took"/"won" (#462).
+QB_GROUNDING_VERSION: Final = "qb-claims-v4"
 
 # The verdict alone takes two or three claims (the winners and the year, D1
 # on #451), so the cap leaves room for a few figures on top.
@@ -266,6 +277,9 @@ _ROMAN_ERROR: Final = (
 # D1's backstop: a win verb after a player, then a measure (`_verdict_backstop`).
 _WIN_VERB_RE: Final = re.compile(
     r"\b(?:takes|wins|edges|beats|tops|grabs|owns|is\s+ahead|leads|has\s+the\s+better)\b"
+    # The past tense (#462 comment from #456): "McNair took the career". Never
+    # "won-loss", which is a record, not a verdict.
+    r"|\btook\b|\bwon\b(?![-‐‑])"
     # "McNair is the career winner", "McNair's the peak king" (#457): the
     # measure sits inside the verb, so the window starts at the verb.
     r"|(?:\bis|['’]s)\s+the\s+(?:(?:career|peak)\s+)?(?:winner|leader|champ|champion|king)\b",
@@ -339,7 +353,10 @@ _APPOSITIVE_RE: Final = re.compile(
 # blowout (#463 round 3).
 _MARGIN_NEGATOR_RE: Final = re.compile(
     r"(?:\b(?:no|not|never|nobody|forget|nothing\s+like)|n['’]t)\s+"
-    r"(?:(?:even|a|an|is|was|be|been|do|does|did|really|ever)\s+){0,2}\Z",
+    r"(?:(?:even|a|an|is|was|be|been|do|does|did|really|ever)\s+){0,2}\Z"
+    # "Neither man runs away with it" (#462): "neither" and up to three words
+    # of its subject ("neither of them") before the phrase.
+    r"|\bneither(?:\s+[\w'’]+){0,3}\s+\Z",
     re.IGNORECASE,
 )
 # A clause that opens on an imperative conditional ("Give him those years and
@@ -355,14 +372,29 @@ _OPENING_CUE_RE: Final = re.compile(
     r"[\s\"'‘’“”(]*(?:if|with|give|count|counting|add)\b", re.IGNORECASE
 )
 # That opening clause governs only when it is about the missing seasons (#463
-# round 3): it names seasons or years ("his Houston years", "his rookie
-# year"), an early or earlier career, a team stint, or the time before the
-# data. "If you look at the peak, it's a different story" and "With that
-# said, McNair's a different story" are true split narrations.
+# round 3): a team stint ("his Houston years", "his stint", "his tenure"),
+# a rookie year, an early or earlier career, his first or missing seasons,
+# or the time before the data. "If you look at the peak, it's a different
+# story" and "With that said, McNair's a different story" are true split
+# narrations, and so is any opener on his best, peak or top seasons (#462:
+# "If you look at his best seasons", "his early peak").
 _MISSING_SEASONS_RE: Final = re.compile(
-    r"\b(?:seasons?|years?|rookie|early|earlier|days|stint|tenure|before|pre)\b",
+    r"\b(?:rookie|stint|tenure|before|pre)\b"
+    r"|\b(?:early|earlier)\b(?!\s+(?:peak|prime|best|top)\b)"
+    r"|\b(?:first|missing|lost|uncounted)\s+(?:(?:few|couple|of)\s+){0,2}"
+    r"(?:seasons?|years?|days)\b"
+    # A team's name before them: "his Houston years", "his Tennessee days".
+    r"|(?-i:\b[A-Z][\w'’]*)\s+(?:seasons?|years?|days)\b",
     re.IGNORECASE,
 )
+# A figure presented as a player's score (#464): a margin right after a
+# player reference, joined by "at", "with", a bare comma or a space ("Warner
+# at 22.61" prints the margin as Warner's score), and a lone score after
+# "<player> to" ("Warner to McNair 0.60" reads as a one-number scoreline).
+# "{wc} by {mc}" and "wins it by {mc}" are the margin's own words and pass.
+_MARGIN_AS_SCORE_GAP_RE: Final = re.compile(r"(?:\s+(?:at|with)\s+|\s*,\s*|\s+)\Z", re.IGNORECASE)
+_SCORELINE_GAP_RE: Final = re.compile(r"\s+to\s+\Z", re.IGNORECASE)
+_GAP_WINDOW: Final = 12
 # The listener shape of "if you had": "If you had McNair, you'd be crying"
 # (#457 round 3) is about the fan, not the missing seasons.
 _IF_YOU_HAD_RE: Final = re.compile(r"if\s+you\s+had", re.IGNORECASE)
@@ -1287,8 +1319,60 @@ def _check_prose(
         history.append((start, claim_side))
 
     errors.extend(_verdict_backstop(masked, walk, modes, claim_measures, breaks, block))
+    errors.extend(
+        _figure_as_score_errors(masked, references, placeholders, modes, claim_measures, block)
+    )
     errors.extend(_margin_word_errors(masked, placeholders, claim_measures, breaks, block))
     return errors, named_at
+
+
+def _figure_as_score_errors(
+    masked: str,
+    references: Sequence[tuple[int, Side]],
+    placeholders: Sequence[re.Match[str]],
+    modes: Mapping[str, tuple[_Mode, Side | None]],
+    claim_measures: Mapping[str, _ClaimMeasure],
+    block: _QbBlock,
+) -> list[str]:
+    """#464: a margin placeholder right after a player reference (a typed
+    name or a winner placeholder) joined by "at", "with", a bare comma or a
+    space, and a score placeholder right after "<player reference> to"."""
+    ends: dict[int, Side] = {}
+    for start, side in references:
+        for form in sorted(block.players[side].forms, key=len, reverse=True):
+            if masked.startswith(form, start):
+                ends[start + len(form)] = side
+                break
+    for match in placeholders:
+        mode, referred = modes.get(match.group(1), ("none", None))
+        if mode == "reference" and referred is not None:
+            ends[match.end()] = referred
+    errors: list[str] = []
+    for match in placeholders:
+        claim_id = match.group(1)
+        claim = claim_measures.get(claim_id)
+        if claim is None or claim.kind not in ("margin", "score"):
+            continue
+        gap_re = _MARGIN_AS_SCORE_GAP_RE if claim.kind == "margin" else _SCORELINE_GAP_RE
+        gap = gap_re.search(masked, max(0, match.start() - _GAP_WINDOW), match.start())
+        if gap is None or gap.start() not in ends:
+            continue
+        name = block.players[ends[gap.start()]].called
+        if claim.kind == "margin":
+            joined = " ".join(gap.group(0).split()) or "a space"
+            errors.append(
+                f"{{{claim_id}}} is a margin, but the prose puts it right after {name} "
+                f"({quote(joined)} between them) as if it were his score; a margin is how far "
+                f'ahead the winner is, so write it with "by" ("{name} takes the '
+                f'{claim.measures[0]} by {{{claim_id}}}")'
+            )
+        else:
+            errors.append(
+                f"{{{claim_id}}} is one player's score, but the prose puts it after "
+                f'"{name} to", which reads as a scoreline with one number; give both scores '
+                f'("{{a}} to {{b}}") or the margin with "by"'
+            )
+    return errors
 
 
 def _margin_holder(
@@ -1453,7 +1537,7 @@ def _verdict_backstop(
     ]
     errors: list[str] = []
     for verb in _WIN_VERB_RE.finditer(masked):
-        left, _ = _sentence_bounds(masked, verb.start(), breaks)
+        left, s_right = _sentence_bounds(masked, verb.start(), breaks)
         before = [
             side for start, side in references if left <= start < verb.start() and side is not None
         ]
@@ -1470,8 +1554,10 @@ def _verdict_backstop(
         colon = _OBJECT_COLON_RE.match(masked, verb.end())
         if colon:
             resume = colon.end()
-        stop = _CLAUSE_END_RE.search(masked, resume)
-        end = stop.start() if stop else len(masked)
+        # Never past the sentence break (#462): "Warner takes the career. On
+        # the peak, ..." says nothing of Warner's peak.
+        stop = _CLAUSE_END_RE.search(masked, resume, s_right)
+        end = stop.start() if stop else s_right
         # "McNair takes the career and Warner the peak": a reference after
         # "and" starts its own (gapped) clause, so the peak isn't McNair's.
         for start, _ in references:
