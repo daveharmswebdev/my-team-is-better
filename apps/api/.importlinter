@@ -131,10 +131,11 @@ allow_indirect_imports = true
 ; because it has to be written that way. The other is an `ignore_imports`
 ; entry on this contract, equally visible. Neither is wanted.
 [importlinter:contract:api-internal-layers]
-name = api's internal layers: main > routes (verdict | catalog | players) > deps > persona > repositories
+name = api's internal layers: main > share > routes (verdict | catalog | players) > deps > persona > repositories
 type = layers
 layers =
     api.main
+    api.share
     api.verdict | api.catalog | api.players
     api.deps
     api.persona
