@@ -151,19 +151,24 @@ def test_build_comparison_team_summaries_and_common_opponents_are_typed(
     `dict[str, object]`, forcing `apps/web` to render a raw generic dump
     instead of a curated summary. This locks in that they are now real
     dataclasses with attribute access, not dicts."""
-    comparison = build_comparison(rated_conn, 2005, "Texas", "USC", method="keener")
+    comparison = build_comparison(rated_conn, 2005, "Texas", "Colorado", method="keener")
 
     assert isinstance(comparison.team_a, ComparisonTeamSummary)
     assert isinstance(comparison.team_b, ComparisonTeamSummary)
     assert comparison.team_a.team_name == "Texas"
+    assert comparison.team_b.team_name == "Colorado"
     assert comparison.team_a.rank >= 1
     assert isinstance(comparison.team_a.rating, float)
     assert comparison.team_a.wins >= 0
-
-    # Texas and USC both played common opponents in the 2005 season
-    # (e.g. conference/OOC overlap) -- assert the shape, not specific teams.
     assert comparison.team_a.ties >= 0
     assert comparison.team_b.ties >= 0
+
+    # Issue #266: Texas and USC share no 2005 opponents in the fixture, so
+    # this pair used to leave the loop below empty and its assertions vacuous.
+    # Texas and Colorado (both Big 12) share Missouri, Oklahoma State, Kansas
+    # and Texas A&M. Assert non-empty first so a fixture change can't silently
+    # empty the loop again; past that, check the shape, not specific teams.
+    assert comparison.common_opponents
     for opponent in comparison.common_opponents:
         assert isinstance(opponent, CommonOpponent)
         assert isinstance(opponent.opponent_name, str)
