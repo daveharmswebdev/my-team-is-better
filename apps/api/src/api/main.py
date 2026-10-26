@@ -32,6 +32,7 @@ from api.config import CORS_ALLOWED_ORIGINS, DATABASE_URL
 from api.errors import register_exception_handlers
 from api.persona.cache import CONNECT_TIMEOUT_SECONDS, ensure_schema
 from api.players import router as players_router
+from api.share import router as share_router
 from api.verdict import router as verdict_router
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,9 @@ app.include_router(catalog_router)
 # Issue #296: the NFL player read layer (`cfb_strength.players`), backing
 # apps/web's leaders and career pages.
 app.include_router(players_router)
+# Issue #185: link-preview pages for share links (HTML, outside the OpenAPI
+# document); the web domain proxies /s and /s/nfl/compare to them.
+app.include_router(share_router)
 register_exception_handlers(app)
 
 
