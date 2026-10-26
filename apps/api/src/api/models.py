@@ -777,8 +777,9 @@ class PlayerStatsOut(BaseModel):
     rushing_first_downs: int | None
     rushing_fumbles_lost: int | None
     # Receiving (#314). `targets` qualifies a player for the receiving board
-    # but is not one of its sorts; nflverse publishes it as 0 for 2003-2008
-    # (#345), which is why the engine qualifies on a target *or* a reception.
+    # but is not one of its sorts; nflverse did not track it for 2003-2008,
+    # which the db stores as NULL (#345), so the engine qualifies on a target
+    # *or* a reception.
     receptions: int | None
     targets: int | None
     receiving_yards: int | None

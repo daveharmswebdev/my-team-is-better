@@ -271,8 +271,8 @@ export const CATEGORY_LABEL: Record<PlayerLeaderCategory, string> = {
 /**
  * The receiving board's columns (issue #314), the rushing board's shape, and
  * the receiving group of the career and compare tables (#352). `targets` is
- * left out everywhere: the source publishes it as 0 for 2003-2008 (#345), so
- * a career total spanning those years undercounts. Receiving first downs and
+ * left out everywhere: the source did not track it for 2003-2008, stored as
+ * null (#345), so a career total spanning those years is null. Receiving first downs and
  * fumbles lost are mirrored in the type but not shown in v1.
  */
 const RECEIVING_COLUMNS: readonly StatColumn[] = [

@@ -277,6 +277,8 @@ def format_season_report(report: PlayerSeasonReport) -> str:
         f"without_players_csv={len(report.players_without_roster_entry)} "
         f"starters: {starters}"
     ]
+    if report.untracked_stats:
+        lines.append(f"  untracked by the source, stored NULL: {', '.join(report.untracked_stats)}")
     if report.players_without_roster_entry:
         lines.append(f"  not in players.csv: {', '.join(report.players_without_roster_entry)}")
     for s in report.skipped:
