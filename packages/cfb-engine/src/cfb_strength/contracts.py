@@ -550,8 +550,15 @@ yards, regular season and playoffs together, including Shaun McDonald (225
 for 2,558 combined; his regular-season board line is 220 for 2,490).
 Outside 2003-2008 every player with a reception also has a target, so the
 `or` changes nothing there: it is the same rule, written so an upstream gap cannot erase real
-careers (founder call, 2026-09-17). The gap itself is tracked as #345;
-we disclose or work around it, and never correct nflverse's numbers."""
+careers (founder call, 2026-09-17). We disclose or work around the gap,
+and never correct nflverse's numbers.
+
+Since #345 the ingest stores `targets` as NULL in a season the source did
+not track (measured per season from the file itself, not a year list: see
+`ingest.nflverse.player_normalize.untracked_stat_columns`), so 2003-2008
+hold NULL rather than a false 0. The `or` still matters: `targets > 0` is
+NULL on those rows, and the reception is what qualifies them. A career
+touching those seasons has a NULL career `targets`, by the null-aware sum."""
 
 PlayerLeaderSort = Literal[
     "passing_yards",
