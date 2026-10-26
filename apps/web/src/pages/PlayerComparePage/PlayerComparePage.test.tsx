@@ -821,7 +821,7 @@ describe('PlayerComparePage: the comparison modal (issue #310)', () => {
       ).toBe(true)
     })
     expect(await navigator.clipboard.readText()).toBe(
-      `${window.location.origin}/nfl/compare?a=${WARNER}&b=${MCNAIR}`,
+      `${window.location.origin}/s/nfl/compare?a=${WARNER}&b=${MCNAIR}`,
     )
   })
 
