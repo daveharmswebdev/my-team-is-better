@@ -31,7 +31,7 @@ export interface PlayerLeadersTableProps {
   onSort: (sort: PlayerLeaderSort) => void
   /** A new page is on its way; the table stays up, so a header keeps focus. */
   busy?: boolean
-  /** The id of the note that explains this board: the pulled-early starter note, or the FG% minimum. */
+  /** The ids of the notes that explain this board: the pulled-early starter note, and a rate sort's minimum (FG%, EPA). */
   describedBy?: string
   /**
    * The prefix the page built its column-note ids from (issue #317). A

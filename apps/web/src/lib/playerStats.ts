@@ -1,15 +1,22 @@
 /**
  * Display rules and copy for the NFL player pages (issue #296). Everything
  * here formats what the API sent; nothing sorts, ranks, totals or derives a
- * rate from it -- with one deliberate, narrow exception (issue #315).
+ * rate from it -- with two deliberate, narrow exceptions (issues #315, #347).
  *
- * The exception: the kicking board's FG% and 50+ columns. The engine ranks
+ * The first: the kicking board's FG% and 50+ columns. The engine ranks
  * by both but sends neither (they are computed sorts, not stats), so the
  * board derives each row's value from the counts it was sent:
  * `fg_made / fg_att` and `fg_made_50_59 + fg_made_60_`. Both live in
- * `deriveKickingStats` and nowhere else. Nothing here re-ranks or re-sorts
- * by them -- the order and the ranks stay the API's -- and no other rate
- * (PAT%, yards per punt) is derived.
+ * `deriveKickingStats` and nowhere else.
+ *
+ * The second (#347): EPA per dropback (`passing_epa / (attempts +
+ * sacks_suffered)`) and EPA per carry (`rushing_epa / carries`), the
+ * passing and rushing boards' rate sorts and the career page's EPA columns.
+ * Both live in `deriveEpaStats` and nowhere else.
+ *
+ * Nothing here re-ranks or re-sorts by any of them -- the order and the
+ * ranks stay the API's -- they are rounded only for display, and no other
+ * rate (PAT%, yards per punt, receiving EPA) is derived.
  */
 import type {
   PlayerLeaderCategory,
@@ -19,9 +26,12 @@ import type {
   StarterRecordOut,
 } from './api/types'
 import {
+  PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES,
+  PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS,
   PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
   PLAYER_LEADER_SORTS_BY_CATEGORY,
 } from './api/types'
+import { formatQbEpa } from './qbScore'
 
 /** What a stat the source didn't track reads as: never 0, never blank. */
 export const NOT_RECORDED = 'not recorded'
@@ -56,14 +66,34 @@ export type DerivedKickingStat = Extract<
   'fg_pct' | 'fg_made_50_plus'
 >
 
-/** A leaderboard column whose value `deriveKickingStats` computes. */
+/**
+ * The two EPA rates the engine ranks by and does not send (issue #347).
+ * Each names a sort, a leaderboard column and a career column.
+ */
+export type DerivedEpaStat = Extract<
+  PlayerLeaderSort,
+  'epa_per_dropback' | 'epa_per_carry'
+>
+
+/** Every stat a column derives rather than shows as sent. */
+export type DerivedStat = DerivedKickingStat | DerivedEpaStat
+
+/** A column whose value `deriveKickingStats` or `deriveEpaStats` computes. */
 export interface DerivedStatColumn {
-  key: DerivedKickingStat
+  key: DerivedStat
   label: string
 }
 
-/** What a leaderboard column shows: a stat as sent, or one of the two derived ones. */
-export type LeaderStatKey = keyof PlayerStatsOut | DerivedKickingStat
+/** What a leaderboard column shows: a stat as sent, or one of the derived ones. */
+export type LeaderStatKey = keyof PlayerStatsOut | DerivedStat
+
+/** Every derived key, so a table that shows only what was sent can leave them out. */
+const DERIVED_STATS: ReadonlySet<LeaderStatKey> = new Set<DerivedStat>([
+  'fg_pct',
+  'fg_made_50_plus',
+  'epa_per_dropback',
+  'epa_per_carry',
+])
 
 /**
  * A founder-required note (#316) that covers some leaderboard columns
@@ -112,6 +142,55 @@ export function deriveKickingStats(
     fg_made_50_plus:
       fifties === null || sixties === null ? null : fifties + sixties,
   }
+}
+
+export interface DerivedEpaStats {
+  /** `passing_epa / (attempts + sacks_suffered)`, unrounded; `null` with no dropback or a null input. */
+  epa_per_dropback: number | null
+  /** `rushing_epa / carries`, unrounded; `null` with no carry or a null input. */
+  epa_per_carry: number | null
+}
+
+/** `numerator / denominator`, or `null` when either is null or the denominator is 0. */
+function rate(
+  numerator: number | null,
+  denominator: number | null,
+): number | null {
+  return numerator === null || denominator === null || denominator === 0
+    ? null
+    : numerator / denominator
+}
+
+/** Dropbacks: pass attempts plus sacks, or `null` when either count is. */
+function dropbacks(stats: PlayerStatsOut): number | null {
+  const attempts = statValue(stats, 'attempts')
+  const sacks = statValue(stats, 'sacks_suffered')
+  return attempts === null || sacks === null ? null : attempts + sacks
+}
+
+/**
+ * The EPA derivation (issue #347; see this file's header): the same
+ * per-dropback and per-carry definitions the engine ranks by. A key an
+ * older API omits reads as `null` (`statValue`), so the rate is too.
+ */
+export function deriveEpaStats(stats: PlayerStatsOut): DerivedEpaStats {
+  return {
+    epa_per_dropback: rate(statValue(stats, 'passing_epa'), dropbacks(stats)),
+    epa_per_carry: rate(
+      statValue(stats, 'rushing_epa'),
+      statValue(stats, 'carries'),
+    ),
+  }
+}
+
+/** The denominator of an EPA rate: dropbacks or carries. */
+function epaDenominator(
+  stats: PlayerStatsOut,
+  key: DerivedEpaStat,
+): number | null {
+  return key === 'epa_per_dropback'
+    ? dropbacks(stats)
+    : statValue(stats, 'carries')
 }
 
 /**
@@ -185,6 +264,17 @@ export function leaderStatCell(
   if (key === 'fg_made_50_plus') {
     return valueCell(deriveKickingStats(stats).fg_made_50_plus)
   }
+  if (key === 'epa_per_dropback' || key === 'epa_per_carry') {
+    // No dropback or no carry: there is no rate of nothing, so a dash. A
+    // count or an EPA sum the source didn't send is "not recorded".
+    if (epaDenominator(stats, key) === 0) {
+      return { kind: 'none' }
+    }
+    const value = deriveEpaStats(stats)[key]
+    return value === null
+      ? { kind: 'not-recorded' }
+      : { kind: 'value', text: formatQbEpa(value) }
+  }
   const value = statValue(stats, key)
   if (value === null && MAX_STATS.has(key)) {
     return { kind: 'none' }
@@ -216,12 +306,26 @@ const RUSHING_BOARD_COLUMNS: readonly StatColumn[] = [
   { key: 'rushing_tds', label: 'Rushing TDs' },
 ]
 
+/** The passing board's and the career passing group's EPA rate (#347), derived. */
+const EPA_PER_DROPBACK_COLUMN: DerivedStatColumn = {
+  key: 'epa_per_dropback',
+  label: 'EPA per dropback',
+}
+
+/** The rushing board's and the career rushing group's EPA rate (#347), derived. */
+const EPA_PER_CARRY_COLUMN: DerivedStatColumn = {
+  key: 'epa_per_carry',
+  label: 'EPA per carry',
+}
+
 /**
- * The passing board's columns: passing, then the board-sized rushing three.
- * Without `sacks_suffered` and `sack_yards_lost`, by choice (#298).
+ * The passing board's columns: passing and its EPA rate (#347), then the
+ * board-sized rushing three. Without `sacks_suffered` and `sack_yards_lost`,
+ * by choice (#298), though the EPA rate counts sacks as dropbacks.
  */
-export const STAT_COLUMNS: readonly StatColumn[] = [
+export const STAT_COLUMNS: readonly LeaderStatColumn[] = [
   ...PASSING_COLUMNS,
+  EPA_PER_DROPBACK_COLUMN,
   ...RUSHING_BOARD_COLUMNS,
 ]
 
@@ -256,6 +360,8 @@ export const SORT_LABEL: Record<PlayerLeaderSort, string> = {
   def_tackles_solo: 'solo tackles',
   def_fumbles_forced: 'forced fumbles',
   def_pass_defended: 'passes defended',
+  epa_per_dropback: 'EPA per dropback',
+  epa_per_carry: 'EPA per carry',
 }
 
 /** How the category dropdown names each board (issues #312, #314, #315, #317). */
@@ -372,7 +478,10 @@ export interface LeaderBoardColumns {
  */
 export const LEADER_BOARD_COLUMNS = {
   passing: { showsRecord: true, stats: STAT_COLUMNS },
-  rushing: { showsRecord: false, stats: RUSHING_BOARD_COLUMNS },
+  rushing: {
+    showsRecord: false,
+    stats: [...RUSHING_BOARD_COLUMNS, EPA_PER_CARRY_COLUMN],
+  },
   receiving: { showsRecord: false, stats: RECEIVING_COLUMNS },
   kicking: { showsRecord: false, stats: KICKING_COLUMNS },
   punting: { showsRecord: false, stats: PUNTING_COLUMNS },
@@ -471,7 +580,43 @@ function relabel(
 
 /** Whether a board column shows a stat the API sends, not one the board derives. */
 function isSentStatColumn(column: LeaderStatColumn): column is TableStatColumn {
-  return column.key !== 'fg_pct' && column.key !== 'fg_made_50_plus'
+  return !DERIVED_STATS.has(column.key)
+}
+
+/**
+ * A career-table column (issue #347): a group column as sent, or one of the
+ * two EPA rates, derived from the line it sits on.
+ */
+export type CareerStatColumn = LeaderStatColumn
+
+/** The EPA rate that closes a career group, if that group has one. */
+const CAREER_GROUP_RATE: Partial<Record<StatGroup, DerivedStatColumn>> = {
+  passing: EPA_PER_DROPBACK_COLUMN,
+  rushing: EPA_PER_CARRY_COLUMN,
+}
+
+/**
+ * The career page's columns (issue #347): `statColumnsFor`'s groups, with
+ * EPA per dropback closing the passing group and EPA per carry closing the
+ * rushing group. Only the career page shows them; the compare table keeps
+ * `statColumnsForPlayers`, which shows only what the API sent.
+ */
+export function careerStatColumnsFor(
+  stats: readonly PlayerStatsOut[],
+): CareerStatColumn[] {
+  return recordedStatGroups(stats).flatMap((group) => {
+    const extra = CAREER_GROUP_RATE[group]
+    const columns: CareerStatColumn[] = [...STAT_GROUP_COLUMNS[group]]
+    return extra === undefined ? columns : [...columns, extra]
+  })
+}
+
+/** Whether any column shows an EPA rate, so the page explains and credits EPA (#347). */
+export function showsEpa(columns: readonly { key: LeaderStatKey }[]): boolean {
+  return columns.some(
+    (column) =>
+      column.key === 'epa_per_dropback' || column.key === 'epa_per_carry',
+  )
 }
 
 /**
@@ -657,6 +802,80 @@ export function fgPctEmptyCopy(seasonType: PlayerSeasonType): string {
   const span = SEASON_TYPE_LABEL[seasonType].toLowerCase()
   return `No kicker has reached ${minimum} career field-goal attempts in the ${span}, so nobody qualifies for the field-goal percentage board.`
 }
+
+/** A minimum as a reader reads it: "1,500", "225". */
+function formatMinimum(minimum: number): string {
+  return minimum.toLocaleString('en-US')
+}
+
+function spanOf(seasonType: PlayerSeasonType): string {
+  return SEASON_TYPE_LABEL[seasonType].toLowerCase()
+}
+
+/** The note on the EPA per dropback board (#347), naming the mirrored minimum. */
+function epaPerDropbackNote(seasonType: PlayerSeasonType): string {
+  const minimum = formatMinimum(
+    PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS[seasonType],
+  )
+  return `EPA per dropback ranks only players with at least ${minimum} career dropbacks (pass attempts plus sacks) in the ${spanOf(seasonType)}. Stats begin in 1999, so earlier dropbacks don't count.`
+}
+
+/** The note on the EPA per carry board (#347). */
+function epaPerCarryNote(seasonType: PlayerSeasonType): string {
+  const minimum = formatMinimum(
+    PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES[seasonType],
+  )
+  return `EPA per carry ranks only players with at least ${minimum} career carries in the ${spanOf(seasonType)}. Stats begin in 1999, so earlier carries don't count.`
+}
+
+/**
+ * The note on a board whose sort has a minimum (FG% #315, the EPA rates
+ * #347): why it can be short, or empty. `null` for a sort with no minimum,
+ * which ranks everyone the category qualifies.
+ */
+export function rateMinimumNote(
+  sort: PlayerLeaderSort,
+  seasonType: PlayerSeasonType,
+): string | null {
+  switch (sort) {
+    case 'fg_pct':
+      return fgPctNote(seasonType)
+    case 'epa_per_dropback':
+      return epaPerDropbackNote(seasonType)
+    case 'epa_per_carry':
+      return epaPerCarryNote(seasonType)
+    default:
+      return null
+  }
+}
+
+/**
+ * What an empty board with a minimum says: nobody reached it, not that no
+ * stats are loaded. `null` for a sort with no minimum.
+ */
+export function rateMinimumEmptyCopy(
+  sort: PlayerLeaderSort,
+  seasonType: PlayerSeasonType,
+): string | null {
+  const span = spanOf(seasonType)
+  switch (sort) {
+    case 'fg_pct':
+      return fgPctEmptyCopy(seasonType)
+    case 'epa_per_dropback':
+      return `No player has reached ${formatMinimum(PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS[seasonType])} career dropbacks in the ${span}, so nobody qualifies for the EPA per dropback board.`
+    case 'epa_per_carry':
+      return `No player has reached ${formatMinimum(PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES[seasonType])} career carries in the ${span}, so nobody qualifies for the EPA per carry board.`
+    default:
+      return null
+  }
+}
+
+/**
+ * What EPA is and how each rate on the page was computed (#347, under
+ * #183's bar: show the math). Shown wherever an EPA column is.
+ */
+export const EPA_EXPLANATION =
+  "Expected points added (EPA) measures how much a play changed the offense's expected points, given the down, distance and field position, so a 5-yard gain on 3rd-and-4 counts for more than one on 3rd-and-10. EPA per dropback is passing EPA divided by dropbacks (pass attempts plus sacks). EPA per carry is rushing EPA divided by carries. Rushing EPA per carry is usually negative: the average run loses expected points."
 
 /** The leaders page's note on games the source has no stat lines for (#288/#289). */
 export const UNDERCOUNT_DISCLOSURE =

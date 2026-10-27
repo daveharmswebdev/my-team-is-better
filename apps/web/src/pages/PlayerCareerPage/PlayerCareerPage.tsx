@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { EpaExplanation } from '../../components/EpaExplanation/EpaExplanation'
 import { PlayerCareerTable } from '../../components/PlayerCareerTable/PlayerCareerTable'
 import { PlayerStatsCredit } from '../../components/PlayerStatsCredit/PlayerStatsCredit'
 import {
@@ -24,6 +25,8 @@ import {
   PLAYER_NOT_FOUND_COPY,
   SEASON_TYPE_LABEL,
   STARTER_RECORD_NOTE,
+  careerStatColumnsFor,
+  showsEpa,
   showsStarterRecord,
 } from '../../lib/playerStats'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
@@ -103,6 +106,8 @@ export function PlayerCareerPage() {
 
   const current = id !== null && answer?.id === id ? answer : null
   const notFound = id === null || current?.status === 'not_found'
+  // A career with an EPA column (#347) credits the EP model it comes from.
+  const epa = current?.status === 'success' && careerShowsEpa(current.career)
 
   return (
     <main className={styles.wrap}>
@@ -136,9 +141,33 @@ export function PlayerCareerPage() {
         </>
       )}
 
-      <PlayerStatsCredit credit={credit} />
+      <PlayerStatsCredit credit={credit} epModel={epa} />
     </main>
   )
+}
+
+/**
+ * Whether either of a career's tables shows an EPA column (#347): each
+ * table's columns follow its own lines and totals, as `PlayerCareerTable`
+ * decides them.
+ */
+function careerShowsEpa(career: PlayerCareerOut): boolean {
+  const sections: [PlayerSeasonType, PlayerCareerTotalsOut | null][] = [
+    ['regular', career.regular_season],
+    ['postseason', career.postseason],
+  ]
+  return sections.some(([seasonType, totals]) => {
+    const lines = career.seasons.filter(
+      (line) => line.season_type === seasonType,
+    )
+    if (lines.length === 0) {
+      return false
+    }
+    const stats = [...lines, ...(totals === null ? [] : [totals])].map(
+      (line) => line.stats,
+    )
+    return showsEpa(careerStatColumnsFor(stats))
+  })
 }
 
 function Career({
@@ -202,6 +231,9 @@ function Career({
           {STARTER_RECORD_NOTE}
         </p>
       )}
+
+      {/* Once, above both tables, when either shows an EPA column (#347). */}
+      {careerShowsEpa(career) && <EpaExplanation />}
 
       {sections.map(([seasonType, totals]) => {
         // Kept in the API's order: filtering by season type, not sorting.

@@ -12,13 +12,21 @@ import {
 import {
   DEFENSE_EARLY_ERA_NOTE,
   DEFENSE_UNOFFICIAL_NOTE,
+  EPA_EXPLANATION,
+  STARTER_RECORD_NOTE,
   fgPctEmptyCopy,
   fgPctNote,
+  rateMinimumEmptyCopy,
+  rateMinimumNote,
 } from '../../lib/playerStats'
 import {
   DATA_SOURCES,
   DEFENSE_WITH_NULL_STATS,
   LEADERS_BY_DEF_SACKS,
+  LEADERS_BY_EPA_PER_CARRY,
+  LEADERS_BY_EPA_PER_CARRY_EMPTY,
+  LEADERS_BY_EPA_PER_DROPBACK,
+  LEADERS_BY_EPA_PER_DROPBACK_EMPTY,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_PCT,
   LEADERS_BY_FG_PCT_EMPTY,
@@ -399,5 +407,98 @@ export const PastTheEnd: Story = {
     await within(canvasElement).findByRole('button', {
       name: 'Back to the top',
     })
+  },
+}
+
+/** Any board with an EPA rate on it: the passing board by default, or the rushing one (#347). */
+function answeringEpa(query: PlayerLeadersQuery) {
+  if (query.sort === 'epa_per_dropback') {
+    return answering(LEADERS_BY_EPA_PER_DROPBACK)(query)
+  }
+  if (query.sort === 'epa_per_carry') {
+    return answering(LEADERS_BY_EPA_PER_CARRY)(query)
+  }
+  return answeringByCategory(query)
+}
+
+/**
+ * Sorting Passing by EPA per dropback (#347), invented rows at the full
+ * build's rates: the minimum is stated and describes the table, beside the
+ * starter-record note, and the EP model is credited.
+ */
+export const PassingByEpaPerDropback: Story = {
+  decorators: [atRoute()],
+  parameters: leaders(answeringEpa),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'EPA per dropback' }),
+    )
+    const table = await canvas.findByRole('table', {
+      name: 'NFL career leaders: regular season, by EPA per dropback',
+    })
+    await canvas.findByRole('link', { name: 'Peyton Manning' })
+    await expect(table).toHaveAccessibleDescription(
+      `${STARTER_RECORD_NOTE} ${rateMinimumNote('epa_per_dropback', 'regular') ?? ''}`,
+    )
+    await expect(canvas.getByText(/nflfastR's EP model/)).toBeInTheDocument()
+  },
+}
+
+/** The rushing board by EPA per carry (#347), with the explanation opened. */
+export const RushingByEpaPerCarryExplained: Story = {
+  decorators: [
+    atRoute('?category=rushing&season_type=regular&sort=epa_per_carry'),
+  ],
+  parameters: leaders(answeringEpa),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('link', { name: 'Josh Allen' })
+    await expect(
+      canvas.getByText(rateMinimumNote('epa_per_carry', 'regular') ?? ''),
+    ).toBeInTheDocument()
+    await userEvent.click(canvas.getByRole('button', { name: 'What is EPA?' }))
+    await expect(
+      canvas.getByRole('region', { name: 'What is EPA?' }),
+    ).toHaveTextContent(EPA_EXPLANATION)
+  },
+}
+
+/**
+ * The EPA per dropback board when nobody has reached the minimum, as on
+ * the committed two-season fixture (#347): it says so, and offers the
+ * default sort.
+ */
+export const PassingEpaPerDropbackEmpty: Story = {
+  decorators: [
+    atRoute('?category=passing&season_type=regular&sort=epa_per_dropback'),
+  ],
+  parameters: leaders(answering(LEADERS_BY_EPA_PER_DROPBACK_EMPTY)),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByText(
+      rateMinimumEmptyCopy('epa_per_dropback', 'regular') ?? '',
+    )
+    await expect(
+      canvas.getByRole('button', { name: 'Rank by passing yards' }),
+    ).toBeInTheDocument()
+  },
+}
+
+/** The playoff EPA per carry board, empty: nobody has 110 playoff carries here (#347). */
+export const RushingEpaPerCarryEmpty: Story = {
+  decorators: [
+    atRoute('?category=rushing&season_type=postseason&sort=epa_per_carry'),
+  ],
+  parameters: leaders(answering(LEADERS_BY_EPA_PER_CARRY_EMPTY)),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByText(
+      rateMinimumEmptyCopy('epa_per_carry', 'postseason') ?? '',
+    )
+    await expect(
+      canvas.getByText(rateMinimumNote('epa_per_carry', 'postseason') ?? ''),
+    ).toBeInTheDocument()
   },
 }

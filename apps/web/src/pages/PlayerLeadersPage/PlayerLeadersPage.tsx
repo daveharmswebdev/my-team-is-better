@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { EpaExplanation } from '../../components/EpaExplanation/EpaExplanation'
 import { LeaderCategorySelect } from '../../components/LeaderCategorySelect/LeaderCategorySelect'
 import { LeaderColumnNotes } from '../../components/LeaderColumnNotes/LeaderColumnNotes'
 import { Pager } from '../../components/Pager/Pager'
@@ -26,8 +27,9 @@ import {
   SORT_LABEL,
   STARTER_RECORD_NOTE,
   UNDERCOUNT_DISCLOSURE,
-  fgPctEmptyCopy,
-  fgPctNote,
+  rateMinimumEmptyCopy,
+  rateMinimumNote,
+  showsEpa,
 } from '../../lib/playerStats'
 import { usePlayerStatsCredit } from '../usePlayerStatsCredit'
 import type { LeadersView } from './leadersSearch'
@@ -153,12 +155,19 @@ export function PlayerLeadersPage() {
   // it follows the board rather than the requested category.
   const showsRecord =
     LEADER_BOARD_COLUMNS[leaders?.category ?? category].showsRecord
-  // The FG% minimum (#315) follows the board on screen the same way, and
-  // names the minimum of that board's season type.
-  const fgPctSeasonType =
-    (leaders?.sort ?? sort) === 'fg_pct'
-      ? (leaders?.season_type ?? seasonType)
-      : null
+  // A rate sort's minimum -- FG% (#315), EPA per dropback or per carry
+  // (#347) -- follows the board on screen the same way, and names the
+  // minimum of that board's season type.
+  const minimumNote = rateMinimumNote(
+    leaders?.sort ?? sort,
+    leaders?.season_type ?? seasonType,
+  )
+  const minimumNoteId = `${noteId}-minimum`
+  // The passing and rushing boards show an EPA rate (#347): explain it, and
+  // credit the EP model it comes from.
+  const epa = showsEpa(
+    LEADER_BOARD_COLUMNS[leaders?.category ?? category].stats,
+  )
   // The defense board's column notes (#317) follow the board on screen too,
   // and live in the box above the table; the table's covered headers point
   // at them by ids built from this prefix.
@@ -171,14 +180,19 @@ export function PlayerLeadersPage() {
     leaders === null
       ? null
       : cutOffLegend(leaders.rows.map((row) => row.coverage))
+  // The table is described by the record note on the boards that show
+  // records, then by its sort's minimum when it has one.
   const describedBy =
     leaders === null
       ? undefined
-      : LEADER_BOARD_COLUMNS[leaders.category].showsRecord
-        ? noteId
-        : leaders.sort === 'fg_pct'
-          ? `${noteId}-fg-pct`
-          : undefined
+      : [
+          LEADER_BOARD_COLUMNS[leaders.category].showsRecord ? noteId : null,
+          rateMinimumNote(leaders.sort, leaders.season_type) === null
+            ? null
+            : minimumNoteId,
+        ]
+          .filter((id) => id !== null)
+          .join(' ') || undefined
 
   return (
     <main className={styles.wrap}>
@@ -199,9 +213,8 @@ export function PlayerLeadersPage() {
           About these numbers
         </h2>
         {showsRecord && <p id={noteId}>{STARTER_RECORD_NOTE}</p>}
-        {fgPctSeasonType !== null && (
-          <p id={`${noteId}-fg-pct`}>{fgPctNote(fgPctSeasonType)}</p>
-        )}
+        {minimumNote !== null && <p id={minimumNoteId}>{minimumNote}</p>}
+        {epa && <EpaExplanation />}
         <LeaderColumnNotes
           category={leaders?.category ?? category}
           idPrefix={columnNoteIdPrefix}
@@ -234,7 +247,7 @@ export function PlayerLeadersPage() {
         )
       )}
 
-      <PlayerStatsCredit credit={credit} />
+      <PlayerStatsCredit credit={credit} epModel={epa} />
     </main>
   )
 }
@@ -249,21 +262,23 @@ function LeadersBoard({
 }: {
   leaders: PlayerLeadersOut
   busy: boolean
-  /** The starter-record note on the boards that show records, or the FG% minimum on the FG% board. */
+  /** The starter-record note on the boards that show records, then the minimum of a sort that has one (FG%, EPA). */
   describedBy: string | undefined
   /** The prefix of the column-note ids the page renders above the table (#317). */
   columnNoteIdPrefix: string
   onSort: (sort: PlayerLeaderSort) => void
   onPage: (offset: number) => void
 }) {
+  const emptyCopy = rateMinimumEmptyCopy(leaders.sort, leaders.season_type)
   if (leaders.rows.length === 0) {
-    if (leaders.total === 0 && leaders.sort === 'fg_pct') {
-      // Nobody reached the FG% attempts minimum (#315): the stats are
-      // loaded, so say why the board is empty and offer the default sort.
+    if (leaders.total === 0 && emptyCopy !== null) {
+      // Nobody reached the sort's minimum (FG% #315, the EPA rates #347):
+      // the stats are loaded, so say why the board is empty and offer the
+      // default sort.
       const fallback = defaultSortFor(leaders.category)
       return (
         <div className={styles.empty}>
-          <p>{fgPctEmptyCopy(leaders.season_type)}</p>
+          <p>{emptyCopy}</p>
           <button
             type="button"
             className={styles.topButton}

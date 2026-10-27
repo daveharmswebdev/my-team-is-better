@@ -363,13 +363,15 @@ export type PlayerLeaderCategory = (typeof PLAYER_LEADER_CATEGORIES)[number]
  * `sort`, so this is the only list a caller may pick a sort from -- never a
  * string check of its own.
  *
- * Two kicking sorts (issue #315), `fg_pct` and `fg_made_50_plus`, are
+ * Two kicking sorts (issue #315), `fg_pct` and `fg_made_50_plus`, and the
+ * two EPA rates (issue #347), `epa_per_dropback` and `epa_per_carry`, are
  * computed by the engine and are not `PlayerStatsOut` fields; every other
- * sort is the stat of the same name.
+ * sort is the stat of the same name. There is no receiving EPA sort (held
+ * on #484).
  */
 export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
-  passing: ['passing_yards', 'passing_tds', 'wins'],
-  rushing: ['rushing_yards', 'rushing_tds', 'carries'],
+  passing: ['passing_yards', 'passing_tds', 'wins', 'epa_per_dropback'],
+  rushing: ['rushing_yards', 'rushing_tds', 'carries', 'epa_per_carry'],
   receiving: ['receiving_yards', 'receiving_tds', 'receptions'],
   kicking: [
     'fg_made',
@@ -399,6 +401,28 @@ export const PLAYER_LEADER_SORTS_BY_CATEGORY = {
 export const PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS = {
   regular: 100,
   postseason: 15,
+} as const satisfies Record<PlayerSeasonType, number>
+
+/**
+ * The mirror of the engine's `PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS`
+ * (`cfb_strength.contracts`, issue #347): the career dropbacks (`attempts +
+ * sacks_suffered`) a player needs, in that season type, to be on the
+ * `epa_per_dropback` board at all. As with FG%, everyone below it is left
+ * off that board and out of its `total`, so the board can be empty.
+ */
+export const PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS = {
+  regular: 1500,
+  postseason: 225,
+} as const satisfies Record<PlayerSeasonType, number>
+
+/**
+ * The mirror of the engine's `PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES`
+ * (issue #347): the career carries a player needs, in that season type, to
+ * be on the `epa_per_carry` board.
+ */
+export const PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES = {
+  regular: 750,
+  postseason: 110,
 } as const satisfies Record<PlayerSeasonType, number>
 
 /**
@@ -452,8 +476,13 @@ export interface StarterRecordOut {
  * recorded zeros. Founder decision (#316): `def_sacks` and
  * `def_fumbles_forced` can run short of the official total for 1999-2009,
  * and `def_tackles_solo` and `def_pass_defended` are unofficial, so the
- * board shows a note with each pair. The engine's EPA columns are not
- * published.
+ * board shows a note with each pair.
+ *
+ * `passing_epa` and `rushing_epa` (issue #347) are career or season sums of
+ * nflfastR's expected points added, unrounded, from which a client derives
+ * EPA per dropback and per carry. `null` whenever the engine's sum is (no
+ * carry means a null `rushing_epa`), never 0. Receiving EPA is not
+ * published (held on #484).
  */
 export interface PlayerStatsOut {
   completions: number | null
@@ -494,6 +523,8 @@ export interface PlayerStatsOut {
   def_fumbles_forced: number | null
   def_tackles_solo: number | null
   def_pass_defended: number | null
+  passing_epa: number | null
+  rushing_epa: number | null
 }
 
 /**

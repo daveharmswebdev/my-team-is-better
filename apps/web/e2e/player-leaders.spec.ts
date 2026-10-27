@@ -549,6 +549,52 @@ test('sorting Kicking by FG% says no kicker has reached 100 attempts, and offers
   )
 })
 
+// Issue #347: the fixture holds two seasons, so nobody reaches 1,500 career
+// dropbacks and the EPA per dropback board comes back empty from the real API.
+test('sorting Passing by EPA per dropback says nobody has reached 1,500 dropbacks, and offers the default sort back', async ({
+  page,
+}) => {
+  await page.goto('/nfl/leaders')
+  await expect(
+    leadersTable(page, 'regular season, by passing yards'),
+  ).toBeVisible()
+  // The passing board's own rate, derived from the sums the API sent.
+  await expect(
+    bodyRow(leadersTable(page, 'regular season, by passing yards'), 0),
+  ).toContainText('0.207')
+
+  await page.getByRole('button', { name: 'EPA per dropback' }).click()
+
+  await expect(page).toHaveURL(
+    /category=passing&season_type=regular&sort=epa_per_dropback&offset=0/,
+  )
+  await expect(
+    page.getByText(
+      'No player has reached 1,500 career dropbacks in the regular season, so nobody qualifies for the EPA per dropback board.',
+    ),
+  ).toBeVisible()
+  await expect(
+    page.getByText('No NFL player stats are loaded yet.'),
+  ).toHaveCount(0)
+  await expect(
+    page.getByText(/ranks only players with at least 1,500 career dropbacks/),
+  ).toBeVisible()
+
+  await page.getByRole('button', { name: 'What is EPA?' }).click()
+  await expect(
+    page.getByRole('region', { name: 'What is EPA?' }),
+  ).toContainText('Rushing EPA per carry is usually negative')
+  await expect(page.getByText(/nflfastR's EP model/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Rank by passing yards' }).click()
+  await expectRow(
+    leadersTable(page, 'regular season, by passing yards'),
+    0,
+    '1',
+    'Tua Tagovailoa',
+  )
+})
+
 test('a kicking deep link shows the same board after a reload, a never-made Long a dash named none', async ({
   page,
 }) => {
@@ -649,6 +695,8 @@ test("Tyreek Hill's name on the receiving board opens his receiving career, with
     'Rushing TDs',
     'Rushing first downs',
     'Rushing fumbles lost',
+    // #347: the rushing group closes with its EPA rate.
+    'EPA per carry',
     'Receptions',
     'Receiving yards',
     'Receiving TDs',

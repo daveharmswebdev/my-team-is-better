@@ -16,6 +16,10 @@ import type { PlayerLeaderRowOut, PlayerLeadersOut } from '../../lib/api/types'
 import {
   DATA_SOURCES,
   LEADERS_BY_DEF_SACKS,
+  LEADERS_BY_EPA_PER_CARRY,
+  LEADERS_BY_EPA_PER_CARRY_EMPTY,
+  LEADERS_BY_EPA_PER_DROPBACK,
+  LEADERS_BY_EPA_PER_DROPBACK_EMPTY,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_PCT,
   LEADERS_BY_FG_PCT_EMPTY,
@@ -34,9 +38,12 @@ import {
 import {
   DEFENSE_EARLY_ERA_NOTE,
   DEFENSE_UNOFFICIAL_NOTE,
+  EPA_EXPLANATION,
   STARTER_RECORD_NOTE,
   fgPctEmptyCopy,
   fgPctNote,
+  rateMinimumEmptyCopy,
+  rateMinimumNote,
 } from '../../lib/playerStats'
 import {
   creditsHandler,
@@ -376,8 +383,9 @@ describe('PlayerLeadersPage (issue #296)', () => {
         name: 'Unrecorded Player',
       })
     ).parentElement as HTMLElement
-    // Games, position and all eight shown stats; `Starts` is a real 0 the API sent.
-    expect(within(row).getAllByText('not recorded')).toHaveLength(10)
+    // Games, position and all nine shown stats, EPA per dropback (#347)
+    // included; `Starts` is a real 0 the API sent.
+    expect(within(row).getAllByText('not recorded')).toHaveLength(11)
     expect(row.querySelector('td')).toHaveTextContent(/^not ranked$/)
   })
 
@@ -1258,5 +1266,194 @@ describe('PlayerLeadersPage: the data span (issue #448)', () => {
 
     await screen.findByRole('table')
     expect(screen.queryByText(/NFL player stats:/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Issue #347: the EPA boards. Each EPA sort has a career minimum, so the
+ * page states it while that sort is up, describes the table by it, and an
+ * empty board says nobody has reached it. The passing and rushing boards
+ * explain EPA and credit the EP model it comes from.
+ */
+describe('PlayerLeadersPage, the EPA boards (issue #347)', () => {
+  function boardFor(query: PlayerLeadersQuery): PlayerLeadersOut {
+    const base =
+      query.sort === 'epa_per_dropback'
+        ? LEADERS_BY_EPA_PER_DROPBACK
+        : query.sort === 'epa_per_carry'
+          ? LEADERS_BY_EPA_PER_CARRY
+          : query.category === 'rushing'
+            ? LEADERS_BY_RUSHING_YARDS
+            : query.category === 'kicking'
+              ? LEADERS_BY_FG_MADE
+              : LEADERS_BY_YARDS
+    return {
+      ...base,
+      category: query.category,
+      season_type: query.season_type,
+      sort: query.sort,
+      offset: query.offset,
+    }
+  }
+
+  const EP_CREDIT = /nflfastR's EP model, by Ben Baldwin & Sebastian Carl/
+
+  beforeEach(() => {
+    mockedFetchPlayerLeaders.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+    mockedFetchPlayerLeaders.mockImplementation((query) =>
+      Promise.resolve(boardFor(query)),
+    )
+  })
+
+  it('sorts by EPA per dropback, states its minimum, and describes the table by it and the record note', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('table')
+    const note = rateMinimumNote('epa_per_dropback', 'regular') ?? ''
+    expect(screen.queryByText(note)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'EPA per dropback' }))
+
+    expect(lastQuery()).toEqual({
+      category: 'passing',
+      season_type: 'regular',
+      sort: 'epa_per_dropback',
+      limit: 50,
+      offset: 0,
+    })
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by EPA per dropback',
+    })
+    expect(note).toMatch(/at least 1,500 career dropbacks/)
+    expect(screen.getAllByText(note)).toHaveLength(1)
+    expect(table).toHaveAccessibleDescription(`${STARTER_RECORD_NOTE} ${note}`)
+  })
+
+  it('names the playoff dropback minimum, 225, on the playoff board', async () => {
+    renderPage(
+      '/nfl/leaders?category=passing&season_type=postseason&sort=epa_per_dropback',
+    )
+
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by EPA per dropback',
+    })
+    const note = rateMinimumNote('epa_per_dropback', 'postseason') ?? ''
+    expect(note).toMatch(/at least 225 career dropbacks/)
+    expect(screen.getByText(note)).toBeInTheDocument()
+  })
+
+  it('states the carry minimum on the EPA per carry board, in both season types', async () => {
+    const view = renderPage('/nfl/leaders?category=rushing&sort=epa_per_carry')
+
+    const table = await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by EPA per carry',
+    })
+    const regular = rateMinimumNote('epa_per_carry', 'regular') ?? ''
+    expect(regular).toMatch(/at least 750 career carries/)
+    expect(table).toHaveAccessibleDescription(regular)
+    view.unmount()
+
+    renderPage(
+      '/nfl/leaders?category=rushing&season_type=postseason&sort=epa_per_carry',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: playoffs, by EPA per carry',
+    })
+    expect(
+      screen.getByText(rateMinimumNote('epa_per_carry', 'postseason') ?? ''),
+    ).toBeInTheDocument()
+  })
+
+  it.each([
+    [
+      'passing',
+      'epa_per_dropback',
+      'regular',
+      LEADERS_BY_EPA_PER_DROPBACK_EMPTY,
+    ],
+    [
+      'passing',
+      'epa_per_dropback',
+      'postseason',
+      LEADERS_BY_EPA_PER_DROPBACK_EMPTY,
+    ],
+    ['rushing', 'epa_per_carry', 'regular', LEADERS_BY_EPA_PER_CARRY_EMPTY],
+    ['rushing', 'epa_per_carry', 'postseason', LEADERS_BY_EPA_PER_CARRY_EMPTY],
+  ] as const)(
+    'says nobody has reached the minimum on an empty %s %s board (%s), and offers the default sort back',
+    async (category, sort, seasonType, empty) => {
+      const user = userEvent.setup()
+      mockedFetchPlayerLeaders.mockImplementation((query) =>
+        Promise.resolve(
+          query.sort === sort
+            ? { ...empty, season_type: seasonType }
+            : boardFor(query),
+        ),
+      )
+      renderPage(
+        `/nfl/leaders?category=${category}&season_type=${seasonType}&sort=${sort}`,
+      )
+
+      const copy = rateMinimumEmptyCopy(sort, seasonType) ?? ''
+      expect(await screen.findByText(copy)).toBeInTheDocument()
+      expect(
+        screen.queryByText('No NFL player stats are loaded yet.'),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByRole('table')).not.toBeInTheDocument()
+      expect(
+        screen.getByText(rateMinimumNote(sort, seasonType) ?? ''),
+      ).toBeInTheDocument()
+
+      const fallback =
+        category === 'passing' ? 'passing yards' : 'rushing yards'
+      await user.click(
+        screen.getByRole('button', { name: `Rank by ${fallback}` }),
+      )
+      expect(lastQuery().sort).toBe(
+        category === 'passing' ? 'passing_yards' : 'rushing_yards',
+      )
+    },
+  )
+
+  it('explains EPA and credits the EP model on the passing and rushing boards', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByRole('table')
+
+    expect(screen.getByText(EP_CREDIT)).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: 'What is EPA?' })
+    await user.click(button)
+    expect(
+      screen.getByRole('region', { name: 'What is EPA?' }),
+    ).toHaveTextContent(EPA_EXPLANATION)
+
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Stat category' }),
+      'rushing',
+    )
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by rushing yards',
+    })
+    expect(
+      screen.getByRole('button', { name: 'What is EPA?' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(EP_CREDIT)).toBeInTheDocument()
+  })
+
+  it('neither explains EPA nor credits the EP model on a board with no EPA', async () => {
+    renderPage('/nfl/leaders?category=kicking')
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by field goals made',
+    })
+
+    expect(
+      screen.queryByRole('button', { name: 'What is EPA?' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(EP_CREDIT)).not.toBeInTheDocument()
   })
 })

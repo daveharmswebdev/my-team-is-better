@@ -8,18 +8,18 @@ import type {
 } from '../../lib/api/types'
 import { formatRecord } from '../../lib/formatRecord'
 import { coveredSeasonsText } from '../../lib/playerCoverage'
-import type { TableStatColumn } from '../../lib/playerStats'
+import type { CareerStatColumn, LeaderStatKey } from '../../lib/playerStats'
 import {
   DASH,
   LEADER_COLUMN_NOTES,
   NONE_LABEL,
   NOT_RECORDED,
+  careerStatColumnsFor,
   formatStat,
   leaderColumnNoteId,
   leaderStatCell,
   showsStarterRecord,
   statColumnNotes,
-  statColumnsFor,
   undercountNote,
 } from '../../lib/playerStats'
 import styles from './PlayerCareerTable.module.css'
@@ -73,7 +73,7 @@ function StatCell({
   statKey,
 }: {
   stats: PlayerStatsOut
-  statKey: keyof PlayerStatsOut
+  statKey: LeaderStatKey
 }) {
   const cell = leaderStatCell(stats, statKey)
   switch (cell.kind) {
@@ -103,7 +103,7 @@ function SharedCells({
   columns,
   showsRecord,
 }: Pick<PlayerSeasonLineOut, 'games' | 'record' | 'stats'> & {
-  columns: readonly TableStatColumn[]
+  columns: readonly CareerStatColumn[]
   showsRecord: boolean
 }) {
   return (
@@ -132,7 +132,7 @@ function StatHeader({
   column,
   noteIdPrefix,
 }: {
-  column: TableStatColumn
+  column: CareerStatColumn
   noteIdPrefix: string
 }) {
   const { label, fullLabel, note } = column
@@ -174,7 +174,7 @@ function recordText(record: StarterRecordOut): string {
  * are left out in v1 (#298).
  *
  * The stat columns are the groups the player recorded on these lines
- * (issue #352, `statColumnsFor`): a quarterback's passing and rushing, a
+ * (issue #352, `careerStatColumnsFor`): a quarterback's passing and rushing, a
  * receiver's receiving, a kicker's kicking, and so on. The starter record
  * and starts show only for a player who passed or started at quarterback.
  * Defense columns bring the founder's notes (#316) with them, under the
@@ -190,7 +190,7 @@ export function PlayerCareerTable({
   const captionId = useId()
   const noteIdPrefix = useId()
   const all = totals === null ? lines : [...lines, totals]
-  const columns = statColumnsFor(all.map((line) => line.stats))
+  const columns = careerStatColumnsFor(all.map((line) => line.stats))
   const showsRecord = showsStarterRecord(all)
   const notes = statColumnNotes(columns)
   return (

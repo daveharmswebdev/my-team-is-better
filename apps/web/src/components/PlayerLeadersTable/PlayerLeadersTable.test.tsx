@@ -8,6 +8,8 @@ import {
   DEFENSE_WITH_NULL_STATS,
   LEADERS_BY_DEF_SACKS,
   LEADERS_BY_DEF_SACKS_TAIL,
+  LEADERS_BY_EPA_PER_CARRY,
+  LEADERS_BY_EPA_PER_DROPBACK,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_MADE_TAIL,
   LEADERS_BY_FG_PCT,
@@ -236,6 +238,7 @@ describe('PlayerLeadersTable (issue #296)', () => {
       'Passing yards',
       'Passing TDs',
       'Interceptions',
+      'EPA per dropback',
       'Carries',
       'Rushing yards',
       'Rushing TDs',
@@ -288,6 +291,7 @@ describe('PlayerLeadersTable, the rushing board (issue #312)', () => {
       'Carries',
       'Rushing yards',
       'Rushing TDs',
+      'EPA per carry',
     ])
     for (const gone of [
       'Starter record',
@@ -1081,5 +1085,85 @@ describe('PlayerLeadersTable and a career cut off by the data (#448)', () => {
 
     expect(screen.getByText('Tyreek Hill')).toBeInTheDocument()
     expect(screen.queryByText(/career began before/)).toBeNull()
+  })
+})
+
+/**
+ * Issue #347: EPA per dropback on the passing board and EPA per carry on the
+ * rushing board. The engine ranks by both and sends neither, so each row's
+ * rate is derived from the EPA sum and count it was sent; both re-sort the
+ * board like FG% does.
+ */
+describe('PlayerLeadersTable, the EPA columns (issue #347)', () => {
+  it("derives each passer's EPA per dropback from the sums sent, sacks counted", () => {
+    renderTable(LEADERS_BY_YARDS)
+
+    const [tua] = bodyRows() as [HTMLElement]
+    // Tua Tagovailoa 2023: 121.67 passing EPA over 560 attempts + 29 sacks.
+    expect(cellUnder(tua, 'EPA per dropback')).toHaveTextContent(/^0\.207$/)
+  })
+
+  it("derives each rusher's EPA per carry, a negative with a real minus sign", () => {
+    renderTable(LEADERS_BY_RUSHING_YARDS)
+
+    const [james] = bodyRows() as [HTMLElement]
+    // Edgerrin James 1999: -26.51 rushing EPA over 369 carries.
+    expect(cellUnder(james, 'EPA per carry')).toHaveTextContent(/^−0\.072$/)
+  })
+
+  it('makes EPA per dropback a sort button that asks for its own sort', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_YARDS)
+    const header = screen.getByRole('columnheader', {
+      name: 'EPA per dropback',
+    })
+    expect(header).toHaveAttribute('aria-sort', 'none')
+    await user.click(
+      within(header).getByRole('button', { name: 'EPA per dropback' }),
+    )
+    expect(onSort.mock.calls).toEqual([['epa_per_dropback']])
+  })
+
+  it('asks for EPA per carry from the rushing board', async () => {
+    const user = userEvent.setup()
+    const { onSort } = renderTable(LEADERS_BY_RUSHING_YARDS)
+    await user.click(screen.getByRole('button', { name: 'EPA per carry' }))
+    expect(onSort.mock.calls).toEqual([['epa_per_carry']])
+  })
+
+  it('marks EPA per dropback descending, and names it in the caption, on its board', () => {
+    renderTable(LEADERS_BY_EPA_PER_DROPBACK)
+
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by EPA per dropback',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('columnheader', { name: 'EPA per dropback' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    expect(
+      bodyRows().map((row) => cellUnder(row, 'EPA per dropback').textContent),
+    ).toEqual(['0.242', '0.220', '0.185'])
+  })
+
+  it('marks EPA per carry descending on its board, in the order sent', () => {
+    renderTable(LEADERS_BY_EPA_PER_CARRY)
+
+    expect(
+      screen.getByRole('columnheader', { name: 'EPA per carry' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    expect(
+      bodyRows().map((row) => cellUnder(row, 'EPA per carry').textContent),
+    ).toEqual(['0.344', '0.293', '0.218'])
+  })
+
+  it('reads "not recorded" for a row whose EPA the source has none of', () => {
+    renderTable(LEADERS_WITH_NULL_STATS)
+
+    const unrecorded = bodyRows()[2] as HTMLElement
+    expect(cellUnder(unrecorded, 'EPA per dropback')).toHaveTextContent(
+      /^not recorded$/,
+    )
   })
 })

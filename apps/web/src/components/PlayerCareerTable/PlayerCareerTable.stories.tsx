@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 import {
   CAREER_WITH_NULL_STATS,
   EDGERRIN_JAMES_CAREER,
@@ -115,6 +116,41 @@ export const Punter: Story = {
     caption: 'Toby Gowin, regular season',
     lines: TOBY_GOWIN_CAREER.seasons.slice(0, 1),
     totals: TOBY_GOWIN_CAREER.regular_season,
+  },
+}
+
+/**
+ * A quarterback's EPA columns (#347): EPA per dropback closes the passing
+ * columns and EPA per carry the rushing ones, derived for each line and the
+ * totals. A second line with no carries shows a dash, read as "none".
+ */
+export const WithEpaColumns: Story = {
+  args: {
+    caption: 'Kurt Warner, regular season',
+    lines: [
+      WARNER_1999_REGULAR,
+      {
+        ...WARNER_1999_REGULAR,
+        season: 2000,
+        games_without_stat_lines: 0,
+        stats: {
+          ...WARNER_1999_REGULAR.stats,
+          carries: 0,
+          rushing_yards: 0,
+          rushing_tds: 0,
+          rushing_epa: null,
+        },
+      },
+    ],
+    totals: null,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'EPA per dropback' }),
+    ).toBeInTheDocument()
+    await expect(canvas.getByRole('cell', { name: '−0.183' })).toBeVisible()
+    await expect(canvas.getByRole('cell', { name: 'none' })).toBeVisible()
   },
 }
 

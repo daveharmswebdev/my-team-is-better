@@ -15,10 +15,12 @@ import {
   DATA_SOURCES,
   KURT_WARNER_CAREER,
   MARVIN_HARRISON_CAREER,
+  OLINDO_MARE_CAREER,
   SMITH_VS_PETERSON,
   TYREEK_HILL_CAREER,
 } from '../../lib/playerFixtures'
 import {
+  EPA_EXPLANATION,
   PLAYER_NOT_FOUND_COPY,
   STARTER_RECORD_NOTE,
   undercountNote,
@@ -380,5 +382,59 @@ describe('PlayerCareerPage: a career cut off by the data (issue #448)', () => {
 
     await screen.findByRole('heading', { level: 1 })
     expect(screen.queryByText(/our books/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Issue #347: a career with EPA columns explains EPA once, above both
+ * tables, and credits the EP model beside the stats credit.
+ */
+describe('PlayerCareerPage: the EPA columns (issue #347)', () => {
+  const EP_CREDIT = /nflfastR's EP model, by Ben Baldwin & Sebastian Carl/
+
+  beforeEach(() => {
+    mockedFetchPlayerCareer.mockReset()
+    mockedFetchCredits.mockReset()
+    mockedFetchCredits.mockResolvedValue({
+      methodologies: [],
+      data_sources: DATA_SOURCES,
+    })
+  })
+
+  it('shows EPA per dropback and per carry in both tables, explained once, the EP model credited', async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(KURT_WARNER_CAREER)
+
+    renderPage()
+
+    const regular = await screen.findByRole('table', {
+      name: 'Kurt Warner, regular season',
+    })
+    const playoffs = screen.getByRole('table', {
+      name: 'Kurt Warner, playoffs',
+    })
+    for (const table of [regular, playoffs]) {
+      for (const name of ['EPA per dropback', 'EPA per carry']) {
+        expect(
+          within(table).getByRole('columnheader', { name }),
+        ).toBeInTheDocument()
+      }
+    }
+    expect(
+      screen.getAllByRole('button', { name: 'What is EPA?' }),
+    ).toHaveLength(1)
+    expect(screen.getByText(EPA_EXPLANATION)).toBeInTheDocument()
+    expect(screen.getByText(EP_CREDIT)).toBeInTheDocument()
+  })
+
+  it('neither explains EPA nor credits the EP model on a career with no EPA column', async () => {
+    mockedFetchPlayerCareer.mockResolvedValue(OLINDO_MARE_CAREER)
+
+    renderPage('/nfl/players/2147978801')
+
+    await screen.findByRole('heading', { level: 1, name: 'Olindo Mare' })
+    expect(
+      screen.queryByRole('button', { name: 'What is EPA?' }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(EP_CREDIT)).not.toBeInTheDocument()
   })
 })

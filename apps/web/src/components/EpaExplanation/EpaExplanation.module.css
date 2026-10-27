@@ -1,0 +1,35 @@
+/* The EPA explanation (issue #347): a disclosure beside the EPA columns. */
+.wrap {
+  margin: var(--sp-2) 0;
+}
+
+.toggle {
+  min-height: 44px;
+  padding: 0 var(--sp-2);
+  border: none;
+  background: none;
+  color: var(--leather-strong);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--leather);
+}
+
+.chevron {
+  display: inline-block;
+  width: 1em;
+}
+
+.panel {
+  max-width: 60ch;
+  padding: 0 var(--sp-2);
+}
+
+.panel p {
+  margin: 0;
+}
