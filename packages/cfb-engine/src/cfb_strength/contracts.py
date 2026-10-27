@@ -332,6 +332,15 @@ total sums only the non-NULL season rows. A season with no stat row at all
 (a start-only line) is different -- nothing was tracked for it -- so it
 still makes the career total NULL, as it does for every other column. A
 career whose season rows are all NULL for the column stays NULL.
+
+One exception the skip can't see (#484): `receiving_epa` is also stored
+NULL on every row of a season whose `targets` the ingest measured as
+untracked (2003-2008), because nflverse names no intended receiver on
+those seasons' incompletions, so the source's value counts catches only.
+The career sum skips those seasons like any blank, so a career receiving
+EPA total covers its tracked seasons only. Nothing publishes it; a client
+that ever does (the board held on #484) must say how many seasons it
+covers rather than show it as the whole career.
 """
 
 
