@@ -80,8 +80,9 @@ UNREPORTED_FIXTURE_PATH = (
 )
 
 
-def _load_raw_records() -> list[dict]:
-    return json.loads(FIXTURE_PATH.read_text())
+def _load_raw_records() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = json.loads(FIXTURE_PATH.read_text())
+    return records
 
 
 def test_fixture_has_the_three_expected_real_games() -> None:

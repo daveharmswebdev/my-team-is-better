@@ -25,6 +25,8 @@ opens it.
 from __future__ import annotations
 
 import shutil
+import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -51,7 +53,7 @@ def regression_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def regression_conn(regression_db: Path):
+def regression_conn(regression_db: Path) -> Iterator[sqlite3.Connection]:
     conn = get_conn(regression_db)
     try:
         yield conn
@@ -73,7 +75,7 @@ def nfl_regression_db(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def nfl_regression_conn(nfl_regression_db: Path):
+def nfl_regression_conn(nfl_regression_db: Path) -> Iterator[sqlite3.Connection]:
     conn = get_conn(nfl_regression_db)
     try:
         yield conn
