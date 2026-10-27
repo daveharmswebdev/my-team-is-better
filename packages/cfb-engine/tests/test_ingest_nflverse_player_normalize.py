@@ -1047,6 +1047,14 @@ def test_targets_has_receptions_as_its_tracking_companion() -> None:
     assert player_normalize.UNTRACKED_COMPANIONS == {"targets": "receptions"}
 
 
+def test_receiving_epa_is_untracked_wherever_targets_is() -> None:
+    # #484: with no intended receiver on an incompletion, nflverse's
+    # receiving EPA counts catches only and runs about 4x high, so it rides
+    # on the targets measurement rather than a share test of its own (an
+    # inflated value is nonzero, so a share test can't see it).
+    assert player_normalize.UNTRACKED_WITH == {"targets": ("receiving_epa",)}
+
+
 def test_a_season_of_catches_with_all_zero_targets_stores_targets_null_everywhere(
     nfl_regression_conn: sqlite3.Connection,
 ) -> None:
@@ -1058,7 +1066,7 @@ def test_a_season_of_catches_with_all_zero_targets_stores_targets_null_everywher
     build = _build(nfl_regression_conn, 1999, rows)
 
     assert _targets(build) == ({None}, {None})
-    assert build.report.untracked_stats == ("targets",)
+    assert build.report.untracked_stats == ("targets", "receiving_epa")
     # Only targets: the receptions in the same rows keep their values.
     assert None not in {r.stats.receptions for r in build.game_stats}
     assert sum(r.stats.receptions or 0 for r in build.season_stats) > 0
@@ -1116,7 +1124,7 @@ def test_the_real_2004_cut_stores_targets_null_including_its_stray_nonzero_row(
     build = _build(nfl_regression_conn, 2004, rows)
 
     assert _targets(build) == ({None}, {None})
-    assert build.report.untracked_stats == ("targets",)
+    assert build.report.untracked_stats == ("targets", "receiving_epa")
 
 
 def test_a_thin_file_keeps_its_targets_as_published(
@@ -1152,16 +1160,74 @@ def test_the_rule_thresholds(catches: int, nonzero_targets: int, untracked: bool
 
     result = player_normalize.untracked_stat_columns(rows)
 
-    assert result == (("targets",) if untracked else ())
+    assert result == (("targets", "receiving_epa") if untracked else ())
 
 
 def test_an_empty_targets_cell_on_a_catch_counts_as_no_target() -> None:
     rows = [{"receptions": "2", "targets": ""}] * 150
-    assert player_normalize.untracked_stat_columns(rows) == ("targets",)
+    assert player_normalize.untracked_stat_columns(rows) == ("targets", "receiving_epa")
+
+
+def _epa(
+    build: player_normalize.SeasonBuild, column: str
+) -> tuple[set[float | None], set[float | None]]:
+    """The distinct `column` values written at the game and the season grain."""
+    return (
+        {getattr(r.stats, column) for r in build.game_stats},
+        {getattr(r.stats, column) for r in build.season_stats},
+    )
+
+
+def test_a_season_with_untracked_targets_stores_receiving_epa_null_everywhere(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    # The 1999 cut with targets rewritten to nflverse's 2003-2008 zeros: its
+    # receiving EPA cells are published numbers, but in such a season they
+    # count catches only, so every game and season line stores NULL.
+    rows = _with_targets(_stat_rows(1999), "0")
+    assert sum(1 for r in rows if r["receiving_epa"] not in ("", "NA")) > 100
+
+    build = _build(nfl_regression_conn, 1999, rows)
+
+    assert _epa(build, "receiving_epa") == ({None}, {None})
+    assert "receiving_epa" in build.report.untracked_stats
+    # Passing and rushing EPA are stored exactly as in the untouched build.
+    published = _build(nfl_regression_conn, 1999, _stat_rows(1999))
+    for column in ("passing_epa", "rushing_epa"):
+        assert [getattr(r.stats, column) for r in build.game_stats] == [
+            getattr(r.stats, column) for r in published.game_stats
+        ], column
+        assert [getattr(r.stats, column) for r in build.season_stats] == [
+            getattr(r.stats, column) for r in published.season_stats
+        ], column
+
+
+def test_a_tracked_season_keeps_its_receiving_epa_as_published(
+    nfl_regression_conn: sqlite3.Connection,
+) -> None:
+    build = _build(nfl_regression_conn, 1999, _stat_rows(1999))
+
+    assert "receiving_epa" not in build.report.untracked_stats
+    # Marvin Harrison, 1999 Indianapolis: every line his published cell, the
+    # season their unrounded sum.
+    harrison = mint_surrogate_id("nfl_player", "00-0007024")
+    cells = [float(v) for v in _game_values(1999, "00-0007024", "receiving_epa")]
+    regular = {g.id for g in _games(nfl_regression_conn, 1999) if g.season_type == "regular"}
+    lines = [r for r in build.game_stats if r.player_id == harrison and r.game_id in regular]
+    season = next(
+        r for r in build.season_stats if r.player_id == harrison and r.season_type == "regular"
+    )
+    assert len(cells) == len(lines) == 16
+    assert sorted(r.stats.receiving_epa or 0.0 for r in lines) == sorted(cells)
+    assert season.stats.receiving_epa == pytest.approx(sum(cells), abs=1e-9)
+    assert season.stats.receiving_epa != 0
 
 
 def test_the_committed_cache_marks_exactly_2003_to_2008_untracked_for_targets() -> None:
     # The rule is measured, not a year list: run it on every cached season.
+    # Receiving EPA (#484) is nulled in exactly the same seasons: measured
+    # league receiving_epa per reception, 2002 +0.222, 2003-2008 +0.85 to
+    # +0.90, 2009 +0.207.
     marked = {
         year: player_normalize.untracked_stat_columns(
             _read_csv(RAW_DIR / "nfl" / f"stats_player_week_{year}.csv")
@@ -1170,4 +1236,4 @@ def test_the_committed_cache_marks_exactly_2003_to_2008_untracked_for_targets() 
     }
 
     assert {y for y, cols in marked.items() if cols} == set(range(2003, 2009))
-    assert all(cols == ("targets",) for cols in marked.values() if cols)
+    assert all(cols == ("targets", "receiving_epa") for cols in marked.values() if cols)

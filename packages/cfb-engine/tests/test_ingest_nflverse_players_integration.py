@@ -311,7 +311,8 @@ def test_a_season_row_is_null_only_where_the_source_leaves_the_cell_empty(
     }
 
     # The one exception is a column the source didn't track that season
-    # (#345): targets in 2004, NULL on every row there and nowhere else.
+    # (#345): targets in 2004, NULL on every row there and nowhere else
+    # (receiving_epa, nulled with it there since #484, is in `epa` already).
     assert {column for column, count in nulls.items() if count} == (
         set(PLAYER_STAT_MAX_FIELDS) | epa | {"targets"}
     )
@@ -347,11 +348,52 @@ def test_targets_are_null_in_the_untracked_2004_season_at_both_grains_and_only_t
         assert nulls == (total if season == 2004 else 0), (table, season)
     assert {s.season: s.untracked_stats for s in report.seasons} == {
         1999: (),
-        2004: ("targets",),
+        2004: ("targets", "receiving_epa"),
         2013: (),
         2022: (),
     }
     assert _season_row(conn, "Peyton Manning", 2004, "regular")["receptions"] is not None
+
+
+def test_receiving_epa_is_null_in_the_untracked_2004_season_and_as_published_elsewhere(
+    ingested: tuple[sqlite3.Connection, PlayerIngestReport],
+) -> None:
+    # #484: 2004 is a season targets is measured untracked in, so nflverse's
+    # receiving EPA there counts catches only (about 4x high) and is stored
+    # NULL at both grains. Every other season stores the published cells.
+    conn, report = ingested
+    for season in FIXTURE_SEASONS:
+        # A rule-3 skip (1999's unnamed P. Franklin) is never stored at all.
+        skipped = {(s.game_id, s.player_id) for s in _season_report(report, season).skipped}
+        cells = [
+            r
+            for r in _read_csv(PLAYER_SAMPLE_DIR / f"stats_player_week_{season}.csv")
+            if r["receiving_epa"] not in ("", "NA")
+            and (r["game_id"], r["player_id"]) not in skipped
+        ]
+        assert len(cells) > 100, season
+        stored = conn.execute(
+            "SELECT COUNT(s.receiving_epa), SUM(s.receiving_epa) FROM player_game_stats s "
+            "JOIN games g ON g.id = s.game_id WHERE g.season = ?",
+            (season,),
+        ).fetchone()
+        season_stored = conn.execute(
+            "SELECT COUNT(receiving_epa), SUM(receiving_epa) FROM player_season_stats "
+            "WHERE season = ?",
+            (season,),
+        ).fetchone()
+        if season == 2004:
+            assert tuple(stored) == (0, None)
+            assert tuple(season_stored) == (0, None)
+        else:
+            assert stored[0] == len(cells), season
+            assert stored[1] == pytest.approx(sum(float(r["receiving_epa"]) for r in cells))
+            assert season_stored[0] > 0, season
+            assert season_stored[1] == pytest.approx(stored[1]), season
+    # Passing and rushing EPA are untouched in 2004.
+    manning = _season_row(conn, "Peyton Manning", 2004, "regular")
+    assert manning["passing_epa"] is not None and manning["passing_epa"] > 0
+    assert manning["rushing_epa"] is not None
 
 
 def test_a_stat_missing_on_every_game_row_stays_null_while_an_all_zero_stat_stays_zero(
@@ -761,7 +803,7 @@ def test_the_committed_cache_reproduces_the_contracts_season_counts(
         assert s.starters_by_source == starters, season
         assert s.games_without_stat_lines == no_lines, season
         assert s.sides_without_starter == (), season
-        assert s.untracked_stats == (("targets",) if season == 2004 else ()), season
+        assert s.untracked_stats == (("targets", "receiving_epa") if season == 2004 else ()), season
 
 
 def test_the_report_names_an_untracked_column() -> None:

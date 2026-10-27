@@ -74,8 +74,11 @@ The rules, in the order a stat line meets them:
    row stores NULL, never the source's 0 (the #313 rule: a stat an era
    did not track is NULL). Which columns are untracked is measured on the
    season's own stat rows by `untracked_stat_columns`, never a year list:
-   see `UNTRACKED_COMPANIONS` for the test and its measurement. The
-   season report names the columns it nulled.
+   see `UNTRACKED_COMPANIONS` for the test and its measurement. A column
+   the source published but can't have computed right without the
+   untracked one is nulled with it (`UNTRACKED_WITH`: receiving_epa rides
+   on targets, #484), so the trigger stays that one measurement. The
+   season report names every column it nulled.
 """
 
 from __future__ import annotations
@@ -128,6 +131,20 @@ share of rows with receptions > 0 whose targets are nonzero: 100% in
 2003-2008 (2008: 16 of 3,630; 2005: 0 of 3,528). Every other contract
 column was measured too and shows no such season, so only targets has a
 companion here."""
+
+UNTRACKED_WITH: Mapping[str, tuple[str, ...]] = {"targets": ("receiving_epa",)}
+"""Rule 10's dependents: measured column -> the columns nulled whenever it
+is measured untracked. nflverse's receiving EPA credits a receiver with
+every pass thrown to them, so in a season with no intended receiver on an
+incompletion it counts catches only and runs about 4x high (#484).
+Measured on nflverse's play_by_play (sacks excluded), incompletions with a
+receiver_player_id: 2002 6,389 of 6,779; 2003 0 of 6,538; 2005 0 of 6,431;
+2008 16 of 6,264; 2009 6,158 of 6,386. League receiving_epa per reception
+on the committed weekly files: 2002 +0.222, 2003 +0.869, 2005 +0.898,
+2008 +0.853, 2009 +0.207. Those are exactly the seasons targets is
+untracked in. An inflated value is nonzero, so a share test of its own
+can't see it: it rides on the targets measurement instead. NULL, never an
+estimate."""
 
 UNTRACKED_MIN_COMPANION_ROWS = 100
 """Rule 10's evidence floor: a season with fewer companion-active rows is
@@ -224,8 +241,9 @@ def untracked_stat_columns(stat_rows: Iterable[Mapping[str, str]]) -> tuple[str,
     in the season these rows make up, in contract order. A column is
     untracked when its companion is nonzero on at least
     `UNTRACKED_MIN_COMPANION_ROWS` rows and the column itself is nonzero on
-    fewer than `UNTRACKED_MAX_NONZERO_SHARE` of them. An empty cell counts
-    as zero here; below the evidence floor nothing is untracked."""
+    fewer than `UNTRACKED_MAX_NONZERO_SHARE` of them; its `UNTRACKED_WITH`
+    dependents are then untracked too. An empty cell counts as zero here;
+    below the evidence floor nothing is untracked."""
     active = dict.fromkeys(UNTRACKED_COMPANIONS, 0)
     nonzero = dict.fromkeys(UNTRACKED_COMPANIONS, 0)
     for row in stat_rows:
@@ -234,13 +252,14 @@ def untracked_stat_columns(stat_rows: Iterable[Mapping[str, str]]) -> tuple[str,
                 active[column] += 1
                 if _is_nonzero(row[column]):
                     nonzero[column] += 1
-    return tuple(
+    measured = {
         name
-        for name in STAT_FIELDS
-        if name in UNTRACKED_COMPANIONS
-        and active[name] >= UNTRACKED_MIN_COMPANION_ROWS
+        for name in UNTRACKED_COMPANIONS
+        if active[name] >= UNTRACKED_MIN_COMPANION_ROWS
         and nonzero[name] < UNTRACKED_MAX_NONZERO_SHARE * active[name]
-    )
+    }
+    dependents = {d for name in measured for d in UNTRACKED_WITH.get(name, ())}
+    return tuple(name for name in STAT_FIELDS if name in measured | dependents)
 
 
 def player_season_type(value: str) -> PlayerSeasonType:
