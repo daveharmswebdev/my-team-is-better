@@ -869,3 +869,89 @@ def test_cli_validate_return_reads_a_report_after_the_latest_prompt(tmp_path: Pa
     result = _cli("validate-return", "--agent", "api-agent", "--transcript", str(path))
     assert result.returncode == 0, result.stderr
     assert "head f00dbabe" in result.stdout
+
+
+# --- #323: a failing green or gate run is fine on success once that command re-ran green
+
+
+def _run(command: str, result: str, phase: str) -> dict[str, str]:
+    return {"command": command, "result": result, "phase": phase}
+
+
+FORMAT_CHECK = "uv run ruff format --check ."
+VITEST = "pnpm vitest run src/lib/share.test.ts"
+
+
+def test_gate_fail_then_gate_pass_of_the_same_command_validates() -> None:
+    data = _success()
+    data["tests_run"] += [_run(FORMAT_CHECK, "fail", "gate"), _run(FORMAT_CHECK, "pass", "gate")]
+    assert _errors(data) == []
+
+
+def test_green_fail_later_passing_validates() -> None:
+    data = _success()
+    data["tests_run"] += [
+        _run(VITEST, "fail", "red"),
+        _run(VITEST, "fail", "green"),
+        _run(VITEST, "pass", "green"),
+        _run(VITEST, "pass", "gate"),
+    ]
+    assert _errors(data) == []
+
+
+def test_a_sabotage_run_after_the_fix_does_not_count_as_the_last_run() -> None:
+    data = _success()
+    data["tests_run"] += [
+        _run(VITEST, "fail", "green"),
+        _run(VITEST, "pass", "green"),
+        _run(VITEST, "fail", "sabotage"),
+    ]
+    assert _errors(data) == []
+
+
+def test_gate_fail_with_no_later_run_of_that_command_is_rejected() -> None:
+    data = _success()
+    data["tests_run"].append(_run(FORMAT_CHECK, "fail", "gate"))
+    errors = _errors(data)
+    assert any(e.startswith(f"tests_run/{len(data['tests_run']) - 1}:") for e in errors), errors
+    assert any("last run of that command failed" in e for e in errors), errors
+
+
+def test_gate_fail_then_a_pass_of_a_different_command_only_is_rejected() -> None:
+    data = _success()
+    data["tests_run"] += [
+        _run(FORMAT_CHECK, "fail", "gate"),
+        _run("uv run ruff check .", "pass", "gate"),
+    ]
+    assert any("last run of that command failed" in e for e in _errors(data))
+
+
+def test_pass_then_fail_of_the_same_command_is_rejected() -> None:
+    data = _success()
+    data["tests_run"] += [_run(FORMAT_CHECK, "pass", "gate"), _run(FORMAT_CHECK, "fail", "gate")]
+    errors = _errors(data)
+    assert any(e.startswith(f"tests_run/{len(data['tests_run']) - 1}:") for e in errors), errors
+    assert any("last run of that command failed" in e for e in errors), errors
+
+
+def test_whitespace_only_command_differences_are_the_same_command() -> None:
+    data = _success()
+    data["tests_run"] += [
+        _run(FORMAT_CHECK + "  ", "fail", "gate"),
+        _run("  " + FORMAT_CHECK, "pass", "gate"),
+    ]
+    assert _errors(data) == []
+    data["tests_run"].append(_run("\t" + FORMAT_CHECK + "\n", "error", "gate"))
+    assert any("last run of that command failed" in e for e in _errors(data))
+
+
+@pytest.mark.parametrize(
+    ("later", "phase"),
+    [("skip", "gate"), ("fail", "red"), ("fail", "sabotage"), ("error", "green")],
+)
+def test_a_gate_fail_is_not_excused_by_a_later_run_that_did_not_pass(
+    later: str, phase: str
+) -> None:
+    data = _success()
+    data["tests_run"] += [_run(FORMAT_CHECK, "fail", "gate"), _run(FORMAT_CHECK, later, phase)]
+    assert any("last run of that command" in e for e in _errors(data))
