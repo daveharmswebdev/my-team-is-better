@@ -113,6 +113,50 @@ const storySyntax = [
   `${MUTATOR} > TemplateLiteral[expressions.length=0][quasis.0.value.cooked=${oneOf(ANY_KEYS)}]`,
 ].map((selector) => ({ selector, message: MESSAGE }))
 
+/**
+ * Issue #221: tests and stories fake the API one way, through the MSW
+ * handlers in `src/mocks/handlers.ts`, so page and component tests run the
+ * real `src/lib/api/client.ts` and no story leaks a fake `fetch` into the
+ * next. Banned in every `src` file and in `.storybook/**`: assigning `fetch`
+ * on `globalThis` / `window` / `self` / `global` (as `.fetch`, `['fetch']` or
+ * `` [`fetch`] ``, any assignment operator), `Object.assign`-ing a `fetch`
+ * onto one of them, `<x>.stubGlobal('fetch', ...)`, `<x>.spyOn(<global>,
+ * 'fetch')`, and `vi.mock` / `vi.doMock` of the client module. A bare
+ * `fetch = ...` on the global is core `no-global-assign`'s. Not covered:
+ * computed keys built at run time, `globalThis` aliased through another
+ * variable, `Object.defineProperty`, `eslint-disable`.
+ * `src/test/eslintNetworkFakes.test.ts` proves each form is flagged in every
+ * block that sets `no-restricted-syntax`, and ordinary code is not.
+ */
+const NETWORK_FAKE_MESSAGE =
+  'Fake the API with MSW (src/mocks/handlers.ts: server.use() in a test, parameters.msw in a story), not by replacing fetch or mocking the API client (issue #221).'
+const GLOBAL_OBJECTS = oneOf('globalThis|window|self|global')
+const literalArg = (index, values) => [
+  `[arguments.${index}.type='Literal'][arguments.${index}.value=${oneOf(values)}]`,
+  `[arguments.${index}.type='TemplateLiteral'][arguments.${index}.expressions.length=0][arguments.${index}.quasis.0.value.cooked=${oneOf(values)}]`,
+]
+const CLIENT_MODULE = '/(^|\\/)(lib\\/api\\/)?client(\\.ts)?$/'
+const VI_MOCK = `CallExpression[callee.object.name='vi'][callee.property.name=${oneOf('mock|doMock')}]`
+
+const networkFakeSyntax = [
+  ...assignedKey('fetch').map(
+    (key) => `AssignmentExpression[left.object.name=${GLOBAL_OBJECTS}]${key}`,
+  ),
+  ...propertyKey('fetch').map(
+    (key) =>
+      `CallExpression[callee.object.name='Object'][callee.property.name='assign'][arguments.0.name=${GLOBAL_OBJECTS}] > ObjectExpression > Property${key}`,
+  ),
+  ...literalArg(0, 'fetch').map(
+    (arg) => `CallExpression[callee.property.name='stubGlobal']${arg}`,
+  ),
+  ...literalArg(1, 'fetch').map(
+    (arg) =>
+      `CallExpression[callee.property.name='spyOn'][arguments.0.name=${GLOBAL_OBJECTS}]${arg}`,
+  ),
+  `${VI_MOCK}[arguments.0.type='Literal'][arguments.0.value=${CLIENT_MODULE}]`,
+  `${VI_MOCK}[arguments.0.type='ImportExpression'][arguments.0.source.value=${CLIENT_MODULE}]`,
+].map((selector) => ({ selector, message: NETWORK_FAKE_MESSAGE }))
+
 export default tseslint.config(
   { ignores: ['dist', 'storybook-static', 'coverage'] },
   {
@@ -195,14 +239,29 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         { selector: dynamicVitestImport, message: MESSAGE },
+        ...networkFakeSyntax,
       ],
+    },
+  },
+  {
+    // Issue #221. The blocks above and below set `no-restricted-syntax` for
+    // source and story files, and a later block's list replaces an earlier
+    // one's, so each carries `networkFakeSyntax` itself.
+    name: 'network-fakes/test-and-storybook-files',
+    files: [
+      'src/**/*.test.{js,jsx,mjs,ts,tsx}',
+      'src/test/setup.ts',
+      '.storybook/**/*.{js,jsx,mjs,ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': ['error', ...networkFakeSyntax],
     },
   },
   {
     name: 'a11y-gate/story-files',
     files: ['src/**/*.stories.{js,jsx,mjs,ts,tsx}'],
     rules: {
-      'no-restricted-syntax': ['error', ...storySyntax],
+      'no-restricted-syntax': ['error', ...storySyntax, ...networkFakeSyntax],
     },
   },
   {

@@ -1,27 +1,30 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { HttpResponse } from 'msw'
 import {
   CATALOG_TIMEOUT_MS,
   NETWORK_ERROR_COPY,
   SERVER_ERROR_COPY,
-  VerdictNetworkError,
 } from '../../lib/api/client'
 import type { CreditsMethodologyOut, CreditsOut } from '../../lib/api/types'
+import {
+  creditsHandler,
+  hang,
+  httpError,
+  networkError,
+} from '../../mocks/handlers'
+import { server } from '../../test/server'
 import { AboutPage } from './AboutPage'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
-  )
-  return {
-    ...actual,
-    fetchCredits: vi.fn(),
-  }
+/**
+ * `GET /api/credits`, answered through MSW (issue #221): the page calls the
+ * real `fetchCredits`.
+ */
+const mockedFetchCredits = vi.fn<Parameters<typeof creditsHandler>[0]>()
+
+beforeEach(() => {
+  server.use(creditsHandler(mockedFetchCredits))
 })
-
-import { fetchCredits } from '../../lib/api/client'
-
-const mockedFetchCredits = vi.mocked(fetchCredits)
 
 /**
  * Mirrors the live `/api/credits` payload: `methodologies` is a list, and the
@@ -86,7 +89,7 @@ describe('AboutPage', () => {
   })
 
   it('renders the "How This Works" headline', () => {
-    mockedFetchCredits.mockReturnValue(new Promise(() => {}))
+    mockedFetchCredits.mockReturnValue(hang())
 
     render(<AboutPage />)
 
@@ -96,7 +99,7 @@ describe('AboutPage', () => {
   })
 
   it('shows a loading state while the credits request is in flight', () => {
-    mockedFetchCredits.mockReturnValue(new Promise(() => {}))
+    mockedFetchCredits.mockReturnValue(hang())
 
     render(<AboutPage />)
 
@@ -266,9 +269,7 @@ describe('AboutPage', () => {
   })
 
   it('shows an error state when the credits request fails', async () => {
-    mockedFetchCredits.mockRejectedValue(
-      new VerdictNetworkError(NETWORK_ERROR_COPY),
-    )
+    mockedFetchCredits.mockResolvedValue(networkError())
 
     render(<AboutPage />)
 
@@ -277,26 +278,16 @@ describe('AboutPage', () => {
     )
   })
 
-  /** Issue #215, through the real client: only `fetch` is faked. */
+  /** Issue #215. */
   describe('an HTTP error from /api/credits (issue #215)', () => {
     afterEach(() => {
-      vi.unstubAllGlobals()
       vi.restoreAllMocks()
     })
 
     it('shows the 5xx copy for a 500, and never the status', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      const actual = await vi.importActual<
-        typeof import('../../lib/api/client')
-      >('../../lib/api/client')
-      mockedFetchCredits.mockImplementation(actual.fetchCredits)
-      vi.stubGlobal(
-        'fetch',
-        vi
-          .fn()
-          .mockResolvedValue(
-            new Response(JSON.stringify({ detail: 'boom' }), { status: 500 }),
-          ),
+      mockedFetchCredits.mockResolvedValue(
+        httpError(500, JSON.stringify({ detail: 'boom' })),
       )
 
       render(<AboutPage />)
@@ -308,7 +299,11 @@ describe('AboutPage', () => {
     })
 
     it('shows the 5xx copy for an error the client never classified', async () => {
-      mockedFetchCredits.mockRejectedValue(new Error('something odd'))
+      // A 200 whose body isn't JSON: the client's parse error is nothing it
+      // maps, so it reaches the page as-is.
+      mockedFetchCredits.mockResolvedValue(
+        new HttpResponse('something odd', { status: 200 }),
+      )
 
       render(<AboutPage />)
 
@@ -318,12 +313,10 @@ describe('AboutPage', () => {
     })
   })
 
-  /** Issue #237, through the real client: only `fetch` and the clock are faked. */
+  /** Issue #237: only the clock is faked, besides the API. */
   describe('a hung /api/credits (issue #237)', () => {
     afterEach(() => {
       vi.useRealTimers()
-      vi.unstubAllGlobals()
-      vi.restoreAllMocks()
     })
 
     /** Moves the fake clock, then lets the rejection chain and React settle. */
@@ -337,22 +330,8 @@ describe('AboutPage', () => {
     }
 
     it('replaces "Loading methods" with the network copy once CATALOG_TIMEOUT_MS passes', async () => {
-      const actual = await vi.importActual<
-        typeof import('../../lib/api/client')
-      >('../../lib/api/client')
-      mockedFetchCredits.mockImplementation(actual.fetchCredits)
       // Never answers; gives up only when its request's signal aborts.
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(
-          (_url: string, init?: RequestInit) =>
-            new Promise<Response>((_resolve, reject) => {
-              init?.signal?.addEventListener('abort', () => {
-                reject(new DOMException('aborted', 'AbortError'))
-              })
-            }),
-        ),
-      )
+      mockedFetchCredits.mockReturnValue(hang())
       vi.useFakeTimers()
 
       render(<AboutPage />)
@@ -409,7 +388,7 @@ describe('AboutPage', () => {
     })
 
     it('shows while the credits request is still loading', () => {
-      mockedFetchCredits.mockReturnValue(new Promise(() => {}))
+      mockedFetchCredits.mockReturnValue(hang())
 
       render(<AboutPage />)
 
@@ -417,9 +396,7 @@ describe('AboutPage', () => {
     })
 
     it('shows when the credits request fails', async () => {
-      mockedFetchCredits.mockRejectedValue(
-        new VerdictNetworkError(NETWORK_ERROR_COPY),
-      )
+      mockedFetchCredits.mockResolvedValue(networkError())
 
       render(<AboutPage />)
 

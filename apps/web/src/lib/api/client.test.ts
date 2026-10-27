@@ -18,6 +18,12 @@ import {
   fetchTeams,
   fetchYears,
 } from './client'
+import { networkError } from '../../mocks/handlers'
+import {
+  answerEveryRequest,
+  stalledBody,
+  type SentInit,
+} from '../../test/network'
 
 const LEADERS_QUERY = {
   category: 'passing',
@@ -42,20 +48,16 @@ const CHAMPION_2005 = {
 } as const
 
 /**
- * A `fetch` that never answers on its own, and rejects with an `AbortError`
- * the moment its request's signal aborts -- as a real browser `fetch` does.
- * Hands back the signal each call was given, so a test can inspect it.
+ * A server that never answers on its own: the client's `fetch` rejects with
+ * an `AbortError` the moment its request's signal aborts, as a browser's
+ * does. Hands back the signal each request carried, so a test can inspect it.
  */
 function neverAnsweringFetch() {
   const signals: (AbortSignal | undefined)[] = []
   const fetchMock = vi.fn(
-    (_url: string, init?: RequestInit) =>
-      new Promise<Response>((_resolve, reject) => {
-        const signal = init?.signal ?? undefined
-        signals.push(signal)
-        signal?.addEventListener('abort', () => {
-          reject(new DOMException('The operation was aborted.', 'AbortError'))
-        })
+    (_url: string, init: SentInit) =>
+      new Promise<Response>(() => {
+        signals.push(init.signal)
       }),
   )
   return { fetchMock, signals }
@@ -90,9 +92,6 @@ async function flushMicrotasks() {
 }
 
 describe('api client', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
 
   it('resolves with the parsed envelope on a 200 response', async () => {
     const envelope = {
@@ -116,7 +115,7 @@ describe('api client', () => {
       ],
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, envelope))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchChampion({
       year: 2005,
@@ -180,7 +179,7 @@ describe('api client', () => {
       const fetchMock = vi
         .fn()
         .mockResolvedValue(jsonResponse(200, { evidence: {}, narration: {} }))
-      vi.stubGlobal('fetch', fetchMock)
+      answerEveryRequest(fetchMock)
 
       await send()
 
@@ -196,14 +195,11 @@ describe('api client', () => {
       year: 1899,
       available_years: [2004, 2005],
     }
-    vi.stubGlobal(
-      'fetch',
-      vi
+    answerEveryRequest(vi
         .fn()
         .mockImplementation(() =>
           Promise.resolve(jsonResponse(404, { detail })),
-        ),
-    )
+        ))
 
     await expect(
       fetchChampion({
@@ -227,10 +223,7 @@ describe('api client', () => {
   })
 
   it('throws a VerdictNetworkError with the network copy when fetch itself rejects', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(networkError()))
 
     const rejection = fetchCompare({
       year: 2005,
@@ -264,10 +257,7 @@ describe('api client', () => {
 
   it('throws a VerdictHttpError, not a VerdictNetworkError, on an unmapped error response shape', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
 
     const rejection = fetchChampion(CHAMPION_2005)
 
@@ -287,7 +277,6 @@ describe('unmapped HTTP errors (issue #215)', () => {
   })
 
   afterEach(() => {
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
@@ -310,7 +299,7 @@ describe('unmapped HTTP errors (issue #215)', () => {
         },
       ],
     }
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(422, body)))
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(422, body)))
 
     const error = await rejectionOf(fetchChampion(CHAMPION_2005))
 
@@ -324,10 +313,7 @@ describe('unmapped HTTP errors (issue #215)', () => {
   })
 
   it('maps an empty 500 to the 5xx copy, with no status in the message', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(new Response(null, { status: 500 })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(new Response(null, { status: 500 })))
 
     const error = await rejectionOf(fetchChampion(CHAMPION_2005))
 
@@ -342,15 +328,12 @@ describe('unmapped HTTP errors (issue #215)', () => {
 
   it("maps a proxy's HTML 503 to the 5xx copy, keeping the raw HTML on bodyText and logging it", async () => {
     const html = '<html>Service Unavailable</html>'
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
+    answerEveryRequest(vi.fn().mockResolvedValue(
         new Response(html, {
           status: 503,
           headers: { 'Content-Type': 'text/html' },
         }),
-      ),
-    )
+      ))
 
     const error = await rejectionOf(fetchChampion(CHAMPION_2005))
 
@@ -372,10 +355,7 @@ describe('unmapped HTTP errors (issue #215)', () => {
       year: 1899,
       available_years: [2004, 2005],
     }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(404, { detail })))
 
     const error = await rejectionOf(fetchChampion(CHAMPION_2005))
 
@@ -393,10 +373,7 @@ describe('unmapped HTTP errors (issue #215)', () => {
   ])(
     '%s rejects a 500 with a VerdictHttpError and the 5xx copy',
     async (_name, send) => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
-      )
+      answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
 
       const error = await rejectionOf(send())
 
@@ -419,13 +396,12 @@ describe('verdict request timeout and abort (issue #214)', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
   it('is still pending one millisecond before VERDICT_TIMEOUT_MS, and rejects with the network copy at it', async () => {
     const { fetchMock, signals } = neverAnsweringFetch()
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const request = fetchChampion(CHAMPION_2005)
     const outcome = track(request)
@@ -449,9 +425,7 @@ describe('verdict request timeout and abort (issue #214)', () => {
   })
 
   it('also times out when the headers arrive but the body never finishes', async () => {
-    const response = jsonResponse(200, {})
-    vi.spyOn(response, 'json').mockReturnValue(new Promise(() => {}))
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+    answerEveryRequest(vi.fn().mockResolvedValue(stalledBody()))
 
     const request = fetchChampion(CHAMPION_2005)
     const outcome = track(request)
@@ -491,7 +465,7 @@ describe('verdict request timeout and abort (issue #214)', () => {
     "%s rejects with an AbortError when the caller's signal aborts, leaving no timer behind",
     async (_name, send) => {
       const { fetchMock } = neverAnsweringFetch()
-      vi.stubGlobal('fetch', fetchMock)
+      answerEveryRequest(fetchMock)
       const controller = new AbortController()
 
       const request = send(controller.signal)
@@ -512,7 +486,7 @@ describe('verdict request timeout and abort (issue #214)', () => {
   )
 
   it('clears its timer once a successful response has been read', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse(200, {})))
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(200, {})))
 
     await fetchChampion(CHAMPION_2005)
 
@@ -532,7 +506,6 @@ describe('GET request timeout (issue #237)', () => {
 
   afterEach(() => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
@@ -553,7 +526,7 @@ describe('GET request timeout (issue #237)', () => {
     '%s is still pending one millisecond before CATALOG_TIMEOUT_MS, and rejects with the network copy at it',
     async (_name, send) => {
       const { fetchMock, signals } = neverAnsweringFetch()
-      vi.stubGlobal('fetch', fetchMock)
+      answerEveryRequest(fetchMock)
 
       const outcome = track(send())
 
@@ -580,9 +553,7 @@ describe('GET request timeout (issue #237)', () => {
   it.each(GETS)(
     '%s also times out when the headers arrive but the JSON body never finishes',
     async (_name, send) => {
-      const response = jsonResponse(200, {})
-      vi.spyOn(response, 'json').mockReturnValue(new Promise(() => {}))
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response))
+      answerEveryRequest(vi.fn().mockResolvedValue(stalledBody()))
 
       const outcome = track(send())
 
@@ -604,14 +575,11 @@ describe('GET request timeout (issue #237)', () => {
   it.each(GETS)(
     '%s clears its timer once a successful response has been read',
     async (_name, send) => {
-      vi.stubGlobal(
-        'fetch',
-        vi
+      answerEveryRequest(vi
           .fn()
           .mockResolvedValue(
             jsonResponse(200, { years: [], teams: [], team_details: [] }),
-          ),
-      )
+          ))
 
       await send()
 
@@ -623,15 +591,15 @@ describe('GET request timeout (issue #237)', () => {
     '%s clears its timer after an HTTP error, which stays a VerdictHttpError',
     async (_name, send) => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue(jsonResponse(503, { detail: 'boom' })),
-      )
+      answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(503, { detail: 'boom' })))
 
       const outcome = track(send())
-      await flushMicrotasks()
-
-      expect(outcome.settled).toBe(true)
+      // The response crosses MSW's interceptor, more than a few microtasks
+      // away; `vi.waitFor` steps the fake clock 50 ms a check, nowhere near
+      // CATALOG_TIMEOUT_MS, and the error type rules a timeout out.
+      await vi.waitFor(() => {
+        expect(outcome.settled).toBe(true)
+      })
       expect(outcome.error).toBeInstanceOf(VerdictHttpError)
       expect(vi.getTimerCount()).toBe(0)
     },
@@ -639,9 +607,6 @@ describe('GET request timeout (issue #237)', () => {
 })
 
 describe('fetchCredits', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
 
   it('resolves with the parsed credits payload on a 200 response', async () => {
     const credits = {
@@ -676,7 +641,7 @@ describe('fetchCredits', () => {
       ],
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, credits))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchCredits()
 
@@ -689,10 +654,7 @@ describe('fetchCredits', () => {
   })
 
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(networkError()))
 
     await expect(fetchCredits()).rejects.toBeInstanceOf(VerdictNetworkError)
     await expect(fetchCredits()).rejects.toThrow(NETWORK_ERROR_COPY)
@@ -700,10 +662,7 @@ describe('fetchCredits', () => {
 
   it('throws a VerdictHttpError on a non-2xx response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
 
     await expect(fetchCredits()).rejects.toBeInstanceOf(VerdictHttpError)
   })
@@ -712,7 +671,6 @@ describe('fetchCredits', () => {
 /** Issue #296: the NFL player read layer. */
 describe('fetchPlayerLeaders', () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
@@ -729,7 +687,7 @@ describe('fetchPlayerLeaders', () => {
 
   it('GETs /api/players/leaders with sport=nfl and exactly the query it was given, in that order', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, leaders))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchPlayerLeaders({
       category: 'passing',
@@ -762,7 +720,7 @@ describe('fetchPlayerLeaders', () => {
       .mockResolvedValue(
         jsonResponse(200, { ...leaders, category: 'rushing', sort: 'carries' }),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchPlayerLeaders({
       category: 'rushing',
@@ -780,10 +738,7 @@ describe('fetchPlayerLeaders', () => {
   })
 
   it('throws a VerdictNetworkError with the network copy when fetch itself rejects', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(networkError()))
 
     await expect(fetchPlayerLeaders(LEADERS_QUERY)).rejects.toThrow(
       NETWORK_ERROR_COPY,
@@ -792,14 +747,11 @@ describe('fetchPlayerLeaders', () => {
 
   it('maps a request-validation 422 to the 4xx copy', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi
+    answerEveryRequest(vi
         .fn()
         .mockResolvedValue(
           jsonResponse(422, { detail: [{ loc: ['query', 'limit'] }] }),
-        ),
-    )
+        ))
 
     const error = await fetchPlayerLeaders(LEADERS_QUERY).catch(
       (caught: unknown) => caught,
@@ -812,7 +764,6 @@ describe('fetchPlayerLeaders', () => {
 
 describe('fetchPlayerCareer', () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
@@ -827,7 +778,7 @@ describe('fetchPlayerCareer', () => {
       postseason: null,
     }
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, career))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchPlayerCareer(2044124519)
 
@@ -841,10 +792,7 @@ describe('fetchPlayerCareer', () => {
 
   it('throws a PlayerApiError carrying the typed body for a 404 unknown_player', async () => {
     const detail = { error: 'unknown_player', player_id: 1, sport: 'nfl' }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(404, { detail })))
 
     const error = await fetchPlayerCareer(1).catch((caught: unknown) => caught)
 
@@ -871,10 +819,7 @@ describe('fetchPlayerCareer', () => {
     'treats a 404 with %s as an unmapped HTTP error with the 4xx copy',
     async (_name, detail) => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
-      )
+      answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(404, { detail })))
 
       const error = await fetchPlayerCareer(1).catch(
         (caught: unknown) => caught,
@@ -888,15 +833,12 @@ describe('fetchPlayerCareer', () => {
 })
 
 describe('fetchYears', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
 
   it('resolves with the parsed years list on a 200 response, defaulting to sport=cfb and method=keener', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { years: [2004, 2005, 2006] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchYears()
 
@@ -911,7 +853,7 @@ describe('fetchYears', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { years: [2021, 2022] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchYears('nfl')
 
@@ -923,7 +865,7 @@ describe('fetchYears', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { years: [2005] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchYears('nfl', 'elo')
 
@@ -937,7 +879,7 @@ describe('fetchYears', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { years: [2004, 2005] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchYears('cfb', 'elo')
 
@@ -946,10 +888,7 @@ describe('fetchYears', () => {
   })
 
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(networkError()))
 
     await expect(fetchYears()).rejects.toBeInstanceOf(VerdictNetworkError)
     await expect(fetchYears()).rejects.toThrow(NETWORK_ERROR_COPY)
@@ -957,19 +896,13 @@ describe('fetchYears', () => {
 
   it('throws a VerdictHttpError on a non-2xx response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
 
     await expect(fetchYears()).rejects.toBeInstanceOf(VerdictHttpError)
   })
 })
 
 describe('fetchTeams', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
 
   it('resolves with the parsed team list on a 200 response, defaulting to sport=cfb and method=keener', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -981,7 +914,7 @@ describe('fetchTeams', () => {
         ],
       }),
     )
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const result = await fetchTeams()
 
@@ -1000,7 +933,7 @@ describe('fetchTeams', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { teams: [], team_details: [] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchTeams('cfb', 'keener', 2005)
 
@@ -1013,7 +946,7 @@ describe('fetchTeams', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { teams: [], team_details: [] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchTeams('cfb', 'elo', 2005)
 
@@ -1032,7 +965,7 @@ describe('fetchTeams', () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, { teams: [], team_details: [] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchTeams('cfb', 'elo', year)
 
@@ -1049,7 +982,7 @@ describe('fetchTeams', () => {
       .mockResolvedValue(
         jsonResponse(200, { teams: ['Chiefs', 'Bills'], team_details: [] }),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchTeams('nfl')
 
@@ -1058,10 +991,7 @@ describe('fetchTeams', () => {
   })
 
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(networkError()))
 
     await expect(fetchTeams()).rejects.toBeInstanceOf(VerdictNetworkError)
     await expect(fetchTeams()).rejects.toThrow(NETWORK_ERROR_COPY)
@@ -1069,10 +999,7 @@ describe('fetchTeams', () => {
 
   it('throws a VerdictHttpError on a non-2xx response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
 
     await expect(fetchTeams()).rejects.toBeInstanceOf(VerdictHttpError)
   })

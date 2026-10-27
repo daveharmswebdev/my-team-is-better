@@ -9,12 +9,8 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  NETWORK_ERROR_COPY,
-  SERVER_ERROR_COPY,
-  VerdictHttpError,
-  VerdictNetworkError,
-} from '../../lib/api/client'
+import { HttpResponse } from 'msw'
+import { NETWORK_ERROR_COPY, SERVER_ERROR_COPY } from '../../lib/api/client'
 import type { PlayerLeadersQuery } from '../../lib/api/client'
 import type { PlayerLeaderRowOut, PlayerLeadersOut } from '../../lib/api/types'
 import {
@@ -42,23 +38,30 @@ import {
   fgPctEmptyCopy,
   fgPctNote,
 } from '../../lib/playerStats'
+import {
+  creditsHandler,
+  hang,
+  httpError,
+  networkError,
+  playerLeadersHandler,
+} from '../../mocks/handlers'
+import { server } from '../../test/server'
 import { PlayerLeadersPage } from './PlayerLeadersPage'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
+/**
+ * `GET /api/players/leaders` and `GET /api/credits`, answered through MSW
+ * (issue #221): the page calls the real client.
+ */
+const mockedFetchPlayerLeaders =
+  vi.fn<Parameters<typeof playerLeadersHandler>[0]>()
+const mockedFetchCredits = vi.fn<Parameters<typeof creditsHandler>[0]>()
+
+beforeEach(() => {
+  server.use(
+    playerLeadersHandler(mockedFetchPlayerLeaders),
+    creditsHandler(mockedFetchCredits),
   )
-  return {
-    ...actual,
-    fetchPlayerLeaders: vi.fn(),
-    fetchCredits: vi.fn(),
-  }
 })
-
-import { fetchCredits, fetchPlayerLeaders } from '../../lib/api/client'
-
-const mockedFetchPlayerLeaders = vi.mocked(fetchPlayerLeaders)
-const mockedFetchCredits = vi.mocked(fetchCredits)
 
 /** 50 distinct rows, ranked from `offset + 1`: one full page of 204. */
 function pageOf(query: PlayerLeadersQuery): PlayerLeadersOut {
@@ -157,7 +160,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
   })
 
   it('shows a loading status while the first page is on its way', () => {
-    mockedFetchPlayerLeaders.mockReturnValue(new Promise(() => {}))
+    mockedFetchPlayerLeaders.mockReturnValue(hang())
 
     renderPage()
 
@@ -433,8 +436,8 @@ describe('PlayerLeadersPage (issue #296)', () => {
 
   it('still points to the credits when they fail to load', async () => {
     mockedFetchPlayerLeaders.mockResolvedValue(LEADERS_BY_YARDS)
-    mockedFetchCredits.mockRejectedValue(
-      new VerdictNetworkError(NETWORK_ERROR_COPY),
+    mockedFetchCredits.mockResolvedValue(
+      networkError(),
     )
 
     renderPage()
@@ -447,8 +450,8 @@ describe('PlayerLeadersPage (issue #296)', () => {
   })
 
   it("shows the narrator's network line when the leaders can't be reached", async () => {
-    mockedFetchPlayerLeaders.mockRejectedValue(
-      new VerdictNetworkError(NETWORK_ERROR_COPY),
+    mockedFetchPlayerLeaders.mockResolvedValue(
+      networkError(),
     )
 
     renderPage()
@@ -460,8 +463,8 @@ describe('PlayerLeadersPage (issue #296)', () => {
   })
 
   it("shows the narrator's 5xx line for a server error, never the status", async () => {
-    mockedFetchPlayerLeaders.mockRejectedValue(
-      new VerdictHttpError(500, 'boom'),
+    mockedFetchPlayerLeaders.mockResolvedValue(
+      httpError(500, 'boom'),
     )
 
     renderPage()
@@ -472,7 +475,10 @@ describe('PlayerLeadersPage (issue #296)', () => {
   })
 
   it('shows the 5xx line for an error nothing classified', async () => {
-    mockedFetchPlayerLeaders.mockRejectedValue(new Error('odd'))
+    // A 200 whose body isn't JSON: nothing the client maps.
+    mockedFetchPlayerLeaders.mockResolvedValue(
+      new HttpResponse('odd', { status: 200 }),
+    )
 
     renderPage()
 

@@ -8,14 +8,7 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  NETWORK_ERROR_COPY,
-  PlayerApiError,
-  PlayersNotComparableError,
-  SERVER_ERROR_COPY,
-  VerdictHttpError,
-  VerdictNetworkError,
-} from '../../lib/api/client'
+import { NETWORK_ERROR_COPY, SERVER_ERROR_COPY } from '../../lib/api/client'
 import { PLAYER_POSITION_GROUPS } from '../../lib/api/types'
 import type {
   PlayerComparisonOut,
@@ -64,38 +57,44 @@ import {
   PLAYER_NOT_FOUND_COPY,
   STARTER_RECORD_NOTE,
 } from '../../lib/playerStats'
+import {
+  creditsHandler,
+  hang,
+  httpError,
+  networkError,
+  playerCareerHandler,
+  playerComparisonHandler,
+  playerSearchHandler,
+  qbVerdictHandler,
+  typedError,
+} from '../../mocks/handlers'
+import { server } from '../../test/server'
 import { expectReadingOrder, matchMediaFor } from '../../test/viewport'
 import { PlayerComparePage } from './PlayerComparePage'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
+/**
+ * The player endpoints and `GET /api/credits`, answered through MSW (issue
+ * #221): the page calls the real client.
+ */
+// Never answers unless a test says otherwise: a QB pair's comparison asks
+// for its narration (#459), which most tests here don't look at.
+const mockedVerdict = vi.fn<Parameters<typeof qbVerdictHandler>[0]>(() =>
+  hang(),
+)
+const mockedCompare = vi.fn<Parameters<typeof playerComparisonHandler>[0]>()
+const mockedCareer = vi.fn<Parameters<typeof playerCareerHandler>[0]>()
+const mockedSearch = vi.fn<Parameters<typeof playerSearchHandler>[0]>()
+const mockedCredits = vi.fn<Parameters<typeof creditsHandler>[0]>()
+
+beforeEach(() => {
+  server.use(
+    qbVerdictHandler(mockedVerdict),
+    playerComparisonHandler(mockedCompare),
+    playerCareerHandler(mockedCareer),
+    playerSearchHandler(mockedSearch),
+    creditsHandler(mockedCredits),
   )
-  return {
-    ...actual,
-    fetchPlayerComparison: vi.fn(),
-    fetchPlayerCareer: vi.fn(),
-    searchPlayers: vi.fn(),
-    fetchCredits: vi.fn(),
-    // Never answers unless a test says otherwise: a QB pair's comparison
-    // asks for its narration (#459), which most tests here don't look at.
-    fetchQbVerdict: vi.fn(() => new Promise(() => {})),
-  }
 })
-
-import {
-  fetchCredits,
-  fetchPlayerCareer,
-  fetchPlayerComparison,
-  fetchQbVerdict,
-  searchPlayers,
-} from '../../lib/api/client'
-
-const mockedVerdict = vi.mocked(fetchQbVerdict)
-const mockedCompare = vi.mocked(fetchPlayerComparison)
-const mockedCareer = vi.mocked(fetchPlayerCareer)
-const mockedSearch = vi.mocked(searchPlayers)
-const mockedCredits = vi.mocked(fetchCredits)
 
 const WARNER = 2044124519
 const MCNAIR = 2385180619
@@ -177,7 +176,7 @@ function compareByPair(comparisons: PlayerComparisonOut[]) {
         comparison.a.player_id === a && comparison.b.player_id === b,
     )
     return found === undefined
-      ? Promise.reject(new Error(`no fixture for ${a}:${b}`))
+      ? Promise.resolve(httpError(500, `no fixture for ${a}:${b}`))
       : Promise.resolve(found)
   })
 }
@@ -393,8 +392,8 @@ describe('PlayerComparePage (issue #301)', () => {
   })
 
   it("answers an unknown player in the narrator's voice, with a way back to the leaders", async () => {
-    mockedCompare.mockRejectedValue(
-      new PlayerApiError(404, {
+    mockedCompare.mockResolvedValue(
+      typedError(404, {
         error: 'unknown_player',
         player_id: 1,
         sport: 'nfl',
@@ -423,7 +422,7 @@ describe('PlayerComparePage (issue #301)', () => {
   })
 
   it("shows the narrator's network line when the comparison can't be reached", async () => {
-    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCompare.mockResolvedValue(networkError())
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
 
@@ -433,7 +432,7 @@ describe('PlayerComparePage (issue #301)', () => {
   })
 
   it("shows the narrator's 5xx line, never the status", async () => {
-    mockedCompare.mockRejectedValue(new VerdictHttpError(503, ''))
+    mockedCompare.mockResolvedValue(httpError(503, ''))
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
 
@@ -462,6 +461,7 @@ describe('PlayerComparePage (issue #301)', () => {
 
     // Player B searches only Player A's group (#436).
     expect(mockedSearch).toHaveBeenCalledWith('McNair', {
+      limit: 10,
       signal: expect.any(AbortSignal) as AbortSignal,
       group: 'QB',
     })
@@ -489,6 +489,7 @@ describe('PlayerComparePage (issue #301)', () => {
     await user.type(playerA(), 'c')
     await waitFor(() => {
       expect(mockedSearch).toHaveBeenCalledWith('m c', {
+        limit: 10,
         signal: expect.any(AbortSignal) as AbortSignal,
       })
     })
@@ -827,7 +828,7 @@ describe('PlayerComparePage: the comparison modal (issue #310)', () => {
   })
 
   it('shows the narrator error state in the modal, with nothing to share', async () => {
-    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCompare.mockResolvedValue(networkError())
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
 
@@ -839,8 +840,8 @@ describe('PlayerComparePage: the comparison modal (issue #310)', () => {
   })
 
   it('shows an unknown player in the modal, with nothing to share', async () => {
-    mockedCompare.mockRejectedValue(
-      new PlayerApiError(404, {
+    mockedCompare.mockResolvedValue(
+      typedError(404, {
         error: 'unknown_player',
         player_id: 1,
         sport: 'nfl',
@@ -939,7 +940,7 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
     // After a failed link closes, Player A's group is looked up (#436 round
     // 3). Held out here, so these tests see the fields as the answers left
     // them; the #436 describe below settles it.
-    mockedCareer.mockReturnValue(new Promise(() => {}))
+    mockedCareer.mockReturnValue(hang())
     mockedSearch.mockReset()
     mockedCredits.mockReset()
     mockedCredits.mockResolvedValue({
@@ -960,7 +961,7 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
   it('a failed link keeps its pair: the fields say who, Compare is enabled and asks again (a)', async () => {
     const user = userEvent.setup()
     mockedCompare
-      .mockRejectedValueOnce(new VerdictNetworkError(NETWORK_ERROR_COPY))
+      .mockResolvedValueOnce(networkError())
       .mockResolvedValue(WARNER_VS_MCNAIR)
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
@@ -997,7 +998,7 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
 
   it('closing a failed link returns focus to the Compare button (b)', async () => {
     const user = userEvent.setup()
-    mockedCompare.mockRejectedValue(new VerdictHttpError(503, ''))
+    mockedCompare.mockResolvedValue(httpError(503, ''))
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
     await within(await screen.findByRole('dialog')).findByRole('alert')
@@ -1008,8 +1009,8 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
 
   it('closing an unknown-player link returns focus to an enabled Compare', async () => {
     const user = userEvent.setup()
-    mockedCompare.mockRejectedValue(
-      new PlayerApiError(404, {
+    mockedCompare.mockResolvedValue(
+      typedError(404, {
         error: 'unknown_player',
         player_id: 1,
         sport: 'nfl',
@@ -1027,7 +1028,7 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
 
   it('picking a player into one slot of a failed link never names the other slot (c)', async () => {
     const user = userEvent.setup()
-    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCompare.mockResolvedValue(networkError())
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
     await within(await screen.findByRole('dialog')).findByRole('alert')
@@ -1129,7 +1130,7 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
     const user = userEvent.setup()
     const retry = heldRequest()
     mockedCompare
-      .mockRejectedValueOnce(new VerdictNetworkError(NETWORK_ERROR_COPY))
+      .mockResolvedValueOnce(networkError())
       .mockReturnValueOnce(retry.promise)
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
@@ -1149,7 +1150,7 @@ describe('PlayerComparePage: the form after a close (issues #308, #324)', () => 
     expect(within(reopened).queryByRole('alert')).not.toBeInTheDocument()
 
     // The retry fails the same way: its own failure shows.
-    retry.reject(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    retry.reject(networkError())
     expect(
       await within(screen.getByRole('dialog')).findByRole('alert'),
     ).toHaveTextContent(NETWORK_ERROR_COPY)
@@ -1219,7 +1220,7 @@ describe('PlayerComparePage: a lone link whose career lookup failed (issue #367)
   })
 
   const unknownPlayer = () =>
-    new PlayerApiError(404, {
+    typedError(404, {
       error: 'unknown_player',
       player_id: WARNER,
       sport: 'nfl',
@@ -1227,7 +1228,7 @@ describe('PlayerComparePage: a lone link whose career lookup failed (issue #367)
 
   it("shows the narrator's line while the fields hold only the lone link's player", async () => {
     const user = userEvent.setup()
-    mockedCareer.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCareer.mockResolvedValue(networkError())
 
     renderPage(`?a=${WARNER}`)
 
@@ -1245,7 +1246,7 @@ describe('PlayerComparePage: a lone link whose career lookup failed (issue #367)
   })
 
   it('shows the unknown-player line while the fields hold only the lone pick', async () => {
-    mockedCareer.mockRejectedValue(unknownPlayer())
+    mockedCareer.mockResolvedValue(unknownPlayer())
 
     renderPage(`?a=${WARNER}`)
 
@@ -1258,7 +1259,7 @@ describe('PlayerComparePage: a lone link whose career lookup failed (issue #367)
   // the fields can come to hold is a new Player A picked by hand.
   it("drops the career's network line once another player is picked: the prompt follows the fields", async () => {
     const user = userEvent.setup()
-    mockedCareer.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCareer.mockResolvedValue(networkError())
 
     renderPage(`?a=${WARNER}`)
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -1277,7 +1278,7 @@ describe('PlayerComparePage: a lone link whose career lookup failed (issue #367)
 
   it("drops the career's unknown-player line once another player is picked", async () => {
     const user = userEvent.setup()
-    mockedCareer.mockRejectedValue(unknownPlayer())
+    mockedCareer.mockResolvedValue(unknownPlayer())
 
     renderPage(`?a=${WARNER}`)
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -1331,7 +1332,7 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
     mockedCareer.mockImplementation((id) => {
       const found = careers.find((career) => career.player_id === id)
       return found === undefined
-        ? Promise.reject(new Error(`no career fixture for ${id}`))
+        ? Promise.resolve(httpError(500, `no career fixture for ${id}`))
         : Promise.resolve(found)
     })
     const answers = [SEARCH_FAULK, SEARCH_FARMER_RB, SEARCH_WILKINS]
@@ -1372,6 +1373,7 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
 
     await pick(user, playerA(), 'faulk', /Marshall Faulk/)
     expect(mockedSearch).toHaveBeenCalledWith('faulk', {
+      limit: 10,
       signal: expect.any(AbortSignal) as AbortSignal,
     })
     expect(mockedSearch.mock.calls[0]?.[1]).not.toHaveProperty('group')
@@ -1379,6 +1381,7 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
     await pick(user, playerB(), 'farmer', /Robert Farmer/)
 
     expect(mockedSearch).toHaveBeenLastCalledWith('farmer', {
+      limit: 10,
       signal: expect.any(AbortSignal) as AbortSignal,
       group: 'RB',
     })
@@ -1469,8 +1472,8 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
   })
 
   it('refuses a mixed link: the refusal, Player A kept, Player B cleared and ready, no pair in the URL', async () => {
-    mockedCompare.mockRejectedValue(
-      new PlayersNotComparableError(400, {
+    mockedCompare.mockResolvedValue(
+      typedError(400, {
         error: 'players_not_comparable',
         a_group: 'QB',
         b_group: 'RB',
@@ -1498,8 +1501,8 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
   })
 
   it('names a group-less Player B by his position in the refusal', async () => {
-    mockedCompare.mockRejectedValue(
-      new PlayersNotComparableError(400, {
+    mockedCompare.mockResolvedValue(
+      typedError(400, {
         error: 'players_not_comparable',
         a_group: 'QB',
         b_group: null,
@@ -1519,8 +1522,8 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
   })
 
   it('a mixed link whose Player A has no group gets the uncomparable line', async () => {
-    mockedCompare.mockRejectedValue(
-      new PlayersNotComparableError(400, {
+    mockedCompare.mockResolvedValue(
+      typedError(400, {
         error: 'players_not_comparable',
         a_group: null,
         b_group: 'QB',
@@ -1538,8 +1541,8 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
 
   it('the refusal goes once a new Player B is picked', async () => {
     const user = userEvent.setup()
-    mockedCompare.mockRejectedValue(
-      new PlayersNotComparableError(400, {
+    mockedCompare.mockResolvedValue(
+      typedError(400, {
         error: 'players_not_comparable',
         a_group: 'RB',
         b_group: 'QB',
@@ -1602,23 +1605,21 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
       'an unknown player (404)',
       `?a=${WARNER}&b=1`,
       () =>
-        Promise.reject(
-          new PlayerApiError(404, {
-            error: 'unknown_player',
-            player_id: 1,
-            sport: 'nfl',
-          }),
-        ),
+        typedError(404, {
+          error: 'unknown_player',
+          player_id: 1,
+          sport: 'nfl',
+        }),
     ],
     [
       'a network failure',
       `?a=${WARNER}&b=${MCNAIR}`,
-      () => Promise.reject(new VerdictNetworkError(NETWORK_ERROR_COPY)),
+      () => networkError(),
     ],
     [
       'a 5xx',
       `?a=${WARNER}&b=${MCNAIR}`,
-      () => Promise.reject(new VerdictHttpError(503, '')),
+      () => httpError(503, ''),
     ],
     ['the same player twice', `?a=${WARNER}&b=${WARNER}`, undefined],
   ] as const)(
@@ -1648,6 +1649,7 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
 
       expect(playerB()).toHaveValue('Steve McNair')
       expect(mockedSearch).toHaveBeenLastCalledWith('McNair', {
+        limit: 10,
         signal: expect.any(AbortSignal) as AbortSignal,
         group: 'QB',
       })
@@ -1657,9 +1659,9 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
 
   it("still lets Player B's pick be cleared when Player A's group can't be looked up", async () => {
     const user = userEvent.setup()
-    mockedCompare.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCompare.mockResolvedValue(networkError())
     mockedCareer.mockReset()
-    mockedCareer.mockRejectedValue(new VerdictNetworkError(NETWORK_ERROR_COPY))
+    mockedCareer.mockResolvedValue(networkError())
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)
     const dialog = await screen.findByRole('dialog')
@@ -1868,7 +1870,7 @@ describe('PlayerComparePage: the QB score (issue #459)', () => {
   it.each([
     [
       '400',
-      new PlayersNotComparableError(400, {
+      typedError(400, {
         error: 'players_not_comparable',
         a_group: 'QB',
         b_group: 'RB',
@@ -1877,7 +1879,7 @@ describe('PlayerComparePage: the QB score (issue #459)', () => {
     ],
     [
       '404',
-      new PlayerApiError(404, {
+      typedError(404, {
         error: 'unknown_player',
         player_id: 1,
         sport: 'nfl',
@@ -1886,20 +1888,20 @@ describe('PlayerComparePage: the QB score (issue #459)', () => {
     ],
     [
       '422',
-      new VerdictHttpError(422, '{}'),
+      httpError(422, '{}'),
       /Your question came through garbled/,
     ],
-    ['503', new VerdictHttpError(503, '{}'), /Something broke in the back/],
+    ['503', httpError(503, '{}'), /Something broke in the back/],
     [
       'network or timeout',
-      new VerdictNetworkError(NETWORK_ERROR_COPY),
+      networkError(),
       /Lost you there, pal\. My two cents/,
     ],
   ])(
     'a narration %s failure is said in voice, and the score stays',
     async (_name, error, copy) => {
       mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
-      mockedVerdict.mockRejectedValue(error)
+      mockedVerdict.mockResolvedValue(error)
 
       renderPage(`?a=${WARNER}&b=${MCNAIR}`)
 
@@ -1936,7 +1938,7 @@ describe('PlayerComparePage: the QB score (issue #459)', () => {
 
   it('abandons the narration request when the comparison closes', async () => {
     mockedCompare.mockResolvedValue(WARNER_VS_MCNAIR)
-    mockedVerdict.mockReturnValue(new Promise(() => {}))
+    mockedVerdict.mockReturnValue(hang())
     const user = userEvent.setup()
 
     renderPage(`?a=${WARNER}&b=${MCNAIR}`)

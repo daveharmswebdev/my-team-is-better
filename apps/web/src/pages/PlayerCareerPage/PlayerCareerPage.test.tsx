@@ -1,13 +1,15 @@
 import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { NETWORK_ERROR_COPY, SERVER_ERROR_COPY } from '../../lib/api/client'
 import {
-  NETWORK_ERROR_COPY,
-  PlayerApiError,
-  SERVER_ERROR_COPY,
-  VerdictHttpError,
-  VerdictNetworkError,
-} from '../../lib/api/client'
+  creditsHandler,
+  httpError,
+  networkError,
+  playerCareerHandler,
+  typedError,
+} from '../../mocks/handlers'
+import { server } from '../../test/server'
 import {
   CAREER_WITH_NULL_STATS,
   DATA_SOURCES,
@@ -23,21 +25,19 @@ import {
 } from '../../lib/playerStats'
 import { PlayerCareerPage } from './PlayerCareerPage'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
+/**
+ * `GET /api/players/:id` and `GET /api/credits`, answered through MSW (issue
+ * #221): the page calls the real client.
+ */
+const mockedFetchPlayerCareer = vi.fn<Parameters<typeof playerCareerHandler>[0]>()
+const mockedFetchCredits = vi.fn<Parameters<typeof creditsHandler>[0]>()
+
+beforeEach(() => {
+  server.use(
+    playerCareerHandler(mockedFetchPlayerCareer),
+    creditsHandler(mockedFetchCredits),
   )
-  return {
-    ...actual,
-    fetchPlayerCareer: vi.fn(),
-    fetchCredits: vi.fn(),
-  }
 })
-
-import { fetchCredits, fetchPlayerCareer } from '../../lib/api/client'
-
-const mockedFetchPlayerCareer = vi.mocked(fetchPlayerCareer)
-const mockedFetchCredits = vi.mocked(fetchCredits)
 
 function renderPage(path = '/nfl/players/2044124519') {
   return render(
@@ -247,8 +247,8 @@ describe('PlayerCareerPage (issue #296)', () => {
   })
 
   it("answers an unknown player in the narrator's voice, with a way back to the leaders", async () => {
-    mockedFetchPlayerCareer.mockRejectedValue(
-      new PlayerApiError(404, {
+    mockedFetchPlayerCareer.mockResolvedValue(
+      typedError(404, {
         error: 'unknown_player',
         player_id: 1,
         sport: 'nfl',
@@ -276,8 +276,8 @@ describe('PlayerCareerPage (issue #296)', () => {
   })
 
   it("shows the narrator's network line when the player can't be reached", async () => {
-    mockedFetchPlayerCareer.mockRejectedValue(
-      new VerdictNetworkError(NETWORK_ERROR_COPY),
+    mockedFetchPlayerCareer.mockResolvedValue(
+      networkError(),
     )
 
     renderPage()
@@ -288,7 +288,7 @@ describe('PlayerCareerPage (issue #296)', () => {
   })
 
   it("shows the narrator's 5xx line for a server error, never the status", async () => {
-    mockedFetchPlayerCareer.mockRejectedValue(new VerdictHttpError(503, ''))
+    mockedFetchPlayerCareer.mockResolvedValue(httpError(503, ''))
 
     renderPage()
 

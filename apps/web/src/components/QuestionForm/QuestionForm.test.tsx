@@ -14,25 +14,26 @@ import { SPORTS } from '../../lib/api/types'
 import type { Method, Sport, TeamDetail, TeamsOut } from '../../lib/api/types'
 import { QuestionForm, YEAR_DEBOUNCE_MS } from './QuestionForm'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
-  )
-  return {
-    ...actual,
-    fetchYears: vi.fn(),
-    fetchTeams: vi.fn(),
-  }
-})
-
+import { CATALOG_TIMEOUT_MS } from '../../lib/api/client'
 import {
-  CATALOG_TIMEOUT_MS,
-  fetchTeams,
-  fetchYears,
-} from '../../lib/api/client'
+  hang,
+  httpError,
+  networkError,
+  teamsHandler,
+  yearsHandler,
+} from '../../mocks/handlers'
+import { server } from '../../test/server'
 
-const mockedFetchYears = vi.mocked(fetchYears)
-const mockedFetchTeams = vi.mocked(fetchTeams)
+/**
+ * `GET /api/years` and `GET /api/teams`, answered through MSW (issue #221):
+ * the form calls the real `fetchYears` / `fetchTeams`.
+ */
+const mockedFetchYears = vi.fn<Parameters<typeof yearsHandler>[0]>()
+const mockedFetchTeams = vi.fn<Parameters<typeof teamsHandler>[0]>()
+
+beforeEach(() => {
+  server.use(yearsHandler(mockedFetchYears), teamsHandler(mockedFetchTeams))
+})
 
 /**
  * The year the form defaults to under the `beforeEach` catalog: the newest
@@ -204,7 +205,7 @@ function stubTeamsRejectingNonIntegerYears() {
   mockedFetchTeams.mockImplementation(
     (_sport?: Sport, _method?: Method, year?: number) =>
       year !== undefined && !Number.isInteger(year)
-        ? Promise.reject(new Error('422: year is not an integer'))
+        ? Promise.resolve(httpError(422, '{"detail": "year is not an integer"}'))
         : Promise.resolve(teamsOut(CFB_DETAILS)),
   )
 }
@@ -465,8 +466,8 @@ describe('QuestionForm', () => {
     })
 
     it('does not block a typed year while the catalog fetch is still in flight', () => {
-      mockedFetchYears.mockReturnValue(new Promise(() => {}))
-      mockedFetchTeams.mockReturnValue(new Promise(() => {}))
+      mockedFetchYears.mockReturnValue(hang())
+      mockedFetchTeams.mockReturnValue(hang())
 
       render(<QuestionForm onSubmit={vi.fn()} />)
 
@@ -485,7 +486,7 @@ describe('QuestionForm', () => {
 
   describe('year default and validation (issue #136)', () => {
     it('defaults the year to the newest season in the College catalog, not the calendar year', async () => {
-      mockedFetchYears.mockReturnValue(new Promise(() => {}))
+      mockedFetchYears.mockReturnValue(hang())
       const { unmount } = render(<QuestionForm onSubmit={vi.fn()} />)
       // Before the catalog lands the field is empty, never a guess.
       expect(screen.getByLabelText(/year/i)).toHaveValue(null)
@@ -673,7 +674,7 @@ describe('QuestionForm', () => {
     })
 
     it('never lets a failed years fetch block a typed year', async () => {
-      mockedFetchYears.mockRejectedValue(new Error('network down'))
+      mockedFetchYears.mockResolvedValue(networkError())
       const user = userEvent.setup()
       const onSubmit = vi.fn()
       render(<QuestionForm onSubmit={onSubmit} />)
@@ -1069,8 +1070,8 @@ describe('QuestionForm', () => {
 
   describe('degraded catalog states (issue #80)', () => {
     it('leaves a usable plain input when the catalog fetch fails', async () => {
-      mockedFetchYears.mockRejectedValue(new Error('network down'))
-      mockedFetchTeams.mockRejectedValue(new Error('network down'))
+      mockedFetchYears.mockResolvedValue(networkError())
+      mockedFetchTeams.mockResolvedValue(networkError())
       const user = userEvent.setup()
       const onSubmit = vi.fn()
       // compare: the champion question has no "your team" field (issue #198).
@@ -1152,15 +1153,13 @@ describe('QuestionForm', () => {
   })
 
   /**
-   * Issue #237, through the real client: only `fetch` and the clock are
-   * faked. A catalog request that never answers must end in the same
-   * degraded state as one that fails outright, once its timeout passes.
+   * Issue #237: only the clock is faked, besides the API. A catalog request
+   * that never answers must end in the same degraded state as one that fails
+   * outright, once its timeout passes.
    */
   describe('hung catalog requests (issue #237)', () => {
     afterEach(() => {
       vi.useRealTimers()
-      vi.unstubAllGlobals()
-      vi.restoreAllMocks()
     })
 
     /** Moves the fake clock, then lets the rejection chain and React settle. */
@@ -1174,30 +1173,16 @@ describe('QuestionForm', () => {
     }
 
     /**
-     * Routes the mocked catalog fetchers to the real client, over a `fetch`
-     * that never answers and gives up only when its request's signal aborts.
+     * Catalog requests that never answer; the client's `fetch` gives up only
+     * when its request's signal aborts.
      */
-    async function hangEveryCatalogRequest() {
-      const actual = await vi.importActual<
-        typeof import('../../lib/api/client')
-      >('../../lib/api/client')
-      mockedFetchYears.mockImplementation(actual.fetchYears)
-      mockedFetchTeams.mockImplementation(actual.fetchTeams)
-      vi.stubGlobal(
-        'fetch',
-        vi.fn(
-          (_url: string, init?: RequestInit) =>
-            new Promise<Response>((_resolve, reject) => {
-              init?.signal?.addEventListener('abort', () => {
-                reject(new DOMException('aborted', 'AbortError'))
-              })
-            }),
-        ),
-      )
+    function hangEveryCatalogRequest() {
+      mockedFetchYears.mockImplementation(hang)
+      mockedFetchTeams.mockImplementation(hang)
     }
 
     it('degrades a hung /api/years to the failed-years hint and an unvalidated year', async () => {
-      await hangEveryCatalogRequest()
+      hangEveryCatalogRequest()
       vi.useFakeTimers()
       const onSubmit = vi.fn()
       render(<QuestionForm onSubmit={onSubmit} />)
@@ -1228,7 +1213,7 @@ describe('QuestionForm', () => {
     })
 
     it('degrades a hung /api/teams to plain team inputs with the failed-list hint', async () => {
-      await hangEveryCatalogRequest()
+      hangEveryCatalogRequest()
       vi.useFakeTimers()
       const onSubmit = vi.fn()
       render(
@@ -1386,7 +1371,7 @@ describe('QuestionForm', () => {
     })
 
     it('says nothing before the first catalog has landed', async () => {
-      mockedFetchTeams.mockReturnValue(new Promise(() => {}))
+      mockedFetchTeams.mockReturnValue(hang())
       render(
         <QuestionForm
           onSubmit={vi.fn()}
@@ -1499,7 +1484,7 @@ describe('QuestionForm', () => {
     })
 
     it('says nothing when the team catalog fetch failed', async () => {
-      mockedFetchTeams.mockRejectedValue(new Error('network down'))
+      mockedFetchTeams.mockResolvedValue(networkError())
       render(
         <QuestionForm
           onSubmit={vi.fn()}
@@ -1577,22 +1562,22 @@ describe('QuestionForm', () => {
       "keeps the newer year's team list when an earlier year's slower request %s after it",
       async (outcome) => {
         mockedFetchYears.mockResolvedValue({ years: [2017, 2018, 2019] })
-        const slow2018: { promise?: Promise<TeamsOut>; settle: () => void } = {
+        const slow2018: { promise?: Promise<TeamsOut | Response>; settle: () => void } = {
           settle: () => {},
         }
         mockedFetchTeams.mockImplementation(
           (_sport?: Sport, _method?: Method, year?: number) => {
             if (year === 2018) {
-              slow2018.promise = new Promise<TeamsOut>(
-                (resolvePromise, rejectPromise) => {
+              slow2018.promise = new Promise<TeamsOut | Response>(
+                (resolvePromise) => {
                   slow2018.settle = () => {
                     // Texas *is* a 2018 team, so a leaked resolve would
-                    // silently drop the 2019 flag; a leaked reject would swap
+                    // silently drop the 2019 flag; a leaked failure would swap
                     // the team hint for the failure copy.
                     if (outcome === 'resolves') {
                       resolvePromise(teamsOut(CFB_DETAILS))
                     } else {
-                      rejectPromise(new Error('network down'))
+                      resolvePromise(networkError())
                     }
                   }
                 },
@@ -1679,23 +1664,23 @@ describe('QuestionForm', () => {
      * just as surely as a leaked College year list does.
      */
     function stubSlowCollegeYears(outcome: 'resolves' | 'rejects'): {
-      promise?: Promise<{ years: number[] }>
+      promise?: Promise<{ years: number[] } | Response>
       settle: () => void
     } {
       const slow: {
-        promise?: Promise<{ years: number[] }>
+        promise?: Promise<{ years: number[] } | Response>
         settle: () => void
       } = { settle: () => {} }
       mockedFetchYears.mockImplementation((sport?: Sport) => {
         if (sport === 'nfl') {
           return Promise.resolve({ years: [2021, NEWEST_NFL_YEAR] })
         }
-        slow.promise = new Promise((resolvePromise, rejectPromise) => {
+        slow.promise = new Promise((resolvePromise) => {
           slow.settle = () => {
             if (outcome === 'resolves') {
               resolvePromise({ years: [2004, 2005, 2006] })
             } else {
-              rejectPromise(new Error('network down'))
+              resolvePromise(networkError())
             }
           }
         })
@@ -1709,7 +1694,7 @@ describe('QuestionForm', () => {
 
     /** Settles the held College request, checking it really was pending. */
     async function settleCollegeYears(slow: {
-      promise?: Promise<{ years: number[] }>
+      promise?: Promise<{ years: number[] } | Response>
       settle: () => void
     }) {
       const pending = slow.promise
@@ -1812,12 +1797,12 @@ describe('QuestionForm', () => {
       {
         state: 'still loading',
         stubYears: () =>
-          mockedFetchYears.mockReturnValue(new Promise(() => {})),
+          mockedFetchYears.mockReturnValue(hang()),
       },
       {
         state: 'failed',
         stubYears: () =>
-          mockedFetchYears.mockRejectedValue(new Error('network down')),
+          mockedFetchYears.mockResolvedValue(networkError()),
       },
       {
         state: 'ready, but empty',
@@ -1860,7 +1845,7 @@ describe('QuestionForm', () => {
     it.each(['999', '10000', '1e21'])(
       'rejects the implausible year "%s" even with no years catalog, and never sends it to /api/teams',
       async (typed) => {
-        mockedFetchYears.mockRejectedValue(new Error('network down'))
+        mockedFetchYears.mockResolvedValue(networkError())
         render(<QuestionForm onSubmit={vi.fn()} initialYear={2018} />)
         expect(
           await screen.findByText(/couldn't load the list of available years/i),
@@ -2626,7 +2611,7 @@ describe('QuestionForm', () => {
         "keeps Elo's default Year when Keener's slower years request %s after the switch",
         async (outcome) => {
           const slow: {
-            promise?: Promise<{ years: number[] }>
+            promise?: Promise<{ years: number[] } | Response>
             settle: () => void
           } = { settle: () => {} }
           mockedFetchYears.mockImplementation(
@@ -2634,12 +2619,12 @@ describe('QuestionForm', () => {
               if (method === 'elo') {
                 return Promise.resolve({ years: [2005, 2006, 2007] })
               }
-              slow.promise = new Promise((resolvePromise, rejectPromise) => {
+              slow.promise = new Promise((resolvePromise) => {
                 slow.settle = () => {
                   if (outcome === 'resolves') {
                     resolvePromise({ years: [2004, 2005, 2006] })
                   } else {
-                    rejectPromise(new Error('network down'))
+                    resolvePromise(networkError())
                   }
                 }
               })
@@ -2681,7 +2666,7 @@ describe('QuestionForm', () => {
       it.each(['resolves', 'rejects'] as const)(
         "keeps Elo's team list when Keener's slower team-list request %s after the switch",
         async (outcome) => {
-          const slow: { promise?: Promise<TeamsOut>; settle: () => void } = {
+          const slow: { promise?: Promise<TeamsOut | Response>; settle: () => void } = {
             settle: () => {},
           }
           mockedFetchTeams.mockImplementation(
@@ -2689,16 +2674,16 @@ describe('QuestionForm', () => {
               if (method === 'elo') {
                 return Promise.resolve(teamsOut([ALABAMA]))
               }
-              slow.promise = new Promise<TeamsOut>(
-                (resolvePromise, rejectPromise) => {
+              slow.promise = new Promise<TeamsOut | Response>(
+                (resolvePromise) => {
                   slow.settle = () => {
                     // Texas *is* in Keener's list, so a leaked resolve would
-                    // silently drop Elo's flag; a leaked reject would swap the
+                    // silently drop Elo's flag; a leaked failure would swap the
                     // team hint for the failure copy.
                     if (outcome === 'resolves') {
                       resolvePromise(teamsOut(CFB_DETAILS))
                     } else {
-                      rejectPromise(new Error('network down'))
+                      resolvePromise(networkError())
                     }
                   }
                 },

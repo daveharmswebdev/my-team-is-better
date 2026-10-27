@@ -4,36 +4,28 @@ import type { PlayerPositionGroup, PlayerSearchOut } from '../../lib/api/types'
 import { SEARCH_MC, SEARCH_MCNAIR } from '../../lib/playerFixtures'
 import { SEARCH_DEBOUNCE_MS, usePlayerSearch } from './usePlayerSearch'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
-  )
-  return { ...actual, searchPlayers: vi.fn() }
-})
+import { playerSearchHandler } from '../../mocks/handlers'
+import { server } from '../../test/server'
 
-import { searchPlayers } from '../../lib/api/client'
-
-const mockedSearch = vi.mocked(searchPlayers)
+/** `GET /api/players/search`, answered through MSW (issue #221). */
+const mockedSearch = vi.fn<Parameters<typeof playerSearchHandler>[0]>()
 
 interface Sent {
   query: string
-  signal: AbortSignal | undefined
+  signal: AbortSignal
   resolve: (answer: PlayerSearchOut) => void
 }
 
 /**
- * Every search hangs until the test settles it; a caller abort rejects it
- * the way the real client does, with a `DOMException` named `AbortError`.
+ * Every search hangs until the test settles it. A caller abort rejects it in
+ * the real client, which hands the request's signal to `fetch`.
  */
 function recordSearches(): Sent[] {
   const sent: Sent[] = []
   mockedSearch.mockImplementation((query, options) => {
-    const signal = options?.signal
-    return new Promise<PlayerSearchOut>((resolve, reject) => {
+    const signal = options.signal
+    return new Promise<PlayerSearchOut>((resolve) => {
       sent.push({ query, signal, resolve })
-      signal?.addEventListener('abort', () => {
-        reject(new DOMException('aborted', 'AbortError'))
-      })
     })
   })
   return sent
@@ -50,6 +42,7 @@ describe('usePlayerSearch: a superseded search is aborted (issue #370)', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockedSearch.mockReset()
+    server.use(playerSearchHandler(mockedSearch))
   })
 
   afterEach(() => {
@@ -141,6 +134,7 @@ describe('usePlayerSearch: a superseded search is aborted (issue #370)', () => {
     )
     await passDebounce()
     expect(mockedSearch).toHaveBeenLastCalledWith('faulk', {
+      limit: 10,
       signal: expect.any(AbortSignal) as AbortSignal,
       group: 'RB',
     })
@@ -149,6 +143,7 @@ describe('usePlayerSearch: a superseded search is aborted (issue #370)', () => {
     await passDebounce()
     expect(mockedSearch).toHaveBeenCalledTimes(2)
     expect(mockedSearch).toHaveBeenLastCalledWith('faulk', {
+      limit: 10,
       signal: expect.any(AbortSignal) as AbortSignal,
       group: 'WR',
     })

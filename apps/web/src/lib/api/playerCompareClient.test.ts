@@ -8,6 +8,8 @@ import {
   fetchPlayerComparison,
   searchPlayers,
 } from './client'
+import { hang } from '../../mocks/handlers'
+import { answerEveryRequest, type SentInit } from '../../test/network'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -18,13 +20,12 @@ function jsonResponse(status: number, body: unknown): Response {
 
 describe('player comparison and search client (issue #301)', () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
   it('asks for the comparison of a and b in the NFL', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { a: {} }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await fetchPlayerComparison(2044124519, 2385180619)
 
@@ -40,10 +41,7 @@ describe('player comparison and search client (issue #301)', () => {
 
   it("rejects the comparison's typed 404 with a PlayerApiError", async () => {
     const detail = { error: 'unknown_player', player_id: 1, sport: 'nfl' }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(404, { detail })))
 
     const error: unknown = await fetchPlayerComparison(2044124519, 1).catch(
       (caught: unknown) => caught,
@@ -59,10 +57,7 @@ describe('player comparison and search client (issue #301)', () => {
       a_group: 'QB',
       b_group: null,
     }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(400, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(400, { detail })))
 
     const error: unknown = await fetchPlayerComparison(
       2044124519,
@@ -75,7 +70,7 @@ describe('player comparison and search client (issue #301)', () => {
 
   it('searches within a position group when given one (#436)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rows: [] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await searchPlayers('faulk', { group: 'RB' })
 
@@ -90,7 +85,7 @@ describe('player comparison and search client (issue #301)', () => {
 
   it('searches the NFL with the given text and limit', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { rows: [] }))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     await searchPlayers('Mc Nair', { limit: 5 })
 
@@ -106,23 +101,20 @@ describe('player comparison and search client (issue #301)', () => {
 
   it("aborts the search's fetch when the caller's signal aborts (#370)", async () => {
     let fetchSignal: AbortSignal | undefined
-    vi.stubGlobal(
-      'fetch',
-      vi.fn((_url: string, init?: RequestInit) => {
-        fetchSignal = init?.signal ?? undefined
-        // Hangs until aborted, then rejects the way fetch does.
-        return new Promise<Response>((_resolve, reject) => {
-          fetchSignal?.addEventListener('abort', () => {
-            reject(new DOMException('aborted', 'AbortError'))
-          })
-        })
-      }),
-    )
+    answerEveryRequest((_url: string, init: SentInit) => {
+      fetchSignal = init.signal
+      // Hangs; the client's fetch rejects once the signal aborts.
+      return hang()
+    })
     const caller = new AbortController()
 
     const result = searchPlayers('mc', { signal: caller.signal }).catch(
       (caught: unknown) => caught,
     )
+    // The request crosses MSW's interceptor before it reaches the server.
+    await vi.waitFor(() => {
+      expect(fetchSignal).toBeDefined()
+    })
     expect(fetchSignal?.aborted).toBe(false)
     caller.abort()
 
@@ -139,10 +131,7 @@ describe('player comparison and search client (issue #301)', () => {
     ['searchPlayers', () => searchPlayers('mc')],
   ])('%s rejects a 500 with the 5xx copy', async (_name, send) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
 
     const error: unknown = await send().catch((caught: unknown) => caught)
 
