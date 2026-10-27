@@ -203,9 +203,10 @@ sheet uses it; otherwise the link is copied. Because the link carries `for`,
 address bar), and §5.3's hint says so.
 
 Accepted trade-off: a prompt-version bump can change the text an old link
-shows. Saved exact-copy links (#186) and per-verdict link previews (#185)
-are deferred until that trade-off or the plain previews become a real
-complaint.
+shows. Saved exact-copy links (#186) are deferred until that trade-off
+becomes a real complaint. Per-verdict link previews shipped in #185: Share
+mints a `/s` link whose page the API renders with the verdict's own title
+(ARCHITECTURE.md, "Per-link previews come from the API").
 
 ### 5.5 Explicitly out of scope for MVP
 
