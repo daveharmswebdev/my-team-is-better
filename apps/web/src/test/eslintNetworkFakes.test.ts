@@ -30,6 +30,8 @@ const PROBES = {
   test: 'src/pages/AboutPage/AboutPage.test.tsx',
   // `./client` names the API client only from inside src/lib/api.
   apiTest: 'src/lib/api/client.test.ts',
+  // From src/lib the client is `./api/client` (issue #221 round 3).
+  libTest: 'src/lib/qbScore.test.ts',
   setup: 'src/test/setup.ts',
   storybook: '.storybook/preview.tsx',
 } as const
@@ -37,7 +39,7 @@ const PROBES = {
 type ProbeKind = keyof typeof PROBES
 
 const ALL_KINDS = Object.keys(PROBES) as ProbeKind[]
-const TEST_KINDS: ProbeKind[] = ['test', 'apiTest', 'setup']
+const TEST_KINDS: ProbeKind[] = ['test', 'apiTest', 'libTest', 'setup']
 
 /** The rules a network fake must trip, at least one of them, as an error. */
 const NETWORK_FAKE_RULES = ['no-restricted-syntax', 'no-global-assign']
@@ -124,6 +126,27 @@ const FORBIDDEN: [string, string, ProbeKind[]][] = [
   [
     'a template-literal `vi.mock(`../../lib/api/client`)`',
     "import { vi } from 'vitest'\n\nvi.mock(`../../lib/api/client`)\n",
+    TEST_KINDS,
+  ],
+  // Issue #221 round 3: any ordinary relative path to the client.
+  [
+    "`vi.mock('./api/client')` from src/lib",
+    "import { vi } from 'vitest'\n\nvi.mock('./api/client')\n",
+    ['libTest'],
+  ],
+  [
+    "`vi.mock('./api/client', importActual factory)` from src/lib",
+    "import { vi } from 'vitest'\n\nvi.mock('./api/client', async () => {\n  const actual = await vi.importActual<typeof import('./api/client')>(\n    './api/client',\n  )\n  return { ...actual, fetchYears: vi.fn() }\n})\n",
+    ['libTest'],
+  ],
+  [
+    "`vi.doMock('../api/client')` from a deeper src/lib dir",
+    "import { vi } from 'vitest'\n\nvi.doMock('../api/client')\n",
+    ['apiTest', 'libTest'],
+  ],
+  [
+    "`vi.mock('../lib/api/client.ts')`",
+    "import { vi } from 'vitest'\n\nvi.mock('../lib/api/client.ts')\n",
     TEST_KINDS,
   ],
   // Issue #221 round 2: a cast on the receiver is an ordinary spelling, not

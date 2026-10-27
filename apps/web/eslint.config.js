@@ -122,8 +122,8 @@ const storySyntax = [
  * `` [`fetch`] ``, any assignment operator), `Object.assign`-ing a `fetch`
  * (shorthand, `'fetch':` or `[`fetch`]:`) onto one of them,
  * `<x>.stubGlobal('fetch', ...)`, `<x>.spyOn(<global>, 'fetch')`, and
- * `vi.mock` / `vi.doMock` of the API client (`.../lib/api/client`, any
- * extension, as a string, a template or an `import()`; `./client` too, from
+ * `vi.mock` / `vi.doMock` of the API client (`.../lib/api/client` or a
+ * relative `.../api/client`, any extension, as a string, a template or an `import()`; `./client` too, from
  * a test in src/lib/api). The global may be written `globalThis.window` and
  * the like, or sit under up to three casts (`as`, `satisfies`, `!`): issue
  * #221 round 2. Other modules named `client` (`react-dom/client`, ...) are
@@ -171,8 +171,13 @@ const FETCH_KEY = [
 ]
 
 const EXTENSION = '(\\.[cm]?[jt]sx?)?'
-/** The API client from anywhere: `.../lib/api/client`, with or without an extension. */
-const API_CLIENT = `/(^|\\/)lib\\/api\\/client${EXTENSION}$/`
+/**
+ * The API client from anywhere, with or without an extension: any path with
+ * `lib/api/client` in it, or a relative one ending in `api/client`
+ * (`./api/client` from src/lib, `../api/client`; issue #221 round 3).
+ * `react-dom/client`, `@apollo/client` and `../components/client` don't match.
+ */
+const API_CLIENT = `/((^|\\/)lib\\/api\\/client|^\\.{1,2}\\/(.*\\/)?api\\/client)${EXTENSION}$/`
 /** The API client from beside it, in src/lib/api. */
 const LOCAL_CLIENT = `/^\\.\\/client${EXTENSION}$/`
 const VI_MOCK = `CallExpression[callee.object.name='vi'][callee.property.name=${oneOf('mock|doMock')}]`
