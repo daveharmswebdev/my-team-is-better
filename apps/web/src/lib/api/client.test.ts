@@ -91,6 +91,33 @@ async function flushMicrotasks() {
   }
 }
 
+/**
+ * Issue #237: the GET `send` makes carries the signal its timeout aborts.
+ * Under MSW every request has a signal of its own, so this checks the
+ * signal's effect, not its presence (issue #221 round 2): on a server that
+ * never answers, the request's signal aborts once CATALOG_TIMEOUT_MS passes.
+ * A client that dropped `{ signal }` from its `fetch` would leave it live.
+ */
+async function expectSignalAbortsAtDeadline(send: () => Promise<unknown>) {
+  vi.useFakeTimers()
+  try {
+    const { fetchMock, signals } = neverAnsweringFetch()
+    answerEveryRequest(fetchMock)
+
+    track(send())
+    await vi.waitFor(() => {
+      expect(signals).toHaveLength(1)
+    })
+    expect(signals[0]?.aborted).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(CATALOG_TIMEOUT_MS)
+    await flushMicrotasks()
+    expect(signals[0]?.aborted).toBe(true)
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 describe('api client', () => {
   it('resolves with the parsed envelope on a 200 response', async () => {
     const envelope = {
@@ -658,11 +685,12 @@ describe('fetchCredits', () => {
     const result = await fetchCredits()
 
     expect(result).toEqual(credits)
-    // Issue #237: every GET carries the signal its timeout aborts.
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/credits'),
-      expect.objectContaining({ signal: expect.any(AbortSignal) as unknown }),
+      expect.anything(),
     )
+    // Issue #237: every GET carries the signal its timeout aborts.
+    await expectSignalAbortsAtDeadline(() => fetchCredits())
   })
 
   it('throws a VerdictNetworkError when fetch itself rejects', async () => {
@@ -724,7 +752,16 @@ describe('fetchPlayerLeaders', () => {
       ['limit', '50'],
       ['offset', '100'],
     ])
-    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(init.method).toBe('GET')
+    await expectSignalAbortsAtDeadline(() =>
+      fetchPlayerLeaders({
+        category: 'passing',
+        season_type: 'postseason',
+        sort: 'wins',
+        limit: 50,
+        offset: 100,
+      }),
+    )
   })
 
   /** Issue #312: the board's category is the API's, sent on every request. */
@@ -803,7 +840,8 @@ describe('fetchPlayerCareer', () => {
     const parsed = new URL(url)
     expect(parsed.pathname).toBe('/api/players/2044124519')
     expect([...parsed.searchParams.entries()]).toEqual([['sport', 'nfl']])
-    expect(init.signal).toBeInstanceOf(AbortSignal)
+    expect(init.method).toBe('GET')
+    await expectSignalAbortsAtDeadline(() => fetchPlayerCareer(2044124519))
   })
 
   it('throws a PlayerApiError carrying the typed body for a 404 unknown_player', async () => {

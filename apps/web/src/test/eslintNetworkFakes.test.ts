@@ -28,6 +28,8 @@ const PROBES = {
   source: 'src/lib/formatRating.ts',
   story: 'src/pages/AboutPage/AboutPage.stories.tsx',
   test: 'src/pages/AboutPage/AboutPage.test.tsx',
+  // `./client` names the API client only from inside src/lib/api.
+  apiTest: 'src/lib/api/client.test.ts',
   setup: 'src/test/setup.ts',
   storybook: '.storybook/preview.tsx',
 } as const
@@ -35,7 +37,7 @@ const PROBES = {
 type ProbeKind = keyof typeof PROBES
 
 const ALL_KINDS = Object.keys(PROBES) as ProbeKind[]
-const TEST_KINDS: ProbeKind[] = ['test', 'setup']
+const TEST_KINDS: ProbeKind[] = ['test', 'apiTest', 'setup']
 
 /** The rules a network fake must trip, at least one of them, as an error. */
 const NETWORK_FAKE_RULES = ['no-restricted-syntax', 'no-global-assign']
@@ -105,8 +107,75 @@ const FORBIDDEN: [string, string, ProbeKind[]][] = [
     TEST_KINDS,
   ],
   [
-    "`vi.doMock('./client')`",
+    "`vi.doMock('./client')` beside the client",
     "import { vi } from 'vitest'\n\nvi.doMock('./client')\n",
+    ['apiTest'],
+  ],
+  [
+    "`vi.mock('./client.ts')` beside the client",
+    "import { vi } from 'vitest'\n\nvi.mock('./client.ts')\n",
+    ['apiTest'],
+  ],
+  [
+    "`vi.mock('../../lib/api/client.js')`",
+    "import { vi } from 'vitest'\n\nvi.mock('../../lib/api/client.js')\n",
+    TEST_KINDS,
+  ],
+  [
+    'a template-literal `vi.mock(`../../lib/api/client`)`',
+    "import { vi } from 'vitest'\n\nvi.mock(`../../lib/api/client`)\n",
+    TEST_KINDS,
+  ],
+  // Issue #221 round 2: a cast on the receiver is an ordinary spelling, not
+  // an evasion.
+  [
+    '`(globalThis as unknown as { fetch: unknown }).fetch = ...`',
+    'export {}\n;(globalThis as unknown as { fetch: unknown }).fetch = () => 1\n',
+    ALL_KINDS,
+  ],
+  [
+    '`(window as unknown as { fetch: unknown }).fetch = ...`',
+    'export {}\n;(window as unknown as { fetch: unknown }).fetch = () => 1\n',
+    ALL_KINDS,
+  ],
+  [
+    "`(globalThis as any)['fetch'] = ...`",
+    "export {}\n;(globalThis as any)['fetch'] = () => 1\n",
+    ALL_KINDS,
+  ],
+  [
+    'a `satisfies` receiver',
+    'export {}\n;(globalThis satisfies object as { fetch: unknown }).fetch = () => 1\n',
+    ALL_KINDS,
+  ],
+  [
+    'a non-null receiver, `globalThis!.fetch = ...`',
+    'export {}\nglobalThis!.fetch = () => Promise.resolve(new Response(null))\n',
+    ALL_KINDS,
+  ],
+  [
+    '`globalThis.window.fetch = ...`',
+    'export {}\nglobalThis.window.fetch = () => Promise.resolve(new Response(null))\n',
+    ALL_KINDS,
+  ],
+  [
+    "`Object.assign(globalThis, { 'fetch': f })`",
+    "const f = () => Promise.resolve(new Response(null))\nObject.assign(globalThis, { 'fetch': f })\n",
+    ALL_KINDS,
+  ],
+  [
+    '`Object.assign(globalThis as object, { fetch })`',
+    'const fetch = () => Promise.resolve(new Response(null))\nObject.assign(globalThis as object, { fetch })\n',
+    ALL_KINDS,
+  ],
+  [
+    "`vi.spyOn(window as any, 'fetch')`",
+    "import { vi } from 'vitest'\n\nvi.spyOn(window as any, 'fetch')\n",
+    TEST_KINDS,
+  ],
+  [
+    "`vi.spyOn(globalThis as unknown as { fetch: () => void }, 'fetch')`",
+    "import { vi } from 'vitest'\n\nvi.spyOn(globalThis as unknown as { fetch: () => void }, 'fetch')\n",
     TEST_KINDS,
   ],
   [
@@ -147,6 +216,32 @@ const ORDINARY: [string, string, ProbeKind[]][] = [
     '`vi.mock` of a page module',
     "import { vi } from 'vitest'\n\nvi.mock('./pages/HomePage/HomePage')\n",
     ['test'],
+  ],
+  // Issue #221 round 2: other modules named `client` are not the API client.
+  [
+    "`vi.mock('react-dom/client', factory)`",
+    "import { vi } from 'vitest'\n\nvi.mock('react-dom/client', () => ({\n  createRoot: vi.fn(() => ({ render: vi.fn() })),\n}))\n",
+    ['test', 'apiTest'],
+  ],
+  [
+    "`vi.mock('@apollo/client')`",
+    "import { vi } from 'vitest'\n\nvi.mock('@apollo/client')\n",
+    ['test', 'apiTest'],
+  ],
+  [
+    "`vi.mock('../components/client')`",
+    "import { vi } from 'vitest'\n\nvi.mock('../components/client')\n",
+    ['test', 'apiTest'],
+  ],
+  [
+    "`vi.mock('./client')` outside src/lib/api",
+    "import { vi } from 'vitest'\n\nvi.mock('./client')\n",
+    ['test'],
+  ],
+  [
+    'a cast `fetch` assignment on an ordinary object',
+    "interface Loader {\n  fetch: () => string\n}\n\nexport function rewire(loader: object): object {\n  ;(loader as Loader).fetch = () => 'x'\n  return loader\n}\n",
+    ['source', 'story', 'test'],
   ],
 ]
 
