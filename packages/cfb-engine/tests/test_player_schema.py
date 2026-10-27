@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ PLAYER_TABLES = (
 
 
 @pytest.fixture
-def conn(tmp_path: Path):
+def conn(tmp_path: Path) -> Iterator[sqlite3.Connection]:
     c = get_conn(tmp_path / "players.sqlite3")
     ensure_schema(c)
     try:

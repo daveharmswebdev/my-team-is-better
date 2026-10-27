@@ -150,7 +150,8 @@ def test_rate_cli_rejects_a_sport_outside_the_alias() -> None:
 
 
 def test_mcp_server_uses_the_contract_alias_itself() -> None:
-    assert server.Sport is Sport
+    # `vars`, because `server` imports `Sport` for its own use, not as an export.
+    assert vars(server)["Sport"] is Sport
 
 
 @pytest.mark.parametrize(

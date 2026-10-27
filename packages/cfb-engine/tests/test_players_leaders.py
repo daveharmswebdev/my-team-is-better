@@ -6,6 +6,7 @@ import sqlite3
 from collections.abc import Iterator
 from dataclasses import fields
 from pathlib import Path
+from typing import Unpack
 
 import pytest
 
@@ -21,7 +22,7 @@ from cfb_strength.contracts import (
     StarterRecord,
 )
 from cfb_strength.players import get_player_career, get_player_leaders
-from tests.test_players_support import PlayerDb, conn_of, full_stats
+from tests.test_players_support import PlayerDb, StatLine, conn_of, full_stats, stat_line
 
 
 @pytest.fixture
@@ -385,8 +386,8 @@ def test_every_leaders_row_equals_that_players_career_totals(db: PlayerDb) -> No
             board = get_player_leaders(
                 conn,
                 sport="nfl",
-                season_type=season_type,  # type: ignore[arg-type]  # loop over the Literal's values
-                sort=sort,  # type: ignore[arg-type]  # loop over the Literal's values
+                season_type=season_type,
+                sort=sort,
             )
             assert board.rows
             for row in board.rows:
@@ -405,10 +406,12 @@ def test_player_leader_row_stats_are_a_full_player_stats(db: PlayerDb) -> None:
     p = db.player("All Columns")
     # The REAL columns (#354) get a fraction, so a read that truncated them
     # to an int would show here; 1.0 == 1 would hide it.
-    values = {
-        f.name: i + 1.5 if f.name in PLAYER_STAT_REAL_FIELDS else i + 1
-        for i, f in enumerate(fields(PlayerStats))
-    }
+    values = stat_line(
+        {
+            f.name: i + 1.5 if f.name in PLAYER_STAT_REAL_FIELDS else i + 1
+            for i, f in enumerate(fields(PlayerStats))
+        }
+    )
     db.season(p, 2000, **values)
     row = get_player_leaders(conn_of(db), sport="nfl").rows[0]
     assert row.stats == PlayerStats(**values)
@@ -482,7 +485,7 @@ def test_each_rushing_sort_orders_descending_with_competition_ranks_and_the_tieb
         ids.append(pid)
         stats = {s: 100 - value for s in RUSHING_SORTS}
         stats[sort] = value
-        db.season(pid, 2000, **full_stats(attempts=0, **stats))
+        db.season(pid, 2000, **full_stats(**stat_line({"attempts": 0, **stats})))
     same_first, same_second = ids[1], ids[4]
     conn = conn_of(db)
 
@@ -653,7 +656,7 @@ def test_every_rushing_leaders_row_equals_that_players_career_totals(db: PlayerD
                 conn,
                 sport="nfl",
                 category="rushing",
-                season_type=season_type,  # type: ignore[arg-type]  # loop over the Literal's values
+                season_type=season_type,
                 sort=sort,  # type: ignore[arg-type]  # loop over the Literal's values
             )
             assert board.rows
@@ -779,7 +782,7 @@ def test_each_receiving_sort_orders_descending_with_competition_ranks_and_the_ti
         ids.append(pid)
         stats = {s: 100 - value for s in RECEIVING_SORTS}
         stats[sort] = value
-        db.season(pid, 2000, **full_stats(attempts=0, targets=100, **stats))
+        db.season(pid, 2000, **full_stats(**stat_line({"attempts": 0, "targets": 100, **stats})))
     same_first, same_second = ids[1], ids[4]
     conn = conn_of(db)
 
@@ -1074,7 +1077,7 @@ PUNTING_SORTS = ("pt_yards", "pt_net_yards", "pt_att", "pt_inside_20")
 _KICKING_COLUMN_SORTS = ("fg_made", "fg_long", "fg_att", "pat_made")
 
 
-def _no_kicks(**overrides: int | None) -> dict[str, int | None]:
+def _no_kicks(**overrides: Unpack[StatLine]) -> StatLine:
     """`full_stats` with every kicking and punting column a real zero (and the
     longs blank, as nflverse leaves them with nothing made), so a line is on
     the kicking or punting board only when a test puts it there."""
@@ -1096,8 +1099,7 @@ def _no_kicks(**overrides: int | None) -> dict[str, int | None]:
         pt_long=None,
         pt_inside_20=0,
     )
-    stats.update(overrides)
-    return stats
+    return {**stats, **overrides}
 
 
 def _kicker(db: PlayerDb, name: str, made: int, att: int, *, season_type: str = "regular") -> int:
@@ -1315,7 +1317,7 @@ def test_each_kicking_and_punting_column_sort_orders_descending_with_the_tiebrea
         ids.append(pid)
         stats: dict[str, int | None] = {c: 100 - value for c in columns}
         stats[sort] = value
-        db.season(pid, 2000, **_no_kicks(**stats))
+        db.season(pid, 2000, **_no_kicks(**stat_line(stats)))
     conn = conn_of(db)
 
     board = get_player_leaders(conn, sport="nfl", category=category, sort=sort)  # type: ignore[arg-type]  # parametrized over the Literal's values
@@ -1417,8 +1419,8 @@ def test_every_kicking_and_punting_leaders_row_equals_that_players_career_totals
                     conn,
                     sport="nfl",
                     category=category,  # type: ignore[arg-type]  # the Literal's values
-                    season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
-                    sort=sort,  # type: ignore[arg-type]  # the Literal's values
+                    season_type=season_type,
+                    sort=sort,
                 )
                 for row in board.rows:
                     career = get_player_career(conn, sport="nfl", player_id=row.player_id)
@@ -1449,12 +1451,10 @@ DEFENSE_SORTS = (
 )
 
 
-def _no_defense(**overrides: float | None) -> dict[str, float | None]:
+def _no_defense(**overrides: Unpack[StatLine]) -> StatLine:
     """`full_stats` with every defense column a real zero, so a line is on
     the defense board only when a test puts it there."""
-    stats = full_stats(**dict.fromkeys(DEFENSE_SORTS, 0))
-    stats.update(overrides)
-    return stats
+    return {**full_stats(**stat_line(dict.fromkeys(DEFENSE_SORTS, 0))), **overrides}
 
 
 def _defense_board(
@@ -1491,7 +1491,12 @@ def test_defense_qualifies_more_than_zero_in_any_column_whatever_the_position(
     dt = db.player("All Zero DT", position="DT")
     db.season(dt, 2000, season_type=season_type, **_no_defense())
     blank = db.player("All Null LB", position="LB")
-    db.season(blank, 2000, season_type=season_type, **_no_defense(**dict.fromkeys(DEFENSE_SORTS)))
+    db.season(
+        blank,
+        2000,
+        season_type=season_type,
+        **_no_defense(**stat_line(dict.fromkeys(DEFENSE_SORTS))),
+    )
     conn = conn_of(db)
 
     board = _defense_board(conn, season_type=season_type)
@@ -1516,7 +1521,7 @@ def test_defense_qualifies_on_any_season_line_not_the_career_total(db: PlayerDb)
     # A NULL season next to a 0 season: neither qualifies.
     q = db.player("Never Counted", position="LB")
     db.season(q, 2000, **_no_defense())
-    db.season(q, 2001, **_no_defense(**dict.fromkeys(DEFENSE_SORTS)))
+    db.season(q, 2001, **_no_defense(**stat_line(dict.fromkeys(DEFENSE_SORTS))))
     conn = conn_of(db)
 
     board = _defense_board(conn)
@@ -1585,7 +1590,7 @@ def test_each_defense_sort_reads_its_own_column_with_the_tiebreak(db: PlayerDb, 
         ids.append(pid)
         stats: dict[str, float | None] = {c: 100 - value for c in DEFENSE_SORTS}
         stats[sort] = value
-        db.season(pid, 2000, **_no_defense(**stats))
+        db.season(pid, 2000, **_no_defense(**stat_line(stats)))
     conn = conn_of(db)
 
     board = _defense_board(conn, sort)
