@@ -24,7 +24,7 @@ What is pinned, and why each matters to the leaders page apps/web builds:
 - **Qualifying is the engine's.** The receiving board takes anyone with a
   target *or* a reception (#345), so a targeted player with no catch is on
   it, ranked, with `receptions` 0 -- apps/api filters nothing out.
-- **The published stat keys are a literal.** Thirty-three names, in order,
+- **The published stat keys are a literal.** Thirty-seven names, in order,
   so dropping or adding a `PlayerStatsOut` field goes red.
 - **A half sack is a half sack.** `def_sacks` is REAL (#354, #317): the
   defense board publishes 17.5 as the JSON number 17.5, never an integer.
@@ -33,6 +33,11 @@ What is pinned, and why each matters to the leaders page apps/web builds:
   `fg_made`/`fg_att` and `fg_made_50_59`/`fg_made_60_`. The `fg_pct` board is
   gated by the engine's attempts minimum, which no fixture kicker reaches, so
   on the fixture it is a 200 with `total` 0 and no rows -- the right answer.
+  The same holds for the EPA sorts (#347), `epa_per_dropback` on passing and
+  `epa_per_carry` on rushing: a client derives them from the published
+  `passing_epa`/`rushing_epa` sums, their minimums are out of the fixture's
+  reach, and `test_players_leaders_epa.py` checks non-empty EPA boards on a
+  copy that reaches them.
 - **A maximum with nothing to maximise is null.** `fg_long`/`pt_long` are
   career maxima, JSON `null` for a player who never made a field goal or
   punted, never 0.
@@ -114,12 +119,21 @@ QUALIFYING: dict[tuple[str, str], int] = {
 }
 
 
+# The sorts with a minimum, every one out of the fixture's reach (`_total`).
+GATED_SORTS = frozenset({"fg_pct", "epa_per_dropback", "epa_per_carry"})
+
+
 def _total(category: str, season_type: str, sort: str) -> int:
     """The board's `total`: the category's qualifying count for every sort
-    except `fg_pct`. Below `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS` (100 regular,
-    15 postseason) a kicker is off that board, and the fixture's busiest
-    kickers have 46 regular and 11 postseason attempts, so it is 0 here."""
-    return 0 if sort == "fg_pct" else QUALIFYING[(category, season_type)]
+    except the gated ones, which are 0 on the fixture. Below
+    `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS` (100 regular, 15 postseason) a
+    kicker is off the `fg_pct` board, and the fixture's busiest kickers have
+    46 regular and 11 postseason attempts. Below
+    `PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS` (1500 / 225) a passer is
+    off `epa_per_dropback`, and the fixture's busiest has 677 regular and
+    154 postseason dropbacks; below `PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES`
+    (750 / 110) a rusher is off `epa_per_carry`, against 369 and 108."""
+    return 0 if sort in GATED_SORTS else QUALIFYING[(category, season_type)]
 
 
 TUA_TAGOVAILOA = 2186969283
@@ -261,6 +275,10 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
     ("regular", "passing_yards"): [(1, "Tua Tagovailoa"), (2, "Jared Goff")],
     ("regular", "passing_tds"): [(1, "Kurt Warner"), (2, "Dak Prescott")],
     ("regular", "wins"): [(1, "Kurt Warner"), (1, "Lamar Jackson")],
+    ("regular", "epa_per_dropback"): [],
+    ("postseason", "epa_per_dropback"): [],
+    ("regular", "epa_per_carry"): [],
+    ("postseason", "epa_per_carry"): [],
     ("postseason", "passing_yards"): [(1, "Kurt Warner"), (2, "Patrick Mahomes")],
     ("postseason", "passing_tds"): [(1, "Kurt Warner"), (2, "Jeff George")],
     ("postseason", "wins"): [(1, "Patrick Mahomes"), (2, "Kurt Warner")],
@@ -311,7 +329,7 @@ TOP_ROWS: dict[tuple[str, str], list[tuple[int, str]]] = {
 
 def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     """Every stats object a player endpoint serves has exactly these
-    thirty-five keys, in this order: on a leaders row of every board, and on a career
+    thirty-seven keys, in this order: on a leaders row of every board, and on a career
     season line and its totals.
 
     The expectation is the literal `PUBLISHED_STATS`, never
@@ -320,7 +338,7 @@ def test_published_stat_keys_are_pinned(client: TestClient) -> None:
     together by construction and a comparison between them could never fail
     (#313 and #338 reviews). Dropping or adding a field must go red here.
     """
-    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 35
+    assert len(PUBLISHED_STATS) == len(set(PUBLISHED_STATS)) == 37
     stats_objects: list[Any] = []
     for category in CATEGORIES:
         stats_objects += [r["stats"] for r in _get(client, category=category, limit=3)["rows"]]
@@ -1186,6 +1204,13 @@ CROSS_CATEGORY_SORTS: list[tuple[PlayerLeaderCategory, str]] = [
     ("receiving", "def_interceptions"),
     ("kicking", "def_fumbles_forced"),
     ("punting", "def_pass_defended"),
+    # #347: each EPA sort belongs to one category only.
+    ("passing", "epa_per_carry"),
+    ("rushing", "epa_per_dropback"),
+    ("receiving", "epa_per_dropback"),
+    ("receiving", "epa_per_carry"),
+    ("defense", "epa_per_dropback"),
+    ("kicking", "epa_per_carry"),
 ]
 
 

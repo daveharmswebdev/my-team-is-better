@@ -196,9 +196,15 @@ def leaders(
     population so a client can page. `rank` is the engine's competition rank
     over that population (ties share it), null when the sort value is null.
     Omitting `sort` gives the category's default, echoed in the response.
-    The one board narrower than its category is the engine's `fg_pct`
-    (#315): only kickers at `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS` qualify, and
-    `total` counts only them -- possibly 0, which is an answer, not an error."""
+    Three boards are narrower than their category, each a rate gated by a
+    career minimum in `season_type`: the engine's `fg_pct` (#315), only
+    kickers at `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`; passing's
+    `epa_per_dropback` (#347), only passers at
+    `PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS` (attempts plus sacks);
+    and rushing's `epa_per_carry` (#347), only rushers at
+    `PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES`. `total` counts only the
+    players who qualify -- possibly 0, which is an answer, not an error. No
+    rate is a published field: a client derives it from the row's stats."""
     category, sort = board
     return PlayerLeadersOut.from_dataclass(
         get_player_leaders(

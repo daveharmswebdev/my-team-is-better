@@ -15,17 +15,18 @@ engine modules apps/api is permitted (`cfb_strength.players`, `db`,
   a response body to it checks names, nesting, order of rows and every
   number at once. `PlayerSearchOut.group`, the request's filter echoed, is
   not the engine's at all; the search tests add it themselves.
-  Its one narrowing is `PlayerStats`, which since #354 carries 42 stats, 7
+  Its one narrowing is `PlayerStats`, which since #354 carries 42 stats, 5
   of which the API does not publish (`UNPUBLISHED_STATS` below): the four
-  0-49 yard field-goal buckets left out on purpose by #315, and #354's
-  three EPA columns (stored in the fixture, to be published by #347).
+  0-49 yard field-goal buckets left out on purpose by #315, and
+  `receiving_epa` (held for #484 step 2). #347 published `passing_epa` and
+  `rushing_epa`.
   #354's five defensive columns have been published since #317, and
   `rushing_first_downs` / `rushing_fumbles_lost` since #352.
 - `PUBLISHED_STAT_NAMES` / `published_stats` / `stats_body` are the seam
-  between the 42-field engine contract and the 35 fields `PlayerStatsOut`
+  between the 42-field engine contract and the 37 fields `PlayerStatsOut`
   publishes (the original ten, #352's two rushing stats, #314's six
-  receiving stats, #315's twelve kicking and punting stats and #317's five
-  defensive stats). All three
+  receiving stats, #315's twelve kicking and punting stats, #317's five
+  defensive stats and #347's two EPA sums). All three
   read the published set off the response model, so widening the API
   widens them with it and no expectation has to be rewritten by hand. The
   flip side: a field *dropped* from the model drops out of these too, so
@@ -72,16 +73,17 @@ FIXTURE_DB = Path(__file__).resolve().parent / "cfb_verdict_fixture.sqlite3"
 
 # Every stat the engine contract carries (42 since issue #354)...
 STAT_NAMES: tuple[str, ...] = tuple(field.name for field in dataclasses.fields(PlayerStats))
-# ...and the subset the API publishes (35 since #352), read off the response
+# ...and the subset the API publishes (37 since #347), read off the response
 # model rather than repeated here, so that widening `PlayerStatsOut` widens
 # these helpers with it and no call site has to be edited.
 PUBLISHED_STAT_NAMES: tuple[str, ...] = tuple(PlayerStatsOut.model_fields)
 
-# The thirty-five stats the API publishes, written out rather than derived:
+# The thirty-seven stats the API publishes, written out rather than derived:
 # the original ten, #352's two rushing stats, #314's six receiving stats,
-# #315's twelve kicking and punting stats and #317's five defensive stats,
+# #315's twelve kicking and punting stats, #317's five defensive stats and
+# #347's two EPA sums,
 # in `PlayerStatsOut`'s order (which is the contract's). `contracts.PlayerStats`
-# has carried 42 columns since #354; the seven it carries and the API does not publish are
+# has carried 42 columns since #354; the five it carries and the API does not publish are
 # `UNPUBLISHED_STATS` below. Deriving this list from the response
 # model would make every assertion on it tautological -- see
 # `test_players_leaders_endpoint.test_published_stat_keys_are_pinned`. It
@@ -129,11 +131,17 @@ PUBLISHED_STATS: tuple[str, ...] = (
     "def_fumbles_forced",
     "def_tackles_solo",
     "def_pass_defended",
+    # #347: the two EPA career sums a client divides into EPA per dropback
+    # and per carry, as for fg_pct. Unrounded REAL sums, null when the
+    # player has no stat row with a value.
+    "passing_epa",
+    "rushing_epa",
 )
 
 # The contract stats the API deliberately leaves out, in contract order,
 # also a literal: the 0-49 yard field-goal buckets (#315, left out on
-# purpose) and #354's three EPA columns (publishing them is #347). #354's
+# purpose) and `receiving_epa` (#484). #347 published the other two EPA
+# columns; #354's
 # five defensive columns left this list when #317 published them, and the
 # two rushing columns #313 added left it when #352 published them; both are
 # kept (`DEFENSE_STATS`, `RUSHING_DETAIL_STATS`) for the tests that pin them.
@@ -152,9 +160,14 @@ DEFENSE_STATS: tuple[str, ...] = (
     "def_pass_defended",
 )
 EPA_STATS: tuple[str, ...] = ("passing_epa", "rushing_epa", "receiving_epa")
+# #347 publishes two of the three. `receiving_epa` stays out: since #484 it
+# is NULL for 2003-2008 (no intended receiver on an incompletion), so a
+# career sum covers tracked seasons only; it is held for #484 step 2.
+PUBLISHED_EPA_STATS: tuple[str, ...] = ("passing_epa", "rushing_epa")
+UNPUBLISHED_EPA_STATS: tuple[str, ...] = ("receiving_epa",)
 UNPUBLISHED_STATS: tuple[str, ...] = (
     *UNPUBLISHED_FG_BUCKETS,
-    *EPA_STATS,
+    *UNPUBLISHED_EPA_STATS,
 )
 
 _UNPUBLISHED = set(PUBLISHED_STAT_NAMES) - set(STAT_NAMES)
@@ -168,7 +181,7 @@ def published_stats(stats: PlayerStats) -> dict[str, int | float | None]:
     `PlayerStats` has carried receiving, kicking and punting since #313;
     `PlayerStatsOut` publishes the original ten fields, the six receiving
     ones (#314), twelve kicking and punting ones (#315), five defensive
-    ones (#317) and two more rushing ones (#352). So "faithful to
+    ones (#317), two more rushing ones (#352) and two EPA sums (#347). So "faithful to
     the engine, field for field" means: every *published* field equals the
     engine's value under its own name. The projection is derived from the
     response model, so a field added there is checked against the engine
@@ -270,6 +283,44 @@ def make_player_db_with_null_stat(
         conn.close()
     if updated != 1:
         raise AssertionError(f"expected to NULL one season row, updated {updated}")
+    return db
+
+
+# The columns `make_player_db_with_scaled_volume` multiplies: each EPA sum
+# with the volume it is divided by, so every career ratio is unchanged.
+SCALED_VOLUME_STATS: tuple[str, ...] = (
+    "attempts",
+    "sacks_suffered",
+    "passing_epa",
+    "carries",
+    "rushing_epa",
+)
+
+
+def make_player_db_with_scaled_volume(tmp_path: Path, *, factor: int) -> Path:
+    """A copy of the committed fixture with every NFL season row's
+    dropbacks (`attempts`, `sacks_suffered`), `carries` and the two EPA sums
+    divided by them multiplied by `factor`.
+
+    The fixture holds only 1999 and 2023, so no career reaches the EPA
+    boards' minimums (1500/225 dropbacks, 750/110 carries); this lifts real
+    careers over them while keeping each one's EPA per dropback and per
+    carry exactly its own ratio (both sides of each division scale alike).
+    Every other column is untouched."""
+    db = tmp_path / "players_scaled_volume.sqlite3"
+    shutil.copy(FIXTURE_DB, db)
+    assignments = ", ".join(f"{name} = {name} * :factor" for name in SCALED_VOLUME_STATS)
+    conn = sqlite3.connect(db)
+    try:
+        with conn:
+            updated = conn.execute(
+                f"UPDATE player_season_stats SET {assignments} WHERE sport = 'nfl'",
+                {"factor": factor},
+            ).rowcount
+    finally:
+        conn.close()
+    if updated == 0:
+        raise AssertionError("expected to scale the fixture's season rows, updated none")
     return db
 
 
