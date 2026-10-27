@@ -114,7 +114,7 @@ def _player_id(conn: sqlite3.Connection, name: str) -> int:
 
 
 def _season_row(conn: sqlite3.Connection, name: str, season: int, season_type: str) -> sqlite3.Row:
-    row = conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT * FROM player_season_stats WHERE player_id = ? AND season = ? AND season_type = ?",
         (_player_id(conn, name), season, season_type),
     ).fetchone()
@@ -221,7 +221,7 @@ def _aggregate_of_game_rows(
     columns = ", ".join(
         f"{'MAX' if c in PLAYER_STAT_MAX_FIELDS else 'SUM'}({c}) AS {c}" for c in STAT_FIELDS
     )
-    row = conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         f"""
         SELECT COUNT(*) AS games, {columns},
                COUNT(DISTINCT p.team_id) AS teams, MIN(p.team_id) AS team_id
@@ -672,9 +672,11 @@ def test_a_player_id_the_db_holds_for_another_gsis_id_raises_and_writes_nothing(
         before = _dump(conn)
         real = player_normalize.player_id_for
         swap = {warner: manning, manning: warner}
-        monkeypatch.setattr(
-            player_normalize, "player_id_for", lambda gsis_id: real(swap.get(gsis_id, gsis_id))
-        )
+
+        def swapped_id_for(gsis_id: str) -> int:
+            return real(swap.get(gsis_id, gsis_id))
+
+        monkeypatch.setattr(player_normalize, "player_id_for", swapped_id_for)
 
         with pytest.raises(ValueError, match="surrogate id collision"):
             ingest_players(conn, [1999], raw_dir=raw)

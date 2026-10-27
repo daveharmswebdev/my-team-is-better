@@ -51,11 +51,11 @@ from cfb_strength.ingest.nflverse.ingest_players import ingest_players
 from cfb_strength.ratings.compute_ratings import compute_and_store
 
 SPORTS: tuple[str, ...] = get_args(Sport)
-METHODS: tuple[str, ...] = get_args(Method)
+METHODS: tuple[Method, ...] = get_args(Method)
 # The methods whose ratings come with an Elo ledger (#183). Written out here
 # rather than imported from `currency` on purpose, so the tests fail if the
 # doctor's own list stops matching the contract's note (`TeamCase.elo_ledger`).
-LEDGER_METHODS: tuple[str, ...] = ("elo",)
+LEDGER_METHODS: tuple[Method, ...] = ("elo",)
 LEDGER_TABLES: tuple[str, ...] = ("elo_ledger_configs", "elo_ledger_steps")
 # The leagues whose committed raw cache holds per-season player stats (#296),
 # and each one's file for a season, as `cfb ingest-players` reads it. Written

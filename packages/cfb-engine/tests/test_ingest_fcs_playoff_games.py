@@ -86,7 +86,7 @@ def _ingest(
 
 
 def _game(conn: sqlite3.Connection, game_id: int) -> sqlite3.Row:
-    row = conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT season_type, week, raw_json FROM games WHERE id = ?", (game_id,)
     ).fetchone()
     assert row is not None, f"game {game_id} was not written"

@@ -47,13 +47,14 @@ jobs:
       # narrow it with a `[[tool.mypy.overrides]]` entry rather than shrinking
       # this path back and silently dropping everything else.
       #
-      # The fixture generator (issue #110) is included explicitly. It patches
-      # private `_fetch_*` names in the ingest clients to forbid live calls,
-      # and a rename there would silently turn the stub into a no-op. mypy
-      # --strict reports `Module has no attribute ...` for that, but only if
-      # the generator is type-checked.
-      - name: mypy --strict (whole package + fixture generator)
-        run: uv run mypy --strict src/cfb_strength tests/fixtures/build_regression_fixtures.py tests/fixtures/build_nfl_player_sample.py
+      # `tests` is checked too (issue #350), the same standard apps/api
+      # applies to its own tests. Test helpers such as PlayerDb are a boundary
+      # every test crosses, and the fixture generators patch private
+      # `_fetch_*` names in the ingest clients to forbid live calls (#110), so
+      # a rename there shows up as `Module has no attribute ...` instead of
+      # silently turning the stub into a no-op.
+      - name: mypy --strict (whole package + tests)
+        run: uv run mypy --strict src/cfb_strength tests
 
       - name: import-linter
         run: uv run lint-imports

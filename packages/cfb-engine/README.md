@@ -108,7 +108,7 @@ football, the default) or `sport="nfl"`, and scopes everything it reads to that 
 
 ```bash
 uv run pytest
-uv run mypy --strict src/cfb_strength
+uv run mypy --strict src/cfb_strength tests
 uv run lint-imports
 ```
 

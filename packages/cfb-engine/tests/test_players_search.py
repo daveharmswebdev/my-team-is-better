@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Unpack
 
 import pytest
 
@@ -17,7 +18,7 @@ from cfb_strength.contracts import (
     position_group,
 )
 from cfb_strength.players import search_players
-from tests.test_players_support import STAT_COLUMNS, PlayerDb, conn_of, full_stats
+from tests.test_players_support import PlayerDb, StatLine, conn_of, full_stats, uniform_stats
 
 
 @pytest.fixture
@@ -37,12 +38,10 @@ def _passer(
     return p
 
 
-def _only(**stats: float | None) -> dict[str, float | None]:
+def _only(**stats: Unpack[StatLine]) -> StatLine:
     """A season line with every stat None except `stats`, so it qualifies for
     exactly the categories those stats satisfy."""
-    line: dict[str, float | None] = dict.fromkeys(STAT_COLUMNS, None)
-    line.update(stats)
-    return line
+    return {**uniform_stats(None), **stats}
 
 
 def _names(db: PlayerDb, query: str, limit: int = 10) -> list[str]:
@@ -233,7 +232,7 @@ _CATEGORY_ONLY = {
 @pytest.mark.parametrize("line", _CATEGORY_ONLY.values(), ids=_CATEGORY_ONLY.keys())
 @pytest.mark.parametrize("season_type", ["regular", "postseason"])
 def test_a_player_qualifying_for_any_one_category_is_found(
-    db: PlayerDb, line: dict[str, float | None], season_type: str
+    db: PlayerDb, line: StatLine, season_type: str
 ) -> None:
     # #371: search found only passers, so typing "gore" missed Frank Gore.
     p = db.player("Gore Nonpasser", position="RB")
@@ -254,8 +253,8 @@ def test_passers_and_qb_starters_still_qualify(db: PlayerDb) -> None:
 def test_a_player_qualifying_for_no_category_is_not_found(db: PlayerDb) -> None:
     # Every stat a real 0, every stat untracked, or no rows at all: on no board.
     zeros = db.player("Smith All Zeros")
-    db.season(zeros, 2003, games=16, **dict.fromkeys(STAT_COLUMNS, 0))
-    db.season(zeros, 2004, season_type="postseason", **dict.fromkeys(STAT_COLUMNS, 0))
+    db.season(zeros, 2003, games=16, **uniform_stats(0))
+    db.season(zeros, 2004, season_type="postseason", **uniform_stats(0))
     untracked = db.player("Smith Untracked")
     db.season(untracked, 2003, games=16, **_only())
     db.player("Smith No Rows")

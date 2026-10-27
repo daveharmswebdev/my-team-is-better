@@ -376,6 +376,7 @@ def test_career_totals_combine_the_season_lines_by_the_contracts_rule(db: Player
         has_row = [s.games is not None or s.stats != PlayerStats() for s in lines]
         for f in fields(PlayerStats):
             values = [getattr(s.stats, f.name) for s in lines]
+            expected: float | None
             if f.name in PLAYER_STAT_MAX_FIELDS:
                 expected = _max_skipping_nulls(values)
             elif f.name in PLAYER_STAT_SPARSE_FIELDS:

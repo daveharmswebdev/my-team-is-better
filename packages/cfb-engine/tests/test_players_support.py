@@ -10,12 +10,92 @@ from __future__ import annotations
 import itertools
 import json
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
+from typing import TypedDict, TypeGuard, Unpack, get_type_hints
 
 from cfb_strength.contracts import PlayerStats
 from cfb_strength.db.connection import ensure_schema, get_conn
 
 STAT_COLUMNS = tuple(PlayerStats.__dataclass_fields__)
+
+
+class StatLine(TypedDict, total=False):
+    """The stat columns a test row sets, typed field by field as
+    `PlayerStats` types them (#350). A key left out is NULL in the row."""
+
+    completions: int | None
+    attempts: int | None
+    passing_yards: int | None
+    passing_tds: int | None
+    passing_interceptions: int | None
+    sacks_suffered: int | None
+    sack_yards_lost: int | None
+    carries: int | None
+    rushing_yards: int | None
+    rushing_tds: int | None
+    rushing_first_downs: int | None
+    rushing_fumbles_lost: int | None
+    receptions: int | None
+    targets: int | None
+    receiving_yards: int | None
+    receiving_tds: int | None
+    receiving_first_downs: int | None
+    receiving_fumbles_lost: int | None
+    fg_made: int | None
+    fg_att: int | None
+    fg_long: int | None
+    fg_made_0_19: int | None
+    fg_made_20_29: int | None
+    fg_made_30_39: int | None
+    fg_made_40_49: int | None
+    fg_made_50_59: int | None
+    fg_made_60_: int | None
+    pat_made: int | None
+    pat_att: int | None
+    pt_att: int | None
+    pt_yards: int | None
+    pt_net_yards: int | None
+    pt_long: int | None
+    pt_inside_20: int | None
+    def_interceptions: int | None
+    def_sacks: float | None
+    def_fumbles_forced: int | None
+    def_tackles_solo: int | None
+    def_pass_defended: int | None
+    passing_epa: float | None
+    rushing_epa: float | None
+    receiving_epa: float | None
+
+
+# Kept in step with `PlayerStats` at import, so a new stat column fails every
+# player test until it is added here too (a test would only fail its own run).
+if list(get_type_hints(StatLine).items()) != list(get_type_hints(PlayerStats).items()):
+    raise TypeError("StatLine must list PlayerStats's fields, in order, with the same types")
+
+_INT_COLUMNS = frozenset(c for c, t in get_type_hints(StatLine).items() if t == int | None)
+
+
+def _is_stat_line(values: Mapping[str, float | None]) -> TypeGuard[StatLine]:
+    return all(
+        c in STAT_COLUMNS and (v is None or isinstance(v, int) or c not in _INT_COLUMNS)
+        for c, v in values.items()
+    )
+
+
+def stat_line(values: Mapping[str, float | None]) -> StatLine:
+    """A `StatLine` from a mapping keyed at runtime (a loop over column
+    names). Raises if a key is not a stat column or an integer column gets a
+    fraction, which the TypedDict would have rejected statically."""
+    line = dict(values)
+    if not _is_stat_line(line):
+        raise TypeError(f"not a stat line: {line!r}")
+    return line
+
+
+def uniform_stats(value: int | None) -> StatLine:
+    """Every stat column set to `value`."""
+    return stat_line(dict.fromkeys(STAT_COLUMNS, value))
 
 
 class PlayerDb:
@@ -106,7 +186,13 @@ class PlayerDb:
         )
 
     def game_line(
-        self, player: int, game: int, team: int, *, sport: str | None = None, **stats: float | None
+        self,
+        player: int,
+        game: int,
+        team: int,
+        *,
+        sport: str | None = None,
+        **stats: Unpack[StatLine],
     ) -> None:
         values = [stats.get(c) for c in STAT_COLUMNS]
         self.conn.execute(
@@ -124,7 +210,7 @@ class PlayerDb:
         team: int | None = None,
         games: int | None = 1,
         sport: str | None = None,
-        **stats: float | None,
+        **stats: Unpack[StatLine],
     ) -> None:
         values = [stats.get(c) for c in STAT_COLUMNS]
         self.conn.execute(
@@ -135,12 +221,10 @@ class PlayerDb:
         )
 
 
-def full_stats(**overrides: float | None) -> dict[str, float | None]:
+def full_stats(**overrides: Unpack[StatLine]) -> StatLine:
     """Every stat column set (to 1 unless overridden), so a total is only None
     when a test means it to be."""
-    stats: dict[str, float | None] = dict.fromkeys(STAT_COLUMNS, 1)
-    stats.update(overrides)
-    return stats
+    return {**uniform_stats(1), **overrides}
 
 
 def conn_of(db: PlayerDb) -> sqlite3.Connection:

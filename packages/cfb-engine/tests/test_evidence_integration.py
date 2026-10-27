@@ -1038,7 +1038,7 @@ def _stored_rating(
 ) -> sqlite3.Row:
     """The ratings row for one team, read straight from SQL -- the ground
     truth the evidence layer's own queries are checked against."""
-    row = conn.execute(
+    row: sqlite3.Row | None = conn.execute(
         "SELECT r.team_id, r.rating, r.rank FROM ratings r JOIN teams t ON t.id = r.team_id "
         "WHERE r.year = ? AND r.method = ? AND r.sport = ? AND t.school = ?",
         (year, method, sport, school),
