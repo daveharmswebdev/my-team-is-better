@@ -56,7 +56,7 @@
     },
     "tests_run": {
       "type": "array",
-      "description": "Every check you actually executed, in order, with its real result. A TDD red run is recorded with phase red and result fail. On an implementation spoke's success, a fail or error outside phase red or sabotage is allowed only when a later green or gate run of the same command (exact string, surrounding whitespace ignored) passed: the last green or gate run of every command must pass. Keep a fixed failure in the record rather than deleting or relabelling it (#323). Success also needs at least one passing green or gate run. A read-only agent records each check as it came out, failing ones included, and its success needs at least one entry: an empty list can't be told apart from a run that never happened.",
+      "description": "Every check you actually executed, in order, with its real result. A TDD red run is recorded with phase red and result fail. On an implementation spoke's success, a fail or error outside phase red or sabotage is allowed only when a later green or gate run of the same command (exact string, surrounding whitespace ignored) passed: every command that failed in green or gate must have its last green or gate run pass (an honest skip with no failure before it is fine). Keep a fixed failure in the record rather than deleting or relabelling it (#323). Success also needs at least one passing green or gate run. A read-only agent records each check as it came out, failing ones included, and its success needs at least one entry: an empty list can't be told apart from a run that never happened.",
       "items": {
         "type": "object",
         "required": ["command", "result", "phase"],
