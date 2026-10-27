@@ -12,7 +12,7 @@ Run the same commands CI runs (`.github/workflows/ci.yml`), from the package dir
 
 | Where | Checks |
 |---|---|
-| `packages/cfb-engine` | `uv run pytest -q` · `uv run mypy --strict src/cfb_strength tests/fixtures/build_regression_fixtures.py` · `uv run lint-imports` · `uv run ruff check .` · `uv run ruff format --check .` |
+| `packages/cfb-engine` | `uv run pytest -q` · `uv run mypy --strict src/cfb_strength tests` · `uv run lint-imports` · `uv run ruff check .` · `uv run ruff format --check .` |
 | `apps/api` | `uv run pytest -q` · `uv run mypy --strict src/api tests` · `uv run ruff check .` · `uv run ruff format --check .` · `uv run lint-imports` |
 | `.claude/hooks` | see the `claude-process` job in ci.yml |
 
@@ -33,3 +33,6 @@ Run the same commands CI runs (`.github/workflows/ci.yml`), from the package dir
   (#341): state the new columns' DDL type and aggregation in `PINNED_RULES`. Its failure
   message lists every test that asserts over the whole field set. Re-check each one,
   because a column-name grep can't find them, and paste the list into the brief.
+  `tests/test_players_support.py`'s `StatLine` TypedDict must gain the same field: an
+  import-time check raises if it and `PlayerStats` differ, so every players test fails
+  to collect until it matches (#350).
