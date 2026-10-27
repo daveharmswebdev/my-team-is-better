@@ -6,6 +6,12 @@
  * so they carry the same numbers the e2e specs assert on. That fixture has no
  * null stats, so the null-stat helpers below are the only source of them.
  *
+ * `passing_epa` and `rushing_epa` (#347) were added later, from the same
+ * fixture API. The lines copied from a full build rather than the fixture
+ * (seasons the fixture doesn't hold, e.g. Emmitt Smith's 2000-2004) and the
+ * invented ones carry `null` for both: their EPA was never captured, so a
+ * table built from them reads "not recorded" there, not a real gap.
+ *
  * Not imported by any app code: only tests and stories use it.
  */
 import type {
@@ -253,6 +259,8 @@ export const TUA_TAGOVAILOA: PlayerLeaderRowOut = {
     rushing_tds: 0,
     rushing_first_downs: 5,
     rushing_fumbles_lost: 4,
+    passing_epa: 121.67434628780522,
+    rushing_epa: -39.12836075014263,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -282,6 +290,8 @@ export const JARED_GOFF: PlayerLeaderRowOut = {
     rushing_tds: 2,
     rushing_first_downs: 5,
     rushing_fumbles_lost: 2,
+    passing_epa: 80.94225091908041,
+    rushing_epa: -21.906581828527315,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -312,6 +322,8 @@ export const DAK_PRESCOTT: PlayerLeaderRowOut = {
     rushing_tds: 2,
     rushing_first_downs: 21,
     rushing_fumbles_lost: 1,
+    passing_epa: 120.79506478811263,
+    rushing_epa: 13.090557725794607,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -342,6 +354,8 @@ export const STEVE_BEUERLEIN: PlayerLeaderRowOut = {
     rushing_tds: 2,
     rushing_first_downs: 7,
     rushing_fumbles_lost: 3,
+    passing_epa: 83.20757745928422,
+    rushing_epa: -14.2875706321672,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -371,6 +385,8 @@ export const KURT_WARNER_REGULAR: PlayerLeaderRowOut = {
     rushing_tds: 1,
     rushing_first_downs: 5,
     rushing_fumbles_lost: 2,
+    passing_epa: 163.01052189864808,
+    rushing_epa: -4.032862065408963,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -401,6 +417,8 @@ export const JORDAN_LOVE: PlayerLeaderRowOut = {
     rushing_tds: 4,
     rushing_first_downs: 16,
     rushing_fumbles_lost: 2,
+    passing_epa: 88.02358448326395,
+    rushing_epa: -7.342560899298345,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -478,6 +496,8 @@ export const UNRECORDED_STATS: PlayerStatsOut = {
   def_fumbles_forced: null,
   def_tackles_solo: null,
   def_pass_defended: null,
+  passing_epa: null,
+  rushing_epa: null,
 }
 
 /**
@@ -525,7 +545,9 @@ export const LEADERS_WITH_NULL_STATS: PlayerLeadersOut = {
 
 /**
  * A back's stats: the fixture records a 0, not a null, for a rusher's
- * passing. His receiving (issue #314) is copied as the API sent it.
+ * passing. His receiving (issue #314) is copied as the API sent it. With no
+ * dropback his `passing_epa` is `null`, as the API sends it, and so is his
+ * `rushing_epa` with no carry (#347).
  */
 function nonPasserStats(
   carries: number,
@@ -534,6 +556,7 @@ function nonPasserStats(
   rushingFirstDowns: number,
   rushingFumblesLost: number,
   catches: ReceivingStats,
+  rushingEpa: number | null = null,
 ): PlayerStatsOut {
   return {
     completions: 0,
@@ -551,6 +574,8 @@ function nonPasserStats(
     ...catches,
     ...NO_KICKING,
     ...NO_DEFENSE,
+    passing_epa: null,
+    rushing_epa: rushingEpa,
   }
 }
 
@@ -566,7 +591,15 @@ export const EDGERRIN_JAMES: PlayerLeaderRowOut = {
   games: 16,
   record: NO_RECORD,
   stats: {
-    ...nonPasserStats(369, 1553, 13, 80, 3, receiving(62, 86, 586, 4, 23, 1)),
+    ...nonPasserStats(
+      369,
+      1553,
+      13,
+      80,
+      3,
+      receiving(62, 86, 586, 4, 23, 1),
+      -26.51174939118083,
+    ),
     def_tackles_solo: 3,
   },
   coverage: rowCoverage(2425879833, 1999, 1999),
@@ -581,7 +614,15 @@ export const CURTIS_MARTIN: PlayerLeaderRowOut = {
   last_season: 1999,
   games: 16,
   record: NO_RECORD,
-  stats: nonPasserStats(367, 1464, 5, 84, 0, receiving(45, 61, 259, 0, 9, 0)),
+  stats: nonPasserStats(
+    367,
+    1464,
+    5,
+    84,
+    0,
+    receiving(45, 61, 259, 0, 9, 0),
+    -24.639798003186034,
+  ),
   coverage: rowCoverage(2056460271, 1999, 1999),
 }
 
@@ -595,7 +636,15 @@ export const CHRISTIAN_MCCAFFREY: PlayerLeaderRowOut = {
   games: 16,
   record: NO_RECORD,
   stats: {
-    ...nonPasserStats(272, 1459, 14, 83, 2, receiving(67, 83, 564, 7, 31, 0)),
+    ...nonPasserStats(
+      272,
+      1459,
+      14,
+      83,
+      2,
+      receiving(67, 83, 564, 7, 31, 0),
+      14.388323717255869,
+    ),
     def_tackles_solo: 2,
   },
   coverage: rowCoverage(2034350752, 2023, 2023),
@@ -610,7 +659,15 @@ export const RAHEEM_MOSTERT: PlayerLeaderRowOut = {
   last_season: 2023,
   games: 15,
   record: NO_RECORD,
-  stats: nonPasserStats(209, 1012, 18, 59, 1, receiving(25, 32, 175, 3, 6, 0)),
+  stats: nonPasserStats(
+    209,
+    1012,
+    18,
+    59,
+    1,
+    receiving(25, 32, 175, 3, 6, 0),
+    17.17960253785715,
+  ),
   coverage: rowCoverage(2254464124, 2023, 2023),
 }
 
@@ -624,7 +681,15 @@ export const STEPHEN_DAVIS: PlayerLeaderRowOut = {
   games: 14,
   record: NO_RECORD,
   stats: {
-    ...nonPasserStats(290, 1405, 17, 85, 1, receiving(23, 28, 111, 0, 5, 0)),
+    ...nonPasserStats(
+      290,
+      1405,
+      17,
+      85,
+      1,
+      receiving(23, 28, 111, 0, 5, 0),
+      51.282561298440875,
+    ),
     def_tackles_solo: 1,
   },
   coverage: rowCoverage(2057513912, 1999, 1999),
@@ -653,6 +718,8 @@ export const JALEN_HURTS: PlayerLeaderRowOut = {
     rushing_tds: 15,
     rushing_first_downs: 68,
     rushing_fumbles_lost: 4,
+    passing_epa: 62.38472199597201,
+    rushing_epa: 21.28859406406033,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -683,6 +750,8 @@ export const JOSH_ALLEN: PlayerLeaderRowOut = {
     rushing_tds: 15,
     rushing_first_downs: 57,
     rushing_fumbles_lost: 3,
+    passing_epa: 91.69279821970741,
+    rushing_epa: 54.38192837900931,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -716,6 +785,163 @@ export const LEADERS_BY_RUSHING_TDS: PlayerLeadersOut = {
   data_first_season: FIXTURE_DATA_FIRST_SEASON,
   data_last_season: FIXTURE_DATA_LAST_SEASON,
   rows: [RAHEEM_MOSTERT, STEPHEN_DAVIS, JALEN_HURTS, JOSH_ALLEN],
+}
+
+// ---------------------------------------------------------------------------
+// The EPA boards (issue #347). The committed fixture holds two seasons, so
+// nobody there reaches the EPA minimums (1,500 dropbacks, 750 carries) and
+// both boards come back empty -- as the e2e spec asserts. The boards with
+// rows below are invented for stories and tests: the counts are made up, and
+// each EPA sum is chosen so the rate matches the full production build's
+// (#347: Peyton Manning 0.242, Patrick Mahomes 0.220 and Tom Brady 0.185 per
+// dropback; Josh Allen 0.344, Mike Vick 0.293 and Jalen Hurts 0.218 per
+// carry). The player ids are invented too.
+// ---------------------------------------------------------------------------
+
+/** The full build's player-stats span, for the invented EPA boards. */
+const FULL_BUILD_DATA = { first: 1999, last: 2025 }
+
+/** An invented career row for an EPA board: a quarterback, counts as given. */
+function epaRow(
+  rank: number,
+  playerId: number,
+  displayName: string,
+  seasons: readonly [number, number],
+  counts: {
+    attempts: number
+    sacks: number
+    passingEpa: number
+    carries: number
+    rushingEpa: number
+  },
+): PlayerLeaderRowOut {
+  const [first, last] = seasons
+  return {
+    ...JARED_GOFF,
+    rank,
+    player_id: playerId,
+    display_name: displayName,
+    first_season: first,
+    last_season: last,
+    stats: {
+      ...JARED_GOFF.stats,
+      attempts: counts.attempts,
+      sacks_suffered: counts.sacks,
+      passing_epa: counts.passingEpa,
+      carries: counts.carries,
+      rushing_epa: counts.rushingEpa,
+    },
+    coverage: fixtureCoverage(
+      first,
+      last,
+      first,
+      last,
+      undefined,
+      FULL_BUILD_DATA,
+    ),
+  }
+}
+
+/** Invented: 9,380 attempts + 303 sacks = 9,683 dropbacks at 0.242. */
+export const EPA_PEYTON_MANNING = epaRow(
+  1,
+  9001,
+  'Peyton Manning',
+  [1999, 2015],
+  {
+    attempts: 9380,
+    sacks: 303,
+    passingEpa: 0.242 * 9683,
+    carries: 431,
+    rushingEpa: -0.12 * 431,
+  },
+)
+
+/** Invented: 5,050 dropbacks at 0.220. */
+export const EPA_PATRICK_MAHOMES = epaRow(
+  2,
+  9002,
+  'Patrick Mahomes',
+  [2017, 2025],
+  {
+    attempts: 4800,
+    sacks: 250,
+    passingEpa: 0.22 * 5050,
+    carries: 520,
+    rushingEpa: 0.15 * 520,
+  },
+)
+
+/** Invented: 12,615 dropbacks at 0.185. */
+export const EPA_TOM_BRADY = epaRow(3, 9003, 'Tom Brady', [2000, 2022], {
+  attempts: 12050,
+  sacks: 565,
+  passingEpa: 0.185 * 12615,
+  carries: 690,
+  rushingEpa: -0.05 * 690,
+})
+
+/** Invented: 900 carries at 0.344. */
+export const EPA_JOSH_ALLEN = epaRow(1, 9004, 'Josh Allen', [2018, 2025], {
+  attempts: 4100,
+  sacks: 230,
+  passingEpa: 0.15 * 4330,
+  carries: 900,
+  rushingEpa: 0.344 * 900,
+})
+
+/** Invented: 1,000 carries at 0.293. */
+export const EPA_MIKE_VICK = epaRow(2, 9005, 'Mike Vick', [2001, 2015], {
+  attempts: 3200,
+  sacks: 260,
+  passingEpa: 0.02 * 3460,
+  carries: 1000,
+  rushingEpa: 0.293 * 1000,
+})
+
+/** Invented: 800 carries at 0.218. */
+export const EPA_JALEN_HURTS = epaRow(3, 9006, 'Jalen Hurts', [2020, 2025], {
+  attempts: 2600,
+  sacks: 180,
+  passingEpa: 0.08 * 2780,
+  carries: 800,
+  rushingEpa: 0.218 * 800,
+})
+
+/** Invented: the regular-season EPA per dropback board's top three (104 qualify). */
+export const LEADERS_BY_EPA_PER_DROPBACK: PlayerLeadersOut = {
+  ...LEADERS_BY_YARDS,
+  sort: 'epa_per_dropback',
+  total: 104,
+  data_first_season: FULL_BUILD_DATA.first,
+  data_last_season: FULL_BUILD_DATA.last,
+  rows: [EPA_PEYTON_MANNING, EPA_PATRICK_MAHOMES, EPA_TOM_BRADY],
+}
+
+/** Invented: the regular-season EPA per carry board's top three (151 qualify). */
+export const LEADERS_BY_EPA_PER_CARRY: PlayerLeadersOut = {
+  ...LEADERS_BY_RUSHING_YARDS,
+  sort: 'epa_per_carry',
+  total: 151,
+  data_first_season: FULL_BUILD_DATA.first,
+  data_last_season: FULL_BUILD_DATA.last,
+  rows: [EPA_JOSH_ALLEN, EPA_MIKE_VICK, EPA_JALEN_HURTS],
+}
+
+/** `?sort=epa_per_dropback` on the committed fixture: nobody reaches 1,500 dropbacks. */
+export const LEADERS_BY_EPA_PER_DROPBACK_EMPTY: PlayerLeadersOut = {
+  ...LEADERS_BY_YARDS,
+  sort: 'epa_per_dropback',
+  total: 0,
+  rows: [],
+}
+
+/** `?category=rushing&sort=epa_per_carry` on the committed fixture: nobody reaches 750 carries. */
+export const LEADERS_BY_EPA_PER_CARRY_EMPTY: PlayerLeadersOut = {
+  ...LEADERS_BY_RUSHING_YARDS,
+  sort: 'epa_per_carry',
+  total: 0,
+  rows: [],
 }
 
 // ---------------------------------------------------------------------------
@@ -758,7 +984,15 @@ export const TYREEK_HILL: PlayerLeaderRowOut = receiverRow(
   'WR',
   2023,
   16,
-  nonPasserStats(6, 15, 0, 2, 0, receiving(119, 171, 1799, 13, 83, 1)),
+  nonPasserStats(
+    6,
+    15,
+    0,
+    2,
+    0,
+    receiving(119, 171, 1799, 13, 83, 1),
+    -1.177542327321135,
+  ),
 )
 
 export const CEEDEE_LAMB: PlayerLeaderRowOut = receiverRow(
@@ -768,7 +1002,15 @@ export const CEEDEE_LAMB: PlayerLeaderRowOut = receiverRow(
   'WR',
   2023,
   17,
-  nonPasserStats(14, 113, 2, 6, 0, receiving(135, 181, 1749, 12, 80, 2)),
+  nonPasserStats(
+    14,
+    113,
+    2,
+    6,
+    0,
+    receiving(135, 181, 1749, 12, 80, 2),
+    8.388359139207758,
+  ),
 )
 
 export const MARVIN_HARRISON: PlayerLeaderRowOut = receiverRow(
@@ -778,7 +1020,15 @@ export const MARVIN_HARRISON: PlayerLeaderRowOut = receiverRow(
   'WR',
   1999,
   16,
-  nonPasserStats(1, 4, 0, 0, 0, receiving(115, 193, 1663, 12, 79, 1)),
+  nonPasserStats(
+    1,
+    4,
+    0,
+    0,
+    0,
+    receiving(115, 193, 1663, 12, 79, 1),
+    0.047850192990154,
+  ),
 )
 
 export const CRIS_CARTER: PlayerLeaderRowOut = receiverRow(
@@ -873,6 +1123,8 @@ export const LEADERS_BY_RECEPTIONS_TAIL: PlayerLeadersOut = {
         rushing_tds: 1,
         rushing_first_downs: 4,
         rushing_fumbles_lost: 0,
+        passing_epa: -22.866367662793948,
+        rushing_epa: -4.067895085056084,
         ...receiving(0, 1, 0, 0, 0, 0),
         ...NO_KICKING,
         ...NO_DEFENSE,
@@ -911,6 +1163,8 @@ export const WARNER_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_tds: 1,
     rushing_first_downs: 5,
     rushing_fumbles_lost: 2,
+    passing_epa: 163.01052189864808,
+    rushing_epa: -4.032862065408963,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -938,6 +1192,8 @@ export const WARNER_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_tds: 0,
     rushing_first_downs: 1,
     rushing_fumbles_lost: 1,
+    passing_epa: 43.79171169931578,
+    rushing_epa: -6.834618478683858,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1047,6 +1303,8 @@ const MCNAIR_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_tds: 8,
     rushing_first_downs: 34,
     rushing_fumbles_lost: 0,
+    passing_epa: 10.33702293922003,
+    rushing_epa: 17.348081170522413,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1074,6 +1332,8 @@ const MCNAIR_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_tds: 3,
     rushing_first_downs: 16,
     rushing_fumbles_lost: 1,
+    passing_epa: -12.4553532466259,
+    rushing_epa: 13.957992626404582,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1137,6 +1397,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 1,
           rushing_fumbles_lost: 1,
+          passing_epa: 3.98204919788993,
+          rushing_epa: -3.14129123539897,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1154,6 +1416,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 1,
           rushing_first_downs: 5,
           rushing_fumbles_lost: 0,
+          passing_epa: -1.62225113260597,
+          rushing_epa: 3.40876174723962,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1188,6 +1452,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 0,
           rushing_fumbles_lost: 0,
+          passing_epa: 23.1146754124699,
+          rushing_epa: -0.451758125447668,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1205,6 +1471,8 @@ export const WARNER_VS_MCNAIR: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 6,
           rushing_fumbles_lost: 0,
+          passing_epa: 2.31726296580321,
+          rushing_epa: 6.80606053496013,
           ...NO_RECEIVING,
           ...NO_KICKING,
           ...NO_DEFENSE,
@@ -1373,6 +1641,8 @@ const MANNING_1999_REGULAR: PlayerSeasonLineOut = {
     rushing_tds: 2,
     rushing_first_downs: 8,
     rushing_fumbles_lost: 2,
+    passing_epa: 115.86611144999004,
+    rushing_epa: -3.6555678737946002,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1400,6 +1670,8 @@ const MANNING_1999_POSTSEASON: PlayerSeasonLineOut = {
     rushing_tds: 1,
     rushing_first_downs: 1,
     rushing_fumbles_lost: 0,
+    passing_epa: 0.35002239238774,
+    rushing_epa: 0.624280723975971,
     ...NO_RECEIVING,
     ...NO_KICKING,
     ...NO_DEFENSE,
@@ -1543,6 +1815,8 @@ export const TOM_BRADY_CAREER: PlayerCareerOut = inventedCareer(
       rushing_tds: 0,
       rushing_first_downs: 3,
       rushing_fumbles_lost: 1,
+      passing_epa: null,
+      rushing_epa: null,
       ...NO_RECEIVING,
       ...NO_KICKING,
       ...NO_DEFENSE,
@@ -1574,6 +1848,8 @@ export const BRADY_QUINN_CAREER: PlayerCareerOut = inventedCareer(
       rushing_tds: 0,
       rushing_first_downs: 7,
       rushing_fumbles_lost: 1,
+      passing_epa: null,
+      rushing_epa: null,
       ...NO_RECEIVING,
       ...NO_KICKING,
       ...NO_DEFENSE,
@@ -2267,7 +2543,15 @@ export const EDGERRIN_JAMES_CAREER: PlayerCareerOut = oneSeasonCareer(
     'postseason',
     'Indianapolis Colts',
     1,
-    nonPasserStats(20, 56, 0, 2, 0, receiving(1, 4, 8, 0, 0, 0)),
+    nonPasserStats(
+      20,
+      56,
+      0,
+      2,
+      0,
+      receiving(1, 4, 8, 0, 0, 0),
+      -8.3360560729634,
+    ),
   ),
 )
 
@@ -2419,6 +2703,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 2,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: -1.177542327321135,
           receptions: 119,
           targets: 171,
           receiving_yards: 1799,
@@ -2469,6 +2755,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 0,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 5,
           targets: 8,
           receiving_yards: 62,
@@ -2519,6 +2807,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
         rushing_tds: 0,
         rushing_first_downs: 2,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: -1.177542327321135,
         receptions: 119,
         targets: 171,
         receiving_yards: 1799,
@@ -2567,6 +2857,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 5,
         targets: 8,
         receiving_yards: 62,
@@ -2624,6 +2916,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
           rushing_tds: 2,
           rushing_first_downs: 6,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: 8.388359139207758,
           receptions: 135,
           targets: 181,
           receiving_yards: 1749,
@@ -2674,6 +2968,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 0,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: -0.323081082198769,
           receptions: 9,
           targets: 17,
           receiving_yards: 110,
@@ -2724,6 +3020,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
         rushing_tds: 2,
         rushing_first_downs: 6,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: 8.388359139207758,
         receptions: 135,
         targets: 181,
         receiving_yards: 1749,
@@ -2772,6 +3070,8 @@ export const HILL_VS_LAMB: PlayerComparisonOut = {
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: -0.323081082198769,
         receptions: 9,
         targets: 17,
         receiving_yards: 110,
@@ -2857,6 +3157,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
           rushing_tds: 7,
           rushing_first_downs: 61,
           rushing_fumbles_lost: 2,
+          passing_epa: -1.92197350761853,
+          rushing_epa: 14.707563717845709,
           receptions: 80,
           targets: 94,
           receiving_yards: 976,
@@ -2907,6 +3209,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
           rushing_tds: 1,
           rushing_first_downs: 5,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: -12.618553251547409,
           receptions: 13,
           targets: 16,
           receiving_yards: 175,
@@ -2957,6 +3261,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
         rushing_tds: 7,
         rushing_first_downs: 61,
         rushing_fumbles_lost: 2,
+        passing_epa: -1.92197350761853,
+        rushing_epa: 14.707563717845709,
         receptions: 80,
         targets: 94,
         receiving_yards: 976,
@@ -3005,6 +3311,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
         rushing_tds: 1,
         rushing_first_downs: 5,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: -12.618553251547409,
         receptions: 13,
         targets: 16,
         receiving_yards: 175,
@@ -3062,6 +3370,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 0,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 0,
           targets: 0,
           receiving_yards: 0,
@@ -3112,6 +3422,8 @@ export const FAULK_VS_FARMER: PlayerComparisonOut = {
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 0,
         targets: 0,
         receiving_yards: 0,
@@ -3196,6 +3508,8 @@ export const JEFF_WILKINS_CAREER: PlayerCareerOut = withCoverage({
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 0,
         targets: 0,
         receiving_yards: 0,
@@ -3246,6 +3560,8 @@ export const JEFF_WILKINS_CAREER: PlayerCareerOut = withCoverage({
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 0,
         targets: 0,
         receiving_yards: 0,
@@ -3296,6 +3612,8 @@ export const JEFF_WILKINS_CAREER: PlayerCareerOut = withCoverage({
       rushing_tds: 0,
       rushing_first_downs: 0,
       rushing_fumbles_lost: 0,
+      passing_epa: null,
+      rushing_epa: null,
       receptions: 0,
       targets: 0,
       receiving_yards: 0,
@@ -3344,6 +3662,8 @@ export const JEFF_WILKINS_CAREER: PlayerCareerOut = withCoverage({
       rushing_tds: 0,
       rushing_first_downs: 0,
       rushing_fumbles_lost: 0,
+      passing_epa: null,
+      rushing_epa: null,
       receptions: 0,
       targets: 0,
       receiving_yards: 0,
@@ -3403,6 +3723,8 @@ export const FRANK_WYCHECK_CAREER: PlayerCareerOut = withCoverage({
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: 5.55303599708714,
+        rushing_epa: -0.947,
         receptions: 69,
         targets: 108,
         receiving_yards: 641,
@@ -3453,6 +3775,8 @@ export const FRANK_WYCHECK_CAREER: PlayerCareerOut = withCoverage({
         rushing_tds: 0,
         rushing_first_downs: 0,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 14,
         targets: 19,
         receiving_yards: 92,
@@ -3503,6 +3827,8 @@ export const FRANK_WYCHECK_CAREER: PlayerCareerOut = withCoverage({
       rushing_tds: 0,
       rushing_first_downs: 0,
       rushing_fumbles_lost: 0,
+      passing_epa: 5.55303599708714,
+      rushing_epa: -0.947,
       receptions: 69,
       targets: 108,
       receiving_yards: 641,
@@ -3551,6 +3877,8 @@ export const FRANK_WYCHECK_CAREER: PlayerCareerOut = withCoverage({
       rushing_tds: 0,
       rushing_first_downs: 0,
       rushing_fumbles_lost: 0,
+      passing_epa: null,
+      rushing_epa: null,
       receptions: 14,
       targets: 19,
       receiving_yards: 92,
@@ -3724,6 +4052,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 11,
           rushing_first_downs: 85,
           rushing_fumbles_lost: 2,
+          passing_epa: null,
+          rushing_epa: -7.598334937604373,
           receptions: 27,
           targets: 32,
           receiving_yards: 119,
@@ -3774,6 +4104,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 1,
           rushing_first_downs: 3,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: 1.90742789639626,
           receptions: 1,
           targets: 2,
           receiving_yards: 14,
@@ -3824,6 +4156,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 9,
           rushing_first_downs: 65,
           rushing_fumbles_lost: 5,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 11,
           targets: 14,
           receiving_yards: 79,
@@ -3874,6 +4208,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 3,
           rushing_first_downs: 47,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 17,
           targets: 21,
           receiving_yards: 116,
@@ -3924,6 +4260,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 5,
           rushing_first_downs: 48,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 16,
           targets: 24,
           receiving_yards: 89,
@@ -3974,6 +4312,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 2,
           rushing_first_downs: 15,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 14,
           targets: 0,
           receiving_yards: 107,
@@ -4024,6 +4364,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 9,
           rushing_first_downs: 41,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 15,
           targets: 0,
           receiving_yards: 105,
@@ -4074,6 +4416,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
         rushing_tds: 39,
         rushing_first_downs: 301,
         rushing_fumbles_lost: 10,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 100,
         targets: 91,
         receiving_yards: 615,
@@ -4122,6 +4466,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
         rushing_tds: 1,
         rushing_first_downs: 3,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: 1.90742789639626,
         receptions: 1,
         targets: 2,
         receiving_yards: 14,
@@ -4179,6 +4525,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 12,
           rushing_first_downs: 62,
           rushing_fumbles_lost: 3,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 19,
           targets: 0,
           receiving_yards: 268,
@@ -4229,6 +4577,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 10,
           rushing_first_downs: 81,
           rushing_fumbles_lost: 4,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 21,
           targets: 0,
           receiving_yards: 125,
@@ -4279,6 +4629,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 2,
           rushing_first_downs: 2,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 0,
           targets: 0,
           receiving_yards: 0,
@@ -4329,6 +4681,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 18,
           rushing_first_downs: 74,
           rushing_fumbles_lost: 5,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 43,
           targets: 57,
           receiving_yards: 436,
@@ -4379,6 +4733,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 3,
           rushing_first_downs: 8,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 3,
           targets: 4,
           receiving_yards: 33,
@@ -4429,6 +4785,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 12,
           rushing_first_downs: 70,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 36,
           targets: 50,
           receiving_yards: 341,
@@ -4479,6 +4837,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 12,
           rushing_first_downs: 49,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 18,
           targets: 23,
           receiving_yards: 139,
@@ -4529,6 +4889,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 12,
           rushing_first_downs: 85,
           rushing_fumbles_lost: 2,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 40,
           targets: 51,
           receiving_yards: 217,
@@ -4579,6 +4941,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 7,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 1,
           targets: 3,
           receiving_yards: 8,
@@ -4629,6 +4993,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 10,
           rushing_first_downs: 59,
           rushing_fumbles_lost: 2,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 29,
           targets: 40,
           receiving_yards: 171,
@@ -4679,6 +5045,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 3,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 2,
           targets: 3,
           receiving_yards: 18,
@@ -4729,6 +5097,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 11,
           rushing_first_downs: 71,
           rushing_fumbles_lost: 3,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 30,
           targets: 36,
           receiving_yards: 222,
@@ -4779,6 +5149,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 2,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 2,
           targets: 2,
           receiving_yards: 13,
@@ -4829,6 +5201,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 0,
           rushing_first_downs: 3,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 3,
           targets: 6,
           receiving_yards: 8,
@@ -4879,6 +5253,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 2,
           rushing_first_downs: 20,
           rushing_fumbles_lost: 2,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 11,
           targets: 19,
           receiving_yards: 70,
@@ -4929,6 +5305,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 7,
           rushing_first_downs: 47,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 20,
           targets: 26,
           receiving_yards: 208,
@@ -4979,6 +5357,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 5,
           rushing_first_downs: 41,
           rushing_fumbles_lost: 1,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 17,
           targets: 23,
           receiving_yards: 142,
@@ -5029,6 +5409,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 7,
           rushing_first_downs: 34,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 12,
           targets: 18,
           receiving_yards: 101,
@@ -5079,6 +5461,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
           rushing_tds: 2,
           rushing_first_downs: 6,
           rushing_fumbles_lost: 0,
+          passing_epa: null,
+          rushing_epa: null,
           receptions: 4,
           targets: 4,
           receiving_yards: 8,
@@ -5129,6 +5513,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
         rushing_tds: 120,
         rushing_first_downs: 705,
         rushing_fumbles_lost: 25,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 305,
         targets: 356,
         receiving_yards: 2474,
@@ -5177,6 +5563,8 @@ export const SMITH_VS_PETERSON: PlayerComparisonOut = {
         rushing_tds: 5,
         rushing_first_downs: 19,
         rushing_fumbles_lost: 0,
+        passing_epa: null,
+        rushing_epa: null,
         receptions: 6,
         targets: 9,
         receiving_yards: 54,

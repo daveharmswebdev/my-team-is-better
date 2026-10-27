@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   PLAYER_LEADER_CATEGORIES,
+  PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES,
+  PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS,
   PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
   PLAYER_LEADER_SORTS,
   PLAYER_LEADER_SORTS_BY_CATEGORY,
@@ -130,8 +132,8 @@ describe('leaderboard categories', () => {
 
   it('mirrors the engine sorts of each category, its default first', () => {
     expect(PLAYER_LEADER_SORTS_BY_CATEGORY).toEqual({
-      passing: ['passing_yards', 'passing_tds', 'wins'],
-      rushing: ['rushing_yards', 'rushing_tds', 'carries'],
+      passing: ['passing_yards', 'passing_tds', 'wins', 'epa_per_dropback'],
+      rushing: ['rushing_yards', 'rushing_tds', 'carries', 'epa_per_carry'],
       receiving: ['receiving_yards', 'receiving_tds', 'receptions'],
       kicking: [
         'fg_made',
@@ -165,7 +167,7 @@ describe('leaderboard categories', () => {
       )
       expect(owners).toHaveLength(1)
     }
-    expect(PLAYER_LEADER_SORTS).toHaveLength(24)
+    expect(PLAYER_LEADER_SORTS).toHaveLength(26)
   })
 
   it('refuses a sort from another category', () => {
@@ -188,12 +190,32 @@ describe('leaderboard categories', () => {
     expect(isSortInCategory('defense', 'def_pass_defended')).toBe(true)
     expect(isSortInCategory('defense', 'passing_interceptions')).toBe(false)
     expect(isSortInCategory('passing', 'def_interceptions')).toBe(false)
+    // #347: each EPA sort is its own board's, and there is no receiving one.
+    expect(isSortInCategory('passing', 'epa_per_dropback')).toBe(true)
+    expect(isSortInCategory('rushing', 'epa_per_dropback')).toBe(false)
+    expect(isSortInCategory('rushing', 'epa_per_carry')).toBe(true)
+    expect(isSortInCategory('passing', 'epa_per_carry')).toBe(false)
+    expect(isSortInCategory('receiving', 'receiving_epa')).toBe(false)
   })
 
   it("mirrors the engine's FG% attempts minimum per season type (#315)", () => {
     expect(PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS).toEqual({
       regular: 100,
       postseason: 15,
+    })
+  })
+
+  it("mirrors the engine's EPA per dropback minimum per season type (#347)", () => {
+    expect(PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS).toEqual({
+      regular: 1500,
+      postseason: 225,
+    })
+  })
+
+  it("mirrors the engine's EPA per carry minimum per season type (#347)", () => {
+    expect(PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES).toEqual({
+      regular: 750,
+      postseason: 110,
     })
   })
 })

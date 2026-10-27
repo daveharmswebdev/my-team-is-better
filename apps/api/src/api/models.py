@@ -819,12 +819,24 @@ class PlayerStatsOut(BaseModel):
     # by team scorers; `def_interceptions` matched every official season
     # leader 1999-2025. A non-defender's line is the source's recorded zeros
     # (a quarterback's `def_sacks` is 0.0), and a stat the source did not
-    # record is null, never 0. The three EPA columns stay unpublished (#347).
+    # record is null, never 0.
     def_interceptions: int | None
     def_sacks: float | None
     def_fumbles_forced: int | None
     def_tackles_solo: int | None
     def_pass_defended: int | None
+    # EPA (#347): career sums of nflfastR's expected points added, published
+    # 1:1 and unrounded, so a client derives EPA per dropback
+    # (passing_epa / (attempts + sacks_suffered)) and per carry
+    # (rushing_epa / carries), the leaders board's two EPA sorts, the way it
+    # derives fg_pct. The ratios are not published. Null whenever the
+    # engine's sum is (`contracts.PLAYER_STAT_SPARSE_FIELDS`: e.g. a player
+    # with no carry has a null `rushing_epa`), never 0. `receiving_epa` is not
+    # published: since #484 it is NULL for 2003-2008, when nflverse names no
+    # intended receiver on an incompletion, so a career sum covers tracked
+    # seasons only; it is held for #484 step 2.
+    passing_epa: float | None
+    rushing_epa: float | None
 
     @classmethod
     def from_dataclass(cls, stats: PlayerStats) -> PlayerStatsOut:
@@ -864,6 +876,8 @@ class PlayerStatsOut(BaseModel):
             def_fumbles_forced=stats.def_fumbles_forced,
             def_tackles_solo=stats.def_tackles_solo,
             def_pass_defended=stats.def_pass_defended,
+            passing_epa=stats.passing_epa,
+            rushing_epa=stats.rushing_epa,
         )
 
 

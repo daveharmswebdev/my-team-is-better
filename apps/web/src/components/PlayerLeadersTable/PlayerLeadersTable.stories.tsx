@@ -5,6 +5,8 @@ import {
   DEFENSE_WITH_NULL_STATS,
   LEADERS_BY_DEF_SACKS,
   LEADERS_BY_DEF_SACKS_TAIL,
+  LEADERS_BY_EPA_PER_CARRY,
+  LEADERS_BY_EPA_PER_DROPBACK,
   LEADERS_BY_FG_MADE,
   LEADERS_BY_FG_MADE_TAIL,
   LEADERS_BY_FG_PCT,
@@ -177,6 +179,35 @@ export const ByFieldGoalPercentage: Story = {
     await expect(
       canvas.getByRole('columnheader', { name: 'FG%' }),
     ).toHaveAttribute('aria-sort', 'descending')
+  },
+}
+
+/**
+ * The passing board by EPA per dropback (#347), a rate the engine ranks by
+ * and does not send: each row's value is derived from its EPA sum over its
+ * dropbacks. Invented rows at the full build's rates.
+ */
+export const ByEpaPerDropback: Story = {
+  args: { leaders: LEADERS_BY_EPA_PER_DROPBACK },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'EPA per dropback' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await expect(canvas.getByRole('cell', { name: '0.242' })).toBeVisible()
+  },
+}
+
+/** The rushing board by EPA per carry (#347). */
+export const ByEpaPerCarry: Story = {
+  args: { leaders: LEADERS_BY_EPA_PER_CARRY },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('columnheader', { name: 'EPA per carry' }),
+    ).toHaveAttribute('aria-sort', 'descending')
+    await userEvent.click(canvas.getByRole('button', { name: 'Carries' }))
+    await expect(args.onSort).toHaveBeenCalledWith('carries')
   },
 }
 

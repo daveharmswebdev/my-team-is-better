@@ -90,6 +90,10 @@ WARNER_1999_REGULAR_STATS = {
     "def_fumbles_forced": 0,
     "def_tackles_solo": 1,
     "def_pass_defended": 0,
+    # EPA (#347): the stored REAL sums, unrounded. A quarterback's 22
+    # carries lost expected points.
+    "passing_epa": 163.01052189864808,
+    "rushing_epa": -4.032862065408963,
 }
 WARNER_1999_POSTSEASON_STATS = {
     "completions": 77,
@@ -111,6 +115,8 @@ WARNER_1999_POSTSEASON_STATS = {
     "def_fumbles_forced": 0,
     "def_tackles_solo": 0,
     "def_pass_defended": 0,
+    "passing_epa": 43.79171169931578,
+    "rushing_epa": -6.834618478683858,
 }
 
 

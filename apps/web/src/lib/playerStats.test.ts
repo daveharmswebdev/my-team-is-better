@@ -30,7 +30,12 @@ import {
   SORT_LABEL,
   STAT_COLUMNS,
   STAT_GROUP_COLUMNS,
+  EPA_EXPLANATION,
+  careerStatColumnsFor,
+  deriveEpaStats,
   deriveKickingStats,
+  rateMinimumEmptyCopy,
+  rateMinimumNote,
   fgPctEmptyCopy,
   fgPctNote,
   formatSeasonSpan,
@@ -72,6 +77,7 @@ describe('STAT_COLUMNS', () => {
       'passing_yards',
       'passing_tds',
       'passing_interceptions',
+      'epa_per_dropback',
       'carries',
       'rushing_yards',
       'rushing_tds',
@@ -137,6 +143,8 @@ describe('labels', () => {
       def_tackles_solo: 'solo tackles',
       def_fumbles_forced: 'forced fumbles',
       def_pass_defended: 'passes defended',
+      epa_per_dropback: 'EPA per dropback',
+      epa_per_carry: 'EPA per carry',
     })
   })
 
@@ -174,12 +182,15 @@ describe('LEADER_BOARD_COLUMNS', () => {
       { key: 'carries', label: 'Carries' },
       { key: 'rushing_yards', label: 'Rushing yards' },
       { key: 'rushing_tds', label: 'Rushing TDs' },
+      { key: 'epa_per_carry', label: 'EPA per carry' },
     ])
   })
 
   it('takes the rushing labels from STAT_COLUMNS, not a copy of them', () => {
     for (const column of LEADER_BOARD_COLUMNS.rushing.stats) {
-      expect(STAT_COLUMNS).toContain(column)
+      if (column.key !== 'epa_per_carry') {
+        expect(STAT_COLUMNS).toContain(column)
+      }
     }
   })
 })
@@ -882,15 +893,19 @@ describe('the career and compare columns (issue #352)', () => {
   })
 
   it('labels each group as the leaders boards do, adding the two new rushing columns', () => {
+    // The boards' EPA rates (#347) are derived, and these groups show only
+    // what the API sent; the career page adds them (`careerStatColumnsFor`).
+    const sent = (columns: readonly { key: string }[]) =>
+      columns.filter((column) => !column.key.startsWith('epa_'))
     expect(STAT_GROUP_COLUMNS.rushing).toEqual([
-      ...LEADER_BOARD_COLUMNS.rushing.stats,
+      ...sent(LEADER_BOARD_COLUMNS.rushing.stats),
       { key: 'rushing_first_downs', label: 'Rushing first downs' },
       { key: 'rushing_fumbles_lost', label: 'Rushing fumbles lost' },
     ])
     expect([
       ...STAT_GROUP_COLUMNS.passing,
-      ...LEADER_BOARD_COLUMNS.rushing.stats,
-    ]).toEqual(LEADER_BOARD_COLUMNS.passing.stats)
+      ...sent(LEADER_BOARD_COLUMNS.rushing.stats),
+    ]).toEqual(sent(LEADER_BOARD_COLUMNS.passing.stats))
     expect(STAT_GROUP_COLUMNS.receiving).toEqual(
       LEADER_BOARD_COLUMNS.receiving.stats,
     )
@@ -948,5 +963,254 @@ describe('the career and compare columns (issue #352)', () => {
     expect(
       statColumnNotes(statColumnsFor([KURT_WARNER_REGULAR.stats])),
     ).toEqual([])
+  })
+})
+
+/** A passer's or rusher's stats: every other stat a recorded 0, EPA as given. */
+function epaLine(stats: Partial<PlayerStatsOut>): PlayerStatsOut {
+  return kicker({ passing_epa: null, rushing_epa: null, ...stats })
+}
+
+/**
+ * Issue #347: the two EPA rates the engine ranks by and does not send. Each
+ * is derived from the sums the API publishes, unrounded, and has no value
+ * (never 0, never NaN) when an input is null or its denominator is 0.
+ */
+describe('deriveEpaStats (issue #347)', () => {
+  it('divides passing EPA by dropbacks: attempts plus sacks', () => {
+    // Kurt Warner, 1999 regular season, on the committed fixture.
+    const warner = KURT_WARNER_REGULAR.stats
+    expect(warner.passing_epa).not.toBeNull()
+    expect(deriveEpaStats(warner).epa_per_dropback).toBe(
+      (warner.passing_epa ?? Number.NaN) / (455 + 26),
+    )
+    expect(
+      deriveEpaStats(
+        epaLine({ passing_epa: 50, attempts: 90, sacks_suffered: 10 }),
+      ).epa_per_dropback,
+    ).toBe(0.5)
+  })
+
+  it('divides rushing EPA by carries, keeping a negative sign', () => {
+    expect(
+      deriveEpaStats(epaLine({ rushing_epa: -12, carries: 100 })).epa_per_carry,
+    ).toBe(-0.12)
+    const warner = KURT_WARNER_REGULAR.stats
+    expect(deriveEpaStats(warner).epa_per_carry).toBe(
+      (warner.rushing_epa ?? Number.NaN) / 22,
+    )
+  })
+
+  it('has no rate when the denominator is 0', () => {
+    const none = deriveEpaStats(
+      epaLine({
+        passing_epa: 0,
+        attempts: 0,
+        sacks_suffered: 0,
+        rushing_epa: 0,
+        carries: 0,
+      }),
+    )
+    expect(none).toEqual({ epa_per_dropback: null, epa_per_carry: null })
+  })
+
+  it('has no rate when the EPA or any count is null', () => {
+    expect(
+      deriveEpaStats(epaLine({ attempts: 10, sacks_suffered: 1 }))
+        .epa_per_dropback,
+    ).toBeNull()
+    expect(
+      deriveEpaStats(
+        epaLine({ passing_epa: 3, attempts: null, sacks_suffered: 1 }),
+      ).epa_per_dropback,
+    ).toBeNull()
+    expect(
+      deriveEpaStats(
+        epaLine({ passing_epa: 3, attempts: 10, sacks_suffered: null }),
+      ).epa_per_dropback,
+    ).toBeNull()
+    expect(deriveEpaStats(epaLine({ carries: 10 })).epa_per_carry).toBeNull()
+    expect(
+      deriveEpaStats(epaLine({ rushing_epa: 2, carries: null })).epa_per_carry,
+    ).toBeNull()
+    expect(deriveEpaStats(UNRECORDED_STATS)).toEqual({
+      epa_per_dropback: null,
+      epa_per_carry: null,
+    })
+  })
+
+  it('reads an EPA sum missing from an older API as null, not a crash', () => {
+    const stats: Partial<PlayerStatsOut> = { ...KURT_WARNER_REGULAR.stats }
+    delete stats.passing_epa
+    delete stats.rushing_epa
+    expect(deriveEpaStats(stats as PlayerStatsOut)).toEqual({
+      epa_per_dropback: null,
+      epa_per_carry: null,
+    })
+  })
+})
+
+describe('the EPA cells (issue #347)', () => {
+  it('shows each rate to three decimals with a real minus sign, rounded only for display', () => {
+    // `formatQbEpa`'s rule: a minus sign (U+2212) on a negative, no plus.
+    expect(
+      leaderStatCell(
+        epaLine({ passing_epa: 24.2, attempts: 90, sacks_suffered: 10 }),
+        'epa_per_dropback',
+      ),
+    ).toEqual({ kind: 'value', text: '0.242' })
+    expect(
+      leaderStatCell(
+        epaLine({ rushing_epa: -4.5, carries: 100 }),
+        'epa_per_carry',
+      ),
+    ).toEqual({ kind: 'value', text: '−0.045' })
+    expect(
+      leaderStatCell(epaLine({ rushing_epa: 0, carries: 10 }), 'epa_per_carry'),
+    ).toEqual({ kind: 'value', text: '0.000' })
+  })
+
+  it('shows a dash named none for a line with no dropbacks or no carries', () => {
+    expect(leaderStatCell(epaLine({ carries: 0 }), 'epa_per_carry')).toEqual({
+      kind: 'none',
+    })
+    expect(
+      leaderStatCell(
+        epaLine({ attempts: 0, sacks_suffered: 0 }),
+        'epa_per_dropback',
+      ),
+    ).toEqual({ kind: 'none' })
+  })
+
+  it('reads "not recorded" when the source has no EPA or no count', () => {
+    expect(leaderStatCell(epaLine({ carries: 12 }), 'epa_per_carry')).toEqual({
+      kind: 'not-recorded',
+    })
+    expect(leaderStatCell(UNRECORDED_STATS, 'epa_per_dropback')).toEqual({
+      kind: 'not-recorded',
+    })
+  })
+})
+
+describe('the EPA boards (issue #347)', () => {
+  it('puts EPA per dropback on the passing board and sorts by it', () => {
+    const keys = LEADER_BOARD_COLUMNS.passing.stats.map((column) => column.key)
+    expect(keys).toContain('epa_per_dropback')
+    expect(keys).not.toContain('epa_per_carry')
+    expect(sortForStat('passing', 'epa_per_dropback')).toBe('epa_per_dropback')
+  })
+
+  it('puts EPA per carry on the rushing board and sorts by it', () => {
+    const keys = LEADER_BOARD_COLUMNS.rushing.stats.map((column) => column.key)
+    expect(keys).toEqual([
+      'carries',
+      'rushing_yards',
+      'rushing_tds',
+      'epa_per_carry',
+    ])
+    expect(sortForStat('rushing', 'epa_per_carry')).toBe('epa_per_carry')
+  })
+
+  it('shows no EPA on any other board, and no receiving EPA anywhere', () => {
+    for (const category of [
+      'receiving',
+      'kicking',
+      'punting',
+      'defense',
+    ] as const) {
+      for (const column of LEADER_BOARD_COLUMNS[category].stats) {
+        expect(String(column.key)).not.toMatch(/epa/)
+      }
+    }
+  })
+
+  it('names the dropback minimum of each season type, from the mirrored constant', () => {
+    expect(rateMinimumNote('epa_per_dropback', 'regular')).toBe(
+      "EPA per dropback ranks only players with at least 1,500 career dropbacks (pass attempts plus sacks) in the regular season. Stats begin in 1999, so earlier dropbacks don't count.",
+    )
+    expect(rateMinimumNote('epa_per_dropback', 'postseason')).toBe(
+      "EPA per dropback ranks only players with at least 225 career dropbacks (pass attempts plus sacks) in the playoffs. Stats begin in 1999, so earlier dropbacks don't count.",
+    )
+  })
+
+  it('names the carry minimum of each season type', () => {
+    expect(rateMinimumNote('epa_per_carry', 'regular')).toBe(
+      "EPA per carry ranks only players with at least 750 career carries in the regular season. Stats begin in 1999, so earlier carries don't count.",
+    )
+    expect(rateMinimumNote('epa_per_carry', 'postseason')).toBe(
+      "EPA per carry ranks only players with at least 110 career carries in the playoffs. Stats begin in 1999, so earlier carries don't count.",
+    )
+  })
+
+  it('says why each EPA board is empty, in both season types', () => {
+    expect(rateMinimumEmptyCopy('epa_per_dropback', 'regular')).toBe(
+      'No player has reached 1,500 career dropbacks in the regular season, so nobody qualifies for the EPA per dropback board.',
+    )
+    expect(rateMinimumEmptyCopy('epa_per_dropback', 'postseason')).toBe(
+      'No player has reached 225 career dropbacks in the playoffs, so nobody qualifies for the EPA per dropback board.',
+    )
+    expect(rateMinimumEmptyCopy('epa_per_carry', 'regular')).toBe(
+      'No player has reached 750 career carries in the regular season, so nobody qualifies for the EPA per carry board.',
+    )
+    expect(rateMinimumEmptyCopy('epa_per_carry', 'postseason')).toBe(
+      'No player has reached 110 career carries in the playoffs, so nobody qualifies for the EPA per carry board.',
+    )
+  })
+
+  it("keeps FG%'s own minimum copy, and has none for a sort without a minimum", () => {
+    expect(rateMinimumNote('fg_pct', 'regular')).toBe(fgPctNote('regular'))
+    expect(rateMinimumEmptyCopy('fg_pct', 'postseason')).toBe(
+      fgPctEmptyCopy('postseason'),
+    )
+    expect(rateMinimumNote('passing_yards', 'regular')).toBeNull()
+    expect(rateMinimumEmptyCopy('carries', 'regular')).toBeNull()
+  })
+
+  it('explains what EPA is and how each rate is computed', () => {
+    expect(EPA_EXPLANATION).toBe(
+      "Expected points added (EPA) measures how much a play changed the offense's expected points, given the down, distance and field position, so a 5-yard gain on 3rd-and-4 counts for more than one on 3rd-and-10. EPA per dropback is passing EPA divided by dropbacks (pass attempts plus sacks). EPA per carry is rushing EPA divided by carries. Rushing EPA per carry is usually negative: the average run loses expected points.",
+    )
+  })
+})
+
+describe('the career EPA columns (issue #347)', () => {
+  function keysFor(...stats: PlayerStatsOut[]): string[] {
+    return careerStatColumnsFor(stats).map((column) => column.key)
+  }
+
+  it('ends the passing group with EPA per dropback and the rushing group with EPA per carry', () => {
+    expect(keysFor(KURT_WARNER_REGULAR.stats)).toEqual([
+      'completions',
+      'attempts',
+      'passing_yards',
+      'passing_tds',
+      'passing_interceptions',
+      'epa_per_dropback',
+      'carries',
+      'rushing_yards',
+      'rushing_tds',
+      'rushing_first_downs',
+      'rushing_fumbles_lost',
+      'epa_per_carry',
+    ])
+  })
+
+  it('gives a back EPA per carry and no EPA per dropback', () => {
+    const keys = keysFor(EDGERRIN_JAMES.stats)
+    expect(keys).toContain('epa_per_carry')
+    expect(keys).not.toContain('epa_per_dropback')
+  })
+
+  it('gives a kicker or a defender no EPA column', () => {
+    expect(keysFor(OLINDO_MARE.stats).join()).not.toMatch(/epa/)
+    expect(keysFor(TJ_WATT.stats).join()).not.toMatch(/epa/)
+  })
+
+  it('leaves the compare columns as they were', () => {
+    expect(
+      statColumnsForPlayers([[KURT_WARNER_REGULAR.stats]])
+        .map((column) => column.key)
+        .join(),
+    ).not.toMatch(/epa/)
   })
 })

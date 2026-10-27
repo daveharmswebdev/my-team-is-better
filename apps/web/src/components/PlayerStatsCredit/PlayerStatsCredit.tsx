@@ -9,25 +9,27 @@ export interface PlayerStatsCreditProps {
    */
   credit: CreditsDataSourceOut | null
   /**
-   * A QB score is on screen (issue #459): credit the EP model its EPA comes
-   * from too, beside the stats credit.
+   * An EPA number is on screen -- a QB score (issue #459), an EPA board or a
+   * career's EPA columns (#347): credit the EP model it comes from too,
+   * beside the stats credit.
    */
   epModel?: boolean
 }
 
 /**
- * The QB score's EPA comes from nflfastR's expected-points model. Static
- * copy: `/api/credits` has no entry of its own for the model, and this sits
+ * Every EPA number here -- the QB score's, the EPA boards', the career EPA
+ * columns' -- comes from nflfastR's expected-points model. Static copy:
+ * `/api/credits` has no entry of its own for the model, and this sits
  * beside -- never instead of -- the API's nflverse credit.
  */
 const EP_MODEL_CREDIT =
-  "The QB score's expected points come from nflfastR's EP model, by Ben Baldwin & Sebastian Carl."
+  "The expected points behind every EPA number here, the QB score's included, come from nflfastR's EP model, by Ben Baldwin & Sebastian Carl."
 
 /**
  * Credits the player data where it appears (issue #296). The name, link and
  * note all come from the API, like the About page's credits; with no credit
  * in hand it points at the About page's data section instead of saying
- * nothing. With a QB score on screen it credits the EP model as well.
+ * nothing. With EPA on screen it credits the EP model as well.
  */
 export function PlayerStatsCredit({
   credit,

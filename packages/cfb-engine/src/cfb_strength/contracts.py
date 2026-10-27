@@ -574,9 +574,11 @@ PlayerLeaderSort = Literal[
     "passing_yards",
     "passing_tds",
     "wins",
+    "epa_per_dropback",
     "rushing_yards",
     "rushing_tds",
     "carries",
+    "epa_per_carry",
     "receiving_yards",
     "receiving_tds",
     "receptions",
@@ -605,6 +607,21 @@ not `PlayerStats` fields (#315):
   * `fg_pct` is `fg_made / fg_att` as an exact ratio (not rounded before
     ranking). Its board is gated by `PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`.
   * `fg_made_50_plus` is `fg_made_50_59 + fg_made_60_`.
+
+Two EPA sorts are computed the same way (#347), as exact ratios of the
+career totals, and are not `PlayerStats` fields either:
+  * `epa_per_dropback` is `passing_epa / (attempts + sacks_suffered)`, the
+    same per-dropback definition as the QB score's `epa_per_dropback`
+    (#440). Its board is gated by `PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS`.
+  * `epa_per_carry` is `rushing_epa / carries`, gated by
+    `PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES`. League rushing EPA per carry
+    is usually negative, so most of that board reads below zero.
+A qualifying player whose EPA total is None is unranked and sorts last, as
+any None sort value does. Receiving has no EPA sort: nflverse names no
+intended receiver on a 2003-2008 incompletion, so receiving EPA in those
+seasons counts catches only and runs about 4x high (#484, held there by
+the founder).
+
 Every other sort is the `PlayerStats` column of the same name. `fg_long` is a
 career MAX (`PLAYER_STAT_MAX_FIELDS`, #334), NULL for a kicker who never made
 one, so such a kicker is unranked and sorts last on that board.
@@ -625,8 +642,8 @@ ties included. The defense sorts carry the founder's disclosure calls from
 PLAYER_LEADER_SORTS_BY_CATEGORY: Mapping[PlayerLeaderCategory, tuple[PlayerLeaderSort, ...]] = (
     MappingProxyType(
         {
-            "passing": ("passing_yards", "passing_tds", "wins"),
-            "rushing": ("rushing_yards", "rushing_tds", "carries"),
+            "passing": ("passing_yards", "passing_tds", "wins", "epa_per_dropback"),
+            "rushing": ("rushing_yards", "rushing_tds", "carries", "epa_per_carry"),
             "receiving": ("receiving_yards", "receiving_tds", "receptions"),
             "kicking": ("fg_made", "fg_pct", "fg_made_50_plus", "fg_long", "fg_att", "pat_made"),
             "punting": ("pt_yards", "pt_net_yards", "pt_att", "pt_inside_20"),
@@ -655,13 +672,40 @@ PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS: Mapping[PlayerSeasonType, int] = MappingProxy
     {"regular": 100, "postseason": 15}
 )
 """Career field-goal attempts a kicker needs, in that season type, to appear
-on the `fg_pct` sort (founder call on #315, 2026-10-08). It is the epic's one
-rate sort, so it is the one sort with a minimum: 100 is Pro Football
+on the `fg_pct` sort (founder call on #315, 2026-10-08). It was the epic's
+first rate sort, and every rate sort has a minimum (the EPA ones below,
+#347): 100 is Pro Football
 Reference's career FG% qualifier. Below it a kicker is left off the `fg_pct`
 board entirely (not listed unranked), and `PlayerLeaders.total` counts only
 the kickers who meet it. Every other kicking sort keeps the
 one-attempt rule. Measured on 1999-2025: 86 of 202 kickers qualify for the
 regular-season board, 31 of 100 for the postseason one."""
+
+PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS: Mapping[PlayerSeasonType, int] = MappingProxyType(
+    {"regular": 1500, "postseason": 225}
+)
+"""Career dropbacks (`attempts + sacks_suffered`, in that season type) a
+player needs to appear on the `epa_per_dropback` sort (founder call on #347,
+2026-10-26: about three seasons as a starter; postseason about 15% of the
+regular-season line, the same ratio as FG%). Below it a player is left off
+the board, and `PlayerLeaders.total` counts only those who meet it. Only
+dropbacks the db holds count, so a career that began before the data
+(`PlayerCoverage.cut_off_before`) is judged on its covered seasons.
+Measured on the committed raw weekly files, 1999-2025, grouped by nflverse
+player id (2026-10-26): 104 qualify for the regular-season board (Peyton
+Manning +0.242, Patrick Mahomes +0.220, Tom Brady +0.185) and 31 for the
+postseason one (Kurt Warner +0.223)."""
+
+PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES: Mapping[PlayerSeasonType, int] = MappingProxyType(
+    {"regular": 750, "postseason": 110}
+)
+"""Career carries a player needs to appear on the `epa_per_carry` sort
+(founder call on #347, 2026-10-26), with the same rules as
+`PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS`. Measured the same way: 151
+qualify for the regular-season board and 39 for the postseason one. The
+board ranks everyone with the carries, whatever their position (the
+category rule), so quarterbacks top it: Josh Allen +0.344, Mike Vick
++0.293, Jalen Hurts +0.218 regular season."""
 
 
 @dataclass(frozen=True)
@@ -749,7 +793,8 @@ class PlayerCoverage:
 class PlayerLeaderRow:
     """One qualifying player on a leaderboard for one category and season
     type. Qualifying is per category (`PlayerLeaderCategory`), with no
-    minimum, except the `fg_pct` sort (`PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`).
+    minimum, except the rate sorts: `fg_pct` (`PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`),
+    `epa_per_dropback` and `epa_per_carry` (their `PLAYER_LEADER_EPA_*` minimums).
     The computed sorts' values are not carried on the row; a client derives
     them from `stats` exactly as `PlayerLeaderSort` defines them. `record` is the
     player's QB starter record whatever the category (0-0-0 for most
@@ -785,7 +830,8 @@ class PlayerLeaders:
     limit: int
     offset: int
     # Size of the whole qualifying population, so a client can page. For the
-    # `fg_pct` sort, only the kickers who meet the attempts minimum.
+    # `fg_pct` sort, only the kickers who meet the attempts minimum; for the
+    # EPA sorts, only the players who meet their minimum.
     total: int
     # The db's player-stat span for this sport (`PlayerCoverage`'s data span),
     # so a board can say "since 1999" even when it has no rows (#446).

@@ -239,11 +239,13 @@ describe('PlayerCareerTable (issue #296)', () => {
       'Passing yards',
       'Passing TDs',
       'Interceptions',
+      'EPA per dropback',
       'Carries',
       'Rushing yards',
       'Rushing TDs',
       'Rushing first downs',
       'Rushing fumbles lost',
+      'EPA per carry',
       'Receptions',
       'Receiving yards',
       'Receiving TDs',
@@ -275,6 +277,7 @@ describe('PlayerCareerTable (issue #296)', () => {
       'Rushing TDs',
       'Rushing first downs',
       'Rushing fumbles lost',
+      'EPA per carry',
       'Receptions',
       'Receiving yards',
       'Receiving TDs',
@@ -486,5 +489,98 @@ describe('PlayerCareerTable and a career cut off by the data (#448)', () => {
     expect(
       screen.getByRole('rowheader', { name: 'Career, 1 season' }),
     ).toBeInTheDocument()
+  })
+})
+
+/**
+ * Issue #347: EPA per dropback closes the passing columns and EPA per carry
+ * the rushing ones, on every season line and the totals, each derived from
+ * the EPA sum and the count that line was sent.
+ */
+describe('PlayerCareerTable, the EPA columns (issue #347)', () => {
+  it("derives each season line's and the totals' EPA rates from the sums sent", () => {
+    render(
+      <PlayerCareerTable
+        caption="Kurt Warner, regular season"
+        lines={[WARNER_1999_REGULAR]}
+        totals={KURT_WARNER_CAREER.regular_season}
+      />,
+    )
+
+    const line = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    const totals = screen.getByRole('rowheader', { name: /^Career/ })
+      .parentElement as HTMLElement
+    // 163.01 passing EPA over 455 attempts + 26 sacks; -4.03 over 22 carries.
+    expect(cellUnder(line, 'EPA per dropback')).toHaveTextContent(/^0\.339$/)
+    expect(cellUnder(line, 'EPA per carry')).toHaveTextContent(/^−0\.183$/)
+    // The totals row's header spans Season and Teams, so its cells sit one
+    // to the left of the header row's.
+    const headers = screen
+      .getAllByRole('columnheader')
+      .map((header) => header.textContent)
+    const totalsCell = (name: string) =>
+      totals.querySelectorAll('th, td')[headers.indexOf(name) - 1]
+    expect(totalsCell('EPA per dropback')).toHaveTextContent(/^0\.339$/)
+    expect(totalsCell('EPA per carry')).toHaveTextContent(/^−0\.183$/)
+  })
+
+  it('shows a dash named none, never 0 or NaN, on a line with no carries', () => {
+    const noCarries = {
+      ...WARNER_1999_POSTSEASON,
+      stats: {
+        ...WARNER_1999_POSTSEASON.stats,
+        carries: 0,
+        rushing_yards: 0,
+        rushing_epa: null,
+      },
+    }
+    render(
+      <PlayerCareerTable
+        caption="Kurt Warner, playoffs"
+        lines={[noCarries]}
+        totals={null}
+      />,
+    )
+
+    const row = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    const cell = cellUnder(row, 'EPA per carry')
+    expect(within(cell).getByText('none')).toBeInTheDocument()
+    expect(cell).not.toHaveTextContent(/0|NaN/)
+    expect(cellUnder(row, 'EPA per dropback')).toHaveTextContent(/^0\.350$/)
+  })
+
+  it('reads "not recorded" where the source has no EPA', () => {
+    const [line] = CAREER_WITH_NULL_STATS.seasons
+    render(
+      <PlayerCareerTable
+        caption="Unrecorded Player, regular season"
+        lines={[line!]}
+        totals={null}
+      />,
+    )
+
+    const row = screen.getByRole('rowheader', { name: '1999' })
+      .parentElement as HTMLElement
+    expect(cellUnder(row, 'EPA per dropback')).toHaveTextContent(
+      /^not recorded$/,
+    )
+  })
+
+  it('gives a kicker no EPA column', () => {
+    render(
+      <PlayerCareerTable
+        caption="Olindo Mare, regular season"
+        lines={OLINDO_MARE_CAREER.seasons.filter(
+          (season) => season.season_type === 'regular',
+        )}
+        totals={OLINDO_MARE_CAREER.regular_season}
+      />,
+    )
+
+    expect(
+      screen.queryByRole('columnheader', { name: /EPA/ }),
+    ).not.toBeInTheDocument()
   })
 })

@@ -11,6 +11,8 @@ from typing import Unpack
 import pytest
 
 from cfb_strength.contracts import (
+    PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES,
+    PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS,
     PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
     PLAYER_LEADER_SORTS_BY_CATEGORY,
     PLAYER_LEADERS_MAX_LIMIT,
@@ -1674,3 +1676,263 @@ def test_every_defense_leaders_row_equals_that_players_career_totals(db: PlayerD
     e, c = by_name["End"].stats, by_name["Corner"]
     assert (e.def_sacks, e.def_fumbles_forced, e.def_tackles_solo) == (19.5, 3, 30)
     assert (c.stats.def_interceptions, c.stats.def_pass_defended, c.games) == (None, 30, None)
+
+
+# --- the EPA rate sorts (#347) ------------------------------------------------
+#
+# `epa_per_dropback` = passing_epa / (attempts + sacks_suffered) on the passing
+# board, `epa_per_carry` = rushing_epa / carries on the rushing board, each
+# gated by its founder minimum as `fg_pct` is.
+
+EPA_SORTS = ("epa_per_dropback", "epa_per_carry")
+_EPA_CASES = [(sort, st) for sort in EPA_SORTS for st in ("regular", "postseason")]
+
+
+def _epa_minimum(sort: str, season_type: str) -> int:
+    table = (
+        PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS
+        if sort == "epa_per_dropback"
+        else PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES
+    )
+    return table[season_type]  # type: ignore[index]  # the Literal's values
+
+
+def _epa_category(sort: str) -> str:
+    return "passing" if sort == "epa_per_dropback" else "rushing"
+
+
+def _epa_line(
+    sort: str, *, epa: float | None, volume: int | None, sacks: int | None = 0
+) -> StatLine:
+    """A line on exactly one of the two boards: `volume` dropbacks (of which
+    `sacks` are sacks) with `epa` passing EPA, or `volume` carries with `epa`
+    rushing EPA."""
+    if sort == "epa_per_dropback":
+        attempts = None if volume is None else volume - (sacks or 0)
+        return full_stats(
+            attempts=attempts, sacks_suffered=sacks, passing_epa=epa, carries=0, rushing_epa=0.0
+        )
+    return full_stats(
+        attempts=0, sacks_suffered=0, passing_epa=0.0, carries=volume, rushing_epa=epa
+    )
+
+
+def _epa_player(
+    db: PlayerDb,
+    sort: str,
+    name: str,
+    *,
+    epa: float | None,
+    volume: int | None,
+    season_type: str,
+    sacks: int | None = 0,
+) -> int:
+    pid = db.player(name, position="QB" if sort == "epa_per_dropback" else "RB")
+    db.season(
+        pid, 2000, season_type=season_type, **_epa_line(sort, epa=epa, volume=volume, sacks=sacks)
+    )
+    return pid
+
+
+def _epa_board(
+    conn: sqlite3.Connection, sort: str | None, category: str, season_type: str, offset: int = 0
+) -> PlayerLeaders:
+    return get_player_leaders(
+        conn,
+        sport="nfl",
+        category=category,  # type: ignore[arg-type]  # the Literal's values
+        season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
+        sort=sort,  # type: ignore[arg-type]  # the Literal's values
+        offset=offset,
+    )
+
+
+def test_passing_and_rushing_sorts_are_the_contracts() -> None:
+    assert PLAYER_LEADER_SORTS_BY_CATEGORY["passing"] == (
+        "passing_yards",
+        "passing_tds",
+        "wins",
+        "epa_per_dropback",
+    )
+    assert PLAYER_LEADER_SORTS_BY_CATEGORY["rushing"] == (*RUSHING_SORTS, "epa_per_carry")
+    assert dict(PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS) == {
+        "regular": 1500,
+        "postseason": 225,
+    }
+    assert dict(PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES) == {"regular": 750, "postseason": 110}
+
+
+@pytest.mark.parametrize(("sort", "season_type"), _EPA_CASES)
+def test_epa_rate_ranks_by_the_exact_ratio_with_competition_ties(
+    db: PlayerDb, sort: str, season_type: str
+) -> None:
+    m = _epa_minimum(sort, season_type)
+    # 0.25 is exact in binary, so the same ratio at twice the volume ties.
+    _epa_player(db, sort, "Half B", epa=0.5 * m, volume=2 * m, season_type=season_type)
+    _epa_player(db, sort, "Half A", epa=0.25 * m, volume=m, season_type=season_type)
+    # 0.20049 and 0.20041 are both 0.200 at three decimals; only the exact
+    # ratio puts Zed above Abe.
+    _epa_player(db, sort, "Abe", epa=0.20041 * m, volume=m, season_type=season_type)
+    _epa_player(db, sort, "Zed", epa=0.20049 * m, volume=m, season_type=season_type)
+    _epa_player(db, sort, "Negative", epa=-0.1 * m, volume=m + 7, season_type=season_type)
+    conn = conn_of(db)
+
+    board = _epa_board(conn, sort, _epa_category(sort), season_type)
+
+    assert [(r.rank, r.display_name) for r in board.rows] == [
+        (1, "Half A"),
+        (1, "Half B"),
+        (3, "Zed"),
+        (4, "Abe"),
+        (5, "Negative"),
+    ]
+    assert (board.sort, board.total) == (sort, 5)
+
+
+@pytest.mark.parametrize(("sort", "season_type"), _EPA_CASES)
+def test_epa_rate_board_needs_the_minimum_inclusive(
+    db: PlayerDb, sort: str, season_type: str
+) -> None:
+    m = _epa_minimum(sort, season_type)
+    # The best ratio but one dropback/carry short: it would top the board.
+    _epa_player(db, sort, "Just Short", epa=0.9 * (m - 1), volume=m - 1, season_type=season_type)
+    _epa_player(db, sort, "Exactly Enough", epa=0.1 * m, volume=m, season_type=season_type)
+    _epa_player(db, sort, "Volume", epa=0.05 * (m + 50), volume=m + 50, season_type=season_type)
+    conn = conn_of(db)
+    category = _epa_category(sort)
+
+    board = _epa_board(conn, sort, category, season_type)
+    assert [(r.rank, r.display_name) for r in board.rows] == [(1, "Exactly Enough"), (2, "Volume")]
+    assert board.total == 2
+    # A page past the end still counts only the players who meet it.
+    past_end = _epa_board(conn, sort, category, season_type, offset=10)
+    assert (past_end.rows, past_end.total) == ([], 2)
+    # Every other sort of the category keeps its one-play rule.
+    for other in PLAYER_LEADER_SORTS_BY_CATEGORY[category]:  # type: ignore[index]  # the Literal's values
+        if other != sort:
+            assert _epa_board(conn, other, category, season_type).total == 3, other
+
+
+@pytest.mark.parametrize("season_type", ["regular", "postseason"])
+def test_sacks_count_toward_dropbacks(db: PlayerDb, season_type: str) -> None:
+    sort = "epa_per_dropback"
+    m = _epa_minimum(sort, season_type)
+    # One attempt short of the minimum, made up by one sack.
+    _epa_player(db, sort, "One Sack", epa=0.3 * m, volume=m, sacks=1, season_type=season_type)
+    # Same EPA and attempts; the sacks halve Sacked's rate.
+    _epa_player(db, sort, "Pocket", epa=0.2 * m, volume=m, sacks=0, season_type=season_type)
+    _epa_player(db, sort, "Sacked", epa=0.2 * m, volume=2 * m, sacks=m, season_type=season_type)
+    conn = conn_of(db)
+
+    board = _epa_board(conn, sort, "passing", season_type)
+
+    assert [(r.rank, r.display_name) for r in board.rows] == [
+        (1, "One Sack"),
+        (2, "Pocket"),
+        (3, "Sacked"),
+    ]
+    by_name = {r.display_name: r.stats for r in board.rows}
+    assert (by_name["One Sack"].attempts, by_name["One Sack"].sacks_suffered) == (m - 1, 1)
+    assert (by_name["Sacked"].attempts, by_name["Sacked"].sacks_suffered) == (m, m)
+    assert board.total == 3
+
+
+@pytest.mark.parametrize(("sort", "season_type"), _EPA_CASES)
+def test_a_null_epa_total_is_unranked_and_last(db: PlayerDb, sort: str, season_type: str) -> None:
+    m = _epa_minimum(sort, season_type)
+    _epa_player(db, sort, "Aaron Untracked", epa=None, volume=m + 100, season_type=season_type)
+    _epa_player(db, sort, "Zed Negative", epa=-0.3 * m, volume=m, season_type=season_type)
+    conn = conn_of(db)
+
+    board = _epa_board(conn, sort, _epa_category(sort), season_type)
+
+    column = "passing_epa" if sort == "epa_per_dropback" else "rushing_epa"
+    assert [(r.rank, r.display_name, getattr(r.stats, column)) for r in board.rows] == [
+        (1, "Zed Negative", -0.3 * m),
+        (None, "Aaron Untracked", None),
+    ]
+    assert board.total == 2
+
+
+@pytest.mark.parametrize(("sort", "season_type"), _EPA_CASES)
+def test_a_null_dropbacks_or_carries_total_is_off_the_board(
+    db: PlayerDb, sort: str, season_type: str
+) -> None:
+    m = _epa_minimum(sort, season_type)
+    _epa_player(db, sort, "Ranked", epa=0.1 * m, volume=m, season_type=season_type)
+    # Past the minimum in one season; the other season's untracked
+    # sacks/carries make the career total NULL, which can't show it is met.
+    partial = _epa_player(db, sort, "Partial", epa=0.5 * m, volume=m, season_type=season_type)
+    untracked = (
+        _epa_line(sort, epa=1.0, volume=10, sacks=None)
+        if sort == "epa_per_dropback"
+        else _epa_line(sort, epa=1.0, volume=None)
+    )
+    db.season(partial, 2001, season_type=season_type, **untracked)
+    conn = conn_of(db)
+    category = _epa_category(sort)
+
+    board = _epa_board(conn, sort, category, season_type)
+
+    assert ([r.display_name for r in board.rows], board.total) == (["Ranked"], 1)
+    # Still on the category's board for its other sorts.
+    assert _epa_board(conn, None, category, season_type).total == 2
+
+
+@pytest.mark.parametrize(("sort", "season_type"), _EPA_CASES)
+def test_the_epa_minimum_and_ratio_use_career_totals_across_seasons(
+    db: PlayerDb, sort: str, season_type: str
+) -> None:
+    m = _epa_minimum(sort, season_type)
+    first = m // 3
+    pid = _epa_player(
+        db, sort, "Two Seasons", epa=0.25 * first, volume=first, season_type=season_type
+    )
+    db.season(
+        pid,
+        2001,
+        season_type=season_type,
+        **_epa_line(sort, epa=-0.125 * (m - first), volume=m - first),
+    )
+    # One season only, at a better rate, but short of the minimum.
+    _epa_player(db, sort, "One Season", epa=0.2 * first, volume=first, season_type=season_type)
+    conn = conn_of(db)
+
+    board = _epa_board(conn, sort, _epa_category(sort), season_type)
+
+    assert [(r.rank, r.display_name) for r in board.rows] == [(1, "Two Seasons")]
+    stats = board.rows[0].stats
+    if sort == "epa_per_dropback":
+        assert stats.attempts is not None and stats.sacks_suffered is not None
+        assert stats.attempts + stats.sacks_suffered == m
+    else:
+        assert stats.carries == m
+
+
+@pytest.mark.parametrize(("sort", "season_type"), _EPA_CASES)
+def test_every_epa_rate_leaders_row_equals_that_players_career_totals(
+    db: PlayerDb, sort: str, season_type: str
+) -> None:
+    m = _epa_minimum(sort, season_type)
+    for i, (name, rate) in enumerate([("Alpha", 0.137), ("Bravo", -0.071), ("Charlie", 0.013)]):
+        # Three seasons each, so the EPA total is a sum of non-trivial floats.
+        pid = db.player(name, position="QB")
+        for k in range(3):
+            volume = m // 3 + 11 * i + k
+            db.season(
+                pid,
+                2000 + k,
+                season_type=season_type,
+                **_epa_line(sort, epa=rate * volume + 0.1 * k, volume=volume, sacks=k),
+            )
+    conn = conn_of(db)
+
+    board = _epa_board(conn, sort, _epa_category(sort), season_type)
+
+    assert board.total == 3
+    for row in board.rows:
+        career = get_player_career(conn, sport="nfl", player_id=row.player_id)
+        totals = career.regular_season if season_type == "regular" else career.postseason
+        assert totals is not None
+        assert row.stats == totals.stats
+        assert row.games == totals.games

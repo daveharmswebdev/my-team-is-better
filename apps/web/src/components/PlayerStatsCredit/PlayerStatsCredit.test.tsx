@@ -32,11 +32,13 @@ describe('PlayerStatsCredit (issue #296)', () => {
     ).toHaveAttribute('href', '/about#data')
   })
 
-  describe('the EP model credit (issue #459)', () => {
+  describe('the EP model credit (issues #459, #347)', () => {
+    // Broadened by #347: it covers the EPA boards and career columns, not
+    // only the QB score.
     const EP_CREDIT =
-      "The QB score's expected points come from nflfastR's EP model, by Ben Baldwin & Sebastian Carl."
+      "The expected points behind every EPA number here, the QB score's included, come from nflfastR's EP model, by Ben Baldwin & Sebastian Carl."
 
-    it('credits the EP model next to the stats credit when a QB score is shown', () => {
+    it('credits the EP model next to the stats credit when EPA is shown', () => {
       render(
         <MemoryRouter>
           <PlayerStatsCredit credit={playerStats} epModel />
