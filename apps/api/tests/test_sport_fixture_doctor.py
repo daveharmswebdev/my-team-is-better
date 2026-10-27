@@ -83,3 +83,23 @@ def test_a_slice_that_misdescribes_the_fixture_fails(tmp_path: Path) -> None:
     result = _check(db, wrong)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "cfb elo_career rated seasons are (), expected (2023,)" in result.stderr
+
+
+@pytest.mark.parametrize("year", [YEAR, 2003])
+def test_sport_fixture_elo_rows_match_the_engine(tmp_path: Path, year: int) -> None:
+    # `sport_fixture.build_elo` is a hand copy of the engine's Elo walk (the
+    # suite may not import `cfb_strength.ratings`). `build_fixture.py
+    # --check-elo-parity` re-rates a copy of the db with the engine's own
+    # `compute_and_store(..., "elo")` and compares the ratings, ledger steps
+    # and ledger configs exactly, so an engine retune or a drifted copy turns
+    # this red instead of leaving the fixture on stale numbers (#254).
+    db = make_sport_fixture_db(tmp_path, year)
+    result = subprocess.run(
+        [sys.executable, str(BUILD_FIXTURE), "--check-elo-parity", str(db)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "elo parity passed" in result.stdout

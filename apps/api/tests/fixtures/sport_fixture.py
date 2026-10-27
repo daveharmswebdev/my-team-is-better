@@ -371,12 +371,13 @@ def doctor_slice(year: int = YEAR) -> dict[str, dict[str, object]]:
 # season-isolated walk is re-done here by hand: the engine's update math
 # (`ratings/elo.py`'s `_game_update` and `_walk`), its shipped `ELO_CONFIGS`
 # constants, and `compute_ratings._load_games`' game order. It is a faithful
-# copy for this tiny regular-season slice, not a second engine. When #254
-# landed, the ratings, ledger steps and config rows it writes for 2023 and
-# 2003 were checked bit-identical to `compute_and_store(conn, year, "elo")`
-# on the same games (a one-off script, since no test may import the engine's
-# ratings layer); nothing pins that afterwards, so a later engine retune
-# leaves these rows on the old constants. The existing assertions all use
+# copy for this tiny regular-season slice, not a second engine, and it is
+# pinned to the engine: `test_sport_fixture_doctor.py` runs `build_fixture.py
+# --check-elo-parity` (the sanctioned importer of `cfb_strength.ratings`) for
+# 2023 and 2003, which re-rates a copy of the db with `compute_and_store(conn,
+# year, "elo")` and requires the ratings, ledger steps and config rows to be
+# exactly equal. An engine retune turns that red; update the copy to match.
+# The existing assertions all use
 # keener, which these rows leave untouched (`method` scopes every table).
 ELO_METHOD = "elo"
 # sport -> (k, hfa); `initial`, `scale`, `mov_scale`, `mov_autocorr` and the

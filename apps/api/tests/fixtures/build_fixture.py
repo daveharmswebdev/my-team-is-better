@@ -110,7 +110,10 @@ The same check runs on any other hand-built fixture db without building
 anything: `--check-db PATH --slice JSON` (`parse_slice`). That is how
 `tests/test_sport_fixture_doctor.py` holds `sport_fixture.py`'s db to these
 waivers (#254) -- through a subprocess, so the pytest process itself never
-imports `cfb_strength.ingest`.
+imports `cfb_strength.ingest`. The same test runs `--check-elo-parity PATH`,
+which re-rates a copy of that db with the engine's `elo` and requires its
+hand-written Elo rows to match exactly, keeping that copy of the engine's
+math on the engine's numbers (`elo_parity_diffs`).
 
 What that bracket does NOT check: it compares (season, season_type) *pairs*
 against the cache, never individual games. A source missing some games inside
@@ -469,6 +472,88 @@ def parse_slice(text: str) -> Slice:
     return parsed
 
 
+# The rows `check_elo_parity` compares, per table: every column the engine
+# writes except the surrogate `id` and the wall-clock `computed_at`.
+_ELO_PARITY_QUERIES: dict[str, str] = {
+    "ratings": """
+        SELECT sport, year, team_id, rating, rank, wins, losses, ties
+        FROM ratings WHERE method = 'elo' ORDER BY sport, year, team_id
+    """,
+    "elo_ledger_steps": """
+        SELECT sport, year, team_id, game_number, week, season_type, start_date,
+               opponent_team_id, venue, team_points, opponent_points, result,
+               rating_before, opponent_rating_before, home_field_adjustment,
+               rating_gap, win_expectancy, mov_multiplier, shift, rating_after
+        FROM elo_ledger_steps WHERE method = 'elo'
+        ORDER BY sport, year, team_id, game_number
+    """,
+    "elo_ledger_configs": """
+        SELECT sport, year, starting_rating, k, hfa, scale, mov_scale, mov_autocorr,
+               mov_denom_floor_fraction
+        FROM elo_ledger_configs WHERE method = 'elo' ORDER BY sport, year
+    """,
+}
+
+
+def elo_parity_diffs(db_path: Path) -> tuple[int, list[str]]:
+    """Re-rate a copy of `db_path` with the engine's own `elo` for every
+    (sport, year) the db holds elo ratings for, and compare the three elo
+    tables row by row, exactly (#254). For a hand-built fixture whose elo rows
+    are written without the engine (`sport_fixture.build_elo`), this is what
+    keeps them on the engine's numbers. Returns (rows compared, differences);
+    the db itself is never written."""
+    copy = db_path.with_name(f".{db_path.name}.elo-parity")
+    _remove_partial(copy)
+    shutil.copy(db_path, copy)
+    try:
+        ours = get_conn(db_path)
+        try:
+            expected = {
+                t: [tuple(r) for r in ours.execute(q)] for t, q in _ELO_PARITY_QUERIES.items()
+            }
+            seasons = ours.execute(
+                "SELECT DISTINCT sport, year FROM ratings WHERE method = 'elo' ORDER BY sport, year"
+            ).fetchall()
+        finally:
+            ours.close()
+        if not seasons:
+            return 0, [f"{db_path} holds no elo ratings to compare"]
+
+        engine = get_conn(copy)
+        try:
+            for row in seasons:
+                compute_and_store(engine, int(row["year"]), "elo", sport=str(row["sport"]))
+            got = {t: [tuple(r) for r in engine.execute(q)] for t, q in _ELO_PARITY_QUERIES.items()}
+        finally:
+            engine.close()
+    finally:
+        _remove_partial(copy)
+
+    diffs: list[str] = []
+    compared = 0
+    for table, fixture_rows in expected.items():
+        engine_rows = got[table]
+        compared += len(fixture_rows)
+        if len(fixture_rows) != len(engine_rows):
+            diffs.append(
+                f"{table}: fixture has {len(fixture_rows)} rows, engine {len(engine_rows)}"
+            )
+        for fixture_row, engine_row in zip(fixture_rows, engine_rows, strict=False):
+            if fixture_row != engine_row:
+                diffs.append(f"{table}:\n      fixture {fixture_row}\n      engine  {engine_row}")
+    return compared, diffs
+
+
+def check_elo_parity(db_path: Path) -> None:
+    compared, diffs = elo_parity_diffs(db_path)
+    if diffs:
+        raise AssertionError(
+            f"{db_path}'s elo rows differ from the engine's compute_and_store "
+            f"({len(diffs)} difference(s)):\n  - " + "\n  - ".join(diffs)
+        )
+    print(f"elo parity passed for {db_path.name}: {compared} rows identical to the engine's")
+
+
 def _refuse_live_fetch(*args: object, **kwargs: object) -> NoReturn:
     raise RuntimeError(
         "build_fixture.py never fetches live data: the committed cache under "
@@ -704,7 +789,20 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="the --check-db db's slice, as JSON (see `parse_slice`)",
     )
+    parser.add_argument(
+        "--check-elo-parity",
+        type=Path,
+        default=None,
+        help="build nothing: compare this db's elo rows with the engine re-rating a copy of it",
+    )
     args = parser.parse_args(argv)
+    if args.check_elo_parity is not None:
+        try:
+            check_elo_parity(args.check_elo_parity)
+        except AssertionError as e:
+            print(e, file=sys.stderr)
+            return 1
+        return 0
     if args.check_db is not None or args.slice is not None:
         if args.check_db is None or args.slice is None:
             parser.error("--check-db and --slice go together")
