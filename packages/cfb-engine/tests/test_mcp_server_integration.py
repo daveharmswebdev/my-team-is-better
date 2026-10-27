@@ -175,6 +175,130 @@ def test_compare_teams_valid_pair_returns_dict_citing_head_to_head(mcp_fixture_d
     assert result["head_to_head"]["meetings"][0]["winner"] == "Texas"
 
 
+# ---------------------------------------------------------------------------
+# Issue #344: the per-game field sets the LLM actually sees. Every payload
+# here is `dataclasses.asdict(...)`, which serializes dataclass FIELDS only:
+# turn one into a `@property` and it silently vanishes from the MCP payload
+# while every Python caller keeps working. So these are exact-set assertions
+# against LITERAL sets. Deriving them from `dataclasses.fields(...)` would
+# move with the contract and catch nothing.
+#
+# The asymmetry between the three per-game shapes is deliberate (contracts.py
+# has the reasons):
+#   - OpponentResult (a team's own games) carries BOTH `venue` (this team's
+#     side) and `neutral_site`.
+#   - CommonOpponentMeeting carries `venue` and NO `neutral_site`: it never
+#     had one, and `venue == "neutral"` says the same thing.
+#   - HeadToHeadMeeting carries `neutral_site` and NO `venue`: it names
+#     `home_team`/`away_team` outright.
+# A change to any of these sets is a contract change and should update the
+# literal here on purpose, not by accident.
+# ---------------------------------------------------------------------------
+
+OPPONENT_RESULT_KEYS = frozenset(
+    {
+        "game_id",
+        "neutral_site",
+        "opponent_name",
+        "opponent_rank",
+        "opponent_rating",
+        "opponent_score",
+        "opponent_team_id",
+        "result",
+        "season_type",
+        "team_score",
+        "title_game_conference",
+        "venue",
+        "venue_reliable",
+        "week",
+    }
+)
+
+COMMON_OPPONENT_MEETING_KEYS = frozenset(
+    {
+        "game_id",
+        "opponent_score",
+        "result",
+        "season_type",
+        "team_score",
+        "title_game_conference",
+        "venue",
+        "venue_reliable",
+        "week",
+    }
+)
+
+HEAD_TO_HEAD_MEETING_KEYS = frozenset(
+    {
+        "away_points",
+        "away_team",
+        "game_id",
+        "home_points",
+        "home_team",
+        "neutral_site",
+        "season_type",
+        "title_game_conference",
+        "venue_reliable",
+        "week",
+        "winner",
+    }
+)
+
+
+def test_per_game_key_sets_keep_their_deliberate_asymmetry() -> None:
+    """The literals themselves encode the asymmetry; pin it so an edit to one
+    set that "harmonizes" it with another is a visible decision."""
+    assert {"venue", "neutral_site"} <= OPPONENT_RESULT_KEYS
+    assert "venue" in COMMON_OPPONENT_MEETING_KEYS
+    assert "neutral_site" not in COMMON_OPPONENT_MEETING_KEYS
+    assert "neutral_site" in HEAD_TO_HEAD_MEETING_KEYS
+    assert "venue" not in HEAD_TO_HEAD_MEETING_KEYS
+
+
+def test_get_team_season_games_carry_exactly_the_opponent_result_fields(
+    mcp_fixture_db: Path,
+) -> None:
+    from cfb_strength.mcp_server.server import get_team_season
+
+    result = get_team_season(year=2005, team="Texas")
+    assert "error" not in result, result
+    games = result["games"]
+    # Non-empty first: an empty list would pass the loop below vacuously (#266).
+    assert len(games) == 13
+    for game in games:
+        assert set(game) == OPPONENT_RESULT_KEYS, sorted(set(game) ^ OPPONENT_RESULT_KEYS)
+
+
+def test_compare_teams_meetings_carry_exactly_their_contract_fields(
+    mcp_fixture_db: Path,
+) -> None:
+    """Texas vs Oklahoma, 2005: they met (the Red River game) and share five
+    Big 12 opponents, so both meeting shapes are populated from real data."""
+    from cfb_strength.mcp_server.server import compare_teams
+
+    result = compare_teams(year=2005, team_a="Texas", team_b="Oklahoma")
+    assert "error" not in result, result
+
+    h2h_meetings = result["head_to_head"]["meetings"]
+    assert len(h2h_meetings) == 1
+    for meeting in h2h_meetings:
+        assert set(meeting) == HEAD_TO_HEAD_MEETING_KEYS, sorted(
+            set(meeting) ^ HEAD_TO_HEAD_MEETING_KEYS
+        )
+
+    common = result["common_opponents"]
+    assert len(common) == 5
+    common_meetings = [
+        m for opp in common for m in (*opp["team_a_meetings"], *opp["team_b_meetings"])
+    ]
+    # Each side met each shared opponent at least once.
+    assert len(common_meetings) >= 2 * len(common)
+    for meeting in common_meetings:
+        assert set(meeting) == COMMON_OPPONENT_MEETING_KEYS, sorted(
+            set(meeting) ^ COMMON_OPPONENT_MEETING_KEYS
+        )
+
+
 def test_compare_teams_same_team_returns_error_dict_not_exception(mcp_fixture_db: Path) -> None:
     from cfb_strength.mcp_server.server import compare_teams
 
