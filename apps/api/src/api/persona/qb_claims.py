@@ -138,6 +138,7 @@ from api.persona.claims import (
     ID_RE,
     MASK,
     PLACEHOLDER_RE,
+    ROMAN_NUMERAL_ERROR,
     SENTENCE_BREAK_RE,
     SURROGATE,
     TOOL_NAME,
@@ -145,6 +146,7 @@ from api.persona.claims import (
     ap_number,
     has_surrogate,
     quote,
+    roman_numeral_matches,
     type_name,
     typed_number_matches,
 )
@@ -262,20 +264,9 @@ _STORY_CUE_RE: Final = re.compile(
     re.IGNORECASE,
 )
 # A Roman numeral ("Super Bowl XXXIV") is a number too, and the QB block holds
-# no Super Bowls (D3 on #451). QB path only: the team path's rules are
-# untouched. A whole uppercase word of two or more numeral letters that is a
-# valid numeral, never an empty match: "DID", "LIVID" and "LCD" are not
-# numerals (#457). The valid numerals of 400 or more that are everyday
-# abbreviations ("DC", "MD", "CD") are no game number and pass; "XL" is
-# Super Bowl XL and doesn't.
-_ROMAN_RE: Final = re.compile(
-    r"\b(?=[MDCLXVI]{2,}\b)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?!\w)"
-)
-_ROMAN_ABBREVIATIONS: Final = frozenset({"DC", "MD", "CD"})
-_ROMAN_ERROR: Final = (
-    "a Roman numeral is a number, and the FACT BLOCK holds no Super Bowls or numbered "
-    "games, so leave it out"
-)
+# no Super Bowls (D3 on #451): `api.persona.claims.roman_numeral_matches`, the
+# one rule the team check reads too since #454, with its default
+# abbreviations ("DC", "MD", "CD"), so the QB path's rules are unchanged.
 # D1's backstop: a win verb after a player, then a measure (`_verdict_backstop`).
 _WIN_VERB_RE: Final = re.compile(
     r"\b(?:takes|wins|edges|beats|tops|grabs|owns|is\s+ahead|leads|has\s+the\s+better)\b"
@@ -1279,10 +1270,10 @@ def _check_prose(
     roman_text = masked
     for player in block.players.values():
         roman_text = roman_text.replace(player.name, MASK * len(player.name))
-    for match in _ROMAN_RE.finditer(roman_text):
-        if not match.group(0) or match.group(0) in _ROMAN_ABBREVIATIONS:
-            continue
-        errors.append(f"the prose types the Roman numeral {quote(match.group(0))}; {_ROMAN_ERROR}")
+    for match in roman_numeral_matches(roman_text):
+        errors.append(
+            f"the prose types the Roman numeral {quote(match.group(0))}; {ROMAN_NUMERAL_ERROR}"
+        )
 
     third = _third_players(masked, block, player_names)
     for _, _, name in third:

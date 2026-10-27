@@ -110,6 +110,11 @@ other than those above pass (#382, coordinator decision): a bare "title" or
 "bowl", "eye-opener", "opened with", "to close the season", "to end the
 season", "down the stretch", and paraphrase ("the game for the conference
 crown"); the smoke eval's `timing_venue_flags` measures that broader set.
+An uppercase Roman numeral typed in the prose ("Super Bowl LI", #454) is a
+number and is rejected through `roman_numeral_matches`, the rule the QB check
+shares; a team name or alias that spells one ("LIV" for Livingstone) and the
+abbreviations "DC", "MD", "CD" and "DL" pass; lowercase and spaced-out
+numerals are deliberate evasion, out of scope.
 
 Pure: no IO, no database, no network, no logging. Since #291
 `api.persona.narrate` calls it on every narration, and `GROUNDING_VERSION`
@@ -136,7 +141,7 @@ TOOL_NAME: Final = "submit_narration"
 # These rules' version in the narration cache key (`api.persona.cache`,
 # issue #291): bump it when a change could accept or reject a narration
 # differently, so narrations checked under the old rules miss.
-GROUNDING_VERSION: Final = "claims-v5"
+GROUNDING_VERSION: Final = "claims-v6"
 
 # The claim cap (founder decisions on #291, 2026-09-15). The good 2017 Alabama
 # spike narration used five claims with two scores; a 2019 narration with
@@ -1529,6 +1534,19 @@ def _check_prose(
                 continue
             errors.append(_nickname_error(form, "a nickname", teams, block))
 
+    # A team name or alias typed in the prose is a name, not a game number:
+    # the catalog holds "MCM" (McMurry) and "LIV" (Livingstone), and an alias
+    # of a team outside the block is prose (`_outside_alias_re`), so both
+    # are masked before the numeral rule runs (#454).
+    roman_text = names_masked
+    if alias_re is not None:
+        for match in alias_re.finditer(masked):
+            roman_text = _mask_span(roman_text, match.start(), match.end())
+    for match in roman_numeral_matches(roman_text, _TEAM_ROMAN_ABBREVIATIONS):
+        errors.append(
+            f"the prose types the Roman numeral {_quote(match.group(0))}; {ROMAN_NUMERAL_ERROR}"
+        )
+
     walk_teams = _with_outside_aliases(masked, typed_teams, name_spans, alias_re, index)
     bare_at = _bare_offsets(placeholders, walk_teams, name_claims, pair_claims, break_ends)
     return errors, bare_at
@@ -1559,6 +1577,44 @@ def typed_number_matches(masked: str) -> list[tuple[str, re.Match[str], str]]:
     for match in _ORDINAL_RE.finditer(masked):
         found.append(("uses the ordinal", match, "a rank must come from a rank claim"))
     return found
+
+
+# A Roman numeral ("Super Bowl XXXIV") is a number too, and no fact block
+# holds a Super Bowl or a numbered game: D3 on #451 for the QB check, #454 for
+# the team check. A whole uppercase word of two or more numeral letters that
+# is a valid numeral, never an empty match: "DID", "LIVID" and "LCD" are not
+# numerals (#457). Lowercase and spaced-out numerals are deliberate evasion,
+# out of scope.
+_ROMAN_RE: Final = re.compile(
+    r"\b(?=[MDCLXVI]{2,}\b)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?!\w)"
+)
+# The valid numerals that are everyday abbreviations ("DC", "MD", "CD") are no
+# game number and pass on both paths; "XL" is Super Bowl XL and doesn't.
+ROMAN_ABBREVIATIONS: Final = frozenset({"DC", "MD", "CD"})
+# The team check also passes "DL" (the defensive line, a valid 550). The QB
+# check keeps `ROMAN_ABBREVIATIONS` alone, its rules unchanged by #454.
+_TEAM_ROMAN_ABBREVIATIONS: Final = ROMAN_ABBREVIATIONS | {"DL"}
+ROMAN_NUMERAL_ERROR: Final = (
+    "a Roman numeral is a number, and the FACT BLOCK holds no Super Bowls or numbered "
+    "games, so leave it out"
+)
+
+
+def roman_numeral_matches(
+    text: str, abbreviations: Collection[str] = ROMAN_ABBREVIATIONS
+) -> list[re.Match[str]]:
+    """Every uppercase Roman numeral typed in `text`, except `abbreviations`.
+
+    The one rule both the team check (`_check_prose`) and the QB check
+    (`api.persona.qb_claims`) read Roman numerals through; each masks the
+    names it holds ("Robert Griffin III", an alias "LIV") before calling it.
+    Kept apart from `typed_number_matches`, so neither path reports a numeral
+    twice."""
+    return [
+        match
+        for match in _ROMAN_RE.finditer(text)
+        if match.group(0) and match.group(0) not in abbreviations
+    ]
 
 
 def _with_outside_aliases(

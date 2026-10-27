@@ -245,7 +245,7 @@ def test_service_writes_under_the_key_built_from_the_production_fact_block(
 
 def test_the_service_keys_on_the_claims_grounding_version() -> None:
     keyed_on = vars(service)["GROUNDING_VERSION"]
-    assert GROUNDING_VERSION == "claims-v5"
+    assert GROUNDING_VERSION == "claims-v6"
     assert keyed_on == claims.GROUNDING_VERSION
     # "grounding-v2" was the lexical checker's version, the string this key
     # carried before #291. #292 deleted that module, so the literal is quoted
