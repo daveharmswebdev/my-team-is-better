@@ -22,8 +22,10 @@ from cfb_strength.contracts import (
     PlayerComparison,
     PlayerHeadToHead,
     PlayerHeadToHeadGame,
+    PlayerLeaderRow,
     PlayerLeaders,
     PlayerSeasonLine,
+    PlayerStats,
     StarterRecord,
 )
 from cfb_strength.db.connection import ensure_schema, get_conn
@@ -871,3 +873,149 @@ def test_careers_inside_the_data_are_not_cut_off(conn: sqlite3.Connection) -> No
     peyton = get_player_career(conn, sport="nfl", player_id=PEYTON_MANNING).coverage
     assert peyton.cut_off_before is True
     assert (peyton.covered_first_season, peyton.covered_last_season) == (1999, 2015)
+
+
+# --- the EPA rate boards (#347) -----------------------------------------------
+#
+# epa_per_dropback = passing_epa / (attempts + sacks_suffered), at least 1500
+# regular-season or 225 postseason career dropbacks; epa_per_carry =
+# rushing_epa / carries, at least 750 or 110 career carries. The counts and
+# leaders are the coordinator's measurement on the raw weekly files grouped by
+# nflverse player id, exactly.
+
+_EPA_BOARDS = [
+    ("passing", "epa_per_dropback", "regular", 1500),
+    ("passing", "epa_per_dropback", "postseason", 225),
+    ("rushing", "epa_per_carry", "regular", 750),
+    ("rushing", "epa_per_carry", "postseason", 110),
+]
+
+
+def _epa_board(
+    conn: sqlite3.Connection, category: str, sort: str, season_type: str
+) -> list[PlayerLeaderRow]:
+    """Every row of one EPA board, paged through."""
+    rows: list[PlayerLeaderRow] = []
+    while True:
+        page = get_player_leaders(
+            conn,
+            sport="nfl",
+            category=category,  # type: ignore[arg-type]  # the Literal's values
+            season_type=season_type,  # type: ignore[arg-type]  # the Literal's values
+            sort=sort,  # type: ignore[arg-type]  # the Literal's values
+            limit=PLAYER_LEADERS_MAX_LIMIT,
+            offset=len(rows),
+        )
+        rows += page.rows
+        if len(rows) >= page.total:
+            assert len(rows) == page.total
+            return rows
+
+
+def _epa_and_volume(sort: str, stats: PlayerStats) -> tuple[float | None, int | None]:
+    if sort == "epa_per_dropback":
+        if stats.attempts is None or stats.sacks_suffered is None:
+            return stats.passing_epa, None
+        return stats.passing_epa, stats.attempts + stats.sacks_suffered
+    return stats.rushing_epa, stats.carries
+
+
+def _epa_top(sort: str, rows: list[PlayerLeaderRow]) -> list[tuple[int | None, str, int, float]]:
+    top = []
+    for r in rows[:3]:
+        epa, volume = _epa_and_volume(sort, r.stats)
+        assert epa is not None and volume is not None
+        top.append((r.rank, r.display_name, volume, round(epa / volume, 3)))
+    return top
+
+
+@pytest.mark.parametrize(
+    ("category", "sort", "season_type", "total", "top"),
+    [
+        (
+            "passing",
+            "epa_per_dropback",
+            "regular",
+            104,
+            [
+                (1, "Peyton Manning", 9086, 0.242),
+                (2, "Patrick Mahomes", 4891, 0.220),
+                (3, "Tom Brady", 12617, 0.185),
+            ],
+        ),
+        (
+            "passing",
+            "epa_per_dropback",
+            "postseason",
+            31,
+            [
+                (1, "Kurt Warner", 481, 0.223),
+                (2, "Matthew Stafford", 511, 0.217),
+                (3, "Patrick Mahomes", 801, 0.204),
+            ],
+        ),
+        (
+            "rushing",
+            "epa_per_carry",
+            "regular",
+            151,
+            [
+                (1, "Josh Allen", 871, 0.344),
+                (2, "Mike Vick", 872, 0.293),
+                (3, "Jalen Hurts", 779, 0.218),
+            ],
+        ),
+        (
+            "rushing",
+            "epa_per_carry",
+            "postseason",
+            39,
+            [
+                (1, "Josh Allen", 135, 0.464),
+                (2, "Patrick Mahomes", 112, 0.293),
+                (3, "Aaron Jones", 117, 0.069),
+            ],
+        ),
+    ],
+)
+def test_epa_rate_boards(
+    conn: sqlite3.Connection,
+    category: str,
+    sort: str,
+    season_type: str,
+    total: int,
+    top: list[tuple[int, str, int, float]],
+) -> None:
+    rows = _epa_board(conn, category, sort, season_type)
+    assert len(rows) == total
+    assert _epa_top(sort, rows) == top
+
+
+@pytest.mark.parametrize(("category", "sort", "season_type", "minimum"), _EPA_BOARDS)
+def test_every_epa_rate_row_meets_the_minimum_and_is_in_ratio_order(
+    conn: sqlite3.Connection, category: str, sort: str, season_type: str, minimum: int
+) -> None:
+    rows = _epa_board(conn, category, sort, season_type)
+    ratios = []
+    for r in rows:
+        epa, volume = _epa_and_volume(sort, r.stats)
+        assert volume is not None and volume >= minimum, r.display_name
+        # No qualifier in 1999-2025 has an untracked EPA total.
+        assert epa is not None and r.rank is not None, r.display_name
+        ratios.append(epa / volume)
+    assert ratios == sorted(ratios, reverse=True)
+    # No two qualifiers share a ratio, so the ranks run 1..total.
+    assert [r.rank for r in rows] == list(range(1, len(rows) + 1))
+
+
+@pytest.mark.parametrize(("category", "sort", "season_type", "minimum"), _EPA_BOARDS)
+def test_an_epa_rate_boards_top_rows_equal_the_career_totals(
+    conn: sqlite3.Connection, category: str, sort: str, season_type: str, minimum: int
+) -> None:
+    # The EPA totals are float sums, so this is exact equality of the sum the
+    # leaders query and the career query each compute, to the last bit.
+    for row in _epa_board(conn, category, sort, season_type)[:10]:
+        career = get_player_career(conn, sport="nfl", player_id=row.player_id)
+        totals = career.regular_season if season_type == "regular" else career.postseason
+        assert totals is not None
+        assert (row.games, row.record, row.stats) == (totals.games, totals.record, totals.stats)

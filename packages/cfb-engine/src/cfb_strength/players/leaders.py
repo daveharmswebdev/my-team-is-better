@@ -1,5 +1,5 @@
-"""Career leaderboards (#296, #312, #314, #315, #317): a stat column sorted
-descending, no rating math."""
+"""Career leaderboards (#296, #312, #314, #315, #317, #347): a stat column, or
+a fixed ratio of two career totals, sorted descending; no rating math."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ import sqlite3
 from typing import get_args
 
 from cfb_strength.contracts import (
+    PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES,
+    PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS,
     PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS,
     PLAYER_LEADER_SORTS_BY_CATEGORY,
     PLAYER_LEADERS_MAX_LIMIT,
@@ -29,6 +31,11 @@ _SORT_COLUMN: dict[PlayerLeaderSort, str] = {
     "passing_yards": "q.passing_yards",
     "passing_tds": "q.passing_tds",
     "wins": "q.wins",
+    # The exact career ratios (#347), never rounded. A NULL EPA total is a
+    # NULL sort value (unranked, last). The gate below keeps a NULL or zero
+    # denominator off the board, so the division never sees one.
+    "epa_per_dropback": "CAST(q.passing_epa AS REAL) / (q.attempts + q.sacks_suffered)",
+    "epa_per_carry": "CAST(q.rushing_epa AS REAL) / q.carries",
     "rushing_yards": "q.rushing_yards",
     "rushing_tds": "q.rushing_tds",
     "carries": "q.carries",
@@ -60,12 +67,19 @@ _SORT_COLUMN: dict[PlayerLeaderSort, str] = {
 }
 
 # A sort's extra condition on who is on its board, over the career-totals row
-# `t`, on top of the category's qualifying rule. Only `fg_pct` has one
-# (`PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`): a kicker below the minimum is left
-# off the board, so the page and `total` both drop him. A NULL attempts total
-# cannot show the minimum is met, so it is off the board too.
+# `t`, on top of the category's qualifying rule. Each rate sort has one, a
+# career volume minimum from the contract: `fg_pct`
+# (`PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS`), `epa_per_dropback`
+# (`PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS`, dropbacks being attempts
+# plus sacks_suffered) and `epa_per_carry`
+# (`PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES`). A player below the minimum is
+# left off the board, so the page and `total` both drop him. A NULL volume
+# total cannot show the minimum is met (NULL >= n is NULL), so it is off the
+# board too.
 _SORT_GATE: dict[PlayerLeaderSort, str] = {
     "fg_pct": "t.fg_att >= :fg_pct_min_attempts",
+    "epa_per_dropback": "t.attempts + t.sacks_suffered >= :epa_per_dropback_min_dropbacks",
+    "epa_per_carry": "t.carries >= :epa_per_carry_min_carries",
 }
 
 
@@ -134,10 +148,13 @@ def get_player_leaders(
     targets at all; kicking, a season row with a field-goal or PAT attempt;
     punting, a season row with a punt; defense, a season row with more than
     zero in any of def_sacks, def_interceptions, def_tackles_solo,
-    def_fumbles_forced and def_pass_defended (`_sql.QUALIFYING`). The one exception
-    is the `fg_pct` sort, whose board holds only kickers with at least
-    PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS[season_type] career attempts, and whose
-    `total` counts only them. `sort=None` is the category's first sort in
+    def_fumbles_forced and def_pass_defended (`_sql.QUALIFYING`). The exceptions
+    are the rate sorts, each gated by a career minimum in `season_type`, whose
+    `total` counts only the players who meet it: `fg_pct` needs
+    PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS field-goal attempts, `epa_per_dropback`
+    PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS dropbacks (attempts plus
+    sacks_suffered), and `epa_per_carry` PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES
+    carries. `sort=None` is the category's first sort in
     PLAYER_LEADER_SORTS_BY_CATEGORY, and the response echoes the resolved one.
     `rank` is competition ranking over the whole qualifying population; a None
     sort value is unranked and sorts last. Raises ValueError unless
@@ -161,6 +178,8 @@ def get_player_leaders(
         "limit": limit,
         "offset": offset,
         "fg_pct_min_attempts": PLAYER_LEADER_FG_PCT_MIN_ATTEMPTS[season_type],
+        "epa_per_dropback_min_dropbacks": PLAYER_LEADER_EPA_PER_DROPBACK_MIN_DROPBACKS[season_type],
+        "epa_per_carry_min_carries": PLAYER_LEADER_EPA_PER_CARRY_MIN_CARRIES[season_type],
     }
     fetched = conn.execute(_leaders_sql(category, resolved), params).fetchall()
     if fetched:
