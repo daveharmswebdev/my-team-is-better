@@ -47,7 +47,10 @@ delivered: you get the errors instead, so fix them and hand it back again.
   that goes red as intended is recorded with `phase: "sabotage"`, `result: "fail"`.
 - **`tests_run` is a record, not a claim.** Every command you actually executed, in
   order, with its real result. A skipped test is `skip` (e.g. the persona smoke eval
-  without a key), not `pass`.
+  without a key), not `pass`. A gate or green run that failed and that you then fixed
+  stays in the record as `fail`, followed by the re-run of the same command: on success
+  a command that failed in green or gate needs its last green or gate run to pass (#323). Never relabel a failure
+  `red` to get past the check.
 - **Numbers.** If the brief's rubric rests on a numeric premise (a precision that makes
   values match, a count, a threshold), check it against real data. If it doesn't hold,
   don't bend the work to fit: report the measured numbers in `brief_defects`.
