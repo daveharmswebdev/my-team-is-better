@@ -158,13 +158,29 @@ def validate_return(data: object, *, agent_type: str | None, ownership: Ownershi
 
     if data["status"] == "success":
         runs = data["tests_run"]
+        # A failing green or gate run is an honest record when the same command was
+        # fixed and re-run green later (#323). What counts is the command's LAST green
+        # or gate run: red and sabotage rows are expected to fail, so they can neither
+        # excuse a failure nor stand in as its re-run. That last run must pass.
+        last_checked: dict[str, int] = {}
+        for index, run in enumerate(runs):
+            if run["phase"] not in ("red", "sabotage"):
+                last_checked[run["command"].strip()] = index
         for index, run in enumerate(runs):
             expected_red = run["phase"] in ("red", "sabotage")
             if not read_only and run["result"] in ("fail", "error") and not expected_red:
+                last_index = last_checked[run["command"].strip()]
+                last = runs[last_index]
+                if last["result"] == "pass":
+                    continue
+                outcome = "failed" if last["result"] in ("fail", "error") else "did not pass"
                 errors.append(
-                    f"tests_run/{index}: result {run['result']!r} in phase {run['phase']!r}. "
-                    "On success only a red or sabotage run may fail: fix it, or return status "
-                    "failure with failure_type rubric-failed"
+                    f"tests_run/{index}: result {run['result']!r} in phase {run['phase']!r}, "
+                    f"and the last run of that command {outcome} (tests_run/{last_index}: "
+                    f"{last['result']!r} in phase {last['phase']!r}). On success only a red or "
+                    "sabotage run may fail unless the same command was re-run green or gate "
+                    "and passed: fix it and re-run it, or return status failure with "
+                    "failure_type rubric-failed"
                 )
         if read_only:
             if not runs:
