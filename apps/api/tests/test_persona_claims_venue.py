@@ -305,4 +305,4 @@ def test_accepted_cost_a_venue_in_the_sentence_after_the_game_passes(
 def test_the_grounding_version_moved_for_the_venue_check() -> None:
     """A narration accepted under claims-v4 can be rejected now, so cached
     ones must miss."""
-    assert GROUNDING_VERSION == "claims-v5"
+    assert GROUNDING_VERSION == "claims-v6"
