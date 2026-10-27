@@ -132,7 +132,9 @@ CORS_ALLOWED_ORIGINS: list[str] = (
 # claim on a row whose venue isn't reliable; "claims-v5" since #388, which
 # rejects a venue phrase typed by hand -- a compound like "a road win"
 # anywhere, a bare "on the road" or "at home" only in a sentence that refers
-# to a game: a grounding change only).
+# to a game: a grounding change only; "claims-v6" since #454, which rejects
+# an uppercase Roman numeral typed in team prose, such as "Super Bowl LI":
+# a grounding change only).
 # persona-v12 (issue #300): the prompt changed -- the `when` claim kind's
 # enumeration gained "in the regular-season finale" and "in the Big 12 title
 # game", which the validator renders now that every game row in the fact
