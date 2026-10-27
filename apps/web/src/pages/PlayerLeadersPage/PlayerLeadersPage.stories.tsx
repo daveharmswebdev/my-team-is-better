@@ -1,7 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { expect, userEvent, within } from 'storybook/test'
+import type { PlayerLeadersQuery } from '../../lib/api/client'
 import type { PlayerLeadersOut } from '../../lib/api/types'
+import {
+  creditsHandler,
+  hang,
+  httpError,
+  playerLeadersHandler,
+} from '../../mocks/handlers'
 import {
   DEFENSE_EARLY_ERA_NOTE,
   DEFENSE_UNOFFICIAL_NOTE,
@@ -27,49 +34,23 @@ import {
 import { PlayerLeadersPage } from './PlayerLeadersPage'
 
 /**
- * Like AboutPage's stories, these drive the page through a stubbed
- * `window.fetch`: `/api/players/leaders` gets each story's handler, and
- * `/api/credits` the live data sources. Everything else falls through.
+ * Like AboutPage's stories, these drive the page through the API, faked with
+ * the shared MSW handlers (issue #221): the meta serves `/api/credits` the
+ * live data sources, and each story answers `/api/players/leaders` itself.
  */
-function installFetch(leaders: (url: URL) => Promise<Response>) {
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
-    )
-    if (url.pathname === '/api/players/leaders') {
-      return leaders(url)
-    }
-    if (url.pathname === '/api/credits') {
-      return jsonResponse({ methodologies: [], data_sources: DATA_SOURCES })
-    }
-    return realFetch(input, init)
-  }
-}
-
-function jsonResponse(body: unknown): Promise<Response> {
-  return Promise.resolve(
-    new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  )
+function leaders(answer: Parameters<typeof playerLeadersHandler>[0]) {
+  return { msw: { handlers: { leaders: playerLeadersHandler(answer) } } }
 }
 
 /** Echoes the request's category, season type, sort and offset onto `page`, as the API does. */
 function answering(page: PlayerLeadersOut) {
-  return (url: URL) =>
-    jsonResponse({
-      ...page,
-      category: url.searchParams.get('category') ?? page.category,
-      season_type: url.searchParams.get('season_type') ?? page.season_type,
-      sort: url.searchParams.get('sort') ?? page.sort,
-      offset: Number(url.searchParams.get('offset') ?? page.offset),
-    })
+  return (query: PlayerLeadersQuery): PlayerLeadersOut => ({
+    ...page,
+    category: query.category,
+    season_type: query.season_type,
+    sort: query.sort,
+    offset: query.offset,
+  })
 }
 
 /**
@@ -77,35 +58,33 @@ function answering(page: PlayerLeadersOut) {
  * different columns, which is why the page cannot just re-render the rows it
  * already has.
  */
-function answeringByCategory(url: URL) {
-  if (url.searchParams.get('category') === 'rushing') {
+function answeringByCategory(query: PlayerLeadersQuery) {
+  if (query.category === 'rushing') {
     const board =
-      url.searchParams.get('sort') === 'rushing_tds'
+      query.sort === 'rushing_tds'
         ? LEADERS_BY_RUSHING_TDS
         : LEADERS_BY_RUSHING_YARDS
-    return answering(board)(url)
+    return answering(board)(query)
   }
-  if (url.searchParams.get('category') === 'receiving') {
+  if (query.category === 'receiving') {
     const board =
-      url.searchParams.get('sort') === 'receiving_tds'
+      query.sort === 'receiving_tds'
         ? LEADERS_BY_RECEIVING_TDS
         : LEADERS_BY_RECEIVING_YARDS
-    return answering(board)(url)
+    return answering(board)(query)
   }
-  if (url.searchParams.get('category') === 'kicking') {
+  if (query.category === 'kicking') {
     const board =
-      url.searchParams.get('sort') === 'fg_pct'
-        ? LEADERS_BY_FG_PCT
-        : LEADERS_BY_FG_MADE
-    return answering(board)(url)
+      query.sort === 'fg_pct' ? LEADERS_BY_FG_PCT : LEADERS_BY_FG_MADE
+    return answering(board)(query)
   }
-  if (url.searchParams.get('category') === 'punting') {
-    return answering(LEADERS_BY_PT_YARDS)(url)
+  if (query.category === 'punting') {
+    return answering(LEADERS_BY_PT_YARDS)(query)
   }
-  if (url.searchParams.get('category') === 'defense') {
-    return answering(LEADERS_BY_DEF_SACKS)(url)
+  if (query.category === 'defense') {
+    return answering(LEADERS_BY_DEF_SACKS)(query)
   }
-  return answering(LEADERS_BY_YARDS)(url)
+  return answering(LEADERS_BY_YARDS)(query)
 }
 
 function atRoute(search = '') {
@@ -124,6 +103,16 @@ const meta = {
   title: 'pages/PlayerLeadersPage',
   component: PlayerLeadersPage,
   tags: ['autodocs'],
+  parameters: {
+    msw: {
+      handlers: {
+        credits: creditsHandler(() => ({
+          methodologies: [],
+          data_sources: DATA_SOURCES,
+        })),
+      },
+    },
+  },
 } satisfies Meta<typeof PlayerLeadersPage>
 
 export default meta
@@ -131,13 +120,8 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Loaded: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answering(LEADERS_BY_YARDS))
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answering(LEADERS_BY_YARDS)),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
@@ -147,13 +131,8 @@ export const Loaded: Story = {
 
 /** A real tie at rank 2, by passing TDs. */
 export const TiedRanks: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answering(LEADERS_BY_TDS))
-      return <Story />
-    },
-    atRoute('?season_type=regular&sort=passing_tds&offset=0'),
-  ],
+  decorators: [atRoute('?season_type=regular&sort=passing_tds&offset=0')],
+  parameters: leaders(answering(LEADERS_BY_TDS)),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Steve Beuerlein' })
@@ -161,13 +140,8 @@ export const TiedRanks: Story = {
 }
 
 export const NullStats: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answering(LEADERS_WITH_NULL_STATS))
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answering(LEADERS_WITH_NULL_STATS)),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Unrecorded Player' })
@@ -176,13 +150,8 @@ export const NullStats: Story = {
 
 /** The playoffs switch, operated from the keyboard. */
 export const Playoffs: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answering(LEADERS_BY_YARDS))
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answering(LEADERS_BY_YARDS)),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
@@ -198,14 +167,11 @@ export const Playoffs: Story = {
 /** The rushing board, reached by its own URL (issue #312). */
 export const Rushing: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
     atRoute(
       '?category=rushing&season_type=regular&sort=rushing_yards&offset=0',
     ),
   ],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Edgerrin James' })
@@ -221,14 +187,11 @@ export const Rushing: Story = {
 /** The receiving board, reached by its own URL (issue #314). */
 export const Receiving: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
     atRoute(
       '?category=receiving&season_type=regular&sort=receiving_yards&offset=0',
     ),
   ],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Tyreek Hill' })
@@ -246,13 +209,8 @@ export const Receiving: Story = {
 
 /** Picking Receiving, then sorting by Receiving TDs: the three-way tie at 1. */
 export const ReceivingSwitch: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
@@ -275,13 +233,8 @@ export const ReceivingSwitch: Story = {
 
 /** Picking Rushing from the dropdown swaps the board, columns and all. */
 export const CategorySwitch: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
@@ -299,12 +252,9 @@ export const CategorySwitch: Story = {
 /** The kicking board, reached by its own URL (issue #315). */
 export const Kicking: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
     atRoute('?category=kicking&season_type=regular&sort=fg_made&offset=0'),
   ],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Olindo Mare' })
@@ -324,12 +274,9 @@ export const Kicking: Story = {
  */
 export const KickingByFieldGoalPercentage: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
     atRoute('?category=kicking&season_type=regular&sort=fg_made&offset=0'),
   ],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Olindo Mare' })
@@ -347,12 +294,9 @@ export const KickingByFieldGoalPercentage: Story = {
  */
 export const KickingFieldGoalPercentageEmpty: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answering(LEADERS_BY_FG_PCT_EMPTY))
-      return <Story />
-    },
     atRoute('?category=kicking&season_type=postseason&sort=fg_pct&offset=0'),
   ],
+  parameters: leaders(answering(LEADERS_BY_FG_PCT_EMPTY)),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByText(fgPctEmptyCopy('postseason'))
@@ -366,12 +310,9 @@ export const KickingFieldGoalPercentageEmpty: Story = {
 /** The punting board, reached by its own URL (issue #315). */
 export const Punting: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
     atRoute('?category=punting&season_type=regular&sort=pt_yards&offset=0'),
   ],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Thomas Morstead' })
@@ -388,12 +329,9 @@ export const Punting: Story = {
  */
 export const Defense: Story = {
   decorators: [
-    (Story) => {
-      installFetch(answering(DEFENSE_WITH_NULL_STATS))
-      return <Story />
-    },
     atRoute('?category=defense&season_type=regular&sort=def_sacks&offset=0'),
   ],
+  parameters: leaders(answering(DEFENSE_WITH_NULL_STATS)),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'T.J. Watt' })
@@ -413,13 +351,8 @@ export const Defense: Story = {
 
 /** Defense, chosen from the dropdown: the board and both notes arrive together. */
 export const DefenseChosen: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answeringByCategory)
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answeringByCategory),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('link', { name: 'Tua Tagovailoa' })
@@ -437,36 +370,21 @@ export const DefenseChosen: Story = {
 }
 
 export const Loading: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => new Promise(() => {}))
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(hang),
 }
 
 export const Error: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => Promise.resolve(new Response(null, { status: 500 })))
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(() => httpError(500)),
   play: async ({ canvasElement }) => {
     await within(canvasElement).findByRole('alert')
   },
 }
 
 export const Empty: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answering({ ...LEADERS_BY_YARDS, total: 0, rows: [] }))
-      return <Story />
-    },
-    atRoute(),
-  ],
+  decorators: [atRoute()],
+  parameters: leaders(answering({ ...LEADERS_BY_YARDS, total: 0, rows: [] })),
   play: async ({ canvasElement }) => {
     await within(canvasElement).findByText(
       'No NFL player stats are loaded yet.',
@@ -475,13 +393,8 @@ export const Empty: Story = {
 }
 
 export const PastTheEnd: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(answering({ ...LEADERS_BY_YARDS, rows: [] }))
-      return <Story />
-    },
-    atRoute('?season_type=regular&sort=passing_yards&offset=500'),
-  ],
+  decorators: [atRoute('?season_type=regular&sort=passing_yards&offset=500')],
+  parameters: leaders(answering({ ...LEADERS_BY_YARDS, rows: [] })),
   play: async ({ canvasElement }) => {
     await within(canvasElement).findByRole('button', {
       name: 'Back to the top',

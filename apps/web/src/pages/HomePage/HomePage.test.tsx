@@ -11,13 +11,12 @@ import { StrictMode } from 'react'
 import { MemoryRouter, useLocation, useNavigationType } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { YEAR_DEBOUNCE_MS } from '../../components/QuestionForm/QuestionForm'
+import { HttpResponse } from 'msw'
 import {
   CLIENT_ERROR_COPY,
   NETWORK_ERROR_COPY,
   SERVER_ERROR_COPY,
   VERDICT_TIMEOUT_MS,
-  VerdictApiError,
-  VerdictNetworkError,
 } from '../../lib/api/client'
 import type {
   ComparisonEnvelope,
@@ -29,35 +28,39 @@ import {
   TEXAS_ELO,
   USC_ELO,
 } from '../../components/EvidenceReceipts/eloLedgerFixture'
+import {
+  championHandler,
+  compareHandler,
+  hang,
+  networkError,
+  teamCaseHandler,
+  teamsHandler,
+  typedError,
+  yearsHandler,
+  type RequestContext,
+} from '../../mocks/handlers'
+import { server } from '../../test/server'
 import { HomePage } from './HomePage'
 
-vi.mock('../../lib/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/api/client')>(
-    '../../lib/api/client',
+/**
+ * The verdict and catalog endpoints, answered through MSW (issue #221): the
+ * page and its form call the real client.
+ */
+const mockedFetchChampion = vi.fn<Parameters<typeof championHandler>[0]>()
+const mockedFetchTeamCase = vi.fn<Parameters<typeof teamCaseHandler>[0]>()
+const mockedFetchCompare = vi.fn<Parameters<typeof compareHandler>[0]>()
+const mockedFetchYears = vi.fn<Parameters<typeof yearsHandler>[0]>()
+const mockedFetchTeams = vi.fn<Parameters<typeof teamsHandler>[0]>()
+
+beforeEach(() => {
+  server.use(
+    championHandler(mockedFetchChampion),
+    teamCaseHandler(mockedFetchTeamCase),
+    compareHandler(mockedFetchCompare),
+    yearsHandler(mockedFetchYears),
+    teamsHandler(mockedFetchTeams),
   )
-  return {
-    ...actual,
-    fetchChampion: vi.fn(),
-    fetchTeamCase: vi.fn(),
-    fetchCompare: vi.fn(),
-    fetchYears: vi.fn(),
-    fetchTeams: vi.fn(),
-  }
 })
-
-import {
-  fetchChampion,
-  fetchCompare,
-  fetchTeamCase,
-  fetchTeams,
-  fetchYears,
-} from '../../lib/api/client'
-
-const mockedFetchChampion = vi.mocked(fetchChampion)
-const mockedFetchTeamCase = vi.mocked(fetchTeamCase)
-const mockedFetchCompare = vi.mocked(fetchCompare)
-const mockedFetchYears = vi.mocked(fetchYears)
-const mockedFetchTeams = vi.mocked(fetchTeams)
 
 const TEAMS: TeamsOut = {
   teams: ['Texas', 'Texas State', 'USC'],
@@ -99,7 +102,7 @@ function envelopeFor(teamName: string, narration: string): TeamCaseEnvelope {
  */
 const WITH_SIGNAL = { signal: expect.any(AbortSignal) as AbortSignal }
 
-const UNKNOWN_YEAR_ERROR = new VerdictApiError(404, {
+const UNKNOWN_YEAR_ERROR = typedError(404, {
   error: 'unknown_year',
   // Fixed, not the calendar year: nothing in these tests may depend on today.
   year: 2019,
@@ -256,7 +259,7 @@ describe('HomePage', () => {
     /** "Texas St" is ambiguous, so this landing answers with a pill. */
     const AMBIGUOUS_LINK =
       '/?q=compare&sport=cfb&year=2005&engine=elo&a=Texas+St&b=USC&for=Texas'
-    const AMBIGUOUS_TEXAS_ST = new VerdictApiError(422, {
+    const AMBIGUOUS_TEXAS_ST = typedError(422, {
       error: 'ambiguous_team',
       query: 'Texas St',
       candidates: ['Texas State'],
@@ -496,7 +499,7 @@ describe('HomePage', () => {
       window.localStorage.setItem('myTeamIsBetter.userTeam', 'USC')
       const user = userEvent.setup()
       mockedFetchCompare
-        .mockRejectedValueOnce(AMBIGUOUS_TEXAS_ST)
+        .mockResolvedValueOnce(AMBIGUOUS_TEXAS_ST)
         .mockResolvedValueOnce(
           comparisonEnvelopeFor('Texas State', 'USC', 'Texas State, somehow.'),
         )
@@ -592,7 +595,7 @@ describe('HomePage', () => {
 
     it('shows an error with its correction pills inside the dialog', async () => {
       const user = userEvent.setup()
-      mockedFetchChampion.mockRejectedValue(UNKNOWN_YEAR_ERROR)
+      mockedFetchChampion.mockResolvedValue(UNKNOWN_YEAR_ERROR)
 
       renderHomePage()
       await waitFor(() => expect(submitButton()).not.toBeDisabled())
@@ -751,7 +754,7 @@ describe('HomePage', () => {
               comparisonEnvelopeFor('Texas', 'USC', 'The first answer.'),
             )
           } else {
-            first.reject(new VerdictNetworkError(NETWORK_ERROR_COPY))
+            first.reject(networkError())
           }
         })
 
@@ -771,7 +774,7 @@ describe('HomePage', () => {
       const user = userEvent.setup()
       const corrected = deferred<TeamCaseEnvelope>()
       mockedFetchChampion
-        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockReturnValueOnce(corrected.promise)
 
       renderHomePage()
@@ -904,8 +907,8 @@ describe('HomePage', () => {
   it('re-submits with the exact candidate name after an ambiguous_team error', async () => {
     const user = userEvent.setup()
     mockedFetchTeamCase
-      .mockRejectedValueOnce(
-        new VerdictApiError(422, {
+      .mockResolvedValueOnce(
+        typedError(422, {
           error: 'ambiguous_team',
           query: 'Texas St',
           candidates: ['Texas State'],
@@ -969,9 +972,7 @@ describe('HomePage', () => {
 
   it('renders a generic failure state on a network error', async () => {
     const user = userEvent.setup()
-    mockedFetchChampion.mockRejectedValue(
-      new VerdictNetworkError(NETWORK_ERROR_COPY),
-    )
+    mockedFetchChampion.mockResolvedValue(networkError())
 
     renderHomePage()
     await waitForDefaultYear()
@@ -986,8 +987,8 @@ describe('HomePage', () => {
 
   it('renders an unknown_team error as a not-found state with no correction pills', async () => {
     const user = userEvent.setup()
-    mockedFetchTeamCase.mockRejectedValue(
-      new VerdictApiError(404, {
+    mockedFetchTeamCase.mockResolvedValue(
+      typedError(404, {
         error: 'unknown_team',
         query: 'Abilene Christian',
         year: 2005,
@@ -1078,9 +1079,9 @@ describe('HomePage', () => {
       async ({ questionType, fill, assertCalled }) => {
         const user = userEvent.setup()
         // Never settles: only the request body is under test.
-        mockedFetchChampion.mockReturnValue(new Promise(() => {}))
-        mockedFetchTeamCase.mockReturnValue(new Promise(() => {}))
-        mockedFetchCompare.mockReturnValue(new Promise(() => {}))
+        mockedFetchChampion.mockReturnValue(hang())
+        mockedFetchTeamCase.mockReturnValue(hang())
+        mockedFetchCompare.mockReturnValue(hang())
 
         renderHomePage()
         await user.selectOptions(
@@ -1104,7 +1105,7 @@ describe('HomePage', () => {
     it('keeps the selected engine across a pill correction: the corrected request and the remounted form both say Elo', async () => {
       const user = userEvent.setup()
       mockedFetchChampion
-        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
 
       renderHomePage()
@@ -1222,7 +1223,7 @@ describe('HomePage', () => {
     it('updates the Year input, not just the verdict, when a year pill is picked', async () => {
       const user = userEvent.setup()
       mockedFetchChampion
-        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
 
       renderHomePage()
@@ -1251,8 +1252,8 @@ describe('HomePage', () => {
     it('updates the team input when an ambiguous-team candidate is picked', async () => {
       const user = userEvent.setup()
       mockedFetchTeamCase
-        .mockRejectedValueOnce(
-          new VerdictApiError(422, {
+        .mockResolvedValueOnce(
+          typedError(422, {
             error: 'ambiguous_team',
             query: 'Texas St',
             candidates: ['Texas State'],
@@ -1290,16 +1291,14 @@ describe('HomePage', () => {
 
     it('updates only the ambiguous side of a compare question', async () => {
       const user = userEvent.setup()
-      mockedFetchCompare.mockRejectedValueOnce(
-        new VerdictApiError(422, {
+      mockedFetchCompare.mockResolvedValueOnce(
+        typedError(422, {
           error: 'ambiguous_team',
           query: 'Texas St',
           candidates: ['Texas State'],
         }),
       )
-      mockedFetchCompare.mockRejectedValueOnce(
-        new VerdictNetworkError(NETWORK_ERROR_COPY),
-      )
+      mockedFetchCompare.mockResolvedValueOnce(networkError())
 
       renderHomePage()
       await user.selectOptions(
@@ -1337,7 +1336,7 @@ describe('HomePage', () => {
     it('keeps an unsubmitted user team, the league, and the corrected year across the correction', async () => {
       const user = userEvent.setup()
       mockedFetchTeamCase
-        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Bengals', 'Bengals, full stop.'))
 
       renderHomePage()
@@ -1411,7 +1410,7 @@ describe('HomePage', () => {
     it('does not let a team-list request in flight at the correction reach the corrected form', async () => {
       const user = userEvent.setup()
       mockedFetchChampion
-        .mockRejectedValueOnce(UNKNOWN_YEAR_ERROR)
+        .mockResolvedValueOnce(UNKNOWN_YEAR_ERROR)
         .mockResolvedValueOnce(envelopeFor('Texas', 'Texas, full stop.'))
       const held: { promise?: Promise<TeamsOut>; release: () => void } = {
         release: () => {},
@@ -1506,42 +1505,37 @@ describe('HomePage', () => {
       return screen.getByRole('dialog', { name: 'The verdict' })
     }
 
-    /**
-     * A `fetch` that never answers on its own, and rejects with an
-     * `AbortError` as soon as its signal aborts, as a browser's does. Keeps
-     * the signal each call was given.
-     */
-    function neverAnsweringFetch() {
-      const signals: (AbortSignal | undefined)[] = []
-      const fetchMock = vi.fn(
-        (_url: string, init?: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            const signal = init?.signal ?? undefined
-            signals.push(signal)
-            signal?.addEventListener('abort', () => {
-              reject(
-                new DOMException('The operation was aborted.', 'AbortError'),
-              )
-            })
-          }),
-      )
-      return { fetchMock, signals }
+    /** Every verdict endpoint answers with `respond()`. */
+    function verdictsAnswer(respond: () => Response) {
+      mockedFetchChampion.mockImplementation(respond)
+      mockedFetchTeamCase.mockImplementation(respond)
+      mockedFetchCompare.mockImplementation(respond)
     }
 
-    beforeEach(async () => {
-      const actual = await vi.importActual<
-        typeof import('../../lib/api/client')
-      >('../../lib/api/client')
-      mockedFetchChampion.mockImplementation(actual.fetchChampion)
-      mockedFetchTeamCase.mockImplementation(actual.fetchTeamCase)
-      mockedFetchCompare.mockImplementation(actual.fetchCompare)
+    /**
+     * Verdict requests that never answer on their own; the client's `fetch`
+     * rejects with an `AbortError` as soon as its signal aborts, as a
+     * browser's does. Keeps the signal each request carried.
+     */
+    function neverAnsweringVerdicts() {
+      const signals: AbortSignal[] = []
+      const answer = (_payload: unknown, { signal }: RequestContext) => {
+        signals.push(signal)
+        return hang()
+      }
+      mockedFetchChampion.mockImplementation(answer)
+      mockedFetchTeamCase.mockImplementation(answer)
+      mockedFetchCompare.mockImplementation(answer)
+      return { signals }
+    }
+
+    beforeEach(() => {
       // The client logs every unmapped HTTP error for developers.
       vi.spyOn(console, 'error').mockImplementation(() => {})
     })
 
     afterEach(() => {
       vi.useRealTimers()
-      vi.unstubAllGlobals()
       vi.restoreAllMocks()
     })
 
@@ -1580,10 +1574,7 @@ describe('HomePage', () => {
     ])(
       'shows plain copy, and never the status, for %s',
       async (_description, respond, copy) => {
-        vi.stubGlobal(
-          'fetch',
-          vi.fn(() => Promise.resolve(respond())),
-        )
+        verdictsAnswer(respond)
         const user = userEvent.setup()
 
         renderHomePage()
@@ -1600,7 +1591,10 @@ describe('HomePage', () => {
 
     it('shows the 5xx copy for an error the client never classified', async () => {
       const user = userEvent.setup()
-      mockedFetchChampion.mockRejectedValue(new Error('something odd'))
+      // A 200 whose body isn't JSON: nothing the client maps.
+      mockedFetchChampion.mockResolvedValue(
+        new HttpResponse('something odd', { status: 200 }),
+      )
 
       renderHomePage()
       await waitFor(() => expect(submitButton()).not.toBeDisabled())
@@ -1615,15 +1609,14 @@ describe('HomePage', () => {
 
     it('shows the network copy once a request that never settles reaches VERDICT_TIMEOUT_MS', async () => {
       vi.useFakeTimers()
-      const { fetchMock } = neverAnsweringFetch()
-      vi.stubGlobal('fetch', fetchMock)
+      const { signals } = neverAnsweringVerdicts()
 
       renderHomePage(TEXAS_USC_LINK)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(VERDICT_TIMEOUT_MS - 1)
       })
 
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(signals).toHaveLength(1)
       expect(within(verdictDialog()).getByRole('status')).toBeInTheDocument()
       expect(within(verdictDialog()).queryByRole('alert')).toBeNull()
 
@@ -1637,12 +1630,11 @@ describe('HomePage', () => {
     })
 
     it("aborts the first request's signal when a second question is asked, and the aborted one never lands", async () => {
-      const { fetchMock, signals } = neverAnsweringFetch()
-      vi.stubGlobal('fetch', fetchMock)
+      const { signals } = neverAnsweringVerdicts()
 
       renderHomePage(TEXAS_USC_LINK, { strict: true })
       await screen.findByRole('dialog', { name: 'The verdict' })
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(signals).toHaveLength(1))
       // StrictMode's rehearsal unmount must not abort the landing's request.
       expect(signals[0]?.aborted).toBe(false)
 
@@ -1657,7 +1649,7 @@ describe('HomePage', () => {
       }
       fireEvent.submit(form)
 
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+      await waitFor(() => expect(signals).toHaveLength(2))
       expect(signals[0]?.aborted).toBe(true)
       expect(signals[1]?.aborted).toBe(false)
       await expectThroughout(() => {
@@ -1668,12 +1660,11 @@ describe('HomePage', () => {
 
     it('aborts the in-flight request when the verdict is closed', async () => {
       const user = userEvent.setup()
-      const { fetchMock, signals } = neverAnsweringFetch()
-      vi.stubGlobal('fetch', fetchMock)
+      const { signals } = neverAnsweringVerdicts()
 
       renderHomePage(TEXAS_USC_LINK, { strict: true })
       const dialog = await screen.findByRole('dialog', { name: 'The verdict' })
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(signals).toHaveLength(1))
       expect(signals[0]?.aborted).toBe(false)
 
       await user.click(
@@ -1688,12 +1679,11 @@ describe('HomePage', () => {
     })
 
     it('aborts the in-flight request when the page unmounts', async () => {
-      const { fetchMock, signals } = neverAnsweringFetch()
-      vi.stubGlobal('fetch', fetchMock)
+      const { signals } = neverAnsweringVerdicts()
 
       const { unmount } = renderHomePage(TEXAS_USC_LINK, { strict: true })
       await screen.findByRole('dialog', { name: 'The verdict' })
-      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(signals).toHaveLength(1))
       expect(signals[0]?.aborted).toBe(false)
 
       unmount()

@@ -2,3 +2,4 @@ dist
 storybook-static
 coverage
 node_modules
+.storybook/public/mockServiceWorker.js

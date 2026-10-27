@@ -29,81 +29,68 @@ import {
 import { NETWORK_ERROR_COPY } from '../../lib/api/client'
 import { WARNER_VS_MCNAIR_VERDICT } from '../../lib/qbScoreFixtures'
 import { PLAYER_NOT_FOUND_COPY } from '../../lib/playerStats'
+import type {
+  PlayerPositionGroup,
+  PlayerSearchOut,
+  QbVerdictEnvelope,
+} from '../../lib/api/types'
+import {
+  creditsHandler,
+  hang,
+  httpError,
+  networkError,
+  playerCareerHandler,
+  playerComparisonHandler,
+  playerSearchHandler,
+  qbVerdictHandler,
+  typedError,
+  type Answer,
+} from '../../mocks/handlers'
 import { PlayerComparePage } from './PlayerComparePage'
 
-type Handler = () => Promise<Response>
-
 interface Handlers {
-  compare?: Handler
+  compare?: Parameters<typeof playerComparisonHandler>[0]
   /** `POST /api/players/compare/verdict` (#459); never answers when not given. */
-  verdict?: Handler
+  verdict?: (a: number, b: number) => Answer<QbVerdictEnvelope>
   /** Gets the id asked for, for a story that looks up more than one. */
-  career?: (playerId: number) => Promise<Response>
+  career?: Parameters<typeof playerCareerHandler>[0]
   /** `/api/players/search`; the fixture's McNair row when not given. */
-  search?: (query: string, group: string | null) => Promise<Response>
+  search?: (
+    query: string,
+    group: PlayerPositionGroup | null,
+  ) => Answer<PlayerSearchOut>
 }
 
 /**
- * Like PlayerCareerPage's stories, these drive the page through a stubbed
- * `window.fetch`: `/api/players/compare` and `/api/players/{id}` get each
- * story's handlers, `/api/players/search` the fixture's McNair row, and
- * `/api/credits` the live data sources. Everything else falls through.
+ * Like PlayerCareerPage's stories, these drive the page through the API,
+ * faked with the shared MSW handlers (issue #221). The meta's `parameters.msw`
+ * leaves `/api/players/compare`, its verdict and `/api/players/{id}` hanging,
+ * answers `/api/players/search` with the fixture's McNair row and
+ * `/api/credits` with the live data sources; `api()` gives a story its own
+ * handlers, which replace the meta's by name.
  */
-function installFetch(handlers: Handlers) {
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
-    )
-    if (url.pathname === '/api/players/compare') {
-      return (handlers.compare ?? never)()
-    }
-    if (url.pathname === '/api/players/compare/verdict') {
-      return (handlers.verdict ?? never)()
-    }
-    if (url.pathname === '/api/players/search') {
-      return handlers.search === undefined
-        ? jsonResponse(200, SEARCH_MCNAIR)
-        : handlers.search(
-            url.searchParams.get('q') ?? '',
-            url.searchParams.get('group'),
-          )
-    }
-    if (url.pathname.startsWith('/api/players/')) {
-      return (handlers.career ?? never)(
-        Number(url.pathname.slice('/api/players/'.length)),
-      )
-    }
-    if (url.pathname === '/api/credits') {
-      return jsonResponse(200, {
-        methodologies: [],
-        data_sources: DATA_SOURCES,
-      })
-    }
-    return realFetch(input, init)
+function api(handlers: Handlers) {
+  const { compare, verdict, career, search } = handlers
+  return {
+    msw: {
+      handlers: {
+        ...(compare && { compare: playerComparisonHandler(compare) }),
+        ...(verdict && {
+          verdict: qbVerdictHandler(verdict),
+        }),
+        ...(career && { career: playerCareerHandler(career) }),
+        ...(search && {
+          search: playerSearchHandler((query, options) =>
+            search(query, options.group ?? null),
+          ),
+        }),
+      },
+    },
   }
 }
 
-function never(): Promise<Response> {
-  return new Promise(() => {})
-}
-
-function jsonResponse(status: number, body: unknown): Promise<Response> {
-  return Promise.resolve(
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  )
-}
-
-function atSearch(search: string, handlers: Handlers = {}) {
+function atSearch(search: string) {
   return function RouterDecorator(Story: () => React.JSX.Element) {
-    installFetch(handlers)
     return (
       <MemoryRouter initialEntries={[`/nfl/compare${search}`]}>
         <Routes>
@@ -132,6 +119,20 @@ const meta = {
   title: 'pages/PlayerComparePage',
   component: PlayerComparePage,
   tags: ['autodocs'],
+  parameters: {
+    msw: {
+      handlers: {
+        compare: playerComparisonHandler(hang),
+        verdict: qbVerdictHandler(hang),
+        career: playerCareerHandler(hang),
+        search: playerSearchHandler(() => SEARCH_MCNAIR),
+        credits: creditsHandler(() => ({
+          methodologies: [],
+          data_sources: DATA_SOURCES,
+        })),
+      },
+    },
+  },
 } satisfies Meta<typeof PlayerComparePage>
 
 export default meta
@@ -150,11 +151,10 @@ export const NothingPicked: Story = {
 
 /** Opened from Kurt Warner's career page: a prompt, not an answer. */
 export const OnePicked: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}`, {
-      career: () => jsonResponse(200, KURT_WARNER_CAREER),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}`)],
+  parameters: api({
+    career: () => KURT_WARNER_CAREER,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
@@ -164,11 +164,10 @@ export const OnePicked: Story = {
 
 /** Player B's typeahead open on "McNair", from the one-picked state. */
 export const PickingPlayerB: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}`, {
-      career: () => jsonResponse(200, KURT_WARNER_CAREER),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}`)],
+  parameters: api({
+    career: () => KURT_WARNER_CAREER,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     // Player B opens once Warner's career says he is a quarterback (#436).
@@ -185,11 +184,10 @@ export const PickingPlayerB: Story = {
  * Compare stays disabled and says why.
  */
 export const TypedNotPicked: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}`, {
-      career: () => jsonResponse(200, KURT_WARNER_CAREER),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}`)],
+  parameters: api({
+    career: () => KURT_WARNER_CAREER,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
@@ -204,12 +202,11 @@ export const TypedNotPicked: Story = {
  * comparison opens over the form (issue #310).
  */
 export const PickedAndCompared: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}`, {
-      career: () => jsonResponse(200, KURT_WARNER_CAREER),
-      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}`)],
+  parameters: api({
+    career: () => KURT_WARNER_CAREER,
+    compare: () => WARNER_VS_MCNAIR,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByText(pickOneMoreCopy('Kurt Warner'))
@@ -237,11 +234,10 @@ export const PickedAndCompared: Story = {
  * narrator's line stays on the form while the fields hold only that pick.
  */
 export const LoneLinkCareerFailed: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}`, {
-      career: () => Promise.reject(new TypeError('Failed to fetch')),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}`)],
+  parameters: api({
+    career: networkError,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(await canvas.findByRole('alert')).toHaveTextContent(
@@ -257,11 +253,10 @@ export const LoneLinkCareerFailed: Story = {
  * waits on Player A's group (#436), so he is the only other pick to make.
  */
 export const LoneLinkCareerFailedThenPicked: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}`, {
-      career: () => Promise.reject(new TypeError('Failed to fetch')),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}`)],
+  parameters: api({
+    career: networkError,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('alert')
@@ -293,7 +288,8 @@ export const SamePlayer: Story = {
 }
 
 export const Loading: Story = {
-  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`, { compare: never })],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({ compare: hang }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -307,11 +303,10 @@ export const Loading: Story = {
 
 /** Kurt Warner and Steve McNair on the committed fixture, in the modal. */
 export const Loaded: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: () => WARNER_VS_MCNAIR,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -335,11 +330,10 @@ export const Loaded: Story = {
  * the pair can be changed or compared again.
  */
 export const ClosedAfterComparing: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: () => WARNER_VS_MCNAIR,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -367,11 +361,10 @@ export const ClosedAfterComparing: Story = {
  * asks for the same pair again without a reload.
  */
 export const ClosedAfterFailedLink: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => Promise.reject(new TypeError('Failed to fetch')),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: networkError,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -400,15 +393,13 @@ export const ClosedAfterFailedLink: Story = {
  * quarterbacks, since only they get a head-to-head (#436).
  */
 export const NeverMet: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=1001`, {
-      compare: () =>
-        jsonResponse(200, {
-          ...NEVER_MET_COMPARISON,
-          b: { ...NEVER_MET_COMPARISON.b, position: 'QB', group: 'QB' },
-        }),
+  decorators: [atSearch(`?a=${WARNER}&b=1001`)],
+  parameters: api({
+    compare: () => ({
+      ...NEVER_MET_COMPARISON,
+      b: { ...NEVER_MET_COMPARISON.b, position: 'QB', group: 'QB' },
     }),
-  ],
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -422,14 +413,11 @@ export const NeverMet: Story = {
 
 /** A 404 `unknown_player`, in the narrator's voice. */
 export const UnknownPlayer: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=1`, {
-      compare: () =>
-        jsonResponse(404, {
-          detail: { error: 'unknown_player', player_id: 1, sport: 'nfl' },
-        }),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=1`)],
+  parameters: api({
+    compare: () =>
+      typedError(404, { error: 'unknown_player', player_id: 1, sport: 'nfl' }),
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -443,11 +431,10 @@ export const UnknownPlayer: Story = {
 }
 
 export const NetworkError: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => Promise.reject(new TypeError('Failed to fetch')),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: networkError,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -470,18 +457,14 @@ export const NetworkError: Story = {
  * typeahead searches running backs only.
  */
 export const RestrictedToRunningBacks: Story = {
-  decorators: [
-    atSearch(`?a=${MARSHALL_FAULK_CAREER.player_id}`, {
-      career: () => jsonResponse(200, MARSHALL_FAULK_CAREER),
-      search: (query, group) =>
-        jsonResponse(
-          200,
-          group === 'RB' && query === 'farmer'
-            ? SEARCH_FARMER_RB
-            : { ...SEARCH_FARMER_RB, query, group, rows: [] },
-        ),
-    }),
-  ],
+  decorators: [atSearch(`?a=${MARSHALL_FAULK_CAREER.player_id}`)],
+  parameters: api({
+    career: () => MARSHALL_FAULK_CAREER,
+    search: (query, group) =>
+      group === 'RB' && query === 'farmer'
+        ? SEARCH_FARMER_RB
+        : { ...SEARCH_FARMER_RB, query, group, rows: [] },
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(await canvas.findByText(restrictionCopy('RB'))).toBeVisible()
@@ -498,19 +481,16 @@ export const RestrictedToRunningBacks: Story = {
  * empty and ready for another quarterback.
  */
 export const MixedLinkRefused: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=2464876093`, {
-      compare: () =>
-        jsonResponse(400, {
-          detail: {
-            error: 'players_not_comparable',
-            a_group: 'QB',
-            b_group: 'RB',
-          },
-        }),
-      career: () => jsonResponse(200, KURT_WARNER_CAREER),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=2464876093`)],
+  parameters: api({
+    compare: () =>
+      typedError(400, {
+        error: 'players_not_comparable',
+        a_group: 'QB',
+        b_group: 'RB',
+      }),
+    career: () => KURT_WARNER_CAREER,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(await canvas.findByRole('alert')).toHaveTextContent(
@@ -528,11 +508,10 @@ export const MixedLinkRefused: Story = {
 
 /** Jeff Wilkins, a kicker, as Player A: no group, so nobody to compare yet. */
 export const UncomparablePlayerA: Story = {
-  decorators: [
-    atSearch(`?a=${JEFF_WILKINS_CAREER.player_id}`, {
-      career: () => jsonResponse(200, JEFF_WILKINS_CAREER),
-    }),
-  ],
+  decorators: [atSearch(`?a=${JEFF_WILKINS_CAREER.player_id}`)],
+  parameters: api({
+    career: () => JEFF_WILKINS_CAREER,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(await canvas.findByText(uncomparableCopy('K'))).toBeVisible()
@@ -543,10 +522,11 @@ export const UncomparablePlayerA: Story = {
 /** Tyreek Hill and CeeDee Lamb: careers side by side, no head-to-head. */
 export const ReceiversCompared: Story = {
   decorators: [
-    atSearch(`?a=${HILL_VS_LAMB.a.player_id}&b=${HILL_VS_LAMB.b.player_id}`, {
-      compare: () => jsonResponse(200, HILL_VS_LAMB),
-    }),
+    atSearch(`?a=${HILL_VS_LAMB.a.player_id}&b=${HILL_VS_LAMB.b.player_id}`),
   ],
+  parameters: api({
+    compare: () => HILL_VS_LAMB,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -579,9 +559,9 @@ export const OneCareerCutOff: Story = {
   decorators: [
     atSearch(
       `?a=${FAULK_VS_FARMER.a.player_id}&b=${FAULK_VS_FARMER.b.player_id}`,
-      { compare: () => jsonResponse(200, FAULK_VS_FARMER) },
     ),
   ],
+  parameters: api({ compare: () => FAULK_VS_FARMER }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -600,11 +580,10 @@ export const OneCareerCutOff: Story = {
 
 /** Warner (1998) and McNair (1995) both began before the data: one callout for both (#448). */
 export const BothCareersCutOff: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: () => WARNER_VS_MCNAIR,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -624,12 +603,11 @@ export const BothCareersCutOff: Story = {
  * is the fixture db's, as the e2e run serves it.
  */
 export const QuarterbacksScored: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
-      verdict: () => jsonResponse(200, WARNER_VS_MCNAIR_VERDICT),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: () => WARNER_VS_MCNAIR,
+    verdict: () => WARNER_VS_MCNAIR_VERDICT,
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -657,6 +635,7 @@ export const QuarterbacksScored: Story = {
 export const ShareOnPhone: Story = {
   globals: { viewport: { value: 'mobile2', isRotated: false } },
   decorators: QuarterbacksScored.decorators,
+  parameters: QuarterbacksScored.parameters,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -697,6 +676,7 @@ export const ShareOnPhone: Story = {
 export const ShareOnDesktop: Story = {
   globals: { viewport: { value: 'desktop', isRotated: false } },
   decorators: QuarterbacksScored.decorators,
+  parameters: QuarterbacksScored.parameters,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -721,12 +701,12 @@ export const ShareOnDesktop: Story = {
 
 /** The narration can't be had (#459): the narrator says so, and the score stays. */
 export const QuarterbackNarrationFailed: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () => jsonResponse(200, WARNER_VS_MCNAIR),
-      verdict: () => jsonResponse(503, { detail: { error: 'stale_database' } }),
-    }),
-  ],
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: () => WARNER_VS_MCNAIR,
+    verdict: () =>
+      httpError(503, JSON.stringify({ detail: { error: 'stale_database' } })),
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {
@@ -751,16 +731,14 @@ export const QuarterbackNarrationFailed: Story = {
  * data): no callout, and the larger numbers marked (#301).
  */
 export const NeitherCareerCutOff: Story = {
-  decorators: [
-    atSearch(`?a=${WARNER}&b=${MCNAIR}`, {
-      compare: () =>
-        jsonResponse(200, {
-          ...WARNER_VS_MCNAIR,
-          a: { ...WARNER_VS_MCNAIR.a, coverage: IN_THE_BOOKS },
-          b: { ...WARNER_VS_MCNAIR.b, coverage: IN_THE_BOOKS },
-        }),
+  decorators: [atSearch(`?a=${WARNER}&b=${MCNAIR}`)],
+  parameters: api({
+    compare: () => ({
+      ...WARNER_VS_MCNAIR,
+      a: { ...WARNER_VS_MCNAIR.a, coverage: IN_THE_BOOKS },
+      b: { ...WARNER_VS_MCNAIR.b, coverage: IN_THE_BOOKS },
     }),
-  ],
+  }),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const dialog = await canvas.findByRole('dialog', {

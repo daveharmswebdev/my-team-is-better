@@ -15,6 +15,8 @@ import {
   VerdictNetworkError,
   fetchQbVerdict,
 } from './client'
+import { hang, networkError } from '../../mocks/handlers'
+import { answerEveryRequest } from '../../test/network'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -36,7 +38,6 @@ async function rejection(request: Promise<unknown>): Promise<unknown> {
 describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () => {
   afterEach(() => {
     vi.useRealTimers()
-    vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })
 
@@ -44,7 +45,7 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(200, BRADY_VS_MANNING_VERDICT))
-    vi.stubGlobal('fetch', fetchMock)
+    answerEveryRequest(fetchMock)
 
     const envelope = await fetchQbVerdict(BRADY_ID, PEYTON_MANNING_ID)
 
@@ -66,10 +67,7 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
       a_group: 'QB',
       b_group: 'RB',
     }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(400, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(400, { detail })))
 
     const error = await rejection(fetchQbVerdict(BRADY_ID, 1))
 
@@ -79,10 +77,7 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
 
   it('rejects the 404 unknown_player with a PlayerApiError', async () => {
     const detail = { error: 'unknown_player', player_id: 1, sport: 'nfl' }
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(404, { detail })))
 
     const error = await rejection(fetchQbVerdict(BRADY_ID, 1))
 
@@ -100,10 +95,7 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
       },
     ]
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(jsonResponse(422, { detail })),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(422, { detail })))
 
     const error = await rejection(fetchQbVerdict(BRADY_ID, BRADY_ID))
 
@@ -113,8 +105,7 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
 
   it('rejects the stale-db 503 with a VerdictHttpError carrying the server copy', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.stubGlobal(
-      'fetch',
+    answerEveryRequest(
       vi
         .fn()
         .mockResolvedValue(
@@ -129,10 +120,7 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
   })
 
   it('rejects an unreachable API with a VerdictNetworkError', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
-    )
+    answerEveryRequest(vi.fn().mockResolvedValue(networkError()))
 
     const error = await rejection(fetchQbVerdict(BRADY_ID, PEYTON_MANNING_ID))
 
@@ -142,17 +130,8 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
 
   it('times out at VERDICT_TIMEOUT_MS with a VerdictNetworkError', async () => {
     vi.useFakeTimers()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        (_url: string, init: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            init.signal?.addEventListener('abort', () => {
-              reject(new DOMException('aborted', 'AbortError'))
-            })
-          }),
-      ),
-    )
+    // Hangs; the client's fetch rejects once the request's signal aborts.
+    answerEveryRequest(hang)
 
     const settled = rejection(fetchQbVerdict(BRADY_ID, PEYTON_MANNING_ID))
     await vi.advanceTimersByTimeAsync(VERDICT_TIMEOUT_MS)
@@ -163,17 +142,8 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
   })
 
   it("rejects with an AbortError when the caller's signal aborts", async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        (_url: string, init: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            init.signal?.addEventListener('abort', () => {
-              reject(new DOMException('aborted', 'AbortError'))
-            })
-          }),
-      ),
-    )
+    // Hangs; the client's fetch rejects once the request's signal aborts.
+    answerEveryRequest(hang)
     const controller = new AbortController()
 
     const settled = rejection(

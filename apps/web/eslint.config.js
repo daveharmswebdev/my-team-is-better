@@ -113,8 +113,112 @@ const storySyntax = [
   `${MUTATOR} > TemplateLiteral[expressions.length=0][quasis.0.value.cooked=${oneOf(ANY_KEYS)}]`,
 ].map((selector) => ({ selector, message: MESSAGE }))
 
+/**
+ * Issue #221: tests and stories fake the API one way, through the MSW
+ * handlers in `src/mocks/handlers.ts`, so page and component tests run the
+ * real `src/lib/api/client.ts` and no story leaks a fake `fetch` into the
+ * next. Banned in every `src` file and in `.storybook/**`: assigning `fetch`
+ * on `globalThis` / `window` / `self` / `global` (as `.fetch`, `['fetch']` or
+ * `` [`fetch`] ``, any assignment operator), `Object.assign`-ing a `fetch`
+ * (shorthand, `'fetch':` or `[`fetch`]:`) onto one of them,
+ * `<x>.stubGlobal('fetch', ...)`, `<x>.spyOn(<global>, 'fetch')`, and
+ * `vi.mock` / `vi.doMock` of the API client (`.../lib/api/client` or a
+ * relative `.../api/client`, any extension, as a string, a template or an `import()`; `./client` too, from
+ * a test in src/lib/api). The global may be written `globalThis.window` and
+ * the like, or sit under up to three casts (`as`, `satisfies`, `!`): issue
+ * #221 round 2. Other modules named `client` (`react-dom/client`, ...) are
+ * fine. A bare `fetch = ...` on the global is core `no-global-assign`'s. Not
+ * covered: computed keys built at run time, `globalThis` aliased through
+ * another variable, `Object.defineProperty`, `eslint-disable`.
+ * `src/test/eslintNetworkFakes.test.ts` proves each form is flagged in every
+ * block that sets `no-restricted-syntax`, and ordinary code is not.
+ */
+const NETWORK_FAKE_MESSAGE =
+  'Fake the API with MSW (src/mocks/handlers.ts: server.use() in a test, parameters.msw in a story), not by replacing fetch or mocking the API client (issue #221).'
+const GLOBAL_NAMES = oneOf('globalThis|window|self|global')
+const CASTS = oneOf(
+  'TSAsExpression|TSNonNullExpression|TSSatisfiesExpression|TSTypeAssertion',
+)
+
+/**
+ * Attribute selectors for "the node at `path` is the global object": a bare
+ * global name, or one global read off another (`globalThis.window`), under
+ * zero to three casts.
+ */
+const globalAt = (path) =>
+  [0, 1, 2, 3].flatMap((depth) => {
+    const casts = Array.from(
+      { length: depth },
+      (_unused, i) => `[${path}${'.expression'.repeat(i)}.type=${CASTS}]`,
+    ).join('')
+    const at = `${path}${'.expression'.repeat(depth)}`
+    return [
+      `${casts}[${at}.type='Identifier'][${at}.name=${GLOBAL_NAMES}]`,
+      `${casts}[${at}.type='MemberExpression'][${at}.object.name=${GLOBAL_NAMES}][${at}.property.name=${GLOBAL_NAMES}]`,
+    ]
+  })
+
+const literalArg = (index, values) => [
+  `[arguments.${index}.type='Literal'][arguments.${index}.value=${oneOf(values)}]`,
+  `[arguments.${index}.type='TemplateLiteral'][arguments.${index}.expressions.length=0][arguments.${index}.quasis.0.value.cooked=${oneOf(values)}]`,
+]
+
+/** An object key `fetch`: `fetch` / `{ fetch }`, `'fetch'` / `['fetch']`, `` [`fetch`] ``. */
+const FETCH_KEY = [
+  `[key.type='Identifier'][computed=false][key.name='fetch']`,
+  `[key.type='Literal'][key.value='fetch']`,
+  `[computed=true][key.type='TemplateLiteral'][key.expressions.length=0][key.quasis.0.value.cooked='fetch']`,
+]
+
+const EXTENSION = '(\\.[cm]?[jt]sx?)?'
+/**
+ * The API client from anywhere, with or without an extension: any path with
+ * `lib/api/client` in it, or a relative one ending in `api/client`
+ * (`./api/client` from src/lib, `../api/client`; issue #221 round 3).
+ * `react-dom/client`, `@apollo/client` and `../components/client` don't match.
+ */
+const API_CLIENT = `/((^|\\/)lib\\/api\\/client|^\\.{1,2}\\/(.*\\/)?api\\/client)${EXTENSION}$/`
+/** The API client from beside it, in src/lib/api. */
+const LOCAL_CLIENT = `/^\\.\\/client${EXTENSION}$/`
+const VI_MOCK = `CallExpression[callee.object.name='vi'][callee.property.name=${oneOf('mock|doMock')}]`
+/** `vi.mock(module)` with `module` a string, a template or an `import()`. */
+const mockOf = (module) => [
+  `${VI_MOCK}[arguments.0.type='Literal'][arguments.0.value=${module}]`,
+  `${VI_MOCK}[arguments.0.type='TemplateLiteral'][arguments.0.expressions.length=0][arguments.0.quasis.0.value.cooked=${module}]`,
+  `${VI_MOCK}[arguments.0.type='ImportExpression'][arguments.0.source.value=${module}]`,
+]
+
+const networkFake = (selector) => ({ selector, message: NETWORK_FAKE_MESSAGE })
+
+const networkFakeSyntax = [
+  ...globalAt('left.object').flatMap((receiver) =>
+    assignedKey('fetch').map((key) => `AssignmentExpression${receiver}${key}`),
+  ),
+  ...globalAt('arguments.0').flatMap((receiver) =>
+    FETCH_KEY.map(
+      (key) =>
+        `CallExpression[callee.object.name='Object'][callee.property.name='assign']${receiver} > ObjectExpression > Property${key}`,
+    ),
+  ),
+  ...literalArg(0, 'fetch').map(
+    (arg) => `CallExpression[callee.property.name='stubGlobal']${arg}`,
+  ),
+  ...globalAt('arguments.0').flatMap((receiver) =>
+    literalArg(1, 'fetch').map(
+      (arg) => `CallExpression[callee.property.name='spyOn']${receiver}${arg}`,
+    ),
+  ),
+  ...mockOf(API_CLIENT),
+].map(networkFake)
+
+/** Only for tests in src/lib/api, where `./client` is the API client. */
+const localClientMockSyntax = mockOf(LOCAL_CLIENT).map(networkFake)
+
 export default tseslint.config(
-  { ignores: ['dist', 'storybook-static', 'coverage'] },
+  {
+    // `.storybook/public/mockServiceWorker.js` is generated by `msw init` (issue #221).
+    ignores: ['dist', 'storybook-static', 'coverage', '.storybook/public'],
+  },
   {
     extends: [
       js.configs.recommended,
@@ -195,6 +299,33 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         { selector: dynamicVitestImport, message: MESSAGE },
+        ...networkFakeSyntax,
+      ],
+    },
+  },
+  {
+    // Issue #221. The blocks above and below set `no-restricted-syntax` for
+    // source and story files, and a later block's list replaces an earlier
+    // one's, so each carries `networkFakeSyntax` itself.
+    name: 'network-fakes/test-and-storybook-files',
+    files: [
+      'src/**/*.test.{js,jsx,mjs,ts,tsx}',
+      'src/test/setup.ts',
+      '.storybook/**/*.{js,jsx,mjs,ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': ['error', ...networkFakeSyntax],
+    },
+  },
+  {
+    // Issue #221 round 2: beside the client, `./client` is the client.
+    name: 'network-fakes/api-client-tests',
+    files: ['src/lib/api/**/*.test.{js,jsx,mjs,ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...networkFakeSyntax,
+        ...localClientMockSyntax,
       ],
     },
   },
@@ -202,7 +333,7 @@ export default tseslint.config(
     name: 'a11y-gate/story-files',
     files: ['src/**/*.stories.{js,jsx,mjs,ts,tsx}'],
     rules: {
-      'no-restricted-syntax': ['error', ...storySyntax],
+      'no-restricted-syntax': ['error', ...storySyntax, ...networkFakeSyntax],
     },
   },
   {

@@ -1,51 +1,22 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 import type { TeamDetail } from '../../lib/api/types'
+import {
+  hang,
+  httpError,
+  teamsHandler,
+  yearsHandler,
+} from '../../mocks/handlers'
 import { QuestionForm } from './QuestionForm'
 
 /**
  * `QuestionForm` fetches `/api/years` and `/api/teams` on mount (issue #56),
  * scoped to the selected sport (issue #60) and, for `/api/teams`, to the
- * entered year (issue #80) -- like `AboutPage.stories.tsx` for
- * `fetchCredits`, each story installs its own stubbed `window.fetch` before
- * rendering rather than mocking the module; only requests to those two
- * catalog endpoints are intercepted, everything else falls through to the
- * real `fetch`.
+ * entered year (issue #80). These stories answer those two endpoints through
+ * MSW (issue #221): the meta's `parameters.msw` serves a sport-scoped
+ * catalog, and a story that needs another replaces its `years` or `teams`
+ * handler by name.
  */
-function installCatalogFetch(
-  handler: (
-    path: '/api/years' | '/api/teams',
-    params: URLSearchParams,
-  ) => Promise<Response>,
-) {
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url
-    const params = new URL(url, 'http://localhost').searchParams
-    if (url.includes('/api/years')) {
-      return handler('/api/years', params)
-    }
-    if (url.includes('/api/teams')) {
-      return handler('/api/teams', params)
-    }
-    return realFetch(input, init)
-  }
-}
-
-function jsonResponse(body: unknown): Promise<Response> {
-  return Promise.resolve(
-    new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  )
-}
-
 const mockYears = [2003, 2004, 2005, 2006, 2007]
 const mockTeams: TeamDetail[] = [
   { name: 'Texas', mascot: 'Longhorns', aliases: ['TEX'] },
@@ -72,13 +43,13 @@ function teamsBody(details: TeamDetail[]) {
 
 /** Serves sport-scoped catalog data -- `cfb` mocks by default, `nfl` mocks
  * once `QuestionForm`'s toggle switches the fetched `sport` param. */
-function installSportScopedCatalogFetch() {
-  installCatalogFetch((path, params) => {
-    const isNfl = params.get('sport') === 'nfl'
-    const years = isNfl ? mockNflYears : mockYears
-    const teams = isNfl ? mockNflTeams : mockTeams
-    return jsonResponse(path === '/api/years' ? { years } : teamsBody(teams))
-  })
+const sportScopedCatalog = {
+  years: yearsHandler((sport) => ({
+    years: sport === 'nfl' ? mockNflYears : mockYears,
+  })),
+  teams: teamsHandler((sport) =>
+    teamsBody(sport === 'nfl' ? mockNflTeams : mockTeams),
+  ),
 }
 
 const meta = {
@@ -88,12 +59,9 @@ const meta = {
   args: {
     onSubmit: fn(),
   },
-  decorators: [
-    (Story) => {
-      installSportScopedCatalogFetch()
-      return <Story />
-    },
-  ],
+  parameters: {
+    msw: { handlers: sportScopedCatalog },
+  },
 } satisfies Meta<typeof QuestionForm>
 
 export default meta
@@ -250,23 +218,21 @@ export const StaleTeamAfterYearChange: Story = {
     initialYear: 2005,
     initialTeam: 'Texas',
   },
-  decorators: [
-    (Story) => {
-      // Year-scoped College teams: the 2003 catalog has no Texas.
-      installCatalogFetch((path, params) =>
-        jsonResponse(
-          path === '/api/years'
-            ? { years: mockYears }
-            : teamsBody(
-                params.get('year') === '2003'
-                  ? mockTeams.filter((detail) => detail.name !== 'Texas')
-                  : mockTeams,
-              ),
+  parameters: {
+    msw: {
+      handlers: {
+        years: yearsHandler(() => ({ years: mockYears })),
+        // Year-scoped College teams: the 2003 catalog has no Texas.
+        teams: teamsHandler((_sport, _method, year) =>
+          teamsBody(
+            year === 2003
+              ? mockTeams.filter((detail) => detail.name !== 'Texas')
+              : mockTeams,
+          ),
         ),
-      )
-      return <Story />
+      },
     },
-  ],
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const yearInput = canvas.getByLabelText(/year/i)
@@ -372,12 +338,9 @@ export const Submitting: Story = {
  * is no default year yet, so the button waits for one to be typed; any
  * number will do until the catalog can range-check it (issue #136). */
 export const CatalogLoading: Story = {
-  decorators: [
-    (Story) => {
-      installCatalogFetch(() => new Promise(() => {}))
-      return <Story />
-    },
-  ],
+  parameters: {
+    msw: { handlers: { years: yearsHandler(hang), teams: teamsHandler(hang) } },
+  },
 }
 
 /** Catalog fetch fails -- the comboboxes degrade to plain typed inputs and
@@ -386,14 +349,14 @@ export const CatalogLoading: Story = {
  * question with team fields: the best-team one has none (issue #198). */
 export const CatalogError: Story = {
   args: { initialQuestionType: 'team_case' },
-  decorators: [
-    (Story) => {
-      installCatalogFetch(() =>
-        Promise.resolve(new Response(null, { status: 500 })),
-      )
-      return <Story />
+  parameters: {
+    msw: {
+      handlers: {
+        years: yearsHandler(() => httpError(500)),
+        teams: teamsHandler(() => httpError(500)),
+      },
     },
-  ],
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const hints = await canvas.findAllByText(/couldn't load the team list/i)
@@ -409,16 +372,14 @@ export const CatalogError: Story = {
  */
 export const EmptyYearScopedCatalog: Story = {
   args: { initialQuestionType: 'team_case' },
-  decorators: [
-    (Story) => {
-      installCatalogFetch((path) =>
-        jsonResponse(
-          path === '/api/years' ? { years: mockYears } : teamsBody([]),
-        ),
-      )
-      return <Story />
+  parameters: {
+    msw: {
+      handlers: {
+        years: yearsHandler(() => ({ years: mockYears })),
+        teams: teamsHandler(() => teamsBody([])),
+      },
     },
-  ],
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const notes = await canvas.findAllByText(/no teams found for/i)

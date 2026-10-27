@@ -7,43 +7,22 @@ import {
   KURT_WARNER_CAREER,
   SMITH_VS_PETERSON,
 } from '../../lib/playerFixtures'
+import {
+  creditsHandler,
+  hang,
+  httpError,
+  playerCareerHandler,
+  typedError,
+} from '../../mocks/handlers'
 import { PlayerCareerPage } from './PlayerCareerPage'
 
 /**
- * Like AboutPage's stories, these drive the page through a stubbed
- * `window.fetch`: `/api/players/{id}` gets each story's handler, and
- * `/api/credits` the live data sources. Everything else falls through.
+ * Like AboutPage's stories, these drive the page through the API, faked with
+ * the shared MSW handlers (issue #221): the meta serves `/api/credits` the
+ * live data sources, and each story answers `/api/players/{id}` itself.
  */
-function installFetch(career: () => Promise<Response>) {
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
-    )
-    if (url.pathname.startsWith('/api/players/')) {
-      return career()
-    }
-    if (url.pathname === '/api/credits') {
-      return jsonResponse(200, {
-        methodologies: [],
-        data_sources: DATA_SOURCES,
-      })
-    }
-    return realFetch(input, init)
-  }
-}
-
-function jsonResponse(status: number, body: unknown): Promise<Response> {
-  return Promise.resolve(
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  )
+function career(answer: Parameters<typeof playerCareerHandler>[0]) {
+  return { msw: { handlers: { career: playerCareerHandler(answer) } } }
 }
 
 function atPlayer(id: string) {
@@ -62,6 +41,16 @@ const meta = {
   title: 'pages/PlayerCareerPage',
   component: PlayerCareerPage,
   tags: ['autodocs'],
+  parameters: {
+    msw: {
+      handlers: {
+        credits: creditsHandler(() => ({
+          methodologies: [],
+          data_sources: DATA_SOURCES,
+        })),
+      },
+    },
+  },
 } satisfies Meta<typeof PlayerCareerPage>
 
 export default meta
@@ -70,13 +59,8 @@ type Story = StoryObj<typeof meta>
 
 /** Kurt Warner on the committed fixture, with the one-game disclosure on 1999. */
 export const Loaded: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => jsonResponse(200, KURT_WARNER_CAREER))
-      return <Story />
-    },
-    atPlayer('2044124519'),
-  ],
+  decorators: [atPlayer('2044124519')],
+  parameters: career(() => KURT_WARNER_CAREER),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await canvas.findByRole('table', { name: 'Kurt Warner, playoffs' })
@@ -90,13 +74,8 @@ export const Loaded: Story = {
  * books: 6 of 15 (1999–2004)", not a career.
  */
 export const CareerCutOff: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => jsonResponse(200, SMITH_VS_PETERSON.a))
-      return <Story />
-    },
-    atPlayer('2249533020'),
-  ],
+  decorators: [atPlayer('2249533020')],
+  parameters: career(() => SMITH_VS_PETERSON.a),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const table = await canvas.findByRole('table', {
@@ -117,54 +96,32 @@ export const CareerCutOff: Story = {
 
 /** Null games and stats, and no playoff games at all. */
 export const NullStats: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => jsonResponse(200, CAREER_WITH_NULL_STATS))
-      return <Story />
-    },
-    atPlayer('1001'),
-  ],
+  decorators: [atPlayer('1001')],
+  parameters: career(() => CAREER_WITH_NULL_STATS),
   play: async ({ canvasElement }) => {
     await within(canvasElement).findByText('No playoff games on record.')
   },
 }
 
 export const Loading: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => new Promise(() => {}))
-      return <Story />
-    },
-    atPlayer('2044124519'),
-  ],
+  decorators: [atPlayer('2044124519')],
+  parameters: career(hang),
 }
 
 /** A 404 `unknown_player`, in the narrator's voice. */
 export const NotFound: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() =>
-        jsonResponse(404, {
-          detail: { error: 'unknown_player', player_id: 1, sport: 'nfl' },
-        }),
-      )
-      return <Story />
-    },
-    atPlayer('1'),
-  ],
+  decorators: [atPlayer('1')],
+  parameters: career(() =>
+    typedError(404, { error: 'unknown_player', player_id: 1, sport: 'nfl' }),
+  ),
   play: async ({ canvasElement }) => {
     await within(canvasElement).findByRole('alert')
   },
 }
 
 export const Error: Story = {
-  decorators: [
-    (Story) => {
-      installFetch(() => Promise.resolve(new Response(null, { status: 503 })))
-      return <Story />
-    },
-    atPlayer('2044124519'),
-  ],
+  decorators: [atPlayer('2044124519')],
+  parameters: career(() => httpError(503)),
   play: async ({ canvasElement }) => {
     await within(canvasElement).findByRole('alert')
   },

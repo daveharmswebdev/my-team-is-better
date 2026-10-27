@@ -4,9 +4,51 @@ import '../src/styles/tokens.css'
 // Barlow; main.ts's staticDirs serves the /fonts/*.woff2 files they point at.
 import '../src/styles/fonts.css'
 import '../src/index.css'
+import { isCommonAssetRequest } from 'msw'
+import { setupWorker } from 'msw/browser'
+import { mswLoader } from 'msw-storybook-addon/csf3'
 import { recordStoryA11yContext } from './a11yPolicy.ts'
 
+/**
+ * Storybook's own requests (its iframe, Vite's modules, story files), which
+ * no MSW handler is meant to answer. The same list as msw-storybook-addon's
+ * default setup.
+ */
+function isStorybookRequest(request: Request): boolean {
+  return /\.eot$|\.mdx$|sb-common-assets|__webpack_hmr|iframe.html|sb-vite|@vite|@react-refresh|\/virtual:|\.stories\./.test(
+    request.url,
+  )
+}
+
+/**
+ * The addon's default worker, but with `onUnhandledRequest` set to error as
+ * in `src/test/setup.ts` (issue #221 round 2): a request no handler answers
+ * (other than Storybook's and common assets) is logged as an MSW error and
+ * fails like a dropped connection instead of reaching the real network.
+ */
+async function startWorker() {
+  const worker = setupWorker()
+  await worker.start({
+    quiet: true,
+    onUnhandledRequest(request, print) {
+      if (isCommonAssetRequest(request) || isStorybookRequest(request)) {
+        return
+      }
+      print.error()
+    },
+  })
+  return worker
+}
+
 const preview: Preview = {
+  // Issue #221: stories fake `apps/api` with the same MSW handlers the unit
+  // tests use (src/mocks/handlers.ts). The loader starts the service worker
+  // once, resets its handlers before every story, then installs that story's
+  // `parameters.msw.handlers`; a request no handler answers fails (see
+  // `startWorker`). Handlers are keyed by name, so a story replaces one group
+  // (say `verdict`) and keeps the rest of its meta's.
+  loaders: [mswLoader(startWorker)],
+
   parameters: {
     controls: {
       matchers: {
