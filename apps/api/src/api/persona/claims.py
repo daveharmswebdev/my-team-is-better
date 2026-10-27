@@ -113,7 +113,10 @@ crown"); the smoke eval's `timing_venue_flags` measures that broader set.
 An uppercase Roman numeral typed in the prose ("Super Bowl LI", #454) is a
 number and is rejected through `roman_numeral_matches`, the rule the QB check
 shares; a team name or alias that spells one ("LIV" for Livingstone) and the
-abbreviations "DC", "MD", "CD" and "DL" pass; lowercase and spaced-out
+abbreviations "DC", "MD", "CD" and "DL" pass, except right after "Super Bowl",
+where any numeral of one letter or more is rejected ("Super Bowl LIV",
+"Super Bowl X"); "Division II" is rejected, the block holding no
+classification; lowercase and spaced-out
 numerals are deliberate evasion, out of scope.
 
 Pure: no IO, no database, no network, no logging. Since #291
@@ -1538,11 +1541,19 @@ def _check_prose(
     # the catalog holds "MCM" (McMurry) and "LIV" (Livingstone), and an alias
     # of a team outside the block is prose (`_outside_alias_re`), so both
     # are masked before the numeral rule runs (#454).
+    # A numeral right after "Super Bowl" is a game number whatever the
+    # masking says, one letter or several: no team is named "Super Bowl LIV"
+    # (#454 round 2). Found first, on the unmasked text, and masked so the
+    # standalone rule never reports it again.
+    numerals = list(_SUPER_BOWL_NUMERAL_RE.finditer(masked))
     roman_text = names_masked
     if alias_re is not None:
         for match in alias_re.finditer(masked):
             roman_text = _mask_span(roman_text, match.start(), match.end())
-    for match in roman_numeral_matches(roman_text, _TEAM_ROMAN_ABBREVIATIONS):
+    for match in numerals:
+        roman_text = _mask_span(roman_text, match.start(), match.end())
+    numerals.extend(roman_numeral_matches(roman_text, _TEAM_ROMAN_ABBREVIATIONS))
+    for match in sorted(numerals, key=lambda match: match.start()):
         errors.append(
             f"the prose types the Roman numeral {_quote(match.group(0))}; {ROMAN_NUMERAL_ERROR}"
         )
@@ -1594,6 +1605,13 @@ ROMAN_ABBREVIATIONS: Final = frozenset({"DC", "MD", "CD"})
 # The team check also passes "DL" (the defensive line, a valid 550). The QB
 # check keeps `ROMAN_ABBREVIATIONS` alone, its rules unchanged by #454.
 _TEAM_ROMAN_ABBREVIATIONS: Final = ROMAN_ABBREVIATIONS | {"DL"}
+# The team check's second numeral rule (#454 round 2): after "Super Bowl" in
+# any case, an uppercase numeral of one letter or more is the match. Team
+# path only: the QB path's single-letter gap predates #454.
+_SUPER_BOWL_NUMERAL_RE: Final = re.compile(
+    r"(?<=(?i:\bsuper\sbowl\s))"
+    r"(?=[MDCLXVI]+\b)M{0,4}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})(?!\w)"
+)
 ROMAN_NUMERAL_ERROR: Final = (
     "a Roman numeral is a number, and the FACT BLOCK holds no Super Bowls or numbered "
     "games, so leave it out"

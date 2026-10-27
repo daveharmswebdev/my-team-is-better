@@ -144,6 +144,81 @@ def test_each_numeral_is_reported_once(texas_2005: str, catalog: tuple[TeamRecor
 
 
 # ---------------------------------------------------------------------------
+# round 2: a numeral right after "Super Bowl" is always a game number
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "numeral"),
+    [
+        # "LIV" and "MCM" are catalog aliases (Livingstone, McMurry), but no
+        # team is named "Super Bowl LIV": the alias masking must not hide it.
+        ("Texas beat Ohio State {g1} and played like it won Super Bowl LIV.", "LIV"),
+        ("Texas beat Ohio State {g1}, a Super Bowl MCM kind of night.", "MCM"),
+        # One letter is a numeral too, right after "Super Bowl".
+        ("Texas beat Ohio State {g1} like it was Super Bowl X.", "X"),
+        ("Texas beat Ohio State {g1} like it was Super Bowl V.", "V"),
+        ("Texas beat Ohio State {g1} like it was Super Bowl I.", "I"),
+        ("Texas beat Ohio State {g1} like it was super bowl X all over again.", "X"),
+        # An abbreviation the standalone rule passes is still a numeral here.
+        ("Texas beat Ohio State {g1} like it was Super Bowl MD.", "MD"),
+    ],
+)
+def test_a_numeral_after_super_bowl_is_rejected_whatever_the_aliases(
+    texas_2005: str, catalog: tuple[TeamRecord, ...], text: str, numeral: str
+) -> None:
+    errors = rejected(text, [_texas_score()], texas_2005, catalog)
+    assert errors == (
+        f'the prose types the Roman numeral "{numeral}"; {ROMAN_FEEDBACK}, so leave it out',
+    ), errors
+
+
+def test_a_numeral_after_super_bowl_is_reported_once(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    errors = rejected(
+        "Texas beat Ohio State {g1}. Super Bowl XL, then Super Bowl X.",
+        [_texas_score()],
+        texas_2005,
+        catalog,
+    )
+    assert _roman_errors(errors) == [
+        f'the prose types the Roman numeral "XL"; {ROMAN_FEEDBACK}, so leave it out',
+        f'the prose types the Roman numeral "X"; {ROMAN_FEEDBACK}, so leave it out',
+    ], errors
+
+
+def test_division_ii_is_rejected(texas_2005: str, catalog: tuple[TeamRecord, ...]) -> None:
+    """Coordinator decision on #454 round 2: the team fact block holds no
+    classification, so "Division II" is an unbacked number and is rejected."""
+    errors = rejected(
+        "Texas beat Ohio State {g1} like a Division II team.",
+        [_texas_score()],
+        texas_2005,
+        catalog,
+    )
+    assert errors == (
+        f'the prose types the Roman numeral "II"; {ROMAN_FEEDBACK}, so leave it out',
+    ), errors
+
+
+@pytest.mark.parametrize("alias", ["LIV", "MCM"])
+def test_a_numeral_alias_standing_alone_still_passes(
+    texas_2005: str, catalog: tuple[TeamRecord, ...], alias: str
+) -> None:
+    text = f"Texas beat Ohio State {{g1}}, and the {alias} folks loved it."
+    rendered(text, [_texas_score()], texas_2005, catalog)
+
+
+def test_the_pronoun_i_after_a_bowl_word_passes(
+    texas_2005: str, catalog: tuple[TeamRecord, ...]
+) -> None:
+    """Only "Super Bowl" right before it makes a one-letter numeral."""
+    text = "Texas beat Ohio State {g1} in a bowl, I think, and I loved it."
+    rendered(text, [_texas_score()], texas_2005, catalog)
+
+
+# ---------------------------------------------------------------------------
 # false positives: legitimate team prose keeps passing
 # ---------------------------------------------------------------------------
 
