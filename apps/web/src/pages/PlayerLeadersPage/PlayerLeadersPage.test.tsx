@@ -436,9 +436,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
 
   it('still points to the credits when they fail to load', async () => {
     mockedFetchPlayerLeaders.mockResolvedValue(LEADERS_BY_YARDS)
-    mockedFetchCredits.mockResolvedValue(
-      networkError(),
-    )
+    mockedFetchCredits.mockResolvedValue(networkError())
 
     renderPage()
 
@@ -450,9 +448,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
   })
 
   it("shows the narrator's network line when the leaders can't be reached", async () => {
-    mockedFetchPlayerLeaders.mockResolvedValue(
-      networkError(),
-    )
+    mockedFetchPlayerLeaders.mockResolvedValue(networkError())
 
     renderPage()
 
@@ -463,9 +459,7 @@ describe('PlayerLeadersPage (issue #296)', () => {
   })
 
   it("shows the narrator's 5xx line for a server error, never the status", async () => {
-    mockedFetchPlayerLeaders.mockResolvedValue(
-      httpError(500, 'boom'),
-    )
+    mockedFetchPlayerLeaders.mockResolvedValue(httpError(500, 'boom'))
 
     renderPage()
 

@@ -105,11 +105,13 @@ describe('fetchQbVerdict: POST /api/players/compare/verdict (issue #459)', () =>
 
   it('rejects the stale-db 503 with a VerdictHttpError carrying the server copy', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi
+    answerEveryRequest(
+      vi
         .fn()
         .mockResolvedValue(
           jsonResponse(503, { detail: { error: 'stale_database' } }),
-        ))
+        ),
+    )
 
     const error = await rejection(fetchQbVerdict(BRADY_ID, PEYTON_MANNING_ID))
 

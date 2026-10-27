@@ -205,7 +205,9 @@ function stubTeamsRejectingNonIntegerYears() {
   mockedFetchTeams.mockImplementation(
     (_sport?: Sport, _method?: Method, year?: number) =>
       year !== undefined && !Number.isInteger(year)
-        ? Promise.resolve(httpError(422, '{"detail": "year is not an integer"}'))
+        ? Promise.resolve(
+            httpError(422, '{"detail": "year is not an integer"}'),
+          )
         : Promise.resolve(teamsOut(CFB_DETAILS)),
   )
 }
@@ -1562,7 +1564,10 @@ describe('QuestionForm', () => {
       "keeps the newer year's team list when an earlier year's slower request %s after it",
       async (outcome) => {
         mockedFetchYears.mockResolvedValue({ years: [2017, 2018, 2019] })
-        const slow2018: { promise?: Promise<TeamsOut | Response>; settle: () => void } = {
+        const slow2018: {
+          promise?: Promise<TeamsOut | Response>
+          settle: () => void
+        } = {
           settle: () => {},
         }
         mockedFetchTeams.mockImplementation(
@@ -1796,13 +1801,11 @@ describe('QuestionForm', () => {
       },
       {
         state: 'still loading',
-        stubYears: () =>
-          mockedFetchYears.mockReturnValue(hang()),
+        stubYears: () => mockedFetchYears.mockReturnValue(hang()),
       },
       {
         state: 'failed',
-        stubYears: () =>
-          mockedFetchYears.mockResolvedValue(networkError()),
+        stubYears: () => mockedFetchYears.mockResolvedValue(networkError()),
       },
       {
         state: 'ready, but empty',
@@ -2666,7 +2669,10 @@ describe('QuestionForm', () => {
       it.each(['resolves', 'rejects'] as const)(
         "keeps Elo's team list when Keener's slower team-list request %s after the switch",
         async (outcome) => {
-          const slow: { promise?: Promise<TeamsOut | Response>; settle: () => void } = {
+          const slow: {
+            promise?: Promise<TeamsOut | Response>
+            settle: () => void
+          } = {
             settle: () => {},
           }
           mockedFetchTeams.mockImplementation(

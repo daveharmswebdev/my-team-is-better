@@ -29,7 +29,8 @@ import { PlayerCareerPage } from './PlayerCareerPage'
  * `GET /api/players/:id` and `GET /api/credits`, answered through MSW (issue
  * #221): the page calls the real client.
  */
-const mockedFetchPlayerCareer = vi.fn<Parameters<typeof playerCareerHandler>[0]>()
+const mockedFetchPlayerCareer =
+  vi.fn<Parameters<typeof playerCareerHandler>[0]>()
 const mockedFetchCredits = vi.fn<Parameters<typeof creditsHandler>[0]>()
 
 beforeEach(() => {
@@ -276,9 +277,7 @@ describe('PlayerCareerPage (issue #296)', () => {
   })
 
   it("shows the narrator's network line when the player can't be reached", async () => {
-    mockedFetchPlayerCareer.mockResolvedValue(
-      networkError(),
-    )
+    mockedFetchPlayerCareer.mockResolvedValue(networkError())
 
     renderPage()
 

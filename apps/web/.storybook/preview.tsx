@@ -4,9 +4,18 @@ import '../src/styles/tokens.css'
 // Barlow; main.ts's staticDirs serves the /fonts/*.woff2 files they point at.
 import '../src/styles/fonts.css'
 import '../src/index.css'
+import { mswLoader } from 'msw-storybook-addon/csf3'
 import { recordStoryA11yContext } from './a11yPolicy.ts'
 
 const preview: Preview = {
+  // Issue #221: stories fake `apps/api` with the same MSW handlers the unit
+  // tests use (src/mocks/handlers.ts). The loader starts the service worker
+  // once, resets its handlers before every story, then installs that story's
+  // `parameters.msw.handlers`; a request no handler answers is warned about
+  // and goes to the network. Handlers are keyed by name, so a story replaces
+  // one group (say `verdict`) and keeps the rest of its meta's.
+  loaders: [mswLoader()],
+
   parameters: {
     controls: {
       matchers: {

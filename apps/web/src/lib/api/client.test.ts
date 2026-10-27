@@ -92,7 +92,6 @@ async function flushMicrotasks() {
 }
 
 describe('api client', () => {
-
   it('resolves with the parsed envelope on a 200 response', async () => {
     const envelope = {
       evidence: {
@@ -195,11 +194,13 @@ describe('api client', () => {
       year: 1899,
       available_years: [2004, 2005],
     }
-    answerEveryRequest(vi
+    answerEveryRequest(
+      vi
         .fn()
         .mockImplementation(() =>
           Promise.resolve(jsonResponse(404, { detail })),
-        ))
+        ),
+    )
 
     await expect(
       fetchChampion({
@@ -257,7 +258,9 @@ describe('api client', () => {
 
   it('throws a VerdictHttpError, not a VerdictNetworkError, on an unmapped error response shape', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+    )
 
     const rejection = fetchChampion(CHAMPION_2005)
 
@@ -313,7 +316,9 @@ describe('unmapped HTTP errors (issue #215)', () => {
   })
 
   it('maps an empty 500 to the 5xx copy, with no status in the message', async () => {
-    answerEveryRequest(vi.fn().mockResolvedValue(new Response(null, { status: 500 })))
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(new Response(null, { status: 500 })),
+    )
 
     const error = await rejectionOf(fetchChampion(CHAMPION_2005))
 
@@ -328,12 +333,14 @@ describe('unmapped HTTP errors (issue #215)', () => {
 
   it("maps a proxy's HTML 503 to the 5xx copy, keeping the raw HTML on bodyText and logging it", async () => {
     const html = '<html>Service Unavailable</html>'
-    answerEveryRequest(vi.fn().mockResolvedValue(
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(
         new Response(html, {
           status: 503,
           headers: { 'Content-Type': 'text/html' },
         }),
-      ))
+      ),
+    )
 
     const error = await rejectionOf(fetchChampion(CHAMPION_2005))
 
@@ -373,7 +380,9 @@ describe('unmapped HTTP errors (issue #215)', () => {
   ])(
     '%s rejects a 500 with a VerdictHttpError and the 5xx copy',
     async (_name, send) => {
-      answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+      answerEveryRequest(
+        vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+      )
 
       const error = await rejectionOf(send())
 
@@ -575,11 +584,13 @@ describe('GET request timeout (issue #237)', () => {
   it.each(GETS)(
     '%s clears its timer once a successful response has been read',
     async (_name, send) => {
-      answerEveryRequest(vi
+      answerEveryRequest(
+        vi
           .fn()
           .mockResolvedValue(
             jsonResponse(200, { years: [], teams: [], team_details: [] }),
-          ))
+          ),
+      )
 
       await send()
 
@@ -591,7 +602,9 @@ describe('GET request timeout (issue #237)', () => {
     '%s clears its timer after an HTTP error, which stays a VerdictHttpError',
     async (_name, send) => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(503, { detail: 'boom' })))
+      answerEveryRequest(
+        vi.fn().mockResolvedValue(jsonResponse(503, { detail: 'boom' })),
+      )
 
       const outcome = track(send())
       // The response crosses MSW's interceptor, more than a few microtasks
@@ -607,7 +620,6 @@ describe('GET request timeout (issue #237)', () => {
 })
 
 describe('fetchCredits', () => {
-
   it('resolves with the parsed credits payload on a 200 response', async () => {
     const credits = {
       methodologies: [
@@ -662,7 +674,9 @@ describe('fetchCredits', () => {
 
   it('throws a VerdictHttpError on a non-2xx response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+    )
 
     await expect(fetchCredits()).rejects.toBeInstanceOf(VerdictHttpError)
   })
@@ -747,11 +761,13 @@ describe('fetchPlayerLeaders', () => {
 
   it('maps a request-validation 422 to the 4xx copy', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi
+    answerEveryRequest(
+      vi
         .fn()
         .mockResolvedValue(
           jsonResponse(422, { detail: [{ loc: ['query', 'limit'] }] }),
-        ))
+        ),
+    )
 
     const error = await fetchPlayerLeaders(LEADERS_QUERY).catch(
       (caught: unknown) => caught,
@@ -819,7 +835,9 @@ describe('fetchPlayerCareer', () => {
     'treats a 404 with %s as an unmapped HTTP error with the 4xx copy',
     async (_name, detail) => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(404, { detail })))
+      answerEveryRequest(
+        vi.fn().mockResolvedValue(jsonResponse(404, { detail })),
+      )
 
       const error = await fetchPlayerCareer(1).catch(
         (caught: unknown) => caught,
@@ -833,7 +851,6 @@ describe('fetchPlayerCareer', () => {
 })
 
 describe('fetchYears', () => {
-
   it('resolves with the parsed years list on a 200 response, defaulting to sport=cfb and method=keener', async () => {
     const fetchMock = vi
       .fn()
@@ -896,14 +913,15 @@ describe('fetchYears', () => {
 
   it('throws a VerdictHttpError on a non-2xx response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+    )
 
     await expect(fetchYears()).rejects.toBeInstanceOf(VerdictHttpError)
   })
 })
 
 describe('fetchTeams', () => {
-
   it('resolves with the parsed team list on a 200 response, defaulting to sport=cfb and method=keener', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse(200, {
@@ -999,7 +1017,9 @@ describe('fetchTeams', () => {
 
   it('throws a VerdictHttpError on a non-2xx response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+    )
 
     await expect(fetchTeams()).rejects.toBeInstanceOf(VerdictHttpError)
   })

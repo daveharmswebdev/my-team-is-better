@@ -972,9 +972,7 @@ describe('HomePage', () => {
 
   it('renders a generic failure state on a network error', async () => {
     const user = userEvent.setup()
-    mockedFetchChampion.mockResolvedValue(
-      networkError(),
-    )
+    mockedFetchChampion.mockResolvedValue(networkError())
 
     renderHomePage()
     await waitForDefaultYear()
@@ -1300,9 +1298,7 @@ describe('HomePage', () => {
           candidates: ['Texas State'],
         }),
       )
-      mockedFetchCompare.mockResolvedValueOnce(
-        networkError(),
-      )
+      mockedFetchCompare.mockResolvedValueOnce(networkError())
 
       renderHomePage()
       await user.selectOptions(

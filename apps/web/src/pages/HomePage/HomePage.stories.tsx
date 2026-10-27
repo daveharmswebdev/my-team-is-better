@@ -12,6 +12,16 @@ import type {
   TeamCaseOut,
   TeamsOut,
 } from '../../lib/api/types'
+import {
+  championHandler,
+  compareHandler,
+  hang,
+  networkError,
+  teamCaseHandler,
+  teamsHandler,
+  typedError,
+  yearsHandler,
+} from '../../mocks/handlers'
 import { HomePage } from './HomePage'
 
 /**
@@ -26,21 +36,13 @@ import { HomePage } from './HomePage'
  * own outline; the "heading outline (issue #219)" cases in HomePage.test.tsx
  * pin the verdict's continuation under the h1.
  *
- * Like the other page stories (AboutPage, PlayerComparePage), these drive the
- * page through a stubbed `window.fetch` -- there is no shared mock helper
- * yet (#221 tracks moving every story to one): `/api/years` and `/api/teams`
- * get a small catalog, each `/api/verdict/*` endpoint its story's handler,
- * and everything else falls through to the real `fetch`. A verdict story
- * lands on a share link (issue #184), which asks its question on mount with
- * no typing.
+ * Like the other page stories, these drive the page through the API, faked
+ * with the shared MSW handlers (issue #221): the meta's `parameters.msw`
+ * gives `/api/years` and `/api/teams` a small catalog and leaves each
+ * `/api/verdict/*` endpoint hanging, and a verdict story replaces its
+ * endpoint's handler by name. A verdict story lands on a share link (issue
+ * #184), which asks its question on mount with no typing.
  */
-type Handler = () => Promise<Response>
-
-interface Handlers {
-  champion?: Handler
-  teamCase?: Handler
-  compare?: Handler
-}
 
 const TEAMS: TeamsOut = {
   teams: ['Texas', 'USC', 'Ohio State'],
@@ -51,50 +53,8 @@ const TEAMS: TeamsOut = {
   ],
 }
 
-function never(): Promise<Response> {
-  return new Promise(() => {})
-}
-
-function jsonResponse(status: number, body: unknown): Promise<Response> {
-  return Promise.resolve(
-    new Response(JSON.stringify(body), {
-      status,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  )
-}
-
-function installFetch(handlers: Handlers) {
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url,
-      window.location.href,
-    )
-    switch (url.pathname) {
-      case '/api/years':
-        return jsonResponse(200, { years: [2004, 2005] })
-      case '/api/teams':
-        return jsonResponse(200, TEAMS)
-      case '/api/verdict/champion':
-        return (handlers.champion ?? never)()
-      case '/api/verdict/team-case':
-        return (handlers.teamCase ?? never)()
-      case '/api/verdict/compare':
-        return (handlers.compare ?? never)()
-      default:
-        return realFetch(input, init)
-    }
-  }
-}
-
-function atSearch(search: string, handlers: Handlers = {}) {
+function atSearch(search: string) {
   return function RouterDecorator(Story: () => React.JSX.Element) {
-    installFetch(handlers)
     return (
       <MemoryRouter initialEntries={[`/${search}`]}>
         <Routes>
@@ -347,6 +307,17 @@ const meta = {
   tags: ['autodocs'],
   parameters: {
     layout: 'fullscreen',
+    msw: {
+      handlers: {
+        catalog: [
+          yearsHandler(() => ({ years: [2004, 2005] })),
+          teamsHandler(() => TEAMS),
+        ],
+        champion: championHandler(hang),
+        teamCase: teamCaseHandler(hang),
+        compare: compareHandler(hang),
+      },
+    },
     a11y: {
       // axe-core runs `heading-order` by default (it is a best-practice rule,
       // and addon-a11y turns off only `region`). Listed here so this page's
@@ -379,7 +350,7 @@ export const Idle: Story = {
 
 /** A question asked, its answer not back yet. */
 export const Loading: Story = {
-  decorators: [atSearch(TEAM_CASE_LINK, { teamCase: never })],
+  decorators: [atSearch(TEAM_CASE_LINK)],
   play: async ({ canvasElement }) => {
     const dialog = await within(canvasElement).findByRole('dialog', {
       name: 'The verdict',
@@ -392,11 +363,10 @@ export const Loading: Story = {
 
 /** "Who was the champion?", with the champion's Keener breakdown open. */
 export const ChampionVerdict: Story = {
-  decorators: [
-    atSearch('?q=champion&sport=cfb&year=2005&engine=keener', {
-      champion: () => jsonResponse(200, CHAMPION),
-    }),
-  ],
+  decorators: [atSearch('?q=champion&sport=cfb&year=2005&engine=keener')],
+  parameters: {
+    msw: { handlers: { champion: championHandler(() => CHAMPION) } },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await verdict(canvasElement, CHAMPION.narration.text)
     await openFirstRating(dialog, /Texas rating breakdown/)
@@ -405,11 +375,10 @@ export const ChampionVerdict: Story = {
 
 /** "Make the case for my team", with its Keener breakdown open. */
 export const TeamCaseVerdict: Story = {
-  decorators: [
-    atSearch(TEAM_CASE_LINK, {
-      teamCase: () => jsonResponse(200, TEAM_CASE),
-    }),
-  ],
+  decorators: [atSearch(TEAM_CASE_LINK)],
+  parameters: {
+    msw: { handlers: { teamCase: teamCaseHandler(() => TEAM_CASE) } },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await verdict(canvasElement, TEAM_CASE.narration.text)
     await openFirstRating(dialog, /Texas rating breakdown/)
@@ -419,10 +388,11 @@ export const TeamCaseVerdict: Story = {
 /** The same case asked of Elo, with its game-by-game ledger open. */
 export const TeamCaseVerdictElo: Story = {
   decorators: [
-    atSearch('?q=team_case&sport=cfb&year=2005&engine=elo&team=Texas', {
-      teamCase: () => jsonResponse(200, TEAM_CASE_ELO),
-    }),
+    atSearch('?q=team_case&sport=cfb&year=2005&engine=elo&team=Texas'),
   ],
+  parameters: {
+    msw: { handlers: { teamCase: teamCaseHandler(() => TEAM_CASE_ELO) } },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await verdict(canvasElement, TEAM_CASE_ELO.narration.text)
     await openFirstRating(dialog, /Texas Elo rating, game by game/)
@@ -432,10 +402,11 @@ export const TeamCaseVerdictElo: Story = {
 /** "Who was better?", under Elo, with the first team's ledger open under its name. */
 export const CompareVerdict: Story = {
   decorators: [
-    atSearch('?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC', {
-      compare: () => jsonResponse(200, COMPARE_ELO),
-    }),
+    atSearch('?q=compare&sport=cfb&year=2005&engine=elo&a=Texas&b=USC'),
   ],
+  parameters: {
+    msw: { handlers: { compare: compareHandler(() => COMPARE_ELO) } },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await verdict(canvasElement, COMPARE_ELO.narration.text)
     await openFirstRating(dialog, /Texas Elo rating, game by game/)
@@ -445,10 +416,11 @@ export const CompareVerdict: Story = {
 /** The same comparison under Keener, with the first team's breakdown open. */
 export const CompareVerdictKeener: Story = {
   decorators: [
-    atSearch('?q=compare&sport=cfb&year=2005&engine=keener&a=Texas&b=USC', {
-      compare: () => jsonResponse(200, COMPARE_KEENER),
-    }),
+    atSearch('?q=compare&sport=cfb&year=2005&engine=keener&a=Texas&b=USC'),
   ],
+  parameters: {
+    msw: { handlers: { compare: compareHandler(() => COMPARE_KEENER) } },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await verdict(canvasElement, COMPARE_KEENER.narration.text)
     await openFirstRating(dialog, /Texas rating breakdown/)
@@ -458,17 +430,21 @@ export const CompareVerdictKeener: Story = {
 /** A season the API doesn't have: the error, with its year pills, in the modal. */
 export const UnknownYearError: Story = {
   decorators: [
-    atSearch('?q=team_case&sport=cfb&year=2019&engine=keener&team=Texas', {
-      teamCase: () =>
-        jsonResponse(404, {
-          detail: {
+    atSearch('?q=team_case&sport=cfb&year=2019&engine=keener&team=Texas'),
+  ],
+  parameters: {
+    msw: {
+      handlers: {
+        teamCase: teamCaseHandler(() =>
+          typedError(404, {
             error: 'unknown_year',
             year: 2019,
             available_years: [2004, 2005],
-          },
-        }),
-    }),
-  ],
+          }),
+        ),
+      },
+    },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await within(canvasElement).findByRole('dialog', {
       name: 'The verdict',
@@ -482,11 +458,10 @@ export const UnknownYearError: Story = {
 
 /** The API never answered: the network error line, in the narrator's voice. */
 export const NetworkError: Story = {
-  decorators: [
-    atSearch(TEAM_CASE_LINK, {
-      teamCase: () => Promise.reject(new TypeError('Failed to fetch')),
-    }),
-  ],
+  decorators: [atSearch(TEAM_CASE_LINK)],
+  parameters: {
+    msw: { handlers: { teamCase: teamCaseHandler(networkError) } },
+  },
   play: async ({ canvasElement }) => {
     const dialog = await within(canvasElement).findByRole('dialog', {
       name: 'The verdict',

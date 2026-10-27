@@ -1,14 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { CreditsOut } from '../../lib/api/types'
 import { DATA_SOURCES } from '../../lib/playerFixtures'
+import { creditsHandler, hang, httpError } from '../../mocks/handlers'
 import { AboutPage } from './AboutPage'
 
 /**
- * AboutPage owns its own data-fetching (`fetchCredits`, via `fetch`), so --
- * unlike the presentational components -- these stories drive it with a
- * stubbed `window.fetch` rather than props. Each story installs its own
- * handler before rendering; only requests to `/api/credits` are intercepted,
- * everything else falls through to the real `fetch`.
+ * AboutPage owns its own data-fetching (`fetchCredits`), so -- unlike the
+ * presentational components -- these stories drive it through the API, faked
+ * with MSW (issue #221): each story answers `/api/credits` in its
+ * `parameters.msw`.
  *
  * `mockCredits` mirrors the live payload's shape and ordering: `methodologies`
  * is a list, Keener's method first and Elo second, and the page renders them
@@ -43,31 +43,6 @@ const mockCredits: CreditsOut = {
   data_sources: DATA_SOURCES,
 }
 
-function installCreditsFetch(handler: () => Promise<Response>) {
-  const realFetch = globalThis.fetch
-  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
-      typeof input === 'string'
-        ? input
-        : input instanceof URL
-          ? input.href
-          : input.url
-    if (url.includes('/api/credits')) {
-      return handler()
-    }
-    return realFetch(input, init)
-  }
-}
-
-function jsonResponse(body: unknown): Promise<Response> {
-  return Promise.resolve(
-    new Response(JSON.stringify(body), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    }),
-  )
-}
-
 const meta = {
   title: 'pages/AboutPage',
   component: AboutPage,
@@ -79,30 +54,19 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Loaded: Story = {
-  decorators: [
-    (Story) => {
-      installCreditsFetch(() => jsonResponse(mockCredits))
-      return <Story />
-    },
-  ],
+  parameters: {
+    msw: { handlers: { credits: creditsHandler(() => mockCredits) } },
+  },
 }
 
 export const Loading: Story = {
-  decorators: [
-    (Story) => {
-      installCreditsFetch(() => new Promise(() => {}))
-      return <Story />
-    },
-  ],
+  parameters: {
+    msw: { handlers: { credits: creditsHandler(hang) } },
+  },
 }
 
 export const Error: Story = {
-  decorators: [
-    (Story) => {
-      installCreditsFetch(() =>
-        Promise.resolve(new Response(null, { status: 500 })),
-      )
-      return <Story />
-    },
-  ],
+  parameters: {
+    msw: { handlers: { credits: creditsHandler(() => httpError(500)) } },
+  },
 }

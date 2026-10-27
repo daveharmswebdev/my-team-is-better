@@ -77,7 +77,8 @@ export interface PlayerSearchRequest {
  */
 export function typedError(
   status: number,
-  body: VerdictErrorBody | UnknownPlayerErrorBody | PlayersNotComparableErrorBody,
+  body:
+    VerdictErrorBody | UnknownPlayerErrorBody | PlayersNotComparableErrorBody,
 ): Response {
   return HttpResponse.json({ detail: body }, { status })
 }

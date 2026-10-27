@@ -131,7 +131,9 @@ describe('player comparison and search client (issue #301)', () => {
     ['searchPlayers', () => searchPlayers('mc')],
   ])('%s rejects a 500 with the 5xx copy', async (_name, send) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    answerEveryRequest(vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })))
+    answerEveryRequest(
+      vi.fn().mockResolvedValue(jsonResponse(500, { detail: 'boom' })),
+    )
 
     const error: unknown = await send().catch((caught: unknown) => caught)
 

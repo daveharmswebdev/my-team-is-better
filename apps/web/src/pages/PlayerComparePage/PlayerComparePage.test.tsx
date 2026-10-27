@@ -1611,16 +1611,8 @@ describe('PlayerComparePage: comparing like with like (issue #436)', () => {
           sport: 'nfl',
         }),
     ],
-    [
-      'a network failure',
-      `?a=${WARNER}&b=${MCNAIR}`,
-      () => networkError(),
-    ],
-    [
-      'a 5xx',
-      `?a=${WARNER}&b=${MCNAIR}`,
-      () => httpError(503, ''),
-    ],
+    ['a network failure', `?a=${WARNER}&b=${MCNAIR}`, () => networkError()],
+    ['a 5xx', `?a=${WARNER}&b=${MCNAIR}`, () => httpError(503, '')],
     ['the same player twice', `?a=${WARNER}&b=${WARNER}`, undefined],
   ] as const)(
     'after closing a link that failed with %s, Player B can be cleared and picked again',
@@ -1886,11 +1878,7 @@ describe('PlayerComparePage: the QB score (issue #459)', () => {
       }),
       /I lost one of these two in my book/,
     ],
-    [
-      '422',
-      httpError(422, '{}'),
-      /Your question came through garbled/,
-    ],
+    ['422', httpError(422, '{}'), /Your question came through garbled/],
     ['503', httpError(503, '{}'), /Something broke in the back/],
     [
       'network or timeout',
