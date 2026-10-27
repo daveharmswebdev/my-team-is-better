@@ -23,6 +23,7 @@ by `test_verdict_sport.py`, `test_catalog_sport.py`, `test_deps.py` and
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from pathlib import Path
 
@@ -30,6 +31,8 @@ from cfb_strength.db.connection import ensure_schema, get_conn
 
 YEAR = 2023
 METHOD = "keener"
+# The season only NFL has a (keener) row for; see `build_sport_fixture`.
+NFL_ONLY_YEAR = 2024
 
 # CFB team ids/names (a 3-team win cycle 1 > 2 > 3 > 1).
 CFB_TEAM_NAMES = {1: "Alpha State", 2: "Bravo Tech", 3: "Charlie U"}
@@ -43,6 +46,19 @@ CFB_COLLISION_TEAM_ID = 4
 NFL_COLLISION_TEAM_ID = 104
 COLLISION_NAME = "Wildcats"
 
+# Issue #254: every CFB team carries a mascot, as a real ingest's #77 alias
+# enrichment gives it, so `cfb doctor` doesn't report `no_cfb_mascots` (which
+# no slice waives). Invented animals no other fixture name, prose word or
+# test string uses, so the grounding check's mascot matching (claims.py) has
+# nothing to catch in existing narration. NFL catalog rows carry no mascot,
+# as in production.
+CFB_MASCOTS = {
+    1: "Aardvarks",
+    2: "Bandicoots",
+    3: "Capybaras",
+    CFB_COLLISION_TEAM_ID: "Dugongs",
+}
+
 
 def _insert_team(
     conn: sqlite3.Connection,
@@ -50,10 +66,11 @@ def _insert_team(
     school: str,
     classification: str | None = None,
     sport: str = "cfb",
+    mascot: str | None = None,
 ) -> None:
     conn.execute(
-        "INSERT INTO teams (id, school, classification, sport) VALUES (?, ?, ?, ?)",
-        (team_id, school, classification, sport),
+        "INSERT INTO teams (id, school, classification, sport, mascot) VALUES (?, ?, ?, ?, ?)",
+        (team_id, school, classification, sport, mascot),
     )
 
 
@@ -160,7 +177,7 @@ def build_sport_fixture(conn: sqlite3.Connection, year: int = YEAR) -> None:
     win cycle, an NFL win cycle, and a cross-sport name collision, all in
     season `year`."""
     for tid, name in CFB_TEAM_NAMES.items():
-        _insert_team(conn, tid, name, classification="fbs", sport="cfb")
+        _insert_team(conn, tid, name, classification="fbs", sport="cfb", mascot=CFB_MASCOTS[tid])
     _insert_game(conn, 1, year, 1, 2, CFB_TEAM_NAMES[1], CFB_TEAM_NAMES[2], 30, 10, sport="cfb")
     _insert_game(conn, 2, year, 2, 3, CFB_TEAM_NAMES[2], CFB_TEAM_NAMES[3], 20, 17, sport="cfb")
     _insert_game(conn, 3, year, 3, 1, CFB_TEAM_NAMES[3], CFB_TEAM_NAMES[1], 3, 40, sport="cfb")
@@ -192,11 +209,18 @@ def build_sport_fixture(conn: sqlite3.Connection, year: int = YEAR) -> None:
     # NFL-only rating for a year CFB has no rows for, so a sport-scoped
     # "unknown year" 404 for CFB never accidentally reports the NFL list.
     _insert_team(conn, 105, "Golf United", classification=None, sport="nfl")
-    _insert_rating(conn, 2024, METHOD, 105, 0.2, 1, 1, 0, sport="nfl")
+    _insert_rating(conn, NFL_ONLY_YEAR, METHOD, 105, 0.2, 1, 1, 0, sport="nfl")
 
     # Cross-sport name collision, same year/method, no games needed
     # (build_team_case only requires a ratings row to exist).
-    _insert_team(conn, CFB_COLLISION_TEAM_ID, COLLISION_NAME, classification="fbs", sport="cfb")
+    _insert_team(
+        conn,
+        CFB_COLLISION_TEAM_ID,
+        COLLISION_NAME,
+        classification="fbs",
+        sport="cfb",
+        mascot=CFB_MASCOTS[CFB_COLLISION_TEAM_ID],
+    )
     _insert_rating(conn, year, METHOD, CFB_COLLISION_TEAM_ID, 0.3, 4, 0, 0, sport="cfb")
     _insert_breakdown(
         conn, year, METHOD, CFB_COLLISION_TEAM_ID, None, None, None, None, None, 0.1, sport="cfb"
@@ -209,6 +233,8 @@ def build_sport_fixture(conn: sqlite3.Connection, year: int = YEAR) -> None:
     )
 
     build_tie_cluster(conn, year)
+    for sport in ("cfb", "nfl"):
+        build_elo(conn, year, sport)
 
 
 # Issue #83: a synthetic NFL tie. No committed apps/api fixture had a single
@@ -316,6 +342,173 @@ def build_tie_cluster(conn: sqlite3.Connection, year: int = YEAR) -> None:
     _insert_rating(conn, year, METHOD, TIE_WIN_OPPONENT_ID, 0.05, 9, 0, 1, sport="nfl")
     for tid in names:
         _insert_breakdown(conn, year, METHOD, tid, None, None, None, None, None, 0.1, sport="nfl")
+
+
+def doctor_slice(year: int = YEAR) -> dict[str, dict[str, object]]:
+    """The deliberate slice `make_sport_fixture_db(year=year)` carries, in
+    `build_fixture.py`'s `--slice` JSON shape (#254): regular-season games in
+    `year` for both leagues, keener and elo ratings for them (elo_career
+    deliberately none, as in the verdict fixture, #98), keener for the NFL
+    2024 one-team season too, and no player stats. `cfb doctor` findings
+    beyond what this slice explains fail `test_sport_fixture_doctor.py`."""
+    return {
+        "cfb": {
+            "games": {"regular": [year]},
+            "rated": {"keener": [year], "elo": [year]},
+        },
+        "nfl": {
+            "games": {"regular": [year]},
+            "rated": {"keener": sorted({year, NFL_ONLY_YEAR}), "elo": [year]},
+        },
+    }
+
+
+# Issue #254: Elo ratings and their ledger (#183), so the fixture is a slice
+# `cfb doctor` accepts (`season_missing_ratings` for elo is not waivable for a
+# season the fixture means to rate, and an elo-rated season without its
+# ledger is `season_missing_elo_ledger`) and a validator can check NFL Elo
+# against it. apps/api's tests may not import `cfb_strength.ratings`, so the
+# season-isolated walk is re-done here by hand: the engine's update math
+# (`ratings/elo.py`'s `_game_update` and `_walk`), its shipped `ELO_CONFIGS`
+# constants, and `compute_ratings._load_games`' game order. It is a faithful
+# copy for this tiny regular-season slice, not a second engine, and it is
+# pinned to the engine: `test_sport_fixture_doctor.py` runs `build_fixture.py
+# --check-elo-parity` (the sanctioned importer of `cfb_strength.ratings`) for
+# 2023 and 2003, which re-rates a copy of the db with `compute_and_store(conn,
+# year, "elo")` and requires the ratings, ledger steps and config rows to be
+# exactly equal. An engine retune turns that red; update the copy to match.
+# The existing assertions all use
+# keener, which these rows leave untouched (`method` scopes every table).
+ELO_METHOD = "elo"
+# sport -> (k, hfa); `initial`, `scale`, `mov_scale`, `mov_autocorr` and the
+# MOV denominator floor are shared by both sports' configs.
+ELO_K_HFA = {"nfl": (20.0, 65.0), "cfb": (40.0, 100.0)}
+ELO_INITIAL = 1500.0
+ELO_SCALE = 400.0
+ELO_MOV_SCALE = 2.2
+ELO_MOV_AUTOCORR = 0.001
+ELO_MOV_DENOM_FLOOR_FRACTION = 0.5
+
+
+def _letter(points: int, opponent_points: int) -> str:
+    return "W" if points > opponent_points else "L" if points < opponent_points else "T"
+
+
+def build_elo(conn: sqlite3.Connection, year: int, sport: str) -> None:
+    """Rate `sport`'s completed `year` games with season-isolated Elo and
+    store the ratings, one ledger step per team per game, and the config
+    row, as `compute_and_store(conn, year, "elo")` shapes them."""
+    k, hfa = ELO_K_HFA[sport]
+    games = conn.execute(
+        """
+        SELECT week, season_type, start_date, home_team_id, away_team_id,
+               home_points, away_points, neutral_site
+        FROM games
+        WHERE season = ? AND sport = ? AND completed = 1
+          AND home_points IS NOT NULL AND away_points IS NOT NULL
+        ORDER BY season,
+                 CASE season_type WHEN 'regular' THEN 0 ELSE 1 END,
+                 CASE WHEN season_type = 'regular' THEN week END IS NULL,
+                 CASE WHEN season_type = 'regular' THEN week END,
+                 start_date IS NULL, start_date,
+                 week IS NULL, week,
+                 id
+        """,
+        (year, sport),
+    ).fetchall()
+
+    elo: dict[int, float] = {}
+    record: dict[int, list[int]] = {}  # team -> [wins, losses, ties]
+    steps: list[tuple[object, ...]] = []
+    game_numbers: dict[int, int] = {}
+    for g in games:
+        home, away = int(g["home_team_id"]), int(g["away_team_id"])
+        hp, ap = int(g["home_points"]), int(g["away_points"])
+        neutral = bool(g["neutral_site"])
+        for team in (home, away):
+            elo.setdefault(team, ELO_INITIAL)
+            record.setdefault(team, [0, 0, 0])
+        home_before, away_before = elo[home], elo[away]
+
+        home_field = 0.0 if neutral else hfa
+        elo_diff = home_before - away_before + home_field
+        result = 1.0 if hp > ap else 0.0 if hp < ap else 0.5
+        if result == 0.5:
+            denom = 1.0
+        else:
+            winner_diff = elo_diff if result == 1.0 else -elo_diff
+            denom = max(
+                winner_diff * ELO_MOV_AUTOCORR + ELO_MOV_SCALE,
+                ELO_MOV_DENOM_FLOOR_FRACTION * ELO_MOV_SCALE,
+            )
+        multiplier = math.log(max(abs(hp - ap), 1.0) + 1.0) * (ELO_MOV_SCALE / denom)
+        expected = 1.0 / (math.pow(10.0, -elo_diff / ELO_SCALE) + 1.0)
+        shift = k * multiplier * (result - expected)
+        elo[home] += shift
+        elo[away] -= shift
+
+        if hp > ap:
+            record[home][0] += 1
+            record[away][1] += 1
+        elif ap > hp:
+            record[away][0] += 1
+            record[home][1] += 1
+        else:
+            record[home][2] += 1
+            record[away][2] += 1
+
+        sides = (
+            (home, away, "home", hp, ap, home_before, away_before, home_field, elo_diff,
+             expected, shift),
+            (away, home, "away", ap, hp, away_before, home_before, 0.0 - home_field,
+             -elo_diff, 1.0 - expected, -shift),
+        )  # fmt: skip
+        for team, opp, venue, pts, opp_pts, before, opp_before, hfa_adj, gap, we, sh in sides:
+            game_numbers[team] = game_numbers.get(team, 0) + 1
+            steps.append(
+                (
+                    year, ELO_METHOD, sport, team, game_numbers[team], g["week"],
+                    g["season_type"], g["start_date"], opp, "neutral" if neutral else venue,
+                    pts, opp_pts, _letter(pts, opp_pts), before, opp_before, hfa_adj, gap,
+                    we, multiplier, sh, elo[team],
+                )
+            )  # fmt: skip
+
+    order = sorted(elo, key=lambda team: (-elo[team], team))
+    for rank, team in enumerate(order, start=1):
+        wins, losses, ties = record[team]
+        _insert_rating(conn, year, ELO_METHOD, team, elo[team], rank, wins, losses, sport, ties)
+    conn.executemany(
+        """
+        INSERT INTO elo_ledger_steps (
+            year, method, sport, team_id, game_number, week, season_type, start_date,
+            opponent_team_id, venue, team_points, opponent_points, result,
+            rating_before, opponent_rating_before, home_field_adjustment, rating_gap,
+            win_expectancy, mov_multiplier, shift, rating_after, computed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')
+        """,
+        steps,
+    )
+    conn.execute(
+        """
+        INSERT INTO elo_ledger_configs (
+            year, method, sport, starting_rating, k, hfa, scale, mov_scale, mov_autocorr,
+            mov_denom_floor_fraction, computed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test')
+        """,
+        (
+            year,
+            ELO_METHOD,
+            sport,
+            ELO_INITIAL,
+            k,
+            hfa,
+            ELO_SCALE,
+            ELO_MOV_SCALE,
+            ELO_MOV_AUTOCORR,
+            ELO_MOV_DENOM_FLOOR_FRACTION,
+        ),
+    )
 
 
 def make_sport_fixture_db(tmp_path: Path, year: int = YEAR) -> Path:

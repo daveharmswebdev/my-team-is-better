@@ -79,27 +79,41 @@ Two currency checks bracket the build: `cfb_strength.ingest.currency
 is written; the second on the finished output. A fixture is a deliberate
 season slice, so it can never pass the doctor outright. Exactly the findings
 `.claude/agents/validator.md` waives for a slice are allowed, and each only
-for the reason the slice gives:
+for the reason the slice gives. The slice is declared as data (`LeagueSlice`
+per league: game seasons per season type, rated seasons per method, player
+stat seasons; `verdict_slice` is this fixture's), and `slice_findings` holds
+the rules:
 
-- `season_behind_cache`: only for seasons the fixture omits, per league --
-  CFB seasons outside `YEARS`, NFL seasons outside `NFL_YEARS` (on the
-  source, which carries no NFL yet, every NFL season).
-- `season_missing_ratings`: for CFB, on the source every method for exactly
-  the seven seasons (the source stores no ratings), on the output only the
-  methods deliberately not baked (`elo_career`, below). For NFL, only on the
-  output, for exactly `NFL_YEARS`, and only because `NFL_RATED_METHODS` is
-  empty.
-- `league_has_no_games`: only for NFL, and only on the source.
+- `season_behind_cache`: only for (season, season type) batches the slice
+  omits -- here, CFB seasons outside `YEARS`, NFL seasons outside
+  `NFL_YEARS` (on the source, which carries no NFL yet, every NFL season).
+- `season_missing_ratings`: only for exactly the slice's own seasons in that
+  league, and only when the slice leaves some method unrated for them. For
+  CFB, on the source every method (the source stores no ratings), on the
+  output only the methods deliberately not baked (`elo_career`, below). For
+  NFL, only on the output, because `NFL_RATED_METHODS` is empty.
+- `season_missing_player_stats`: only for exactly the slice's own seasons,
+  and only when the slice declares no player stats for that league. This
+  fixture's NFL slice declares them for both its seasons, so here it is
+  never waived.
+- `league_has_no_games`: only for a league the slice carries no games for
+  (here NFL, on the source).
 
 On top of the findings, the per-league report must show exactly the slice:
-CFB game seasons `YEARS`, NFL game seasons `NFL_YEARS` (none on the source),
-the rated seasons each method is expected to have, and player stats for
-exactly `NFL_YEARS` in NFL and none in CFB. `season_missing_player_stats` is
-never waived: the NFL slice must carry player stats for both its seasons.
-Anything else fails the build: `schema_not_current`, `no_cfb_mascots` (a
-source built without the #77 alias enrichment -- the old pre-#110 fixture had
-none), `raw_cache_*`, `cache_past_max_year`, `season_missing_elo_ledger` and
-`season_missing_player_stats`.
+game seasons per season type, the rated seasons of every method, and the
+player-stat seasons. Anything else fails the build: `schema_not_current`,
+`no_cfb_mascots` (a source built without the #77 alias enrichment -- the old
+pre-#110 fixture had none), `raw_cache_*`, `cache_past_max_year` and
+`season_missing_elo_ledger`.
+
+The same check runs on any other hand-built fixture db without building
+anything: `--check-db PATH --slice JSON` (`parse_slice`). That is how
+`tests/test_sport_fixture_doctor.py` holds `sport_fixture.py`'s db to these
+waivers (#254) -- through a subprocess, so the pytest process itself never
+imports `cfb_strength.ingest`. The same test runs `--check-elo-parity PATH`,
+which re-rates a copy of that db with the engine's `elo` and requires its
+hand-written Elo rows to match exactly, keeping that copy of the engine's
+math on the engine's numbers (`elo_parity_diffs`).
 
 What that bracket does NOT check: it compares (season, season_type) *pairs*
 against the cache, never individual games. A source missing some games inside
@@ -152,19 +166,22 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import shutil
 import sqlite3
+import sys
 import warnings
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, get_args
 
 from cfb_strength import config
 from cfb_strength.contracts import Method, Sport
 from cfb_strength.db.connection import StaleDatabaseWarning, ensure_schema, get_conn
-from cfb_strength.ingest.currency import check_currency
+from cfb_strength.ingest.currency import CurrencyReport, Problem, check_currency
 from cfb_strength.ingest.nflverse import client as nflverse_client
 from cfb_strength.ingest.nflverse import ingest_players as nflverse_players
 from cfb_strength.ingest.nflverse import ingest_season as nflverse_games
@@ -205,7 +222,12 @@ KEENER_CHAMPIONS: dict[int, tuple[str, int, int, bool]] = {
 }
 
 WAIVABLE_FOR_A_SLICE = frozenset(
-    {"season_behind_cache", "season_missing_ratings", "league_has_no_games"}
+    {
+        "season_behind_cache",
+        "season_missing_ratings",
+        "season_missing_player_stats",
+        "league_has_no_games",
+    }
 )
 
 # The baked methods that record an Elo ledger (issue #183). Keener has a
@@ -281,62 +303,119 @@ def _record(wins: int, losses: int, ties: int) -> str:
     return f"{wins}-{losses}-{ties}" if ties else f"{wins}-{losses}"
 
 
-def check_slice_currency(
-    db_path: Path,
-    raw_dir: Path,
-    *,
-    rated_methods: tuple[Method, ...],
-    nfl_seasons: tuple[int, ...],
-) -> None:
-    """Fail unless `db_path`'s only `cfb doctor` findings are the ones a slice
-    explains: CFB seasons `YEARS` rated for exactly `rated_methods`, plus NFL
-    seasons `nfl_seasons` (empty before the NFL slice is ingested) with player
-    stats and no ratings. See the module docstring for the rules."""
-    report = check_currency(db_path, raw_dir)
-    slices: dict[Sport, tuple[int, ...]] = {"cfb": YEARS, "nfl": nfl_seasons}
-    league_rated_methods: dict[Sport, tuple[Method, ...]] = {
-        "cfb": rated_methods,
-        "nfl": NFL_RATED_METHODS,
-    }
-    unexplained: list[str] = []
+@dataclass(frozen=True)
+class LeagueSlice:
+    """What a fixture deliberately carries for one league: its game seasons
+    per season type, the seasons each method is rated for (a method it
+    doesn't name is rated for none), and its player-stat seasons."""
 
+    games: Mapping[str, tuple[int, ...]] = field(default_factory=dict)
+    rated: Mapping[Method, tuple[int, ...]] = field(default_factory=dict)
+    player_stats: tuple[int, ...] = ()
+
+    @property
+    def seasons(self) -> tuple[int, ...]:
+        """The fixture's own seasons for this league, any season type."""
+        return tuple(sorted({season for seasons in self.games.values() for season in seasons}))
+
+    @property
+    def pairs(self) -> frozenset[tuple[int, str]]:
+        return frozenset(
+            (season, season_type)
+            for season_type, seasons in self.games.items()
+            for season in seasons
+        )
+
+
+# A fixture's slice: one `LeagueSlice` per league the doctor reports on.
+Slice = Mapping[Sport, LeagueSlice]
+
+
+def verdict_slice(*, rated_methods: tuple[Method, ...], nfl_seasons: tuple[int, ...]) -> Slice:
+    """This script's own slice: CFB seasons `YEARS` (both season types)
+    rated for exactly `rated_methods`, plus NFL seasons `nfl_seasons` (empty
+    before the NFL slice is ingested; both season types) with player stats
+    and `NFL_RATED_METHODS` ratings."""
+    return {
+        "cfb": LeagueSlice(
+            games={season_type: YEARS for season_type in config.SEASON_TYPES},
+            rated={method: YEARS for method in rated_methods},
+        ),
+        "nfl": LeagueSlice(
+            games=(
+                {season_type: nfl_seasons for season_type in config.SEASON_TYPES}
+                if nfl_seasons
+                else {}
+            ),
+            rated={method: nfl_seasons for method in NFL_RATED_METHODS},
+            player_stats=nfl_seasons,
+        ),
+    }
+
+
+def _explained(problem: Problem, league: LeagueSlice) -> bool:
+    """Whether the slice `league` explains `problem`, a finding whose code is
+    in `WAIVABLE_FOR_A_SLICE`. See the module docstring for each rule."""
+    own = league.seasons
+    if problem.code == "league_has_no_games":
+        return not own
+    if problem.code == "season_behind_cache":
+        return not set(problem.pairs) & league.pairs
+    if problem.code == "season_missing_ratings":
+        # The finding doesn't name its method, so it is waived only as "the
+        # fixture's own seasons, for a method the slice leaves unrated"; the
+        # exact per-method comparison in `slice_findings` pins the rest.
+        unrated = any(set(own) - set(league.rated.get(m, ())) for m in get_args(Method))
+        return bool(own) and problem.seasons == own and unrated
+    if problem.code == "season_missing_player_stats":
+        return bool(own) and problem.seasons == own and not league.player_stats
+    return False
+
+
+def slice_findings(report: CurrencyReport, expected: Slice) -> list[str]:
+    """Every `cfb doctor` finding in `report` that the slice `expected`
+    doesn't explain, plus every way the per-league report differs from the
+    slice. Empty means the db is exactly that slice of the cache."""
+    unexplained: list[str] = []
     for problem in report.problems:
-        explained = False
-        sliced = slices.get(problem.sport) if problem.sport is not None else None
-        if sliced is None:
-            explained = False
-        elif problem.code == "league_has_no_games":
-            explained = problem.sport == "nfl" and not sliced
-        elif problem.code == "season_behind_cache":
-            explained = not set(problem.seasons) & set(sliced)
-        elif problem.code == "season_missing_ratings":
-            if problem.sport == "cfb":
-                explained = problem.seasons == YEARS
-            else:
-                explained = not NFL_RATED_METHODS and bool(sliced) and problem.seasons == sliced
-        if problem.code not in WAIVABLE_FOR_A_SLICE or not explained:
+        league = expected.get(problem.sport) if problem.sport is not None else None
+        explained = (
+            league is not None
+            and problem.code in WAIVABLE_FOR_A_SLICE
+            and _explained(problem, league)
+        )
+        if not explained:
             unexplained.append(f"{problem.code}: {problem.message}")
 
-    for league in report.leagues:
-        expected_games = slices.get(league.sport, ())
-        if league.game_seasons != expected_games:
+    for report_league in report.leagues:
+        sport = report_league.sport
+        league = expected.get(sport)
+        if league is None:
+            unexplained.append(f"{sport}: the slice doesn't describe this league")
+            continue
+        for season_type in sorted({*report_league.game_seasons_by_type, *league.games}):
+            got = tuple(report_league.game_seasons_by_type.get(season_type, ()))
+            want = league.games.get(season_type, ())
+            if got != want:
+                unexplained.append(f"{sport} {season_type} game seasons are {got}, expected {want}")
+        for method in get_args(Method):
+            rated = tuple(report_league.rated_seasons.get(method, ()))
+            want = league.rated.get(method, ())
+            if rated != want:
+                unexplained.append(f"{sport} {method} rated seasons are {rated}, expected {want}")
+        if report_league.player_stat_seasons != league.player_stats:
             unexplained.append(
-                f"{league.sport} game seasons are {league.game_seasons}, expected {expected_games}"
+                f"{sport} player-stat seasons are {report_league.player_stat_seasons}, "
+                f"expected {league.player_stats}"
             )
-        methods = league_rated_methods.get(league.sport, ())
-        for method, rated in league.rated_seasons.items():
-            expected = expected_games if method in methods else ()
-            if rated != expected:
-                unexplained.append(
-                    f"{league.sport} {method} rated seasons are {rated}, expected {expected}"
-                )
-        expected_players = nfl_seasons if league.sport == "nfl" else ()
-        if league.player_stat_seasons != expected_players:
-            unexplained.append(
-                f"{league.sport} player-stat seasons are {league.player_stat_seasons}, "
-                f"expected {expected_players}"
-            )
+    return unexplained
 
+
+def check_slice_currency(db_path: Path, raw_dir: Path, expected: Slice) -> None:
+    """Fail unless `db_path`'s only `cfb doctor` findings are the ones the
+    slice `expected` explains. See the module docstring for the rules."""
+    report = check_currency(db_path, raw_dir)
+    unexplained = slice_findings(report, expected)
     if unexplained:
         raise AssertionError(
             f"{db_path} is not a current slice of the committed cache {raw_dir} "
@@ -344,10 +423,135 @@ def check_slice_currency(
             + "\n  - ".join(unexplained)
         )
     print(
-        f"currency check passed for {db_path.name} (rated: {', '.join(rated_methods) or 'none'}; "
-        f"nfl slice: {', '.join(map(str, nfl_seasons)) or 'none'}); "
+        f"currency check passed for {db_path.name}; "
         f"waived slice findings: {sorted({p.code for p in report.problems})}"
     )
+
+
+def parse_slice(text: str) -> Slice:
+    """A slice from JSON, for `--check-db`: `{sport: {"games": {season_type:
+    [seasons]}, "rated": {method: [seasons]}, "player_stats": [seasons]}}`,
+    every key optional. Unknown sports, keys, season types and methods are
+    rejected, so a typo in a slice can never waive a finding."""
+    raw: object = json.loads(text)
+    if not isinstance(raw, dict):
+        raise ValueError("a slice is a JSON object keyed by sport")
+
+    def seasons(value: object, where: str) -> tuple[int, ...]:
+        if not isinstance(value, list) or not all(
+            isinstance(v, int) and not isinstance(v, bool) for v in value
+        ):
+            raise ValueError(f"{where} must be a list of seasons")
+        return tuple(sorted(value))
+
+    def by_key(value: object, allowed: tuple[str, ...], where: str) -> dict[str, tuple[int, ...]]:
+        if not isinstance(value, dict):
+            raise ValueError(f"{where} must be an object")
+        unknown = sorted(set(value) - set(allowed))
+        if unknown:
+            raise ValueError(f"{where}: unknown key(s) {unknown}; allowed {list(allowed)}")
+        return {str(k): seasons(v, f"{where}.{k}") for k, v in value.items()}
+
+    methods: dict[str, Method] = {m: m for m in get_args(Method)}
+    sports: dict[str, Sport] = {s: s for s in get_args(Sport)}
+    parsed: dict[Sport, LeagueSlice] = {}
+    for key, spec in raw.items():
+        sport = sports.get(str(key))
+        if sport is None or not isinstance(spec, dict):
+            raise ValueError(f"bad slice entry {key!r}: expected a sport in {list(sports)}")
+        unknown = sorted(set(spec) - {"games", "rated", "player_stats"})
+        if unknown:
+            raise ValueError(f"{sport}: unknown slice key(s) {unknown}")
+        games = by_key(spec.get("games", {}), config.SEASON_TYPES, f"{sport}.games")
+        rated = by_key(spec.get("rated", {}), tuple(methods), f"{sport}.rated")
+        parsed[sport] = LeagueSlice(
+            games=games,
+            rated={methods[m]: s for m, s in rated.items()},
+            player_stats=seasons(spec.get("player_stats", []), f"{sport}.player_stats"),
+        )
+    return parsed
+
+
+# The rows `check_elo_parity` compares, per table: every column the engine
+# writes except the surrogate `id` and the wall-clock `computed_at`.
+_ELO_PARITY_QUERIES: dict[str, str] = {
+    "ratings": """
+        SELECT sport, year, team_id, rating, rank, wins, losses, ties
+        FROM ratings WHERE method = 'elo' ORDER BY sport, year, team_id
+    """,
+    "elo_ledger_steps": """
+        SELECT sport, year, team_id, game_number, week, season_type, start_date,
+               opponent_team_id, venue, team_points, opponent_points, result,
+               rating_before, opponent_rating_before, home_field_adjustment,
+               rating_gap, win_expectancy, mov_multiplier, shift, rating_after
+        FROM elo_ledger_steps WHERE method = 'elo'
+        ORDER BY sport, year, team_id, game_number
+    """,
+    "elo_ledger_configs": """
+        SELECT sport, year, starting_rating, k, hfa, scale, mov_scale, mov_autocorr,
+               mov_denom_floor_fraction
+        FROM elo_ledger_configs WHERE method = 'elo' ORDER BY sport, year
+    """,
+}
+
+
+def elo_parity_diffs(db_path: Path) -> tuple[int, list[str]]:
+    """Re-rate a copy of `db_path` with the engine's own `elo` for every
+    (sport, year) the db holds elo ratings for, and compare the three elo
+    tables row by row, exactly (#254). For a hand-built fixture whose elo rows
+    are written without the engine (`sport_fixture.build_elo`), this is what
+    keeps them on the engine's numbers. Returns (rows compared, differences);
+    the db itself is never written."""
+    copy = db_path.with_name(f".{db_path.name}.elo-parity")
+    _remove_partial(copy)
+    shutil.copy(db_path, copy)
+    try:
+        ours = get_conn(db_path)
+        try:
+            expected = {
+                t: [tuple(r) for r in ours.execute(q)] for t, q in _ELO_PARITY_QUERIES.items()
+            }
+            seasons = ours.execute(
+                "SELECT DISTINCT sport, year FROM ratings WHERE method = 'elo' ORDER BY sport, year"
+            ).fetchall()
+        finally:
+            ours.close()
+        if not seasons:
+            return 0, [f"{db_path} holds no elo ratings to compare"]
+
+        engine = get_conn(copy)
+        try:
+            for row in seasons:
+                compute_and_store(engine, int(row["year"]), "elo", sport=str(row["sport"]))
+            got = {t: [tuple(r) for r in engine.execute(q)] for t, q in _ELO_PARITY_QUERIES.items()}
+        finally:
+            engine.close()
+    finally:
+        _remove_partial(copy)
+
+    diffs: list[str] = []
+    compared = 0
+    for table, fixture_rows in expected.items():
+        engine_rows = got[table]
+        compared += len(fixture_rows)
+        if len(fixture_rows) != len(engine_rows):
+            diffs.append(
+                f"{table}: fixture has {len(fixture_rows)} rows, engine {len(engine_rows)}"
+            )
+        for fixture_row, engine_row in zip(fixture_rows, engine_rows, strict=False):
+            if fixture_row != engine_row:
+                diffs.append(f"{table}:\n      fixture {fixture_row}\n      engine  {engine_row}")
+    return compared, diffs
+
+
+def check_elo_parity(db_path: Path) -> None:
+    compared, diffs = elo_parity_diffs(db_path)
+    if diffs:
+        raise AssertionError(
+            f"{db_path}'s elo rows differ from the engine's compute_and_store "
+            f"({len(diffs)} difference(s)):\n  - " + "\n  - ".join(diffs)
+        )
+    print(f"elo parity passed for {db_path.name}: {compared} rows identical to the engine's")
 
 
 def _refuse_live_fetch(*args: object, **kwargs: object) -> NoReturn:
@@ -422,7 +626,7 @@ def build(
 
     # Checked before anything is written: a stale source fails here, loudly,
     # rather than as a puzzling assertion in an unrelated test run later.
-    check_slice_currency(source, raw_dir, rated_methods=(), nfl_seasons=())
+    check_slice_currency(source, raw_dir, verdict_slice(rated_methods=(), nfl_seasons=()))
 
     # Built beside the output and moved into place only once every check
     # below has passed, so a failed build never leaves a half-built fixture.
@@ -562,7 +766,9 @@ def _bake(partial: Path, raw_dir: Path) -> None:
     finally:
         conn.close()
 
-    check_slice_currency(partial, raw_dir, rated_methods=METHODS, nfl_seasons=NFL_YEARS)
+    check_slice_currency(
+        partial, raw_dir, verdict_slice(rated_methods=METHODS, nfl_seasons=NFL_YEARS)
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -572,7 +778,40 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source", type=Path, default=SOURCE_FIXTURE)
     parser.add_argument("--output", type=Path, default=OUTPUT_FIXTURE)
     parser.add_argument("--raw-dir", type=Path, default=COMMITTED_RAW_DIR)
+    parser.add_argument(
+        "--check-db",
+        type=Path,
+        default=None,
+        help="build nothing: run only the slice currency check on this db, against --slice",
+    )
+    parser.add_argument(
+        "--slice",
+        default=None,
+        help="the --check-db db's slice, as JSON (see `parse_slice`)",
+    )
+    parser.add_argument(
+        "--check-elo-parity",
+        type=Path,
+        default=None,
+        help="build nothing: compare this db's elo rows with the engine re-rating a copy of it",
+    )
     args = parser.parse_args(argv)
+    if args.check_elo_parity is not None:
+        try:
+            check_elo_parity(args.check_elo_parity)
+        except AssertionError as e:
+            print(e, file=sys.stderr)
+            return 1
+        return 0
+    if args.check_db is not None or args.slice is not None:
+        if args.check_db is None or args.slice is None:
+            parser.error("--check-db and --slice go together")
+        try:
+            check_slice_currency(args.check_db, args.raw_dir, parse_slice(args.slice))
+        except AssertionError as e:
+            print(e, file=sys.stderr)
+            return 1
+        return 0
     build(args.source, args.output, args.raw_dir)
     return 0
 
