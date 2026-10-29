@@ -49,6 +49,12 @@ Findings filed: #n (pre-existing, <category>) … | none
 Closes #n
 ```
 
+The `pr-body` CI check (#374) fails a PR whose description lacks `## Why`,
+`## What changed`, `## Verification`, or an issue reference: `Closes #n` (or Fixes,
+Resolves), a line starting `Part of #n` or `Refs #n` for one step of an issue that stays
+open, or `No issue: <reason>` for untracked work. Editing the description re-runs it.
+Check locally first: `python3 .claude/hooks/check_pr_body.py --body-file <file>`.
+
 Add the attribution lines your session's instructions give you.
 
 ## 3. Merge
