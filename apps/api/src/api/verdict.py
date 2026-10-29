@@ -39,7 +39,8 @@ holds, then hands the resolved name to `build_team_case` -- by design, and
 apart from the read-only queries in `api.repositories` (among them the team
 catalog, `api.repositories.teams.list_team_records`, which feeds both
 `api.catalog`'s `/api/teams` route and, as below, the narration layer's team
-universe), the only non-evidence-layer SQL in this app.
+universe), and the persona cache and admin purge's Postgres statements
+(`api.persona.cache`, `api.admin`), the only non-evidence-layer SQL in this app.
 
 Since issue #245 the persona layer no longer runs a catalog query itself. Each
 route reads the sport's catalog exactly once, `list_team_records(conn,

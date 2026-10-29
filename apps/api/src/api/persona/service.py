@@ -12,7 +12,8 @@ teams in this particular fact block, so a mention of a real-but-wrong team
 rather than silently ignored as an arbitrary capitalized word. The catalog
 query lived here once as a private `_all_team_names` helper; issue #13
 promoted it to a shared query for `api.catalog`'s `/api/teams` route, and
-issue #209 settled it in `api.repositories.teams`, below this layer. Since
+issue #209 settled it in `api.repositories.teams`, below this layer, and
+issue #336 deleted it once nothing called it. Since
 issue #245 this module does not run a catalog query at all: the route already
 reads the sport's catalog (`list_team_records`) to canonicalise `user_team`
 and passes it in. Since issue #291 it passes the records themselves, as
