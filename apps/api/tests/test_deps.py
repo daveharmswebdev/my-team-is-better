@@ -2,10 +2,11 @@
 groundwork -- a real booted `uvicorn` process needs both to work with no live
 Postgres instance or real `ANTHROPIC_API_KEY`).
 
-This file began as the failing-first test for `api.deps.list_all_team_names`
-(GitHub issue #13); issue #209 moved that query to `api.repositories.teams`
-and its tests to `test_repositories_teams.py`, which also pins that
-`api.deps` now holds only the three dependency-injection callables.
+This file began as the failing-first test for a names-only team query in
+`api.deps` (GitHub issue #13); issue #209 moved that query to
+`api.repositories.teams` and its tests to `test_repositories_teams.py`, which
+also pins that `api.deps` now holds only the three dependency-injection
+callables. Issue #336 deleted the query once grounding stopped reading it.
 
 The `APP_TEST_MODE` tests below reimport both `api.config` and `api.deps`
 fresh after monkeypatching the environment -- mirrors `test_config.py`'s

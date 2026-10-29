@@ -56,10 +56,10 @@ suite overrides it with an unlimited budget for every test
 (`tests/conftest.py`), since this module-level budget is shared by the whole
 run; `tests/test_persona_call_budget.py` injects its own with a fake clock.
 
-This module is the dependency-injection wiring and nothing else. The two
-team-name queries (`list_all_team_names`, issue #13, and
-`list_team_records`, issue #78) lived here until issue #209 moved them to
-`api.repositories.teams`, whose docstring explains why they are two queries:
+This module is the dependency-injection wiring and nothing else. The
+team-name queries (a names-only one from issue #13, deleted by issue #336
+once grounding stopped reading it, and `list_team_records`, issue #78) lived
+here until issue #209 moved them to `api.repositories.teams`:
 `api.persona.service` importing them from here meant the persona layer
 imported the module that builds the narrator and the cache *from* the
 persona layer, an upward import that `.importlinter`'s `layers` contract

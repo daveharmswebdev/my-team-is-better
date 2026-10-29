@@ -87,9 +87,9 @@ def teams(
     `list_team_records` call below, never two queries, so they cannot drift
     apart.
 
-    Note this is `list_team_records`, not the grounding check's
-    `list_all_team_names`: the persona layer's known-team-name universe
-    must stay unscoped (see `api.repositories.teams`).
+    The verdict routes read the same `list_team_records` with no `year` as
+    the typed-claim validator's team universe, which must stay unscoped (see
+    `api.repositories.teams`): only this route ever narrows it by `year`.
 
     A stale db is a 503 `stale_database`, as on every verdict route:
     `list_team_records` checks the schema before its query (issue #423).

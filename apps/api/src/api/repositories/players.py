@@ -3,8 +3,8 @@
 `api.persona.qb_claims.check_and_render_qb` rejects a third player's full
 name typed into a QB narration ("Marshall Faulk" in Warner vs McNair), and
 needs every player name in the sport to recognise one. This is that query,
-the player-side twin of `api.repositories.teams.list_all_team_names`: the
-route reads it on its own connection and hands the names to the persona
+every distinct player name for the sport with no season or position filter:
+the route reads it on its own connection and hands the names to the persona
 layer, which never queries (`apps/api/.importlinter`'s layers contract keeps
 this module below `api.persona` and `api.deps`).
 
