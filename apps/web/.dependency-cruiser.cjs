@@ -11,8 +11,46 @@ module.exports = {
       from: { path: '^src/components' },
       to: { path: '^src/pages' },
     },
+    {
+      name: 'lib-must-not-import-ui',
+      comment:
+        'lib/** is the UI-free layer (API client and types, formatting, pure helpers) that ' +
+        'components/** and pages/** build on. lib importing a component or a page would ' +
+        'make the bottom layer depend on the top and invite cycles, so it is forbidden.',
+      severity: 'error',
+      from: { path: '^src/lib' },
+      to: { path: '^src/(components|pages)' },
+    },
+    {
+      name: 'not-to-unresolvable',
+      comment:
+        'An import dependency-cruiser cannot resolve is invisible to every other rule: a ' +
+        'mistyped path that crosses a boundary passes them all (#127). So an unresolvable ' +
+        'import from src is an error in its own right. One exception: vite/client, which ' +
+        'src/vite-env.d.ts pulls in by a triple-slash types reference (vite exports that ' +
+        'path under the "types" condition only, which the resolver here rightly does not ' +
+        'use for runtime imports).',
+      severity: 'error',
+      from: { path: '^src' },
+      to: { couldNotResolve: true, pathNot: '^vite/client$' },
+    },
+    {
+      name: 'no-circular',
+      comment:
+        'A cycle between modules makes load order matter, breaks HMR and tree-shaking in ' +
+        'subtle ways, and means neither side can be understood or tested alone. Split the ' +
+        'shared part into its own module instead.',
+      severity: 'error',
+      from: { path: '^src' },
+      to: { circular: true },
+    },
   ],
   options: {
+    // Third-party internals are not ours to police, and walking them cost ~2000 extra
+    // modules per run and surfaced their own cycles and unresolvable optional deps.
+    // Imports of node_modules are still recorded (and still checked by the rules above);
+    // the cruise just does not descend into them.
+    doNotFollow: { path: 'node_modules' },
     tsPreCompilationDeps: true,
     tsConfig: {
       fileName: 'tsconfig.app.json',
