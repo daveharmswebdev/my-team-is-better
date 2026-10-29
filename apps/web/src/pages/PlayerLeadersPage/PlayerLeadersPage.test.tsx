@@ -133,6 +133,26 @@ function search(): string {
   return screen.getByTestId('location-search').textContent ?? ''
 }
 
+/**
+ * Every `aria-describedby` on the page names elements that exist, so no
+ * header or table points at a note the page has dropped (issue #357).
+ */
+function expectEveryDescriptionResolves(): void {
+  const described = document.querySelectorAll('[aria-describedby]')
+  expect(described.length).toBeGreaterThan(0)
+  for (const element of described) {
+    const ids = (element.getAttribute('aria-describedby') ?? '')
+      .split(/\s+/)
+      .filter((id) => id !== '')
+    for (const id of ids) {
+      expect(
+        document.getElementById(id),
+        `aria-describedby="${id}" on ${element.textContent ?? ''}`,
+      ).not.toBeNull()
+    }
+  }
+}
+
 describe('PlayerLeadersPage (issue #296)', () => {
   beforeEach(() => {
     mockedFetchPlayerLeaders.mockReset()
@@ -726,6 +746,29 @@ describe('PlayerLeadersPage, the stat category (issue #312)', () => {
     expect(table).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
   })
 
+  it('keeps the starter-record note while the passing board waits on a switch to rushing (issue #357)', async () => {
+    const user = userEvent.setup()
+    mockedFetchPlayerLeaders.mockImplementation((query) =>
+      query.category === 'rushing' ? hang() : Promise.resolve(boardFor(query)),
+    )
+    renderPage()
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by passing yards',
+    })
+
+    await user.selectOptions(categorySelect(), 'Rushing')
+
+    expect(lastQuery()).toMatchObject({ category: 'rushing' })
+    expect(screen.getByRole('status')).toHaveTextContent(/loading/i)
+    // The passing board is still the one on screen, and so is its note.
+    const table = screen.getByRole('table', {
+      name: 'NFL career leaders: regular season, by passing yards',
+    })
+    expect(screen.getByText(STARTER_RECORD_NOTE)).toBeInTheDocument()
+    expect(table).toHaveAccessibleDescription(STARTER_RECORD_NOTE)
+    expectEveryDescriptionResolves()
+  })
+
   it('names every category in the lede (issues #314, #315, #317)', async () => {
     renderPage()
 
@@ -1121,6 +1164,37 @@ describe('PlayerLeadersPage, kicking and punting (issue #315)', () => {
     })
     expect(screen.queryByText(DEFENSE_EARLY_ERA_NOTE)).not.toBeInTheDocument()
     expect(screen.queryByText(DEFENSE_UNOFFICIAL_NOTE)).not.toBeInTheDocument()
+  })
+
+  it('keeps the defense notes while the defense board waits on a switch to kicking (issue #357)', async () => {
+    const user = userEvent.setup()
+    mockedFetchPlayerLeaders.mockImplementation((query) =>
+      query.category === 'kicking' ? hang() : Promise.resolve(boardFor(query)),
+    )
+    renderPage('/nfl/leaders?category=defense')
+    await screen.findByRole('table', {
+      name: 'NFL career leaders: regular season, by sacks',
+    })
+
+    await user.selectOptions(categorySelect(), 'Kicking')
+
+    expect(lastQuery()).toMatchObject({ category: 'kicking' })
+    expect(screen.getByRole('status')).toHaveTextContent(/loading/i)
+    // The defense board is still the one on screen, and so are its notes.
+    expect(
+      screen.getByRole('table', {
+        name: 'NFL career leaders: regular season, by sacks',
+      }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(DEFENSE_EARLY_ERA_NOTE)).toBeInTheDocument()
+    expect(screen.getByText(DEFENSE_UNOFFICIAL_NOTE)).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Sacks' }),
+    ).toHaveAccessibleDescription(DEFENSE_EARLY_ERA_NOTE)
+    expect(
+      screen.getByRole('button', { name: 'Solo tackles' }),
+    ).toHaveAccessibleDescription(DEFENSE_UNOFFICIAL_NOTE)
+    expectEveryDescriptionResolves()
   })
 
   it('states both defense notes in "About these numbers", above the table (issue #317)', async () => {
