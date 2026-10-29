@@ -26,14 +26,13 @@ module.exports = {
       comment:
         'An import dependency-cruiser cannot resolve is invisible to every other rule: a ' +
         'mistyped path that crosses a boundary passes them all (#127). So an unresolvable ' +
-        'import from src is an error in its own right. Two exceptions: vite/client, which ' +
+        'import from src is an error in its own right. One exception: vite/client, which ' +
         'src/vite-env.d.ts pulls in by a triple-slash types reference (vite exports that ' +
         'path under the "types" condition only, which the resolver here rightly does not ' +
-        'use for runtime imports); and virtual:* ids, which a Vite plugin serves at build ' +
-        'time and no file on disk backs.',
+        'use for runtime imports).',
       severity: 'error',
       from: { path: '^src' },
-      to: { couldNotResolve: true, pathNot: ['^vite/client$', '^virtual:'] },
+      to: { couldNotResolve: true, pathNot: '^vite/client$' },
     },
     {
       name: 'no-circular',
