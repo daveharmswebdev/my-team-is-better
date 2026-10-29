@@ -3,8 +3,9 @@
 Before #245 each verdict route read the sport's catalog twice on a cold
 cache: `resolve_user_team` ran `list_team_records(conn, sport)` to
 canonicalise `user_team`, and `api.persona.service._cached_narration` ran
-`list_all_team_names(conn, sport)` for the grounding universe. Both are the
-same universe (every `teams.school` for the sport), so the route reads the
+a second, names-only query (`SELECT DISTINCT school FROM teams WHERE sport =
+?`, deleted by issue #336) for the grounding universe. Both are the same
+universe (every `teams.school` for the sport), so the route reads the
 catalog once, hands the records to `resolve_user_team`, and passes them into
 the persona layer through an explicit argument. The persona layer holds no
 connection at all.
@@ -16,8 +17,8 @@ bare names the lexical grounding check took.
 
 What is measured: the statements the request's own `sqlite3.Connection`
 runs, recorded with `set_trace_callback`. A "catalog read" is a scan of the
-`teams` table -- the `FROM teams` of `list_all_team_names` and
-`list_team_records` -- as opposed to the evidence layer's per-row
+`teams` table -- the `FROM teams` of `list_team_records` (and, before
+#245, of the names-only query) -- as opposed to the evidence layer's per-row
 `SELECT school FROM teams WHERE id = ?` lookups and `_resolve_champion_name`'s
 `JOIN teams`, which are not catalog reads and are not counted. Measured at
 the #245 base: 2 catalog reads per route with a `user_team`, 1 without
@@ -25,8 +26,8 @@ the #245 base: 2 catalog reads per route with a `user_team`, 1 without
 both cases: never 2, and never 0 without `user_team` either, because the
 narration layer still needs the catalog.
 
-The records a route reads are year-unrestricted: their names equal
-`list_all_team_names(conn, sport)` as a set, for cfb on the committed verdict
+The records a route reads are year-unrestricted: their names equal the
+`SELECT DISTINCT school FROM teams WHERE sport = ?` list as a set, for cfb on the committed verdict
 fixture and for nfl on the sport fixture.
 """
 
@@ -54,7 +55,7 @@ from api.persona.budget import UnlimitedCallBudget
 from api.persona.cache import InMemoryNarrationCache
 from api.persona.narrate import NarrationResult
 from api.persona.service import narrate_comparison, narrate_team_case
-from api.repositories.teams import TeamRecord, list_all_team_names, list_team_records
+from api.repositories.teams import TeamRecord, list_team_records
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
@@ -174,12 +175,17 @@ def test_the_traced_statements_include_the_evidence_queries(traced: _Traced) -> 
     [("cfb", "cfb"), ("sport", "nfl"), ("sport", "cfb")],
     ids=["verdict-fixture-cfb", "sport-fixture-nfl", "sport-fixture-cfb"],
 )
-def test_the_records_names_equal_list_all_team_names(tmp_path: Path, db: str, sport: str) -> None:
+def test_the_records_names_equal_every_team_name_in_the_sport(
+    tmp_path: Path, db: str, sport: str
+) -> None:
+    """The oracle is a direct SQL query, independent of `list_team_records`:
+    every distinct `teams.school` for the sport, with no year or ratings join."""
     db_path = FIXTURE_DB if db == "cfb" else make_sport_fixture_db(tmp_path)
     conn = get_conn(db_path, read_only=True)
     try:
         derived = [record.name for record in list_team_records(conn, sport)]
-        universe = list_all_team_names(conn, sport)
+        rows = conn.execute("SELECT DISTINCT school FROM teams WHERE sport = ?", (sport,))
+        universe = [str(row["school"]) for row in rows.fetchall()]
     finally:
         conn.close()
 
@@ -304,8 +310,7 @@ def test_the_persona_service_has_no_connection_to_query_the_catalog_with() -> No
     catalog query in its namespace, `api.persona.service` cannot issue the
     second read again without changing its signature -- and a route passing
     the records it already read is the only way the catalog gets in."""
-    for query in ("list_all_team_names", "list_team_records"):
-        assert not hasattr(service, query), f"api.persona.service still names {query}"
+    assert not hasattr(service, "list_team_records"), "api.persona.service names the query"
     for fn in (narrate_team_case, narrate_comparison):
         parameters = inspect.signature(fn).parameters
         assert "conn" not in parameters, f"{fn.__name__} still takes a connection"

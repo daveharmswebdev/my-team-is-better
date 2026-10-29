@@ -6,9 +6,10 @@ sport_fixture.py) rather than the committed `cfb_verdict_fixture.sqlite3`,
 since that fixture predates NFL support and has no `sport='nfl'` rows.
 `sport_fixture.py`'s data also includes a cross-sport "Wildcats" name
 collision (a CFB team and an NFL team sharing the same name, same
-year/method) -- the edge case the brief calls out for
-`list_all_team_names`/the persona grounding check's "known team names"
-universe -- exercised here via `/api/verdict/team-case` for each sport.
+year/method) -- the edge case for the sport-scoped team catalog
+(`list_team_records(conn, sport)`) that the typed-claim validator takes as
+its team universe -- exercised here via `/api/verdict/team-case` for each
+sport.
 """
 
 from __future__ import annotations

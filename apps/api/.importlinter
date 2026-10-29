@@ -99,9 +99,11 @@ allow_indirect_imports = true
 ; the layering and drags DI wiring into every persona import and test. That
 ; is exactly how `api.persona.service` came to import `list_all_team_names`
 ; from `api.deps` without anything noticing: the query had nothing to do with
-; DI, it just lived in the same file. The queries now live in
-; `api.repositories`, the bottom layer, which everything above may call and
-; which imports nothing of the app except leaves (`api.models` etc.).
+; DI, it just lived in the same file. (That query has since been deleted,
+; issue #336: grounding reads `list_team_records` since #291.) The queries
+; now live in `api.repositories`, the bottom layer, which everything above
+; may call and which imports nothing of the app except leaves (`api.models`
+; etc.).
 ;
 ; Read top-down: a higher layer may import any lower one, directly or
 ; indirectly; a lower layer may never import a higher one. Modules joined by

@@ -1,14 +1,15 @@
-"""`api.repositories.teams` (issue #209): the two team-name queries, moved
-out of `api.deps` so the persona layer stops importing the FastAPI wiring.
+"""`api.repositories.teams` (issue #209): the team catalog query, moved out
+of `api.deps` so the persona layer stops importing the FastAPI wiring.
 
-`list_all_team_names` (issue #13) was promoted out of
-`api.persona.service._all_team_names` (issue #4's grounding-check helper) so
-both the persona grounding check and the `/api/teams` route call the same
-`SELECT DISTINCT school FROM teams` query -- see `test_catalog.py` and
-`test_catalog_teams_year.py` for the route-level coverage of its sibling
-`list_team_records`, and `test_verdict_persona.py`'s grounding-mismatch tests
-(unchanged) for proof the persona side still works post-move. The behaviour
-tests below are the ones `test_deps.py` held while the query lived there.
+`list_team_records` (issue #78) is the one team query left: the `/api/teams`
+route reads it, and every verdict route reads it once (issue #245) and hands
+the records to the typed-claim validator as its team universe (issue #291).
+Its year-free, names-only sibling (issue #13), the old lexical grounding
+check's "known team names" universe, lost its last production caller with
+#291 and was deleted by issue #336, along with the tests that pinned its own
+behaviour. Sport scoping of the unscoped catalog is covered at
+the route by `test_catalog_sport.py`, and the year filter by `test_catalog.py`
+and `test_catalog_teams_year.py`.
 
 The last two tests pin the move itself: `api.deps` keeps only the three
 dependency-injection callables and re-exports nothing, so a consumer cannot
@@ -24,65 +25,25 @@ from pathlib import Path
 from cfb_strength.db.connection import get_conn
 
 import api.deps
-from api.repositories.teams import TeamRecord, list_all_team_names, list_team_records
+from api.repositories.teams import TeamRecord, list_team_records
 
 FIXTURE_DB = Path(__file__).parent / "fixtures" / "cfb_verdict_fixture.sqlite3"
 
 
-def test_list_all_team_names_returns_real_teams_from_the_db() -> None:
-    conn = get_conn(FIXTURE_DB, read_only=True)
-    try:
-        names = list_all_team_names(conn)
-    finally:
-        conn.close()
-
-    assert "Texas" in names
-    assert "USC" in names
-    assert "Alabama" in names
-
-
-def test_list_all_team_names_default_sport_is_cfb() -> None:
-    """No pre-#59 call site ever passed `sport` -- the default must keep
-    producing the same result as an explicit sport='cfb' call."""
-    conn = get_conn(FIXTURE_DB, read_only=True)
-    try:
-        assert list_all_team_names(conn) == list_all_team_names(conn, sport="cfb")
-    finally:
-        conn.close()
-
-
-def test_list_all_team_names_scopes_by_sport(tmp_path: Path) -> None:
-    """Issue #59: a CFB/NFL name collision ("Wildcats" in both sports, same
-    year/method) must not cross-contaminate either sport's "known team
-    names" universe -- the grounding check's precondition."""
-    from fixtures.sport_fixture import make_sport_fixture_db
-
-    db_path = make_sport_fixture_db(tmp_path)
-    conn = get_conn(db_path, read_only=True)
-    try:
-        cfb_names = list_all_team_names(conn, sport="cfb")
-        nfl_names = list_all_team_names(conn, sport="nfl")
-    finally:
-        conn.close()
-
-    assert "Alpha State" in cfb_names
-    assert "Delta Squad" not in cfb_names
-    assert "Delta Squad" in nfl_names
-    assert "Alpha State" not in nfl_names
-    assert cfb_names.count("Wildcats") == 1
-    assert nfl_names.count("Wildcats") == 1
-
-
-def test_list_team_records_without_year_matches_list_all_team_names() -> None:
-    """The move must not change either query: with no `year`,
-    `list_team_records` still yields exactly the names `list_all_team_names`
-    does, in the same order (the pre-#78 `DISTINCT school` list)."""
+def test_list_team_records_without_year_matches_the_distinct_school_list() -> None:
+    """With no `year`, `list_team_records` yields exactly the pre-#78
+    `SELECT DISTINCT school FROM teams WHERE sport = ?` names, in the same
+    order. The oracle is that query, inline, so it can't share a bug with the
+    function under test."""
     conn = get_conn(FIXTURE_DB, read_only=True)
     try:
         records = list_team_records(conn)
-        names = list_all_team_names(conn)
+        rows = conn.execute("SELECT DISTINCT school FROM teams WHERE sport = ?", ("cfb",))
+        names = [str(row["school"]) for row in rows.fetchall()]
     finally:
         conn.close()
+
+    assert names, "the oracle query found no teams; the comparison would be vacuous"
 
     assert [record.name for record in records] == names
     assert all(isinstance(record, TeamRecord) for record in records)
@@ -91,7 +52,7 @@ def test_list_team_records_without_year_matches_list_all_team_names() -> None:
 def test_deps_keeps_only_the_dependency_injection_callables() -> None:
     """`api.deps` is the FastAPI wiring and nothing else after #209: the
     queries left, and no re-export brings them back for old import paths."""
-    for moved in ("list_all_team_names", "list_team_records", "TeamRecord", "_decode_aliases"):
+    for moved in ("list_team_records", "TeamRecord", "_decode_aliases"):
         assert not hasattr(api.deps, moved), f"api.deps still exposes {moved}"
     assert callable(api.deps.get_db_conn)
     assert callable(api.deps.get_narration_cache)
@@ -100,15 +61,13 @@ def test_deps_keeps_only_the_dependency_injection_callables() -> None:
 
 def test_persona_service_does_not_bind_deps() -> None:
     """Belt to the contract's braces: nothing defined in `api.deps` is bound
-    in the service module's namespace. (Until issue #245 this also pinned
-    the service holding the repository's `list_all_team_names`; the route
-    now derives the grounding universe from its own catalog read and passes
-    it in, so the service binds no query at all -- see
-    `test_verdict_catalog_reads.py`.)"""
+    in the service module's namespace. (Since issue #245 the route reads
+    the catalog itself and passes it in, so the service binds no query at
+    all -- see `test_verdict_catalog_reads.py`.)"""
     import api.persona.service as service
 
     namespace = vars(service)
-    assert "list_all_team_names" not in namespace
+    assert "list_team_records" not in namespace
     bound_from_deps = [
         name
         for name, value in namespace.items()

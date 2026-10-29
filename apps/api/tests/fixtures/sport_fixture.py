@@ -40,8 +40,8 @@ CFB_TEAM_NAMES = {1: "Alpha State", 2: "Bravo Tech", 3: "Charlie U"}
 NFL_TEAM_NAMES = {101: "Delta Squad", 102: "Echo Corp", 103: "Foxtrot Ltd"}
 # Name-colliding pair across sports, same year/method -- proves a CFB/NFL
 # team-name collision (e.g. shared city/mascot names) doesn't cross-
-# contaminate `resolve_team`'s candidate pool or `list_all_team_names`'s
-# grounding-check universe.
+# contaminate `resolve_team`'s candidate pool or the sport-scoped team
+# catalog (`list_team_records`) the claim validator grounds against.
 CFB_COLLISION_TEAM_ID = 4
 NFL_COLLISION_TEAM_ID = 104
 COLLISION_NAME = "Wildcats"

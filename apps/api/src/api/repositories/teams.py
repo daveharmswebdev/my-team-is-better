@@ -1,31 +1,28 @@
-"""The two team-name queries, shared by the persona grounding check and the
-`/api/teams` route. Moved here from `api.deps` by issue #209 so the persona
-layer stops importing the FastAPI dependency wiring to reach a query.
+"""The team catalog query, shared by every verdict route's grounding input
+and the `/api/teams` route. Moved here from `api.deps` by issue #209 so the
+persona layer stops importing the FastAPI dependency wiring to reach a query.
 
-`list_all_team_names` (issue #13) is the shared "known team names" universe
--- originally a private helper on `api.persona.service` (issue #4's
-grounding-check input), promoted so `api.catalog`'s `/api/teams` route and
-`api.persona.service`'s grounding check share one query rather than two
-hand-maintained copies of `SELECT DISTINCT school FROM teams`.
+`list_team_records` (issue #78) began as the `/api/teams` route's own query:
+the teams a user can ask about, with display metadata, optionally narrowed to
+one season's rated teams. Since issue #245 each verdict route also reads it
+once per request, with no `year`, and since issue #291 hands those records to
+the persona layer as `catalog`, the typed-claim validator's team universe
+(names, mascots and aliases). That universe must stay unscoped: a narration
+mentioning a real-but-unrated opponent must still be recognized as a team
+mention and checked against the fact block, so narrowing it would either flag
+legitimate opponents or silently accept invented ones. Only the `/api/teams`
+route ever passes `year`.
 
 Issue #59 scopes it by `sport` (default "cfb", matching every other call
 site's default): CFB and NFL can share a team name (e.g. "Wildcats"), so an
-unscoped universe would let a same-named team from the other sport
-contaminate the persona grounding check's known-team-name membership test
-for a case that was never about that team.
+unscoped catalog would let a same-named team from the other sport
+contaminate a case that was never about that team.
 
-`list_team_records` (issue #78) is the `/api/teams` route's *own* query,
-deliberately not a `year` argument bolted onto `list_all_team_names`. The
-two consumers want genuinely different things: the route wants the teams a
-user can ask about for one season, with display metadata; the grounding
-check wants the full team-name universe, because a persona response
-mentioning a real-but-unrated opponent must still be recognized as a
-team-name mention and checked against the fact block (narrowing it would
-either flag legitimate opponents or silently accept invented ones). Two
-functions keep that difference explicit instead of load-bearing on a
-default argument.
+Before #291 the lexical grounding check read a separate, year-free
+names-only query (issue #13) for its "known team names"; it lost its last
+caller with #291 and issue #336 deleted it.
 
-Both take an already-open `sqlite3.Connection`: opening one is
+It takes an already-open `sqlite3.Connection`: opening one is
 `api.deps.get_db_conn`'s job (the FastAPI seam onto
 `cfb_strength.db.connection.get_conn`), and this module never imports
 `api.deps` -- see the `layers` contract in `apps/api/.importlinter`.
@@ -38,22 +35,6 @@ import sqlite3
 from dataclasses import dataclass
 
 from cfb_strength.evidence.proof import require_current_schema
-
-
-def list_all_team_names(conn: sqlite3.Connection, sport: str = "cfb") -> list[str]:
-    """Every distinct team name in the db for `sport` -- deliberately *not*
-    scoped to a particular year/method.
-
-    Its consumer is the persona grounding check's "known team names"
-    universe (`api.persona.service`), which needs every name the db knows
-    about: a response that mentions a real-but-unrated opponent must still
-    be recognized as a team-name mention and checked against the fact
-    block. Issue #78 gave `/api/teams` its own year-scopable query
-    (`list_team_records`) rather than adding a `year` argument here, so
-    that this universe can never be narrowed by a picker-facing change.
-    """
-    rows = conn.execute("SELECT DISTINCT school FROM teams WHERE sport = ?", (sport,)).fetchall()
-    return [str(row["school"]) for row in rows]
 
 
 @dataclass(frozen=True)
@@ -125,8 +106,8 @@ def list_team_records(
     method: str = "keener",
 ) -> list[TeamRecord]:
     """Selectable teams for `sport`, with display metadata -- the
-    `/api/teams` route's query (see module docstring for why this is not
-    `list_all_team_names` with an extra argument).
+    `/api/teams` route's query and, with no `year`, every verdict route's
+    grounding catalog (see the module docstring).
 
     With `year`, restricted to teams holding a `ratings` row for that
     `year`/`sport`/`method`: without it the nflverse ingest's one-row-per-

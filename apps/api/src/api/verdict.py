@@ -35,12 +35,11 @@ which this app must not import (it's the MCP/LLM-tool surface, wraps results
 in `{"error": ...}` dicts rather than raising, wrong shape for HTTP). Per
 issue #3's brief, `_resolve_champion_name` below replicates that same
 7-line rank=1 SQL query directly against the connection this app already
-holds, then hands the resolved name to `build_team_case` -- the only
-non-evidence-layer SQL in this app, by design (issue #4 adds one more:
-`api.repositories.teams.list_all_team_names`, the grounding check's "known
-team names" universe, same justification -- promoted from a private
-`api.persona.service._all_team_names` helper by issue #13 so `api.catalog`'s
-`/api/teams` route can share it, and moved out of `api.deps` by issue #209).
+holds, then hands the resolved name to `build_team_case` -- by design, and
+apart from the read-only queries in `api.repositories` (among them the team
+catalog, `api.repositories.teams.list_team_records`, which feeds both
+`api.catalog`'s `/api/teams` route and, as below, the narration layer's team
+universe), the only non-evidence-layer SQL in this app.
 
 Since issue #245 the persona layer no longer runs a catalog query itself. Each
 route reads the sport's catalog exactly once, `list_team_records(conn,

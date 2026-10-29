@@ -21,18 +21,19 @@ Two fixtures are used deliberately:
   move -- see that module's docstring for why neither existing fixture has
   them.
 
-The last two tests in this file pin issue #78's one real trap: the shared
-`api.repositories.teams.list_all_team_names` helper (in `api.deps` until
-#209) has a *second* caller, the persona
-grounding check, which needs the full unscoped team-name universe. If
-year-scoping had been pushed down into that shared helper, the grounding
-check would stop recognizing legitimately-mentioned unrated opponents as
-team names at all.
+The last two tests in this file pin issue #78's one real trap: the persona
+grounding check needs the full unscoped team-name universe. Since issue #291
+that universe is the `catalog` each verdict route reads with
+`list_team_records(conn, sport)` and no `year`, so year-scoping `/api/teams`
+must never leak into what the typed-claim validator is handed; if it did,
+the validator would stop recognizing legitimately-mentioned unrated
+opponents as team names at all. (Before #291 the grounding check read a
+separate year-free names-only helper; issue #336 deleted it, and its own
+signature test with it.)
 """
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -261,19 +262,3 @@ def test_grounding_is_handed_the_whole_unscoped_team_universe(
     names = [record.name for record in captured["catalog"]]
     assert sorted(names) == sorted(_pre_issue_78_team_names(FIXTURE_DB, "cfb"))
     assert len(names) == 451
-
-
-def test_list_all_team_names_signature_stays_year_free() -> None:
-    """The shared helper keeps its pre-#78 behavior for its grounding
-    caller: same call, same full-universe result."""
-    from api.repositories.teams import list_all_team_names
-
-    conn: sqlite3.Connection = get_conn(FIXTURE_DB, read_only=True)
-    try:
-        names = list_all_team_names(conn)
-        assert names == list_all_team_names(conn, sport="cfb")
-    finally:
-        conn.close()
-
-    assert names == _pre_issue_78_team_names(FIXTURE_DB, "cfb")
-    assert "Abilene Christian" in names
