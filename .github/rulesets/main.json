@@ -26,7 +26,8 @@
           { "context": "apps/api (pytest, mypy --strict, ruff, import-linter)", "integration_id": 15368 },
           { "context": "apps-web (eslint, tsc, vitest, dependency-cruiser, storybook build + a11y tests)", "integration_id": 15368 },
           { "context": "claude-process (hooks + delegation contract: pytest, mypy --strict, ruff, conflict markers)", "integration_id": 15368 },
-          { "context": "e2e (Playwright, apps/api + apps/web)", "integration_id": 15368 }
+          { "context": "e2e (Playwright, apps/api + apps/web)", "integration_id": 15368 },
+          { "context": "pr-body (/ship verification record)", "integration_id": 15368 }
         ]
       }
     }

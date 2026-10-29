@@ -1,0 +1,25 @@
+name: PR body
+
+# Issue #374: a PR into main must carry /ship's verification record
+# (.claude/skills/ship/SKILL.md section 2). PR #366 merged with an empty description.
+# A separate workflow, so editing the description re-runs this check alone, not all of CI.
+# Its job name is a required check in .github/rulesets/main.json
+# (.claude/hooks/tests/test_ruleset.py keeps the two in step).
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-body:
+    name: "pr-body (/ship verification record)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Stdlib only, so plain python3 runs it; it reads pull_request.body from the event.
+      - name: check the description
+        run: python3 .claude/hooks/check_pr_body.py "$GITHUB_EVENT_PATH"
